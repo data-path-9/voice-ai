@@ -1,0 +1,94 @@
+name: Deploy Web API (Azure)
+
+on:
+  push:
+    branches: [saas]
+    paths:
+      - 'api/web-api/**'
+      - 'cmd/web/**'
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+env:
+  SERVICE: web-api
+  BINARY: web-api.0.0.1
+  DEPLOY_DIR: /opt/app/backend-app/artifacts/web-api
+  STORAGE_ACCOUNT: rapidastore
+  CONTAINER: deploy-artifacts
+  VM_NAME: rapida-web-api
+  RESOURCE_GROUP: rg-rapida-in-01
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Setup private module access
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+          eval "$(ssh-agent -s)"
+
+      - name: Build binary
+        run: |
+          go mod download
+          GOOS=linux GOARCH=amd64 go build -o $BINARY cmd/web/web.go
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Upload artifact to Blob Storage
+        run: |
+          az storage blob upload \
+            --account-name $STORAGE_ACCOUNT \
+            --container-name $CONTAINER \
+            --name $SERVICE/$BINARY \
+            --file $BINARY \
+            --overwrite \
+            --auth-mode login
+
+      - name: Deploy to VM via Custom Script Extension
+        run: |
+          az vm run-command invoke \
+            --resource-group $RESOURCE_GROUP \
+            --name $VM_NAME \
+            --command-id RunShellScript \
+            --scripts "
+              set -e
+              echo 'Downloading artifact...'
+              az storage blob download \
+                --account-name $STORAGE_ACCOUNT \
+                --container-name $CONTAINER \
+                --name $SERVICE/$BINARY \
+                --file /tmp/$BINARY \
+                --auth-mode login 2>/dev/null || \
+              curl -sf 'https://${STORAGE_ACCOUNT}.blob.core.windows.net/${CONTAINER}/${SERVICE}/${BINARY}' -o /tmp/$BINARY
+
+              echo 'Stopping service...'
+              systemctl stop $SERVICE || true
+
+              echo 'Deploying binary...'
+              cp /tmp/$BINARY $DEPLOY_DIR/
+              chown deploy-agent:deploy-agent $DEPLOY_DIR/$BINARY
+              chmod +x $DEPLOY_DIR/$BINARY
+
+              echo 'Starting service...'
+              systemctl start $SERVICE
+
+              echo 'Validating...'
+              sleep 10
+              curl -sf --max-time 10 http://localhost:9001/readiness/
+              echo 'web-api deployed successfully'
+            "
