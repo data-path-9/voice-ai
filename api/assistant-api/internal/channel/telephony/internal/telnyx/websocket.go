@@ -11,8 +11,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sync"
 
-	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
@@ -65,11 +65,12 @@ type TelnyxStopEvent struct {
 type telnyxWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
 
-	streamID       string
-	callControlID  string
-	connection     *websocket.Conn
-	encoder        *base64.Encoding
-	telephony      *telnyxTelephony
+	streamID      string
+	callControlID string
+	connection    *websocket.Conn
+	mu            sync.RWMutex
+	encoder       *base64.Encoding
+	telephony     *telnyxTelephony
 }
 
 // NewTelnyxWebsocketStreamer creates a Telnyx WebSocket streamer.
@@ -93,7 +94,10 @@ func NewTelnyxWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 
 // runWebSocketReader reads messages from the WebSocket connection.
 func (tws *telnyxWebsocketStreamer) runWebSocketReader() {
+	tws.mu.RLock()
 	conn := tws.connection
+	tws.mu.RUnlock()
+
 	if conn == nil {
 		return
 	}
@@ -135,15 +139,18 @@ func (tws *telnyxWebsocketStreamer) runWebSocketReader() {
 			})
 
 		case "media":
-			msg, _ := tws.handleMediaEvent(event)
+			msg, err := tws.handleMediaEvent(event)
+			if err != nil {
+				tws.Logger.Errorf("Failed to handle media event: %v", err)
+			}
 			if msg != nil {
 				tws.PushInput(msg)
 			}
 
 		case "stop":
 			tws.Logger.Info("Telnyx stream stopped")
-			tws.Cancel()
 			tws.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
+			tws.Cancel()
 			return
 
 		case "dtmf":
@@ -197,8 +204,12 @@ func (tws *telnyxWebsocketStreamer) handleMediaEvent(event TelnyxWebSocketEvent)
 
 // Send sends audio or control messages to Telnyx.
 func (tws *telnyxWebsocketStreamer) Send(response internal_type.Stream) error {
-	if tws.connection == nil {
-		return nil
+	tws.mu.RLock()
+	conn := tws.connection
+	tws.mu.RUnlock()
+
+	if conn == nil {
+		return fmt.Errorf("telnyx websocket connection is nil")
 	}
 
 	switch data := response.(type) {
@@ -266,7 +277,11 @@ func (tws *telnyxWebsocketStreamer) Send(response internal_type.Stream) error {
 
 // sendMedia sends audio data to Telnyx via WebSocket.
 func (tws *telnyxWebsocketStreamer) sendMedia(audioData []byte) error {
-	if tws.connection == nil || tws.streamID == "" {
+	tws.mu.RLock()
+	conn := tws.connection
+	tws.mu.RUnlock()
+
+	if conn == nil || tws.streamID == "" {
 		return nil
 	}
 
@@ -283,12 +298,18 @@ func (tws *telnyxWebsocketStreamer) sendMedia(audioData []byte) error {
 		return fmt.Errorf("failed to marshal media message: %w", err)
 	}
 
+	tws.mu.Lock()
+	defer tws.mu.Unlock()
 	return tws.connection.WriteMessage(websocket.TextMessage, messageJSON)
 }
 
 // sendClear sends a clear command to Telnyx to interrupt audio.
 func (tws *telnyxWebsocketStreamer) sendClear() error {
-	if tws.connection == nil || tws.streamID == "" {
+	tws.mu.RLock()
+	conn := tws.connection
+	tws.mu.RUnlock()
+
+	if conn == nil || tws.streamID == "" {
 		return nil
 	}
 
@@ -302,12 +323,18 @@ func (tws *telnyxWebsocketStreamer) sendClear() error {
 		return fmt.Errorf("failed to marshal clear message: %w", err)
 	}
 
+	tws.mu.Lock()
+	defer tws.mu.Unlock()
 	return tws.connection.WriteMessage(websocket.TextMessage, messageJSON)
 }
 
 // sendDTMF sends DTMF digits to Telnyx.
 func (tws *telnyxWebsocketStreamer) sendDTMF(digit string) error {
-	if tws.connection == nil || tws.streamID == "" {
+	tws.mu.RLock()
+	conn := tws.connection
+	tws.mu.RUnlock()
+
+	if conn == nil || tws.streamID == "" {
 		return nil
 	}
 
@@ -324,6 +351,8 @@ func (tws *telnyxWebsocketStreamer) sendDTMF(digit string) error {
 		return fmt.Errorf("failed to marshal dtmf message: %w", err)
 	}
 
+	tws.mu.Lock()
+	defer tws.mu.Unlock()
 	return tws.connection.WriteMessage(websocket.TextMessage, messageJSON)
 }
 
@@ -334,9 +363,13 @@ func (tws *telnyxWebsocketStreamer) GetConversationUuid() string {
 
 // Cancel closes the WebSocket connection.
 func (tws *telnyxWebsocketStreamer) Cancel() error {
-	if tws.connection != nil {
-		tws.connection.Close()
-		tws.connection = nil
+	tws.mu.Lock()
+	conn := tws.connection
+	tws.connection = nil
+	tws.mu.Unlock()
+
+	if conn != nil {
+		conn.Close()
 	}
 	tws.BaseStreamer.Cancel()
 	return nil
@@ -345,51 +378,4 @@ func (tws *telnyxWebsocketStreamer) Cancel() error {
 // NotifyMode is a no-op for telephony providers.
 func (tws *telnyxWebsocketStreamer) NotifyMode(mode protos.StreamMode) {
 	// No-op for telephony
-}
-
-// ProcessIncomingCallWebhook handles an incoming call webhook from Telnyx.
-// This is called by the inbound call handler to start streaming.
-func ProcessIncomingCallWebhook(c *gin.Context, appCfg *config.AssistantConfig, logger commons.Logger) error {
-	// Parse the webhook payload
-	body, err := c.GetRawData()
-	if err != nil {
-		return fmt.Errorf("failed to read request body: %w", err)
-	}
-
-	var webhook map[string]interface{}
-	if err := json.Unmarshal(body, &webhook); err != nil {
-		return fmt.Errorf("failed to parse webhook: %w", err)
-	}
-
-	// Extract call_control_id from the webhook
-	var callControlID string
-	if data, ok := webhook["data"].(map[string]interface{}); ok {
-		if payload, ok := data["payload"].(map[string]interface{}); ok {
-			if ccid, ok := payload["call_control_id"].(string); ok {
-				callControlID = ccid
-			}
-		}
-	}
-
-	if callControlID == "" {
-		return fmt.Errorf("call_control_id not found in webhook")
-	}
-
-	logger.Debugf("Processing incoming call webhook for call_control_id: %s", callControlID)
-
-	// Return JSON to instruct Telnyx to start streaming
-	contextID := c.Param("contextId")
-	streamURL := fmt.Sprintf("wss://%s/%s",
-		appCfg.PublicAssistantHost,
-		internal_type.GetContextAnswerPath("telnyx", contextID))
-
-	c.JSON(200, gin.H{
-		"result": "streaming.start",
-		"params": gin.H{
-			"stream_url":    streamURL,
-			"stream_track":  "both_tracks",
-		},
-	})
-
-	return nil
 }

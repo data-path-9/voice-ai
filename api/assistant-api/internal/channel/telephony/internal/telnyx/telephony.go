@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
@@ -53,13 +54,13 @@ func (tpc *telnyxTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 	body, err := c.GetRawData()
 	if err != nil {
 		tpc.logger.Errorf("failed to read request body with error %+v", err)
-		return nil, fmt.Errorf("failed to read request body")
+		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
 
 	var payload map[string]interface{}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		tpc.logger.Errorf("failed to parse request body: %+v", err)
-		return nil, fmt.Errorf("failed to parse request body")
+		return nil, fmt.Errorf("failed to parse request body: %w", err)
 	}
 
 	// Telnyx webhook format: {"data": {"event_type": "call.answered", ...}}
@@ -97,13 +98,17 @@ func (tpc *telnyxTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo
 	}
 	if clientNumber == "" {
 		// Try from request body
-		body, _ := c.GetRawData()
-		var payload map[string]interface{}
-		if err := json.Unmarshal(body, &payload); err == nil {
-			if data, ok := payload["data"].(map[string]interface{}); ok {
-				if payloadData, ok := data["payload"].(map[string]interface{}); ok {
-					if from, ok := payloadData["from"].(string); ok {
-						clientNumber = from
+		body, err := c.GetRawData()
+		if err != nil {
+			tpc.logger.Warnf("failed to read request body for caller number: %v", err)
+		} else {
+			var payload map[string]interface{}
+			if err := json.Unmarshal(body, &payload); err == nil {
+				if data, ok := payload["data"].(map[string]interface{}); ok {
+					if payloadData, ok := data["payload"].(map[string]interface{}); ok {
+						if from, ok := payloadData["from"].(string); ok {
+							clientNumber = from
+						}
 					}
 				}
 			}
@@ -145,7 +150,7 @@ func (tpc *telnyxTelephony) OutboundCall(
 	info := &internal_type.CallInfo{Provider: telnyxProvider}
 
 	// Get credentials from vault
-	apiKey, connectionID, err := tpc.get_credentials(vaultCredential)
+	apiKey, connectionID, err := tpc.getCredentials(vaultCredential)
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("authentication error: %s", err.Error())
@@ -186,8 +191,8 @@ func (tpc *telnyxTelephony) OutboundCall(
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	// Send the request
-	client := &http.Client{}
+	// Send the request with timeout
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		info.Status = "FAILED"
@@ -273,23 +278,6 @@ func (tpc *telnyxTelephony) InboundCall(c *gin.Context, auth types.SimplePrincip
 	contextID, _ := c.Get("contextId")
 	ctxID := fmt.Sprintf("%v", contextID)
 
-	// Get call_control_id from the request (Telnyx sends it in the webhook)
-	callControlID := c.Query("call_control_id")
-	if callControlID == "" {
-		// Try from request body
-		body, _ := c.GetRawData()
-		var payload map[string]interface{}
-		if err := json.Unmarshal(body, &payload); err == nil {
-			if data, ok := payload["data"].(map[string]interface{}); ok {
-				if payloadData, ok := data["payload"].(map[string]interface{}); ok {
-					if ccid, ok := payloadData["call_control_id"].(string); ok {
-						callControlID = ccid
-					}
-				}
-			}
-		}
-	}
-
 	// Return JSON to tell Telnyx to start streaming
 	c.JSON(http.StatusOK, gin.H{
 		"result": "streaming.start",
@@ -306,12 +294,16 @@ func (tpc *telnyxTelephony) InboundCall(c *gin.Context, auth types.SimplePrincip
 
 // Auth extracts the API key from vault credential.
 func (tpc *telnyxTelephony) Auth(vaultCredential *protos.VaultCredential) (string, error) {
-	apiKey, _, err := tpc.get_credentials(vaultCredential)
+	apiKey, _, err := tpc.getCredentials(vaultCredential)
 	return apiKey, err
 }
 
-// get_credentials extracts API key and connection ID from vault credential.
-func (tpc *telnyxTelephony) get_credentials(vaultCredential *protos.VaultCredential) (string, string, error) {
+// getCredentials extracts API key and connection ID from vault credential.
+func (tpc *telnyxTelephony) getCredentials(vaultCredential *protos.VaultCredential) (string, string, error) {
+	if vaultCredential == nil {
+		return "", "", fmt.Errorf("vault credential is nil")
+	}
+
 	credMap := vaultCredential.GetValue().AsMap()
 
 	apiKey, ok := credMap["api_key"]
@@ -329,7 +321,7 @@ func (tpc *telnyxTelephony) get_credentials(vaultCredential *protos.VaultCredent
 
 // HangupCall hangs up a call using Telnyx Call Control API.
 func (tpc *telnyxTelephony) HangupCall(callControlID string, vaultCredential *protos.VaultCredential) error {
-	apiKey, _, err := tpc.get_credentials(vaultCredential)
+	apiKey, _, err := tpc.getCredentials(vaultCredential)
 	if err != nil {
 		return err
 	}
@@ -343,7 +335,7 @@ func (tpc *telnyxTelephony) HangupCall(callControlID string, vaultCredential *pr
 
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
