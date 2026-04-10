@@ -4,7 +4,7 @@ import { SidebarSimpleListItem } from '@/app/components/navigation/sidebar/sideb
 import { UserMultiple } from '@carbon/icons-react';
 import { useLocation } from 'react-router-dom';
 
-export function Team() {
+export function Team({ isLoading }: { isLoading?: boolean }) {
   const location = useLocation();
   const { pathname } = location;
   const currentPath = '/organization/users';
@@ -13,11 +13,12 @@ export function Team() {
       <SidebarSimpleListItem
         navigate={currentPath}
         active={pathname.includes(currentPath)}
+        loading={isLoading}
       >
         <SidebarIconWrapper>
           <UserMultiple size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel>Users and Teams</SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>Users and Teams</SidebarLabel>
       </SidebarSimpleListItem>
     </li>
   );

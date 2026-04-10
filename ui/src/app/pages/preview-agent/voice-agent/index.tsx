@@ -1,17 +1,15 @@
-import { GreenNoticeBlock } from '@/app/components/container/message/notice-block';
-import { Dropdown } from '@/app/components/dropdown';
-import { PrimaryButton } from '@/app/components/carbon/button';
-import { ChevronRight } from '@carbon/icons-react';
-import { ErrorMessage } from '@/app/components/form/error-message';
-import { Input } from '@/app/components/form/input';
 import {
-  JsonTextarea,
-  NumberTextarea,
-  ParagraphTextarea,
-  TextTextarea,
-  UrlTextarea,
-} from '@/app/components/form/textarea';
-import { InputVarForm } from '@/app/pages/endpoint/view/try-playground/experiment-prompt/components/input-var-form';
+  PrimaryButton,
+  GhostButton,
+  IconOnlyButton,
+} from '@/app/components/carbon/button';
+import { Dropdown } from '@/app/components/carbon/dropdown';
+import { Form, Stack, TextInput } from '@/app/components/carbon/form';
+import { PhoneOutgoing, ArrowLeft } from '@carbon/icons-react';
+import { Notification } from '@/app/components/carbon/notification';
+import { Tabs } from '@/app/components/carbon/tabs';
+import { Text } from '@/app/components/carbon/text';
+import { TextArea } from '@/app/components/carbon/form';
 import {
   ConfigBlock,
   InfoRow,
@@ -25,7 +23,7 @@ import {
 import { CONFIG } from '@/configs';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import { InputVarType } from '@/models/common';
-import { cn, randomMeaningfullName } from '@/utils';
+import { randomMeaningfullName } from '@/utils';
 import { getStatusMetric } from '@/utils/metadata';
 import {
   AgentConfig,
@@ -41,12 +39,8 @@ import {
   GetAssistantRequest,
   Variable,
 } from '@rapidaai/react';
-import { ChevronLeft } from 'lucide-react';
-import React, { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router-dom';
-import { PageLoader } from '@/app/components/loader/page-loader';
-import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
-import { PageTitleBlock } from '@/app/components/blocks/page-title-block';
 
 /**
  *
@@ -121,6 +115,8 @@ export const PreviewVoiceAgent = () => {
 
 type PhoneCallStatus = 'idle' | 'calling' | 'success' | 'failed';
 type PhoneDebugTab = 'configuration' | 'arguments';
+const PHONE_DEBUG_TABS: PhoneDebugTab[] = ['configuration', 'arguments'];
+const PHONE_DEBUG_TAB_LABELS = ['Configuration', 'Arguments'];
 
 //
 export const PreviewPhoneAgent = () => {
@@ -143,18 +139,6 @@ export const PreviewPhoneAgent = () => {
   const [argumentMap, setArgumentMap] = useState<Map<string, string>>(
     new Map(),
   );
-  const [searchQuery, setSearchQuery] = useState('');
-
-  const filteredCountries = useMemo(() => {
-    if (!searchQuery) return PHONE_COUNTRIES;
-    const q = searchQuery.toLowerCase();
-    return PHONE_COUNTRIES.filter(
-      c =>
-        c.name.toLowerCase().includes(q) ||
-        c.value.includes(q) ||
-        c.code.toLowerCase().includes(q),
-    );
-  }, [searchQuery]);
 
   useEffect(() => {
     if (!assistantId) return;
@@ -256,127 +240,130 @@ export const PreviewPhoneAgent = () => {
     setErrorMessage('');
   };
 
-  if (!assistant) return <PageLoader />;
-
-  const deployment = assistant.getPhonedeployment() ?? null;
+  const deployment = assistant?.getPhonedeployment() ?? null;
   const stt = deployment?.getInputaudio() ?? null;
   const tts = deployment?.getOutputaudio() ?? null;
-  const model = assistant.getAssistantprovidermodel() ?? null;
+  const model = assistant?.getAssistantprovidermodel() ?? null;
 
   return (
-    <div className="h-dvh flex p-8 text-sm/6 w-full gap-3 md:gap-6">
+    <div className="h-screen w-full flex flex-col lg:flex-row text-sm/6">
       {/* ── Left: phone call form ───────────────────────────────────── */}
-      <div className="flex flex-col overflow-hidden h-full w-2/3 border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-950">
+      <div className="flex flex-col overflow-hidden h-full w-full lg:w-2/3 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
         {/* Header */}
-        <PageHeaderBlock className="border-b pl-3 shrink-0">
-          <a
-            href={`/deployment/assistant/${assistantId}/overview`}
-            className="flex items-center hover:text-red-600 hover:cursor-pointer"
-          >
-            <ChevronLeft className="w-5 h-5 mr-1" strokeWidth={1.5} />
-            <PageTitleBlock className="text-sm/6">
-              Back to Assistant
-            </PageTitleBlock>
-          </a>
-        </PageHeaderBlock>
+        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-200 dark:border-gray-800 shrink-0">
+          <IconOnlyButton
+            kind="ghost"
+            size="sm"
+            renderIcon={ArrowLeft}
+            iconDescription="Back to Assistant"
+            onClick={() => {
+              window.location.href = `/deployment/assistant/${assistantId}/overview`;
+            }}
+          />
+          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+            Back to Assistant
+          </span>
+        </div>
 
         {/* Body */}
-        <div className="flex-1 flex flex-col items-center justify-center px-8">
-          <div className="w-full max-w-lg space-y-6">
-            <div className="space-y-1">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                Make a Phone Call
-              </h2>
-              <p className="text-gray-500 dark:text-gray-400">
-                Enter a phone number to start a call with your assistant.
-              </p>
-            </div>
-
-            <div
-              className={cn(
-                'p-px text-sm!',
-                'outline-solid outline-transparent',
-                'focus-within:outline-blue-600 focus:outline-blue-600 -outline-offset-1',
-                'border-b border-gray-300 dark:border-gray-700',
-                'dark:focus-within:border-blue-600 focus-within:border-blue-600',
-                'transition-all duration-200 ease-in-out',
-                'flex relative divide-x',
-              )}
-            >
-              <div className="w-48 relative">
-                <Dropdown
-                  className="bg-white max-w-full dark:bg-gray-950 focus-within:border-none! focus-within:outline-hidden! border-none! outline-hidden"
-                  currentValue={country}
-                  setValue={v => setCountry(v)}
-                  allValue={filteredCountries}
-                  placeholder="Select country"
-                  searchable
-                  onSearching={(e: ChangeEvent<HTMLInputElement>) =>
-                    setSearchQuery(e.target.value)
-                  }
-                  option={c => (
-                    <span className="inline-flex items-center gap-2 max-w-full text-sm font-medium">
-                      <span className="truncate capitalize">
-                        {c.name} ({c.value})
-                      </span>
-                    </span>
-                  )}
-                  label={c => (
-                    <span className="inline-flex items-center gap-2 max-w-full text-sm font-medium">
-                      <span className="truncate capitalize">
-                        {c.name} ({c.value})
-                      </span>
-                    </span>
-                  )}
-                />
-              </div>
-              <Input
-                type="tel"
-                placeholder="Enter your phone number"
-                className="bg-white max-w-full dark:bg-gray-950 focus-within:border-none! focus-within:outline-hidden! border-none!"
-                value={phoneNumber}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  setPhoneNumber(e.target.value);
-                  setErrorMessage('');
-                }}
-              />
-            </div>
-
-            <ErrorMessage message={errorMessage} />
-
-            {callStatus === 'success' && (
-              <GreenNoticeBlock>
-                Call has been created successfully.
-              </GreenNoticeBlock>
-            )}
-
-            <div className="flex items-center justify-between">
-              {callStatus === 'success' ? (
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+        <div className="flex-1 flex flex-col items-center justify-center px-5 md:px-8">
+          <Form className="w-full max-w-[42rem]" onSubmit={e => e.preventDefault()}>
+            <Stack gap={7}>
+              <div className="space-y-1">
+                <Text
+                  as="h2"
+                  isLoading={!assistant}
+                  heading
+                  skeletonWidth="60%"
+                  className="text-xl font-semibold text-gray-900 dark:text-gray-100"
                 >
-                  Make another call
-                </button>
-              ) : (
-                <span />
+                  Debug Phone Call
+                </Text>
+                <Text
+                  as="p"
+                  isLoading={!assistant}
+                  skeletonWidth="80%"
+                  className="text-gray-500 dark:text-gray-400"
+                >
+                  Place a live test call to validate your phone deployment end-to-end.
+                </Text>
+              </div>
+
+              <div>
+                <Text as="label" className="block mb-2 text-sm font-medium">
+                  Phone number
+                </Text>
+                <div className="grid grid-cols-[16rem_minmax(0,1fr)] gap-3">
+                  <Dropdown<Country>
+                    id="phone-country"
+                    titleText=""
+                    label="Select country code"
+                    items={PHONE_COUNTRIES}
+                    selectedItem={country}
+                    onChange={({ selectedItem }) =>
+                      setCountry(selectedItem ?? DEFAULT_COUNTRY)
+                    }
+                    itemToString={item =>
+                      item ? `${item.name} (${item.value})` : ''
+                    }
+                    hideLabel
+                  />
+                  <TextInput
+                    id="phone-number"
+                    labelText="Phone number"
+                    hideLabel
+                    type="tel"
+                    placeholder="Enter your phone number"
+                    value={phoneNumber}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setPhoneNumber(e.target.value);
+                      setErrorMessage('');
+                    }}
+                    invalid={Boolean(errorMessage)}
+                  />
+                </div>
+              </div>
+
+              {errorMessage && (
+                <Notification
+                  kind="error"
+                  title="Error"
+                  subtitle={errorMessage}
+                />
               )}
-              <PrimaryButton
-                size="md"
-                renderIcon={ChevronRight}
-                onClick={handleSubmit}
-                isLoading={callStatus === 'calling'}
-              >
-                Start Call
-              </PrimaryButton>
-            </div>
-          </div>
+
+              {callStatus === 'success' && (
+                <Notification
+                  kind="success"
+                  title="Success"
+                  subtitle="Call has been created successfully."
+                />
+              )}
+
+              <div className="flex items-center justify-between">
+                {callStatus === 'success' ? (
+                  <GhostButton size="sm" onClick={handleReset}>
+                    Make another call
+                  </GhostButton>
+                ) : (
+                  <span />
+                )}
+                <PrimaryButton
+                  size="md"
+                  renderIcon={PhoneOutgoing}
+                  onClick={handleSubmit}
+                  isLoading={callStatus === 'calling'}
+                >
+                  Start Call
+                </PrimaryButton>
+              </div>
+            </Stack>
+          </Form>
         </div>
       </div>
 
       {/* ── Right: debugger panel ───────────────────────────────────── */}
-      <div className="shrink-0 flex flex-col overflow-hidden border border-gray-200 dark:border-gray-700 w-1/3 rounded bg-white dark:bg-gray-950">
+      <div className="shrink-0 flex flex-col overflow-hidden border-t lg:border-t-0 border-gray-200 dark:border-gray-800 w-full lg:w-1/3 bg-white dark:bg-gray-950">
         <PhoneAgentDebugger
           assistant={assistant}
           deployment={deployment ? deployment : undefined}
@@ -396,7 +383,7 @@ export const PreviewPhoneAgent = () => {
 // ---------------------------------------------------------------------------
 
 const PhoneAgentDebugger: React.FC<{
-  assistant: Assistant;
+  assistant: Assistant | null;
   deployment: ReturnType<Assistant['getPhonedeployment']>;
   stt: any;
   tts: any;
@@ -413,101 +400,109 @@ const PhoneAgentDebugger: React.FC<{
   onChangeArgument,
 }) => {
   const [tab, setTab] = useState<PhoneDebugTab>('configuration');
+  const loading = !assistant;
 
   return (
     <div className="flex flex-col h-full overflow-hidden text-sm">
       {/* Tab bar */}
-      <div className="shrink-0 flex items-center border-b border-gray-200 dark:border-gray-700">
-        {(['configuration', 'arguments'] as PhoneDebugTab[]).map(t => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={cn(
-              'px-3 py-2.5 text-sm/6 font-medium border-b-2 transition-colors',
-              tab === t
-                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
-            )}
-          >
-            {t}
-          </button>
-        ))}
+      <div className="border-b border-gray-200 dark:border-gray-800">
+        <Tabs
+          tabs={PHONE_DEBUG_TAB_LABELS}
+          selectedIndex={PHONE_DEBUG_TABS.indexOf(tab)}
+          onChange={idx => setTab(PHONE_DEBUG_TABS[idx])}
+          contained
+          aria-label="Phone debugger tabs"
+          isLoading={loading}
+        />
       </div>
 
       {/* ── configuration tab ── */}
       {tab === 'configuration' && (
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <ConfigBlock title="assistant">
-            <InfoRow label="name" value={assistant.getName()} />
-            {assistant.getDescription() && (
-              <InfoRow label="description" value={assistant.getDescription()} />
+          <ConfigBlock title="assistant" isLoading={loading} skeletonRows={2}>
+            {assistant && (
+              <>
+                <InfoRow label="name" value={assistant.getName()} />
+                {assistant.getDescription() && (
+                  <InfoRow label="description" value={assistant.getDescription()} />
+                )}
+              </>
             )}
           </ConfigBlock>
 
-          <ConfigBlock title="telephony">
-            {deployment?.getPhoneprovidername() && (
-              <InfoRow
-                label="provider"
-                value={deployment.getPhoneprovidername()}
-              />
-            )}
-            <InfoRow
-              label="input mode"
-              value={'Text' + (deployment?.getInputaudio() ? ', Audio' : '')}
-            />
-            <InfoRow
-              label="output mode"
-              value={'Text' + (deployment?.getOutputaudio() ? ', Audio' : '')}
-            />
-          </ConfigBlock>
-
-          {stt && (
-            <ConfigBlock title="stt">
-              <InfoRow label="provider" value={stt.getAudioprovider()} />
-              {stt
-                .getAudiooptionsList()
-                .filter((d: any) => d.getValue())
-                .filter((d: any) => d.getKey().startsWith('listen.'))
-                .map((d: any) => (
+          <ConfigBlock title="telephony" isLoading={loading} skeletonRows={3}>
+            {deployment && (
+              <>
+                {deployment.getPhoneprovidername() && (
                   <InfoRow
-                    key={d.getKey()}
-                    label={d.getKey()}
-                    value={d.getValue()}
+                    label="provider"
+                    value={deployment.getPhoneprovidername()}
                   />
-                ))}
-            </ConfigBlock>
-          )}
-
-          {tts && (
-            <ConfigBlock title="tts">
-              <InfoRow label="provider" value={tts.getAudioprovider()} />
-              {tts
-                .getAudiooptionsList()
-                .filter((d: any) => d.getValue())
-                .filter((d: any) => d.getKey().startsWith('speak.'))
-                .map((d: any) => (
-                  <InfoRow
-                    key={d.getKey()}
-                    label={d.getKey()}
-                    value={d.getValue()}
-                  />
-                ))}
-            </ConfigBlock>
-          )}
-
-          {model && (
-            <ConfigBlock title="llm">
-              <InfoRow label="provider" value={model.getModelprovidername()} />
-              {model.getAssistantmodeloptionsList().map((m: any) => (
+                )}
                 <InfoRow
-                  key={m.getKey()}
-                  label={m.getKey()}
-                  value={m.getValue()}
+                  label="input mode"
+                  value={'Text' + (deployment.getInputaudio() ? ', Audio' : '')}
                 />
-              ))}
-            </ConfigBlock>
-          )}
+                <InfoRow
+                  label="output mode"
+                  value={'Text' + (deployment.getOutputaudio() ? ', Audio' : '')}
+                />
+              </>
+            )}
+          </ConfigBlock>
+
+          <ConfigBlock title="stt" isLoading={loading} skeletonRows={2}>
+            {stt && (
+              <>
+                <InfoRow label="provider" value={stt.getAudioprovider()} />
+                {stt
+                  .getAudiooptionsList()
+                  .filter((d: any) => d.getValue())
+                  .filter((d: any) => d.getKey().startsWith('listen.'))
+                  .map((d: any) => (
+                    <InfoRow
+                      key={d.getKey()}
+                      label={d.getKey()}
+                      value={d.getValue()}
+                    />
+                  ))}
+              </>
+            )}
+          </ConfigBlock>
+
+          <ConfigBlock title="tts" isLoading={loading} skeletonRows={2}>
+            {tts && (
+              <>
+                <InfoRow label="provider" value={tts.getAudioprovider()} />
+                {tts
+                  .getAudiooptionsList()
+                  .filter((d: any) => d.getValue())
+                  .filter((d: any) => d.getKey().startsWith('speak.'))
+                  .map((d: any) => (
+                    <InfoRow
+                      key={d.getKey()}
+                      label={d.getKey()}
+                      value={d.getValue()}
+                    />
+                  ))}
+              </>
+            )}
+          </ConfigBlock>
+
+          <ConfigBlock title="llm" isLoading={loading} skeletonRows={2}>
+            {model && (
+              <>
+                <InfoRow label="provider" value={model.getModelprovidername()} />
+                {model.getAssistantmodeloptionsList().map((m: any) => (
+                  <InfoRow
+                    key={m.getKey()}
+                    label={m.getKey()}
+                    value={m.getValue()}
+                  />
+                ))}
+              </>
+            )}
+          </ConfigBlock>
         </div>
       )}
 
@@ -515,56 +510,35 @@ const PhoneAgentDebugger: React.FC<{
       {tab === 'arguments' && (
         <div className="flex-1 min-h-0 overflow-y-auto">
           {variables.length > 0 ? (
-            <div className="[&_label]:!text-sm [&_label]:!leading-6 [&_label]:!py-2 [&_label]:!px-3 [&_textarea]:!text-sm [&_textarea]:!leading-6 [&_textarea]:!px-3 [&_textarea]:!py-2">
+            <div className="divide-y border-b">
               {variables.map((x, idx) => (
-                <InputVarForm key={idx} var={x}>
-                  {(x.getType() === InputVarType.stringInput ||
-                    x.getType() === InputVarType.textInput) && (
-                    <TextTextarea
+                <div key={idx} className="px-4 py-3">
+                  {[
+                    InputVarType.stringInput,
+                    InputVarType.textInput,
+                    InputVarType.paragraph,
+                    InputVarType.number,
+                    InputVarType.json,
+                    InputVarType.url,
+                  ].includes(x.getType() as InputVarType) && (
+                    <TextArea
                       id={x.getName()}
+                      labelText={`{{${x.getName()}}}`}
+                      helperText={`Type: ${x.getType()}`}
+                      rows={
+                        x.getType() === InputVarType.paragraph ||
+                        x.getType() === InputVarType.json
+                          ? 4
+                          : 2
+                      }
                       defaultValue={x.getDefaultvalue()}
+                      placeholder="Enter variable value..."
                       onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                         onChangeArgument(x.getName(), e.target.value)
                       }
                     />
                   )}
-                  {x.getType() === InputVarType.paragraph && (
-                    <ParagraphTextarea
-                      id={x.getName()}
-                      defaultValue={x.getDefaultvalue()}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        onChangeArgument(x.getName(), e.target.value)
-                      }
-                    />
-                  )}
-                  {x.getType() === InputVarType.number && (
-                    <NumberTextarea
-                      id={x.getName()}
-                      defaultValue={x.getDefaultvalue()}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        onChangeArgument(x.getName(), e.target.value)
-                      }
-                    />
-                  )}
-                  {x.getType() === InputVarType.json && (
-                    <JsonTextarea
-                      id={x.getName()}
-                      defaultValue={x.getDefaultvalue()}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        onChangeArgument(x.getName(), e.target.value)
-                      }
-                    />
-                  )}
-                  {x.getType() === InputVarType.url && (
-                    <UrlTextarea
-                      id={x.getName()}
-                      defaultValue={x.getDefaultvalue()}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        onChangeArgument(x.getName(), e.target.value)
-                      }
-                    />
-                  )}
-                </InputVarForm>
+                </div>
               ))}
             </div>
           ) : (

@@ -46,10 +46,6 @@ func (at Telephony) String() string {
 	return string(at)
 }
 
-// --------------------------------------------------------------------------
-// Factory — GetTelephony returns the right provider implementation
-// --------------------------------------------------------------------------
-
 // GetTelephony is the factory function that creates a telephony provider for the
 // given type. This follows the platform factory pattern — providers are created
 // per-request through a switch-based lookup.
@@ -80,10 +76,6 @@ func GetTelephony(at Telephony, cfg *config.AssistantConfig, logger commons.Logg
 	}
 }
 
-// --------------------------------------------------------------------------
-// Options & Deps
-// --------------------------------------------------------------------------
-
 // TelephonyOption configures optional dependencies for telephony providers.
 type TelephonyOption struct {
 	SIPServer *sip_infra.Server
@@ -101,15 +93,11 @@ type TelephonyDispatcherDeps struct {
 	TelephonyOpt        TelephonyOption
 }
 
-// --------------------------------------------------------------------------
-// Streamer factory — unified per-connection factory
-// --------------------------------------------------------------------------
-
 // StreamerOption carries the transport-specific parameters needed to construct a
 // streamer. Callers populate only the fields relevant to their transport:
 //
 //   - WebSocket providers (Twilio, Exotel, Vonage, Asterisk WS): set WebSocketConn
-//   - AudioSocket (Asterisk): set AudioSocketConn, AudioSocketReader, AudioSocketWriter, InitialUUID
+//   - AudioSocket (Asterisk): set AudioSocketConn, AudioSocketReader, AudioSocketWriter
 //   - SIP: set Ctx, SIPSession, SIPConfig
 type StreamerOption struct {
 	// WebSocket transport
@@ -146,9 +134,9 @@ func (at Telephony) NewStreamer(
 		if opt.AudioSocketConn != nil {
 			return internal_asterisk_audiosocket.NewStreamer(logger, opt.AudioSocketConn, opt.AudioSocketReader, opt.AudioSocketWriter, cc, vaultCred)
 		}
-		return internal_asterisk_websocket.NewAsteriskWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred), nil
+		return internal_asterisk_websocket.NewAsteriskWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred)
 	case SIP:
-		return internal_sip_telephony.NewStreamer(opt.Ctx, opt.SIPConfig, logger, opt.SIPSession, cc, vaultCred)
+		return internal_sip_telephony.NewStreamer(opt.Ctx, logger, opt.SIPSession, cc, vaultCred)
 	default:
 		return nil, fmt.Errorf("streamer not supported for provider %q", at)
 	}

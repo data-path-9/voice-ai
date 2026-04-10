@@ -29,7 +29,7 @@ export const CodeHighlighting: FC<CodeHighlightingProps> = React.memo(
       <div
         className={cn(
           'prose-base! relative bg-light-background dark:bg-gray-950 border',
-          'p-4 m-0 flex flex-1',
+          'p-0 m-0 flex flex-1',
           className,
         )}
       >

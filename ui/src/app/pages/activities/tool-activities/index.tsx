@@ -4,7 +4,11 @@ import { DateFilter } from '@/app/components/carbon/date-filter';
 import { useCredential } from '@/hooks/use-credential';
 import toast from 'react-hot-toast/headless';
 import { useRapidaStore } from '@/hooks';
-import { formatNanoToReadableMilli, toDateString, toDate } from '@/utils/date';
+import {
+  formatNanoToReadableMilli,
+  toDateString,
+  toHumanReadableDateTime,
+} from '@/utils/date';
 import { PageTitleWithCount } from '@/app/components/blocks/page-title-with-count';
 import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
 import { useToolActivityLogPage } from '@/hooks/use-tool-activity-log-page-store';
@@ -24,7 +28,6 @@ import {
   TableToolbarContent,
   TableToolbarSearch,
   Loading,
-  DefinitionTooltip,
 } from '@carbon/react';
 import { TableLink } from '@/app/components/carbon/table-link';
 import { Renew, View, Launch, ToolKit } from '@carbon/icons-react';
@@ -133,14 +136,18 @@ export function ListingPage() {
                 <TableRow key={idx}>
                   {visibleColumn('assistant_id') && (
                     <TableCell>
-                      <TableLink href={`/deployment/assistant/${at.getAssistantid()}`}>
+                      <TableLink
+                        href={`/deployment/assistant/${at.getAssistantid()}`}
+                      >
                         {at.getAssistantid()}
                       </TableLink>
                     </TableCell>
                   )}
                   {visibleColumn('assistant_conversation_id') && (
                     <TableCell>
-                      <TableLink href={`/deployment/assistant/${at.getAssistantid()}/sessions/${at.getAssistantconversationid()}`}>
+                      <TableLink
+                        href={`/deployment/assistant/${at.getAssistantid()}/sessions/${at.getAssistantconversationid()}`}
+                      >
                         {at.getAssistantconversationid()}
                       </TableLink>
                     </TableCell>
@@ -190,14 +197,8 @@ export function ListingPage() {
                   )}
                   {visibleColumn('created_date') && (
                     <TableCell className="!text-xs whitespace-nowrap">
-                      {at.getCreateddate() && (
-                        <DefinitionTooltip
-                          definition={toDate(at.getCreateddate()!).toUTCString()}
-                          openOnHover
-                        >
-                          {toDate(at.getCreateddate()!).toLocaleString()}
-                        </DefinitionTooltip>
-                      )}
+                      {at.getCreateddate() &&
+                        toHumanReadableDateTime(at.getCreateddate()!)}
                     </TableCell>
                   )}
                 </TableRow>

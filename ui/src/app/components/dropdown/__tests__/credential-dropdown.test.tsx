@@ -6,6 +6,8 @@ import { CredentialDropdown } from '@/app/components/dropdown/credential-dropdow
 
 const mockReloadProviderCredentials = jest.fn();
 const mockAllProvider = jest.fn();
+const mockOpenCreateCredentialModal = jest.fn();
+const mockCreateProviderCredentialDialog = jest.fn();
 
 type MockCredential = {
   getId: () => string;
@@ -41,6 +43,19 @@ jest.mock('@/providers', () => ({
   allProvider: () => mockAllProvider(),
 }));
 
+jest.mock('@/context/provider-credential-modal-context', () => ({
+  useProviderCredentialModal: () => ({
+    openCreateCredentialModal: mockOpenCreateCredentialModal,
+  }),
+}));
+
+jest.mock('@/app/components/base/modal/create-provider-credential-modal', () => ({
+  CreateProviderCredentialDialog: (props: any) => {
+    mockCreateProviderCredentialDialog(props);
+    return props.modalOpen ? <div data-testid="create-provider-credential-modal" /> : null;
+  },
+}));
+
 jest.mock('@/app/components/carbon/dropdown', () => ({
   Dropdown: ({
     id,
@@ -51,7 +66,10 @@ jest.mock('@/app/components/carbon/dropdown', () => ({
     itemToString,
     onChange,
   }: any) => {
-    const selectedIndex = Math.max(items.findIndex((x: any) => x === selectedItem), 0);
+    const selectedIndex = Math.max(
+      items.findIndex((x: any) => x === selectedItem),
+      0,
+    );
     return (
       <div>
         <label htmlFor={id}>{titleText}</label>
@@ -77,18 +95,16 @@ jest.mock('@/app/components/carbon/dropdown', () => ({
 }));
 
 jest.mock('@carbon/react', () => ({
-  Button: ({ children, iconDescription, hasIconOnly: _, renderIcon: _r, ...props }: any) => (
+  Button: ({
+    children,
+    iconDescription,
+    hasIconOnly: _,
+    renderIcon: _r,
+    ...props
+  }: any) => (
     <button aria-label={iconDescription} {...props}>
       {children}
     </button>
-  ),
-}));
-
-jest.mock('@/app/components/base/modal/create-provider-credential-modal', () => ({
-  CreateProviderCredentialDialog: ({ modalOpen, currentProvider }: any) => (
-    <div data-testid="create-provider-modal">
-      {String(modalOpen)}::{currentProvider || ''}
-    </div>
   ),
 }));
 
@@ -118,8 +134,12 @@ describe('CredentialDropdown', () => {
 
     expect(screen.getByText('Credential')).toBeInTheDocument();
     const select = screen.getByTestId('credential-dropdown');
-    expect(screen.getByRole('option', { name: 'OpenAI / Primary' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Azure / Secondary' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: 'OpenAI / Primary' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'Azure / Secondary' }),
+    ).not.toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: '0' } });
     expect(onChangeCredential).toHaveBeenCalledWith(openAiCred);
@@ -132,25 +152,40 @@ describe('CredentialDropdown', () => {
     mockAllProvider.mockReturnValue([{ code: 'openai', name: 'OpenAI' }]);
 
     render(
-      <CredentialDropdown provider="unknown-provider" onChangeCredential={onChangeCredential as any} />,
+      <CredentialDropdown
+        provider="unknown-provider"
+        onChangeCredential={onChangeCredential as any}
+      />,
     );
 
     expect(screen.getByRole('option', { name: 'Lonely' })).toBeInTheDocument();
   });
 
-  it('reload and create actions work (refresh callback + modal open)', () => {
+  it('reload and create actions work (refresh callback + modal trigger)', () => {
     const onChangeCredential = jest.fn();
     mockProviderCredentials = [makeCredential('c1', 'Primary', 'openai')];
 
     render(
-      <CredentialDropdown provider="openai" onChangeCredential={onChangeCredential as any} />,
+      <CredentialDropdown
+        provider="openai"
+        onChangeCredential={onChangeCredential as any}
+      />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh credentials' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Refresh credentials' }),
+    );
     expect(mockReloadProviderCredentials).toHaveBeenCalledTimes(1);
 
-    expect(screen.getByTestId('create-provider-modal')).toHaveTextContent('false::openai');
     fireEvent.click(screen.getByRole('button', { name: 'Create credential' }));
-    expect(screen.getByTestId('create-provider-modal')).toHaveTextContent('true::openai');
+    expect(
+      screen.getByTestId('create-provider-credential-modal'),
+    ).toBeInTheDocument();
+    expect(mockCreateProviderCredentialDialog).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        modalOpen: true,
+        currentProvider: 'openai',
+      }),
+    );
   });
 });

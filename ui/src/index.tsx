@@ -5,6 +5,7 @@ import ReactDOM from 'react-dom/client';
 import { App } from '@/app';
 import { HelmetProvider } from 'react-helmet-async';
 import { DarkModeProvider } from '@/context/dark-mode-context';
+import { ProviderCredentialModalProvider } from '@/context/provider-credential-modal-context';
 import { WorkspaceProvider } from '@/workspace';
 import { initializeAnalytics } from '@/react-web-analytics';
 const root = ReactDOM.createRoot(
@@ -15,9 +16,11 @@ root.render(
   <HelmetProvider>
     <React.StrictMode>
       <DarkModeProvider>
-        <WorkspaceProvider>
-          <App />
-        </WorkspaceProvider>
+        <ProviderCredentialModalProvider>
+          <WorkspaceProvider>
+            <App />
+          </WorkspaceProvider>
+        </ProviderCredentialModalProvider>
       </DarkModeProvider>
     </React.StrictMode>
   </HelmetProvider>,

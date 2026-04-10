@@ -63,11 +63,9 @@ export function Dropdown<T>({
 }: CarbonDropdownProps<T>) {
   if (isLoading) {
     return (
-      <CarbonDropdownSkeleton
-        size={size}
-        hideLabel={hideLabel}
-        className={cn(className)}
-      />
+      <div className={cn(className)}>
+        <CarbonDropdownSkeleton size={size} hideLabel={hideLabel} />
+      </div>
     );
   }
 

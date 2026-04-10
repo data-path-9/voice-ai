@@ -15,22 +15,27 @@ import { useCurrentCredential } from '@/hooks/use-credential';
 import { AssistantConversation } from '@rapidaai/react';
 import { useRapidaStore } from '@/hooks';
 import { PageLoader } from '@/app/components/loader/page-loader';
-import { ArrowLeft, Renew } from '@carbon/icons-react';
+import {
+  ArrowLeft,
+  Renew,
+  DataBase,
+  DataCheck,
+  ChartLine,
+} from '@carbon/icons-react';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { GhostButton } from '@/app/components/carbon/button';
 import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
-import { Tab } from '@/app/components/tab-link';
 import { Table } from '@/app/components/base/tables/table';
 import { TableHead } from '@/app/components/base/tables/table-head';
 import { TableBody } from '@/app/components/base/tables/table-body';
 import { TableRow } from '@/app/components/base/tables/table-row';
 import { TableCell } from '@/app/components/base/tables/table-cell';
-import { BlueNoticeBlock } from '@/app/components/container/message/notice-block';
 import { EmptyState } from '@/app/components/carbon/empty-state';
 import { connectionConfig } from '@/configs';
 import { cn } from '@/utils';
 import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
 import { getStatusMetric } from '@/utils/metadata';
+import { Tabs } from '@/app/components/carbon/tabs';
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
@@ -55,6 +60,10 @@ export function ConversationDetailPage() {
   const [currentConversation, setCurrentConversation] =
     useState<AssistantConversation | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>('messages');
+  const selectedTabIndex = Math.max(
+    TABS.findIndex(({ key }) => key === activeTab),
+    0,
+  );
 
   const get = () => {
     showLoader();
@@ -100,10 +109,11 @@ export function ConversationDetailPage() {
           .getMetadataList()
           .filter(x => x.getKey().startsWith('analysis.'));
         return items.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-1 items-center justify-center py-12">
             <EmptyState
+              icon={ChartLine}
               title="No Analysis"
-              subtitle="There is no analysis yet for this conversation"
+              subtitle="There is no analysis data for this session yet."
             />
           </div>
         ) : (
@@ -126,10 +136,11 @@ export function ConversationDetailPage() {
       case 'context': {
         const contexts = currentConversation.getContextsList();
         return contexts.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-1 items-center justify-center py-12">
             <EmptyState
+              icon={DataBase}
               title="No Context"
-              subtitle="No knowledge context was retrieved for this conversation"
+              subtitle="No knowledge context was retrieved for this session."
             />
           </div>
         ) : (
@@ -222,14 +233,33 @@ export function ConversationDetailPage() {
             </TableBody>
           </Table>
         ) : (
-          <BlueNoticeBlock>
-            No metrics have been captured for this conversation.
-          </BlueNoticeBlock>
+          <div className="flex flex-1 items-center justify-center py-12">
+            <EmptyState
+              icon={ChartLine}
+              title="No Metrics"
+              subtitle="No metrics have been captured for this session yet."
+            />
+          </div>
         );
 
-      case 'arguments':
+      case 'arguments': {
+        const hasArguments =
+          currentConversation.getArgumentsList().length > 0 ||
+          currentConversation.getOptionsList().length > 0 ||
+          currentConversation.getMetadataList().length > 0;
+        if (!hasArguments) {
+          return (
+            <div className="flex flex-1 items-center justify-center py-12">
+              <EmptyState
+                icon={DataCheck}
+                title="No Arguments"
+                subtitle="No arguments, options, or metadata were captured for this session."
+              />
+            </div>
+          );
+        }
         return (
-          <Table className="bg-white dark:bg-gray-900">
+          <Table className="w-full bg-white dark:bg-gray-900">
             <TableHead
               columns={[
                 { name: 'Type', key: 'Type' },
@@ -264,6 +294,7 @@ export function ConversationDetailPage() {
             </TableBody>
           </Table>
         );
+      }
     }
   };
 
@@ -303,20 +334,18 @@ export function ConversationDetailPage() {
       </PageHeaderBlock>
 
       {/* ── Horizontal tab bar ── */}
-      <div className="flex items-stretch border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shrink-0 overflow-x-auto">
-        {TABS.map(({ key, label }) => (
-          <Tab
-            key={key}
-            isActive={activeTab === key}
-            onClick={() => setActiveTab(key)}
-          >
-            {label}
-          </Tab>
-        ))}
+      <div className="border-b border-gray-200 dark:border-gray-800 shrink-0">
+        <Tabs
+          tabs={TABS.map(({ label }) => label)}
+          selectedIndex={selectedTabIndex}
+          onChange={idx => setActiveTab(TABS[idx]?.key ?? 'messages')}
+          contained
+          aria-label="Session detail tabs"
+        />
       </div>
 
       {/* ── Content area ── */}
-      <div className="flex-1 overflow-auto flex flex-col">
+      <div className="flex-1 overflow-auto min-h-0 flex flex-col">
         {renderContent()}
       </div>
     </>

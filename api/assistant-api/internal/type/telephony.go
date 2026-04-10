@@ -34,8 +34,15 @@ type CallInfo struct {
 	// (Twilio CallSid, Vonage UUID, Asterisk channel ID, SIP Call-ID, etc.)
 	ChannelUUID string
 
-	// CallerNumber is the resolved caller/client phone number (ReceiveCall only).
+	// CallerNumber is the resolved caller/client phone number.
+	// Inbound: the caller's number. Outbound: the "to" number.
 	CallerNumber string
+
+	// FromNumber is the originating number for outbound calls.
+	FromNumber string
+
+	// Direction is "inbound" or "outbound".
+	Direction string
 
 	// Status is the call status string (e.g. "SUCCESS", "FAILED", "initiated").
 	Status string

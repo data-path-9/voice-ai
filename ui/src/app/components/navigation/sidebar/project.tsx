@@ -4,7 +4,7 @@ import { SidebarSimpleListItem } from '@/app/components/navigation/sidebar/sideb
 import { Catalog } from '@carbon/icons-react';
 import { useLocation } from 'react-router-dom';
 
-export function Project() {
+export function Project({ isLoading }: { isLoading?: boolean }) {
   const location = useLocation();
   const { pathname } = location;
   const currentPath = '/organization/projects';
@@ -13,11 +13,12 @@ export function Project() {
       <SidebarSimpleListItem
         navigate={currentPath}
         active={pathname.includes(currentPath)}
+        loading={isLoading}
       >
         <SidebarIconWrapper>
           <Catalog size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel>Projects</SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>Projects</SidebarLabel>
       </SidebarSimpleListItem>
     </li>
   );

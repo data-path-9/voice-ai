@@ -1,4 +1,4 @@
-import React, { FC, useEffect } from 'react';
+import React, { FC, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { toHumanReadableDateTime } from '@/utils/date';
@@ -10,14 +10,9 @@ import toast from 'react-hot-toast/headless';
 import { EmptyState } from '@/app/components/carbon/empty-state';
 import { UpdateAssistantWebhook } from '@/app/pages/assistant/actions/configure-assistant-webhook/update-assistant-webhook';
 import { useAssistantWebhookPageStore } from '@/app/pages/assistant/actions/store/use-webhook-page-store';
-import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
-import {
-  OverflowMenu,
-  OverflowMenuItem,
-} from '@/app/components/carbon/overflow-menu';
-import { PrimaryButton } from '@/app/components/carbon/button';
+import { IconOnlyButton, PrimaryButton } from '@/app/components/carbon/button';
 import { Pagination } from '@/app/components/carbon/pagination';
-import { Add, Renew } from '@carbon/icons-react';
+import { Add, Renew, Webhook, Edit, TrashCan } from '@carbon/icons-react';
 import { Tag } from '@carbon/react';
 import {
   Table,
@@ -30,6 +25,11 @@ import {
   TableToolbarContent,
   TableToolbarSearch,
   Button,
+  TableBatchActions,
+  TableBatchAction,
+  RadioButton,
+  Breadcrumb,
+  BreadcrumbItem,
 } from '@carbon/react';
 import { TableSection } from '@/app/components/sections/table-section';
 
@@ -56,17 +56,6 @@ export function UpdateAssistantWebhookPage() {
   );
 }
 
-const headers = [
-  { key: 'httpUrl', header: 'Endpoint' },
-  { key: 'events', header: 'Events' },
-  { key: 'maxRetryCount', header: 'Retries' },
-  { key: 'timeoutSeconds', header: 'Timeout (s)' },
-  { key: 'executionPriority', header: 'Priority' },
-  { key: 'status', header: 'Status' },
-  { key: 'created_date', header: 'Created' },
-  { key: 'actions', header: '' },
-];
-
 const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
   assistantId,
 }) => {
@@ -74,6 +63,10 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
   const axtion = useAssistantWebhookPageStore();
   const { authId, token, projectId } = useCurrentCredential();
   const { loading, showLoader, hideLoader } = useRapidaStore();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedWebhookId, setSelectedWebhookId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     showLoader('block');
@@ -114,6 +107,25 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
     );
   };
 
+  const filteredWebhooks = searchTerm.trim()
+    ? axtion.webhooks.filter(row =>
+        [
+          row.getHttpmethod(),
+          row.getHttpurl(),
+          row.getExecutionpriority(),
+          row.getStatus(),
+          ...row.getAssistanteventsList(),
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(searchTerm.trim().toLowerCase()),
+      )
+    : axtion.webhooks;
+
+  const selectedWebhook = filteredWebhooks.find(
+    row => row.getId() === selectedWebhookId,
+  );
+
   if (loading) {
     return (
       <div className="h-full w-full flex flex-col items-center justify-center">
@@ -124,16 +136,65 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
 
   return (
     <div className="h-full flex flex-col flex-1">
+      <div className="px-4 pt-4 pb-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+        <div>
+          <Breadcrumb noTrailingSlash className="mb-2">
+            <BreadcrumbItem
+              href={`/deployment/assistant/${assistantId}/overview`}
+            >
+              Assistant
+            </BreadcrumbItem>
+          </Breadcrumb>
+          <h1 className="text-2xl font-light tracking-tight">Webhooks</h1>
+        </div>
+      </div>
       <TableToolbar>
+        <TableBatchActions
+          shouldShowBatchActions={!!selectedWebhook}
+          totalSelected={selectedWebhook ? 1 : 0}
+          totalCount={filteredWebhooks.length}
+          onCancel={() => setSelectedWebhookId(null)}
+          className="[&_[class*=divider]]:hidden [&_.cds--btn]:transition-colors [&_.cds--btn:hover]:!bg-primary [&_.cds--btn:hover]:!text-white"
+        >
+          {selectedWebhook && (
+            <>
+              <TableBatchAction
+                renderIcon={Edit}
+                kind="ghost"
+                onClick={() => {
+                  navigation.goToEditAssistantWebhook(
+                    assistantId,
+                    selectedWebhook.getId(),
+                  );
+                  setSelectedWebhookId(null);
+                }}
+              >
+                Edit webhook
+              </TableBatchAction>
+              <TableBatchAction
+                renderIcon={TrashCan}
+                kind="ghost"
+                onClick={() => {
+                  deleteAssistantWebhook(assistantId, selectedWebhook.getId());
+                  setSelectedWebhookId(null);
+                }}
+              >
+                Delete webhook
+              </TableBatchAction>
+            </>
+          )}
+        </TableBatchActions>
         <TableToolbarContent>
-          <TableToolbarSearch placeholder="Search webhooks..." />
-          <Button
-            hasIconOnly
+          <TableToolbarSearch
+            placeholder="Search webhooks..."
+            onChange={(e: any) => setSearchTerm(e.target?.value || '')}
+          />
+          <IconOnlyButton
+            kind="ghost"
+            size="lg"
             renderIcon={Renew}
             iconDescription="Refresh"
-            kind="ghost"
             onClick={get}
-            tooltipPosition="bottom"
           />
           <PrimaryButton
             size="md"
@@ -145,66 +206,101 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
         </TableToolbarContent>
       </TableToolbar>
       <TableSection>
-        {axtion.webhooks.length > 0 ? (
+        {axtion.webhooks.length > 0 && filteredWebhooks.length > 0 ? (
           <>
             <Table>
               <TableHead>
                 <TableRow>
-                  {headers.map(h => (
-                    <TableHeader key={h.key}>{h.header}</TableHeader>
-                  ))}
+                  <TableHeader className="!w-12" />
+                  <TableHeader>Endpoint</TableHeader>
+                  <TableHeader>Events</TableHeader>
+                  <TableHeader>Retries</TableHeader>
+                  <TableHeader>Timeout (s)</TableHeader>
+                  <TableHeader>Priority</TableHeader>
+                  <TableHeader>Created</TableHeader>
+                  <TableHeader>Actions</TableHeader>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {axtion.webhooks.map(row => (
-                  <TableRow key={row.getId()}>
-                    <TableCell>
-                      <span className="font-mono text-xs">
-                        {row.getHttpmethod()}
-                      </span>{' '}
-                      <span className="truncate">{row.getHttpurl()}</span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {row.getAssistanteventsList().map((event, index) => (
-                          <Tag key={index} type="blue" size="sm">
-                            {event}
-                          </Tag>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>{row.getRetrycount()}</TableCell>
-                    <TableCell>{row.getTimeoutsecond()}</TableCell>
-                    <TableCell>{row.getExecutionpriority()}</TableCell>
-                    <TableCell>
-                      <CarbonStatusIndicator state={row.getStatus()} />
-                    </TableCell>
-                    <TableCell>
-                      {row.getCreateddate() &&
-                        toHumanReadableDateTime(row.getCreateddate()!)}
-                    </TableCell>
-                    <TableCell>
-                      <OverflowMenu size="sm" flipped>
-                        <OverflowMenuItem
-                          itemText="Update webhook"
-                          onClick={() =>
-                            navigation.goToEditAssistantWebhook(
-                              assistantId,
-                              row.getId(),
-                            )
+                {filteredWebhooks.map(row => {
+                  const selected = selectedWebhookId === row.getId();
+                  return (
+                    <TableRow
+                      key={row.getId()}
+                      isSelected={selected}
+                      onClick={() =>
+                        setSelectedWebhookId(selected ? null : row.getId())
+                      }
+                      className="cursor-pointer"
+                    >
+                      <TableCell
+                        className="!w-12 !pr-0"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <RadioButton
+                          id={`webhook-select-${row.getId()}`}
+                          name="webhook-select"
+                          labelText=""
+                          hideLabel
+                          checked={selected}
+                          onChange={() =>
+                            setSelectedWebhookId(selected ? null : row.getId())
                           }
                         />
-                        <OverflowMenuItem
-                          itemText="Delete webhook"
-                          isDelete
-                          onClick={() =>
-                            deleteAssistantWebhook(assistantId, row.getId())
-                          }
-                        />
-                      </OverflowMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-mono text-xs">
+                          {row.getHttpmethod()}
+                        </span>{' '}
+                        <span className="truncate">{row.getHttpurl()}</span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {row.getAssistanteventsList().map((event, index) => (
+                            <Tag key={index} type="blue" size="sm">
+                              {event}
+                            </Tag>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell>{row.getRetrycount()}</TableCell>
+                      <TableCell>{row.getTimeoutsecond()}</TableCell>
+                      <TableCell>{row.getExecutionpriority()}</TableCell>
+                      <TableCell>
+                        {row.getCreateddate()
+                          ? toHumanReadableDateTime(row.getCreateddate()!)
+                          : '—'}
+                      </TableCell>
+                      <TableCell onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-0">
+                          <Button
+                            hasIconOnly
+                            renderIcon={Edit}
+                            iconDescription="Edit webhook"
+                            kind="ghost"
+                            size="sm"
+                            onClick={() =>
+                              navigation.goToEditAssistantWebhook(
+                                assistantId,
+                                row.getId(),
+                              )
+                            }
+                          />
+                          <Button
+                            hasIconOnly
+                            renderIcon={TrashCan}
+                            iconDescription="Delete webhook"
+                            kind="danger--ghost"
+                            size="sm"
+                            onClick={() =>
+                              deleteAssistantWebhook(assistantId, row.getId())
+                            }
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
             <Pagination
@@ -218,15 +314,19 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
               }}
             />
           </>
+        ) : axtion.webhooks.length > 0 ? (
+          <EmptyState
+            className="w-full"
+            icon={Webhook}
+            title="No webhooks found"
+            subtitle="No webhook matched your search."
+          />
         ) : (
           <EmptyState
             className="w-full"
+            icon={Webhook}
             title="No Webhook"
             subtitle="There are no assistant webhook found."
-            action="Create new webhook"
-            onAction={() =>
-              navigation.goToCreateAssistantWebhook(assistantId)
-            }
           />
         )}
       </TableSection>

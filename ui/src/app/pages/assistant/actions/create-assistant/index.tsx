@@ -2,11 +2,24 @@ import { useState } from 'react';
 import { Helmet } from '@/app/components/helmet';
 import { useRapidaStore } from '@/hooks';
 import { TabForm } from '@/app/components/form/tab-form';
+import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import {
-  PrimaryButton,
-  SecondaryButton,
-} from '@/app/components/carbon/button';
-import { ButtonSet } from '@carbon/react';
+  ButtonSet,
+  Table,
+  TableHead,
+  TableRow,
+  TableHeader,
+  TableBody,
+  TableCell,
+  TableToolbar,
+  TableToolbarContent,
+  TableToolbarSearch,
+  TableBatchActions,
+  TableBatchAction,
+  RadioButton,
+  Tag,
+  Button,
+} from '@carbon/react';
 import {
   Assistant,
   ConnectionConfig,
@@ -30,19 +43,11 @@ import {
   ValidateTextProviderDefaultOptions,
 } from '@/app/components/providers/text';
 import { BuildinToolConfig } from '@/app/components/tools';
-import {
-  BaseCard,
-  CardDescription,
-  CardTitle,
-} from '@/app/components/base/cards';
-import { ArrowUpRight, Plus } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { BUILDIN_TOOLS } from '@/llm-tools';
-import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
-import { PageTitleBlock } from '@/app/components/blocks/page-title-block';
 import { EmptyState } from '@/app/components/carbon/empty-state';
 import { ConfigureAssistantToolDialog } from '@/app/components/base/modal/assistant-configure-tool-modal';
 import { DocNoticeBlock } from '@/app/components/container/message/notice-block/doc-notice-block';
-import { CardOptionMenu } from '@/app/components/menu';
 import { CreateAssistant } from '@rapidaai/react';
 import { CreateAssistantToolRequest } from '@rapidaai/react';
 import { Struct } from 'google-protobuf/google/protobuf/struct_pb';
@@ -52,6 +57,7 @@ import toast from 'react-hot-toast/headless';
 import { ConfigureAssistantNextDialog } from '@/app/components/base/modal/assistant-configure-next-modal';
 import { SectionDivider } from '@/app/components/blocks/section-divider';
 import { CornerBorderOverlay } from '@/app/components/base/corner-border';
+import { Add, Edit, ToolKit, TrashCan } from '@carbon/icons-react';
 import {
   AssistantTemplate,
   ConfigureAssistantTemplateDialog,
@@ -137,6 +143,8 @@ export function CreateAssistantPage() {
   const { showDialog, ConfirmDialogComponent } = useConfirmDialog({});
   const [configureToolOpen, setConfigureToolOpen] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [toolSearchTerm, setToolSearchTerm] = useState('');
+  const [selectedToolName, setSelectedToolName] = useState<string | null>(null);
 
   /**
    * Applies a selected usecase template to pre-fill the form state.
@@ -339,6 +347,20 @@ export function CreateAssistantPage() {
     return true;
   };
 
+  const normalizedToolSearch = toolSearchTerm.trim().toLowerCase();
+  const filteredTools = normalizedToolSearch
+    ? tools.filter(tool =>
+        [
+          tool.name,
+          tool.description,
+          tool.buildinToolConfig.code.replace(/_/g, ' '),
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedToolSearch),
+      )
+    : tools;
+
   //
   return (
     <>
@@ -462,10 +484,7 @@ export function CreateAssistantPage() {
                   {/* Prompt template section */}
                   <div className="flex flex-col gap-6">
                     <SectionDivider label="Prompt Template" />
-                    <DocNoticeBlock
-                      docUrl="https://doc.rapida.ai/assistants/prompt-templating"
-                      tone="blue"
-                    >
+                    <DocNoticeBlock docUrl="https://doc.rapida.ai/assistants/prompt-templating">
                       Prompt variables and system arguments are resolved at
                       runtime. Read the prompt templating guide before
                       finalizing your instruction.
@@ -483,12 +502,11 @@ export function CreateAssistantPage() {
             ),
             actions: [
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <SecondaryButton size="lg"
-                  onClick={() => showDialog(goBack)}
-                >
+                <SecondaryButton size="lg" onClick={() => showDialog(goBack)}>
                   Cancel
                 </SecondaryButton>
-                <PrimaryButton size="lg"
+                <PrimaryButton
+                  size="lg"
                   isLoading={loading}
                   onClick={() => {
                     if (validateInstruction()) setActiveTab('tools');
@@ -506,12 +524,11 @@ export function CreateAssistantPage() {
               'Let your assistant work with different tools on behalf of you.',
             actions: [
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <SecondaryButton size="lg"
-                  onClick={() => showDialog(goBack)}
-                >
+                <SecondaryButton size="lg" onClick={() => showDialog(goBack)}>
                   Cancel
                 </SecondaryButton>
-                <PrimaryButton size="lg"
+                <PrimaryButton
+                  size="lg"
                   isLoading={loading}
                   onClick={() => {
                     if (tools.length === 0) {
@@ -529,128 +546,181 @@ export function CreateAssistantPage() {
             ],
             body: (
               <div className="relative flex flex-col flex-1">
-                <PageHeaderBlock>
-                  <PageTitleBlock>Tools and MCPs</PageTitleBlock>
-                  <div className="flex items-stretch h-12 border-l border-gray-200 dark:border-gray-800">
-                    <button
-                      type="button"
+                <TableToolbar>
+                  <TableBatchActions
+                    shouldShowBatchActions={!!selectedToolName}
+                    totalSelected={selectedToolName ? 1 : 0}
+                    totalCount={tools.length}
+                    onCancel={() => setSelectedToolName(null)}
+                    className="[&_[class*=divider]]:hidden [&_.cds--btn]:transition-colors [&_.cds--btn:hover]:!bg-primary [&_.cds--btn:hover]:!text-white"
+                  >
+                    {selectedToolName && (
+                      <>
+                        <TableBatchAction
+                          renderIcon={Edit}
+                          onClick={() => {
+                            const selectedTool = tools.find(
+                              itm => itm.name === selectedToolName,
+                            );
+                            if (!selectedTool) return;
+                            setEditingTool(selectedTool);
+                            setConfigureToolOpen(true);
+                            setSelectedToolName(null);
+                          }}
+                        >
+                          Edit tool
+                        </TableBatchAction>
+                        <TableBatchAction
+                          renderIcon={TrashCan}
+                          onClick={() => {
+                            setTools(prevTools =>
+                              prevTools.filter(
+                                tool => tool.name !== selectedToolName,
+                              ),
+                            );
+                            setSelectedToolName(null);
+                          }}
+                        >
+                          Delete tool
+                        </TableBatchAction>
+                      </>
+                    )}
+                  </TableBatchActions>
+                  <TableToolbarContent>
+                    <TableToolbarSearch
+                      placeholder="Search tools..."
+                      onChange={(e: any) =>
+                        setToolSearchTerm(e.target?.value || '')
+                      }
+                    />
+                    <PrimaryButton
+                      size="md"
+                      renderIcon={Add}
                       onClick={() => setConfigureToolOpen(true)}
-                      className="flex items-center gap-2 px-4 text-sm text-white bg-primary hover:bg-primary/90 transition-colors whitespace-nowrap"
                     >
-                      Add another tool
-                      <Plus className="w-4 h-4" strokeWidth={1.5} />
-                    </button>
-                  </div>
-                </PageHeaderBlock>
-                <DocNoticeBlock docUrl="https://doc.rapida.ai/assistants/tools/">
-                  Activate the tools you want your assistant to use, allowing it
-                  to perform actions like fetching real-time data, processing
-                  complex tasks, and more.
-                </DocNoticeBlock>
+                      Add tool
+                    </PrimaryButton>
+                  </TableToolbarContent>
+                </TableToolbar>
                 <div className="overflow-auto flex flex-col flex-1">
-                  {tools.length > 0 ? (
-                    <section className="grid content-start grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 grow shrink-0 m-4">
-                      {tools.map((itm, idx) => {
-                        const isMCP = itm.buildinToolConfig.code === 'mcp';
-                        const toolMeta = BUILDIN_TOOLS.find(
-                          x => x.code === itm.buildinToolConfig.code,
-                        );
+                  {tools.length > 0 && filteredTools.length > 0 ? (
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableHeader className="!w-12" />
+                          <TableHeader>Name</TableHeader>
+                          <TableHeader>Type</TableHeader>
+                          <TableHeader>Description</TableHeader>
+                          <TableHeader>Actions</TableHeader>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {filteredTools.map((itm, idx) => {
+                          const method = itm.buildinToolConfig.code;
+                          const methodMeta = BUILDIN_TOOLS.find(
+                            x => x.code === method,
+                          );
+                          const isMCP = method === 'mcp';
+                          const selected = selectedToolName === itm.name;
 
-                        return (
-                          <BaseCard
-                            key={idx}
-                            className="flex flex-col bg-light-background col-span-1"
-                          >
-                            {/* Body */}
-                            <div className="p-4 flex-1 flex flex-col gap-3">
-                              {/* Header: icon + options menu */}
-                              <header className="flex items-start justify-between">
-                                <div className="w-9 h-9 flex items-center justify-center bg-gray-100 dark:bg-gray-800/60 shrink-0">
-                                  {toolMeta?.icon ? (
-                                    <img
-                                      alt={toolMeta.name}
-                                      src={toolMeta.icon}
-                                      className="w-5 h-5 object-contain"
-                                    />
-                                  ) : (
-                                    <span className="text-xs font-semibold text-gray-400 uppercase">
-                                      {(itm.name ?? '?').charAt(0)}
-                                    </span>
+                          return (
+                            <TableRow
+                              key={`tool-row-${idx}`}
+                              isSelected={selected}
+                              onClick={() =>
+                                setSelectedToolName(selected ? null : itm.name)
+                              }
+                              className="cursor-pointer"
+                            >
+                              <TableCell
+                                className="!w-12 !pr-0"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <RadioButton
+                                  id={`tool-select-${itm.name}`}
+                                  name="tool-select"
+                                  labelText=""
+                                  hideLabel
+                                  checked={selected}
+                                  onChange={() =>
+                                    setSelectedToolName(
+                                      selected ? null : itm.name,
+                                    )
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell>{itm.name}</TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-1">
+                                  {methodMeta && (
+                                    <Tag size="sm" type="gray">
+                                      {methodMeta.name}
+                                    </Tag>
+                                  )}
+                                  {isMCP && (
+                                    <Tag size="sm" type="purple">
+                                      MCP
+                                    </Tag>
+                                  )}
+                                  {!methodMeta && !isMCP && (
+                                    <Tag size="sm" type="gray">
+                                      {(method || 'Unknown').replace(/_/g, ' ')}
+                                    </Tag>
                                   )}
                                 </div>
-                                <CardOptionMenu
-                                  options={[
-                                    {
-                                      option: 'Edit tool',
-                                      onActionClick: () => {
-                                        setEditingTool(itm);
-                                        setConfigureToolOpen(true);
-                                      },
-                                    },
-                                    {
-                                      option: (
-                                        <span className="text-rose-600">
-                                          Delete tool
-                                        </span>
-                                      ),
-                                      onActionClick: () => {
-                                        setTools(prevTools =>
-                                          prevTools.filter(
-                                            tool => tool !== itm,
-                                          ),
-                                        );
-                                      },
-                                    },
-                                  ]}
-                                  classNames="h-8 w-8 p-1"
-                                />
-                              </header>
-
-                              {/* Name + description */}
-                              <div className="flex-1 flex flex-col gap-1 min-w-0">
-                                <CardTitle className="line-clamp-1 text-sm font-semibold">
-                                  {itm.name}
-                                </CardTitle>
-                                <CardDescription className="line-clamp-2 text-xs leading-relaxed">
-                                  {itm.description}
-                                </CardDescription>
-                              </div>
-                            </div>
-
-                            {/* Footer: execution type tag */}
-                            <div className="flex items-center gap-1.5 px-4 py-2.5 border-t border-gray-100 dark:border-gray-800">
-                              {toolMeta && (
-                                <span className="inline-flex items-center h-5 px-2 text-[11px] font-medium tracking-wide bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
-                                  {toolMeta.name}
-                                </span>
-                              )}
-                              {isMCP && (
-                                <span className="inline-flex items-center h-5 px-2 text-[11px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                                  MCP
-                                </span>
-                              )}
-                              {!toolMeta && !isMCP && (
-                                <span className="inline-flex items-center h-5 px-2 text-[11px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-500 capitalize">
-                                  {itm.buildinToolConfig.code.replace(
-                                    /_/g,
-                                    ' ',
-                                  )}
-                                </span>
-                              )}
-                            </div>
-                          </BaseCard>
-                        );
-                      })}
-                    </section>
+                              </TableCell>
+                              <TableCell className="max-w-[360px] truncate">
+                                {itm.description}
+                              </TableCell>
+                              <TableCell onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center gap-0">
+                                  <Button
+                                    hasIconOnly
+                                    renderIcon={Edit}
+                                    iconDescription="Edit tool"
+                                    size="sm"
+                                    kind="ghost"
+                                    onClick={() => {
+                                      setEditingTool(itm);
+                                      setConfigureToolOpen(true);
+                                    }}
+                                  />
+                                  <Button
+                                    hasIconOnly
+                                    renderIcon={TrashCan}
+                                    iconDescription="Delete tool"
+                                    size="sm"
+                                    kind="ghost"
+                                    onClick={() => {
+                                      setTools(prevTools =>
+                                        prevTools.filter(
+                                          tool => tool.name !== itm.name,
+                                        ),
+                                      );
+                                      if (selectedToolName === itm.name) {
+                                        setSelectedToolName(null);
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  ) : tools.length > 0 ? (
+                    <EmptyState
+                      icon={ToolKit}
+                      title="No tools found"
+                      subtitle="No tool matched your search."
+                    />
                   ) : (
-                    <div className="flex flex-1 items-center justify-center">
-                      <EmptyState
-                        title="No Tools"
-                        subtitle="There are no tools given added to the assistant"
-                        action="Add a tool"
-                        onAction={() => setConfigureToolOpen(true)}
-                      />
-                    </div>
+                    <EmptyState
+                      icon={ToolKit}
+                      title="No tools found"
+                      subtitle="Any tools or MCPs you add will be listed here."
+                    />
                   )}
                 </div>
               </div>
@@ -663,12 +733,11 @@ export function CreateAssistantPage() {
               'Provide the name, a brief description, and relevant tags for your assistant to help identify and categorize it.',
             actions: [
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <SecondaryButton size="lg"
-                  onClick={() => showDialog(goBack)}
-                >
+                <SecondaryButton size="lg" onClick={() => showDialog(goBack)}>
                   Cancel
                 </SecondaryButton>
-                <PrimaryButton size="lg"
+                <PrimaryButton
+                  size="lg"
                   isLoading={loading}
                   onClick={createAssistant}
                 >
@@ -679,7 +748,9 @@ export function CreateAssistantPage() {
             body: (
               <div className="px-8 pt-8 pb-8 max-w-2xl">
                 <Stack gap={7}>
-                  <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">Identity</p>
+                  <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">
+                    Identity
+                  </p>
                   <TextInput
                     id="agent-name"
                     labelText="Name *"
@@ -697,7 +768,9 @@ export function CreateAssistantPage() {
                     rows={4}
                     helperText="Provide a description to explain what this assistant is about."
                   />
-                  <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">Labels</p>
+                  <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">
+                    Labels
+                  </p>
                   <TagInput
                     tags={tags}
                     addTag={onAddTag}

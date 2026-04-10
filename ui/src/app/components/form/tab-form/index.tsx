@@ -143,11 +143,14 @@ export const TabForm: FC<TabFormProps> = ({
       {/* Content area — flex column so footer sits below scroll */}
       <div className="flex-1 min-h-0 flex flex-col bg-white dark:bg-gray-900">
         {/* Scrollable region */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
           {form.map(
             item =>
               item.code === activeTab && (
-                <div key={`form-body-${item.code}`}>
+                <div
+                  key={`form-body-${item.code}`}
+                  className="flex flex-col flex-1"
+                >
                   {/* IBM Carbon step content header */}
                   <header className="px-8 pt-8 pb-6 border-b border-gray-200 dark:border-gray-800">
                     <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400 mb-1.5">
@@ -173,12 +176,13 @@ export const TabForm: FC<TabFormProps> = ({
         {form.map(
           item =>
             item.code === activeTab && (
-              <div
-                key={`footer-${item.code}`}
-                className="shrink-0"
-              >
+              <div key={`footer-${item.code}`} className="shrink-0">
                 {errorMessage && (
-                  <Notification kind="error" title="Error" subtitle={errorMessage} />
+                  <Notification
+                    kind="error"
+                    title="Error"
+                    subtitle={errorMessage}
+                  />
                 )}
                 {item.actions.map((action, idx) => (
                   <div key={`action-${idx}`}>{action}</div>

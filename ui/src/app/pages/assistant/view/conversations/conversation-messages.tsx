@@ -8,7 +8,7 @@ import { FC, useCallback, useContext, useEffect, useRef } from 'react';
 import { AssistantChatContext } from '@/hooks/use-assistant-chat';
 import { useBoolean } from 'ahooks';
 import { SectionLoader } from '@/app/components/loader/section-loader';
-import { Renew, Download } from '@carbon/icons-react';
+import { Renew, Download, Chat } from '@carbon/icons-react';
 import { GhostButton } from '@/app/components/carbon/button';
 import { Tag, DefinitionTooltip } from '@carbon/react';
 import { EmptyState } from '@/app/components/carbon/empty-state';
@@ -151,10 +151,11 @@ export const ConversationMessages: FC<{
 
       {/* ── Empty state ── */}
       {conversations.length === 0 && (
-        <div className="my-auto mx-auto border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-8 py-8">
+        <div className="flex flex-1 items-center justify-center py-12">
           <EmptyState
+            icon={Chat}
             title="No messages yet"
-            subtitle="There are no messages yet for this conversation"
+            subtitle="There are no messages for this session yet."
           />
         </div>
       )}

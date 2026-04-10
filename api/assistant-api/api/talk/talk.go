@@ -6,16 +6,27 @@
 package assistant_talk_api
 
 import (
+	"bufio"
+	"context"
 	"errors"
+	"fmt"
+	"net"
 
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/rapidaai/api/assistant-api/config"
 	internal_adapter "github.com/rapidaai/api/assistant-api/internal/adapters"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_grpc "github.com/rapidaai/api/assistant-api/internal/channel/grpc"
+	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
 	channel_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
 	internal_webrtc "github.com/rapidaai/api/assistant-api/internal/channel/webrtc"
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	observe "github.com/rapidaai/api/assistant-api/internal/observe"
+	observe_exporters "github.com/rapidaai/api/assistant-api/internal/observe/exporters"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
+	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
@@ -24,6 +35,7 @@ import (
 	storage_files "github.com/rapidaai/pkg/storages/file-storage"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/protos"
 	assistant_api "github.com/rapidaai/protos"
 )
 
@@ -38,6 +50,7 @@ type ConversationApi struct {
 	callContextStore             callcontext.Store
 	outboundDispatcher           *channel_telephony.OutboundDispatcher
 	inboundDispatcher            *channel_telephony.InboundDispatcher
+	channelPipeline              *channel_pipeline.Dispatcher
 	assistantConversationService internal_services.AssistantConversationService
 	assistantService             internal_services.AssistantService
 	vaultClient                  web_client.VaultClient
@@ -72,6 +85,118 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 		TelephonyOpt:        channel_telephony.TelephonyOption{SIPServer: sipServer},
 	}
 
+	inbound := channel_telephony.NewInboundDispatcher(telephonyDeps)
+	outboundDisp := channel_telephony.NewOutboundDispatcher(telephonyDeps)
+
+	pipeline := channel_pipeline.NewDispatcher(&channel_pipeline.DispatcherConfig{
+		Logger: logger,
+		OnReceiveCall: func(ctx context.Context, provider string, ginCtx *gin.Context) (*internal_type.CallInfo, error) {
+			return inbound.ReceiveCall(ginCtx, provider)
+		},
+		OnLoadAssistant: func(ctx context.Context, auth types.SimplePrinciple, assistantID uint64) (*internal_assistant_entity.Assistant, error) {
+			return inbound.LoadAssistant(ctx, auth, assistantID)
+		},
+		OnCreateConversation: func(ctx context.Context, auth types.SimplePrinciple, callerNumber string, assistantID, assistantProviderID uint64, direction string) (uint64, error) {
+			return inbound.CreateConversation(ctx, auth, callerNumber, assistantID, assistantProviderID, direction)
+		},
+		OnSaveCallContext: func(ctx context.Context, auth types.SimplePrinciple, assistant *internal_assistant_entity.Assistant, conversationID uint64, callInfo *internal_type.CallInfo, provider string) (string, error) {
+			return inbound.SaveCallContext(ctx, auth, assistant, conversationID, callInfo, provider)
+		},
+		OnAnswerProvider: func(ctx context.Context, ginCtx *gin.Context, auth types.SimplePrinciple, provider string, assistantID uint64, callerNumber string, conversationID uint64) error {
+			return inbound.AnswerProvider(ginCtx, auth, provider, assistantID, callerNumber, conversationID)
+		},
+		OnDispatchOutbound: func(ctx context.Context, contextID string) error {
+			return outboundDisp.Dispatch(ctx, contextID)
+		},
+		OnApplyConversationExtras: func(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, opts, args, metadata map[string]interface{}) error {
+			if len(opts) > 0 {
+				if _, err := conversationService.ApplyConversationOption(ctx, auth, assistantID, conversationID, opts); err != nil {
+					return err
+				}
+			}
+			if len(args) > 0 {
+				if _, err := conversationService.ApplyConversationArgument(ctx, auth, assistantID, conversationID, args); err != nil {
+					return err
+				}
+			}
+			if len(metadata) > 0 {
+				md := make([]*types.Metadata, 0, len(metadata))
+				for k, v := range metadata {
+					md = append(md, types.NewMetadata(k, fmt.Sprintf("%v", v)))
+				}
+				if _, err := conversationService.ApplyConversationMetadata(ctx, auth, assistantID, conversationID, md); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		OnResolveSession: func(ctx context.Context, contextID string) (*callcontext.CallContext, *protos.VaultCredential, error) {
+			return inbound.ResolveCallSessionByContext(ctx, contextID)
+		},
+		OnCreateStreamer: func(ctx context.Context, cc *callcontext.CallContext, vc *protos.VaultCredential, ws *websocket.Conn, conn net.Conn, reader *bufio.Reader, writer *bufio.Writer) (internal_type.Streamer, error) {
+			return channel_telephony.Telephony(cc.Provider).NewStreamer(logger, cc, vc, channel_telephony.StreamerOption{
+				WebSocketConn:     ws,
+				AudioSocketConn:   conn,
+				AudioSocketReader: reader,
+				AudioSocketWriter: writer,
+			})
+		},
+		OnCreateTalker: func(ctx context.Context, streamer internal_type.Streamer) (internal_type.Talking, error) {
+			return internal_adapter.GetTalker(utils.PhoneCall, ctx, cfg, logger, postgres, opensearch, redis, fileStorage, streamer)
+		},
+		OnRunTalk: func(ctx context.Context, talker internal_type.Talking, auth types.SimplePrinciple) error {
+			return talker.Talk(ctx, auth)
+		},
+		OnCreateObserver: func(ctx context.Context, callID string, auth types.SimplePrinciple, assistantID, conversationID uint64) *observe.ConversationObserver {
+			var projectID, orgID uint64
+			if pid := auth.GetCurrentProjectId(); pid != nil {
+				projectID = *pid
+			}
+			if oid := auth.GetCurrentOrganizationId(); oid != nil {
+				orgID = *oid
+			}
+			meta := observe.SessionMeta{
+				AssistantID:             assistantID,
+				AssistantConversationID: conversationID,
+				ProjectID:               projectID,
+				OrganizationID:          orgID,
+			}
+			var eventExporters []observe.EventExporter
+			var metricExporters []observe.MetricExporter
+			if cfg.TelemetryConfig != nil {
+				if envType := cfg.TelemetryConfig.Type(); envType != "" {
+					evtExp, metExp, err := observe_exporters.GetExporter(
+						ctx, logger, &cfg.AppConfig, opensearch, string(envType), cfg.TelemetryConfig.ToMap(),
+					)
+					if err != nil {
+						logger.Warnf("pipeline observer: default exporter creation failed: %v", err)
+					} else if evtExp != nil && metExp != nil {
+						eventExporters = append(eventExporters, evtExp)
+						metricExporters = append(metricExporters, metExp)
+					}
+				}
+			}
+			return observe.NewConversationObserver(&observe.ConversationObserverConfig{
+				Logger:         logger,
+				Auth:           auth,
+				AssistantID:    assistantID,
+				ConversationID: conversationID,
+				ProjectID:      projectID,
+				OrganizationID: orgID,
+				Persist:        conversationService,
+				Events:         observe.NewEventCollector(logger, meta, eventExporters...),
+				Metrics:        observe.NewMetricCollector(logger, meta, metricExporters...),
+			})
+		},
+		OnCompleteSession: func(ctx context.Context, contextID string) {
+			// Context already claimed at connect time (ResolveCallSessionByContext).
+			// No state transition needed — CLAIMED is the terminal state.
+			logger.Debugf("session completed: contextId=%s", contextID)
+		},
+	})
+
+	pipeline.Start(context.Background())
+
 	return &ConversationApi{
 		cfg:                          cfg,
 		logger:                       logger,
@@ -79,8 +204,9 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 		redis:                        redis,
 		opensearch:                   opensearch,
 		callContextStore:             store,
-		outboundDispatcher:           channel_telephony.NewOutboundDispatcher(telephonyDeps),
-		inboundDispatcher:            channel_telephony.NewInboundDispatcher(telephonyDeps),
+		outboundDispatcher:           outboundDisp,
+		inboundDispatcher:            inbound,
+		channelPipeline:              pipeline,
 		assistantConversationService: conversationService,
 		assistantService:             assistantService,
 		storage:                      fileStorage,
@@ -107,6 +233,11 @@ func NewWebRtcApi(config *config.AssistantConfig, logger commons.Logger,
 	sipServer *sip_infra.Server,
 ) assistant_api.WebRTCServer {
 	return &ConversationGrpcApi{*newConversationApiCore(config, logger, postgres, redis, opensearch, sipServer)}
+}
+
+// Pipeline returns the channel pipeline dispatcher for use by external engines (e.g. AudioSocket).
+func (cApi *ConversationApi) Pipeline() *channel_pipeline.Dispatcher {
+	return cApi.channelPipeline
 }
 
 func NewConversationApi(config *config.AssistantConfig, logger commons.Logger,

@@ -8,7 +8,7 @@ import { Locked, Key, ChevronDown } from '@carbon/icons-react';
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
-export function Vault() {
+export function Vault({ isLoading }: { isLoading?: boolean }) {
   const location = useLocation();
   const { open } = useSidebar();
   const { pathname } = location;
@@ -27,12 +27,13 @@ export function Vault() {
           setOpt(!opt);
         }}
         navigate="#"
+        loading={isLoading}
       >
         <div className="flex items-center">
           <SidebarIconWrapper>
             <Locked size={20} />
           </SidebarIconWrapper>
-          <SidebarLabel>Credentials</SidebarLabel>
+          <SidebarLabel isLoading={isLoading}>Credentials</SidebarLabel>
         </div>
         <SidebarIconWrapper className="transition-all duration-100">
           <ChevronDown
@@ -55,21 +56,23 @@ export function Vault() {
             className="mx-0 mr-2"
             active={pathname.includes('/project-credential')}
             navigate="/integration/project-credential"
+            loading={isLoading}
           >
             <SidebarIconWrapper>
               <Locked size={20} />
             </SidebarIconWrapper>
-            <SidebarLabel>Project Credential</SidebarLabel>
+            <SidebarLabel isLoading={isLoading}>Project Credential</SidebarLabel>
           </SidebarSimpleListItem>
           <SidebarSimpleListItem
             className="mx-0 mr-2"
             active={pathname.includes('/personal-credential')}
             navigate="/integration/personal-credential"
+            loading={isLoading}
           >
             <SidebarIconWrapper>
               <Key size={20} />
             </SidebarIconWrapper>
-            <SidebarLabel>Personal Token</SidebarLabel>
+            <SidebarLabel isLoading={isLoading}>Personal Token</SidebarLabel>
           </SidebarSimpleListItem>
         </div>
       </Disclosure>

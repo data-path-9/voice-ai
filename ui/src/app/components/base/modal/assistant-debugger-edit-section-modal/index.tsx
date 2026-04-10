@@ -6,12 +6,10 @@ import {
   ModalFooter,
   ModalHeader,
 } from '@/app/components/carbon/modal';
-import {
-  PrimaryButton,
-  SecondaryButton,
-} from '@/app/components/carbon/button';
+import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import { ErrorMessage } from '@/app/components/form/error-message';
 import { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 type EditSection = 'telephony' | 'experience' | 'voice-input' | 'voice-output';
 
@@ -36,12 +34,11 @@ export function DeploymentEditSectionModal(
   props: DeploymentEditSectionModalProps,
 ) {
   const title = sectionToTitle(props.section);
-  return (
+  const modalContent = (
     <Modal
       open={props.modalOpen}
       onClose={() => props.setModalOpen(false)}
       size={props.size || 'lg'}
-      selectorPrimaryFocus="#deployment-voice-input-toggle"
       preventCloseOnClickOutside
     >
       <ModalHeader
@@ -72,6 +69,10 @@ export function DeploymentEditSectionModal(
       </ModalFooter>
     </Modal>
   );
+
+  if (typeof document === 'undefined') return modalContent;
+
+  return createPortal(modalContent, document.body);
 }
 
 /** @deprecated Use DeploymentEditSectionModal instead */

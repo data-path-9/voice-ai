@@ -27,8 +27,6 @@ export const AssistantViewLayout: FC<HTMLAttributes<HTMLDivElement>> = () => {
   const {
     goToAssistantPreview,
     goToAssistantPreviewCall,
-    goToCreateAssistantVersion,
-    goToCreateAssistantAgentKitVersion,
     goToAssistantListing,
   } = useGlobalNavigation();
 
@@ -69,6 +67,7 @@ export const AssistantViewLayout: FC<HTMLAttributes<HTMLDivElement>> = () => {
           }
         })
         .catch(() => {
+          toast.error('Unable to get your assistant. please try again later.');
           hideLoader();
         });
     }
@@ -92,7 +91,7 @@ export const AssistantViewLayout: FC<HTMLAttributes<HTMLDivElement>> = () => {
       <Helmet title="Hosted Assistant" />
 
       {/* ── Left side nav (config-driven) ── */}
-      {assistantAction.currentAssistant && assistantId && (
+      {assistantId && (
         <AssistantSideNav
           assistantId={assistantId}
           assistant={assistantAction.currentAssistant}

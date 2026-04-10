@@ -7,7 +7,11 @@ import { useRapidaStore } from '@/hooks';
 import { Metadata } from '@rapidaai/react';
 import { TableLink } from '@/app/components/carbon/table-link';
 import { useActivityLogPage } from '@/hooks/use-activity-log-page-store';
-import { formatNanoToReadableMilli, toDateString, toDate } from '@/utils/date';
+import {
+  formatNanoToReadableMilli,
+  toDateString,
+  toHumanReadableDateTime,
+} from '@/utils/date';
 import { getMetadataValue } from '@/utils/metadata';
 import { LLMLogDialog } from '@/app/components/base/modal/llm-log-modal';
 import { HttpStatusSpanIndicator } from '@/app/components/indicators/http-status';
@@ -31,7 +35,6 @@ import {
   TableToolbarContent,
   TableToolbarSearch,
   Loading,
-  DefinitionTooltip,
 } from '@carbon/react';
 
 export function ListingPage() {
@@ -162,16 +165,8 @@ export function ListingPage() {
                   )}
                   {visibleColumn('Created Date') && (
                     <TableCell className="!text-xs whitespace-nowrap">
-                      {at.getCreateddate() && (
-                        <DefinitionTooltip
-                          definition={toDate(
-                            at.getCreateddate()!,
-                          ).toUTCString()}
-                          openOnHover
-                        >
-                          {toDate(at.getCreateddate()!).toLocaleString()}
-                        </DefinitionTooltip>
-                      )}
+                      {at.getCreateddate() &&
+                        toHumanReadableDateTime(at.getCreateddate()!)}
                     </TableCell>
                   )}
                   {visibleColumn('Action') && (
@@ -250,7 +245,11 @@ export function ListingPage() {
 
 function ActivitySource(props: { metadatas: Metadata[] }) {
   const { source, link } = getActivityLink(props.metadatas);
-  return link ? <TableLink href={link}>{source}</TableLink> : <span className="text-xs">{source}</span>;
+  return link ? (
+    <TableLink href={link}>{source}</TableLink>
+  ) : (
+    <span className="text-xs">{source}</span>
+  );
 }
 
 function getActivityLink(metadatas: Metadata[]): {
@@ -273,4 +272,3 @@ function getActivityLink(metadatas: Metadata[]): {
 
   return { source: '', link: '' };
 }
-

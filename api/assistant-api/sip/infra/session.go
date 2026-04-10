@@ -10,11 +10,13 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/emiago/sipgo"
+	"github.com/emiago/sipgo/sip"
 	"github.com/google/uuid"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -85,8 +87,10 @@ type Session struct {
 	// nil for outbound calls.
 	dialogServerSession *sipgo.DialogServerSession
 
-	// onDisconnect is called during Close/End to perform transport-level call teardown
-	// (e.g., sending SIP BYE). Set by the server that owns this session.
+	// onDisconnect is called via Disconnect() to perform transport-level call teardown
+	// (e.g., sending SIP BYE). NOT called by End() — the caller must invoke
+	// Disconnect() explicitly before End() if a SIP BYE should be sent.
+	// Set by the server that owns this session.
 	onDisconnect func(session *Session)
 }
 
@@ -240,18 +244,14 @@ func (s *Session) isValidTransition(from, to CallState) bool {
 	return false
 }
 
-// emitEvent sends an event to the event channel (non-blocking)
-// Safe to call after session has ended — silently drops the event.
+// emitEvent sends an event to the event channel (non-blocking).
+// Safe to call during End() — the recover guard handles closed channel.
 func (s *Session) emitEvent(eventType EventType, data map[string]interface{}) {
-	if s.ended.Load() {
-		return
-	}
 	event := NewEvent(eventType, s.info.CallID, data)
-	defer func() { recover() }() // guard against closed channel race
+	defer func() { recover() }()
 	select {
 	case s.eventChan <- event:
 	default:
-		// Channel full, drop event
 	}
 }
 
@@ -406,6 +406,51 @@ func (s *Session) SetOnDisconnect(fn func(session *Session)) {
 	s.onDisconnect = fn
 }
 
+// SendRefer sends a SIP REFER to transfer the call to another target.
+// The target can be a phone number (+15551234567) or SIP URI (sip:user@domain).
+// Uses the dialog session (client or server) to send an in-dialog REFER.
+func (s *Session) SendRefer(target string) error {
+	s.mu.RLock()
+	logger := s.logger
+	callID := s.info.CallID
+	s.mu.RUnlock()
+
+	if logger != nil {
+		logger.Infow("Sending SIP REFER", "call_id", callID, "refer_to", target)
+	}
+
+	// Build Refer-To URI
+	referTo := target
+	if !strings.HasPrefix(referTo, "sip:") && !strings.HasPrefix(referTo, "sips:") {
+		referTo = "sip:" + strings.TrimPrefix(target, "+") + "@" + s.config.Server
+	}
+
+	// Try client dialog (outbound calls) first, then server dialog (inbound)
+	if ds := s.GetDialogClientSession(); ds != nil {
+		req := sip.NewRequest(sip.REFER, ds.InviteRequest.Recipient)
+		req.AppendHeader(sip.NewHeader("Refer-To", "<"+referTo+">"))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := ds.Do(ctx, req); err != nil {
+			return fmt.Errorf("REFER via client dialog failed: %w", err)
+		}
+		return nil
+	}
+
+	if ds := s.GetDialogServerSession(); ds != nil {
+		req := sip.NewRequest(sip.REFER, sip.Uri{Host: s.config.Server, Port: s.config.Port})
+		req.AppendHeader(sip.NewHeader("Refer-To", "<"+referTo+">"))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := ds.Do(ctx, req); err != nil {
+			return fmt.Errorf("REFER via server dialog failed: %w", err)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("no dialog session available for REFER")
+}
+
 // Disconnect performs transport-level call teardown by invoking the onDisconnect callback.
 // This sends a SIP BYE (or equivalent) to the remote party before local cleanup.
 // Safe to call multiple times — the callback is cleared after first invocation.
@@ -444,85 +489,75 @@ func (s *Session) GetVaultCredential() *protos.VaultCredential {
 	return s.vaultCredential
 }
 
-// SendEvent sends an event notification (non-blocking)
+// SendEvent sends an event notification (non-blocking).
 func (s *Session) SendEvent(event Event) {
 	if s.ended.Load() {
 		return
 	}
-	defer func() { recover() }()
 	select {
 	case s.eventChan <- event:
 	default:
-		// Event dropped if channel is full
 	}
 }
 
-// SendError sends an error to the error channel (non-blocking)
+// SendError sends an error to the error channel (non-blocking).
 func (s *Session) SendError(err error) {
 	if s.ended.Load() {
 		return
 	}
-	defer func() { recover() }()
 	select {
 	case s.errorChan <- err:
 	default:
-		// Error dropped if channel is full
 	}
 }
 
-// End terminates the SIP session gracefully
+// End terminates the SIP session gracefully. This is the single teardown function —
+// all triggers (BYE, pipeline end, streamer close) route here. Owns all side effects:
+// 1. Send BYE via onDisconnect callback
+// 2. Stop RTP
+// 3. Cancel context
+// 4. Set terminal state
 func (s *Session) End() {
-	// Use atomic to ensure End is only called once
 	if !s.ended.CompareAndSwap(false, true) {
-		return // Already ended
+		return
 	}
 
-	// Only transition through ending if not already in a terminal state
-	// (e.g. already set to CallStateFailed before End() was called)
-	if !s.info.State.IsTerminal() {
+	s.mu.RLock()
+	terminal := s.info.State.IsTerminal()
+	s.mu.RUnlock()
+	if !terminal {
 		s.SetState(CallStateEnding)
 	}
 
-	// Stop RTP handler if present
+	// Send BYE to remote party (clears callback to prevent double-send)
+	s.Disconnect()
+
+	// Stop RTP
 	s.mu.Lock()
 	rtpHandler := s.rtpHandler
 	s.rtpHandler = nil
 	s.mu.Unlock()
-
 	if rtpHandler != nil {
 		if err := rtpHandler.Stop(); err != nil && s.logger != nil {
 			s.logger.Warnw("Error stopping RTP handler", "error", err, "call_id", s.info.CallID)
 		}
 	}
 
-	// Cancel context
+	// Cancel context — unblocks anything waiting on session.Context()
 	s.cancel()
 
-	// Set final state before closing channels to avoid send-on-closed-channel
-	// Skip if already in a terminal state (e.g. failed)
-	if !s.info.State.IsTerminal() {
+	s.mu.RLock()
+	terminal = s.info.State.IsTerminal()
+	s.mu.RUnlock()
+	if !terminal {
 		s.SetState(CallStateEnded)
 	}
-
-	// Close channels safely
-	s.closeChannels()
 
 	if s.logger != nil {
 		s.logger.Info("Session ended",
 			"call_id", s.info.CallID,
 			"duration", s.info.GetDuration())
 	}
-}
-
-// closeChannels safely closes all session channels
-func (s *Session) closeChannels() {
-	defer func() {
-		// Recover from panic if channel is already closed
-		recover()
-	}()
-
-	close(s.eventChan)
-	close(s.errorChan)
 }
 
 // IsActive returns whether the session is still active
@@ -554,6 +589,13 @@ func (s *Session) NotifyBye() {
 // Use this in select{} to detect early BYE without relying on session.End().
 func (s *Session) ByeReceived() <-chan struct{} {
 	return s.byeReceived
+}
+
+// GetConfig returns the SIP configuration for this session.
+func (s *Session) GetConfig() *Config {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.config
 }
 
 // GetState returns the current session state

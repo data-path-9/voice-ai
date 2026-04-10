@@ -1,15 +1,19 @@
 import { Metadata } from '@rapidaai/react';
-import { BlueNoticeBlock } from '@/app/components/container/message/notice-block';
 import { FC } from 'react';
+import { EmptyState } from '@/app/components/carbon/empty-state';
+import { DataBase } from '@carbon/icons-react';
 
 export const EndpointMetadatas: FC<{ metadata: Array<Metadata> }> = ({
   metadata,
 }) => {
   if (metadata.length <= 0)
     return (
-      <BlueNoticeBlock className="w-full h-fit">
-        There are no metadata for given endpoint execution.
-      </BlueNoticeBlock>
+      <EmptyState
+        className="h-full min-h-[420px]"
+        icon={DataBase}
+        title="No metadata found"
+        subtitle="No metadata was recorded for this trace."
+      />
     );
   return (
     <div className="divide-y divide-gray-200 dark:divide-gray-800 w-full">

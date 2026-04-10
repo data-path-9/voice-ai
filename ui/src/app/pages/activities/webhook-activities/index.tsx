@@ -4,7 +4,11 @@ import { DateFilter } from '@/app/components/carbon/date-filter';
 import { useCredential } from '@/hooks/use-credential';
 import toast from 'react-hot-toast/headless';
 import { useRapidaStore } from '@/hooks';
-import { formatNanoToReadableMilli, toDateString, toHumanReadableDateTime } from '@/utils/date';
+import {
+  formatNanoToReadableMilli,
+  toDateString,
+  toHumanReadableDateTime,
+} from '@/utils/date';
 import { HttpStatusSpanIndicator } from '@/app/components/indicators/http-status';
 import { PageTitleWithCount } from '@/app/components/blocks/page-title-with-count';
 import { useWebhookLogPage } from '@/hooks/use-webhook-log-page-store';
@@ -136,14 +140,18 @@ export function ListingPage() {
                 <TableRow key={idx}>
                   {visibleColumn('webhookid') && (
                     <TableCell>
-                      <TableLink href={`/deployment/assistant/${at.getAssistantid()}/manage/configure-webhook`}>
+                      <TableLink
+                        href={`/deployment/assistant/${at.getAssistantid()}/manage/configure-webhook`}
+                      >
                         {at.getWebhookid()}
                       </TableLink>
                     </TableCell>
                   )}
                   {visibleColumn('sessionid') && (
                     <TableCell>
-                      <TableLink href={`/deployment/assistant/${at.getAssistantid()}/sessions/${at.getAssistantconversationid()}`}>
+                      <TableLink
+                        href={`/deployment/assistant/${at.getAssistantid()}/sessions/${at.getAssistantconversationid()}`}
+                      >
                         {at.getAssistantconversationid()}
                       </TableLink>
                     </TableCell>
@@ -162,7 +170,9 @@ export function ListingPage() {
                   )}
                   {visibleColumn('responsestatus') && (
                     <TableCell>
-                      <HttpStatusSpanIndicator status={Number(at.getResponsestatus())} />
+                      <HttpStatusSpanIndicator
+                        status={Number(at.getResponsestatus())}
+                      />
                     </TableCell>
                   )}
                   {visibleColumn('timetaken') && (
@@ -171,11 +181,14 @@ export function ListingPage() {
                     </TableCell>
                   )}
                   {visibleColumn('retrycount') && (
-                    <TableCell className="!text-xs">{at.getRetrycount()}</TableCell>
+                    <TableCell className="!text-xs">
+                      {at.getRetrycount()}
+                    </TableCell>
                   )}
                   {visibleColumn('created_date') && (
-                    <TableCell className="!font-mono !text-xs whitespace-nowrap">
-                      {at.getCreateddate() && toHumanReadableDateTime(at.getCreateddate()!)}
+                    <TableCell className="!text-xs whitespace-nowrap">
+                      {at.getCreateddate() &&
+                        toHumanReadableDateTime(at.getCreateddate()!)}
                     </TableCell>
                   )}
                   <TableCell>

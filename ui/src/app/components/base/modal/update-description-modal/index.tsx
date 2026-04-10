@@ -1,6 +1,11 @@
 import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import { ModalProps } from '@/app/components/base/modal';
-import { Modal, ModalHeader, ModalBody, ModalFooter } from '@/app/components/carbon/modal';
+import {
+  Modal,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+} from '@/app/components/carbon/modal';
 import { Notification } from '@/app/components/carbon/notification';
 import { Stack, TextInput, TextArea } from '@/app/components/carbon/form';
 import { useRapidaStore } from '@/hooks';
@@ -50,7 +55,6 @@ export function UpdateDescriptionDialog(props: UpdateDescriptionDialogProps) {
       open={props.modalOpen}
       onClose={() => props.setModalOpen(false)}
       size="sm"
-      selectorPrimaryFocus="#edit-name"
     >
       <ModalHeader
         label="Details"

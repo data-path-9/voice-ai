@@ -12,7 +12,11 @@ import { InputHelper } from '@/app/components/input-helper';
 import { YellowNoticeBlock } from '@/app/components/container/message/notice-block';
 import { ProviderPill } from '@/app/components/pill/provider-model-pill';
 import { FC, ReactNode, useMemo } from 'react';
-import { DeploymentRow, DeploymentSectionHeader } from '@/app/components/base/modal/deployment-modal-primitives';
+import { createPortal } from 'react-dom';
+import {
+  DeploymentRow,
+  DeploymentSectionHeader,
+} from '@/app/components/base/modal/deployment-modal-primitives';
 
 interface AssistantPhoneCallDeploymentDialogProps extends ModalProps {
   deployment: AssistantPhoneDeployment;
@@ -30,7 +34,7 @@ export function AssistantPhoneCallDeploymentDialog(
   const webhookUrl = `${mediaHost}/v1/talk/${providerName}/call/${assistantId}?x-api-key={{PROJECT_CRDENTIAL_KEY}}`;
   const eventUrl = `${mediaHost}/v1/talk/${providerName}/event/${assistantId}?x-api-key={{PROJECT_CRDENTIAL_KEY}}`;
 
-  return (
+  const modalContent = (
     <RightSideModal
       modalOpen={props.modalOpen}
       setModalOpen={props.setModalOpen}
@@ -107,6 +111,10 @@ export function AssistantPhoneCallDeploymentDialog(
       </div>
     </RightSideModal>
   );
+
+  if (typeof document === 'undefined') return modalContent;
+
+  return createPortal(modalContent, document.body);
 }
 
 /* -------------------------------------------------------------------------- */

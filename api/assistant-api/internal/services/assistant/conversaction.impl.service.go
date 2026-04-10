@@ -72,11 +72,6 @@ func (conversationService *assistantConversationService) GetAll(ctx context.Cont
 			Preload("Arguments")
 	}
 
-	if opts != nil && opts.InjectTelephonyEvent {
-		qry = qry.
-			Preload("TelephonyEvents")
-	}
-
 	for _, ct := range criterias {
 		qry.Where(fmt.Sprintf("%s %s ?", ct.GetKey(), ct.GetLogic()), ct.GetValue())
 	}
@@ -449,6 +444,16 @@ func (conversationService *assistantConversationService) ApplyConversationMetric
 	return mtrs, nil
 }
 
+func (s *assistantConversationService) PersistMetrics(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, metrics []*types.Metric) error {
+	_, err := s.ApplyConversationMetrics(ctx, auth, assistantID, conversationID, metrics)
+	return err
+}
+
+func (s *assistantConversationService) PersistMetadata(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, metadata []*types.Metadata) error {
+	_, err := s.ApplyConversationMetadata(ctx, auth, assistantID, conversationID, metadata)
+	return err
+}
+
 /* */
 func (conversationService *assistantConversationService) CreateConversationMetric(
 	ctx context.Context,
@@ -590,40 +595,4 @@ func (eService *assistantConversationService) GetRecordingPublicUrl(ctx context.
 		return nil, output.Error
 	}
 	return utils.Ptr(output.CompletePath), nil
-}
-
-func (eService *assistantConversationService) ApplyConversationTelephonyEvent(
-	ctx context.Context,
-	auth types.SimplePrinciple,
-	telephony string,
-	assistantId,
-	assistantConversationId uint64,
-	events []*types.Event,
-) ([]*internal_conversation_entity.AssistantConversationTelephonyEvent, error) {
-	start := time.Now()
-	db := eService.postgres.DB(ctx)
-
-	telephonyEvent := make([]*internal_conversation_entity.AssistantConversationTelephonyEvent, 0)
-	for _, v := range events {
-		tE := &internal_conversation_entity.AssistantConversationTelephonyEvent{
-			AssistantConversationId: assistantConversationId,
-			Event: *gorm_models.NewEvent(
-				v.EventType,
-				v.Payload,
-			),
-			Provider:    telephony,
-			AssistantId: assistantId,
-		}
-
-		telephonyEvent = append(telephonyEvent, tE)
-	}
-
-	tx := db.Create(&telephonyEvent)
-	if tx.Error != nil {
-		eService.logger.Benchmark("eService.CreateConversationTelephonyEvent", time.Since(start))
-		eService.logger.Errorf("error while updating conversation %v", tx.Error)
-		return nil, tx.Error
-	}
-	eService.logger.Benchmark("eService.CreateConversationTelephonyEvent", time.Since(start))
-	return telephonyEvent, nil
 }

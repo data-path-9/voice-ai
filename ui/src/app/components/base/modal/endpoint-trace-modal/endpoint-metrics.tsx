@@ -1,17 +1,21 @@
 import { Metric } from '@rapidaai/react';
-import { BlueNoticeBlock } from '@/app/components/container/message/notice-block';
 import { Tooltip } from '@/app/components/tooltip';
 import { InfoIcon } from 'lucide-react';
 import { FC } from 'react';
+import { EmptyState } from '@/app/components/carbon/empty-state';
+import { ChartLine } from '@carbon/icons-react';
 
 export const EndpointMetrics: FC<{ metrics: Array<Metric> }> = ({
   metrics,
 }) => {
   if (metrics.length <= 0)
     return (
-      <BlueNoticeBlock className="w-full h-fit">
-        There are no metrics recorded for given endpoint execution.
-      </BlueNoticeBlock>
+      <EmptyState
+        className="h-full min-h-[420px]"
+        icon={ChartLine}
+        title="No metrics found"
+        subtitle="No metrics were recorded for this trace."
+      />
     );
   return (
     <div className="divide-y divide-gray-200 dark:divide-gray-800 w-full">

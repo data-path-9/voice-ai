@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   ConnectionConfig,
   CreateProviderCredentialRequest,
@@ -27,6 +27,7 @@ import { connectionConfig } from '@/configs';
 import { useProviderContext } from '@/context/provider-context';
 import { Struct } from 'google-protobuf/google/protobuf/struct_pb';
 import { INTEGRATION_PROVIDER, RapidaProvider } from '@/providers';
+import { createPortal } from 'react-dom';
 
 interface CreateProviderCredentialDialogProps extends ModalProps {
   currentProvider?: string | null;
@@ -35,6 +36,7 @@ interface CreateProviderCredentialDialogProps extends ModalProps {
 export function CreateProviderCredentialDialog(
   props: CreateProviderCredentialDialogProps,
 ) {
+  const keyNameInputId = useId();
   const { authId, projectId, token } = useCurrentCredential();
   const [provider, setProvider] = useState<RapidaProvider | null>(null);
   const providerCtx = useProviderContext();
@@ -55,6 +57,17 @@ export function CreateProviderCredentialDialog(
     setConfig(prev => ({ ...prev, [name]: value }));
   };
 
+  const isConfigFieldRequired = (field: {
+    name: string;
+    label: string;
+    required?: boolean;
+  }) => {
+    if (field.required === false) return false;
+    if (field.label?.toLowerCase().includes('(optional)')) return false;
+    if (provider?.code === 'sip' && field.name === 'sip_headers') return false;
+    return true;
+  };
+
   const validateAndSubmit = () => {
     if (!provider) {
       setError('Please select the provider which you want to create the key.');
@@ -66,7 +79,7 @@ export function CreateProviderCredentialDialog(
     }
     const missingFields = provider.configurations?.filter(
       configOption =>
-        configOption.type !== 'key_value' &&
+        isConfigFieldRequired(configOption) &&
         !config[configOption.name]?.trim(),
     );
     if (missingFields && missingFields.length > 0) {
@@ -120,12 +133,14 @@ export function CreateProviderCredentialDialog(
       });
   };
 
-  return (
+  const modalContent = (
     <Modal
       open={props.modalOpen}
       onClose={() => props.setModalOpen(false)}
       size="sm"
-      selectorPrimaryFocus="#credential-key-name"
+      className="!z-999999"
+      containerClassName="!z-999999"
+      selectorPrimaryFocus={`[id="${keyNameInputId}"]`}
       preventCloseOnClickOutside
     >
       <ModalHeader
@@ -150,7 +165,7 @@ export function CreateProviderCredentialDialog(
             }}
           />
           <TextInput
-            id="credential-key-name"
+            id={keyNameInputId}
             labelText="Key Name"
             placeholder="Assign a unique name to this provider key"
             value={keyName}
@@ -166,7 +181,7 @@ export function CreateProviderCredentialDialog(
                   labelText={x.label}
                   placeholder={x.label}
                   value={config[x.name] || ''}
-                  required
+                  required={isConfigFieldRequired(x)}
                   onChange={e => handleConfigChange(x.name, e.target.value)}
                 />
               ) : x.type === 'key_value' ? (
@@ -184,7 +199,7 @@ export function CreateProviderCredentialDialog(
                   labelText={x.label}
                   placeholder={x.label}
                   value={config[x.name] || ''}
-                  required
+                  required={isConfigFieldRequired(x)}
                   onChange={e => handleConfigChange(x.name, e.target.value)}
                 />
               ),
@@ -196,12 +211,20 @@ export function CreateProviderCredentialDialog(
         <SecondaryButton size="lg" onClick={() => props.setModalOpen(false)}>
           Cancel
         </SecondaryButton>
-        <PrimaryButton size="lg" onClick={validateAndSubmit} isLoading={loading}>
+        <PrimaryButton
+          size="lg"
+          onClick={validateAndSubmit}
+          isLoading={loading}
+        >
           Configure
         </PrimaryButton>
       </ModalFooter>
     </Modal>
   );
+
+  if (typeof document === 'undefined') return modalContent;
+
+  return createPortal(modalContent, document.body);
 }
 
 function CredentialKeyValueField({
@@ -236,9 +259,13 @@ function CredentialKeyValueField({
     return Object.keys(obj).length > 0 ? JSON.stringify(obj) : '';
   };
 
-  const [entries, setEntries] = useState<{ key: string; value: string }[]>(
-    () => parseEntries(value),
+  const [entries, setEntries] = useState<{ key: string; value: string }[]>(() =>
+    parseEntries(value),
   );
+
+  useEffect(() => {
+    setEntries(parseEntries(value));
+  }, [value]);
 
   const syncEntries = (next: { key: string; value: string }[]) => {
     setEntries(next);
@@ -267,14 +294,28 @@ function CredentialKeyValueField({
       <table className="w-full border-collapse border border-gray-200 dark:border-gray-700 text-sm [&_input]:!border-none [&_.cds--text-input]:!border-none [&_.cds--text-input]:!outline-none [&_.cds--form-item]:!m-0">
         <thead>
           <tr className="bg-gray-50 dark:bg-gray-900">
-            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">Key</th>
-            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">Value</th>
+            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">
+              Key
+            </th>
+            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">
+              Value
+            </th>
             <th className="border-b border-gray-200 dark:border-gray-700 w-8" />
           </tr>
         </thead>
         <tbody>
+          {entries.length === 0 && (
+            <tr>
+              <td colSpan={3} className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
+                No entries yet. Click <strong>Add {label.toLowerCase()}</strong> below to add key-value pairs.
+              </td>
+            </tr>
+          )}
           {entries.map((entry, index) => (
-            <tr key={index} className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
+            <tr
+              key={index}
+              className="border-b border-gray-200 dark:border-gray-700 last:border-b-0"
+            >
               <td className="border-r border-gray-200 dark:border-gray-700 p-0">
                 <TextInput
                   id={`kv-key-${name}-${index}`}
@@ -309,6 +350,17 @@ function CredentialKeyValueField({
               </td>
             </tr>
           ))}
+          {entries.length === 0 && (
+            <tr>
+              <td
+                colSpan={3}
+                className="px-3 py-4 text-xs text-gray-500 dark:text-gray-400 text-center"
+              >
+                No {label.toLowerCase()} added yet. Add at least one key-value
+                pair.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
       <TertiaryButton

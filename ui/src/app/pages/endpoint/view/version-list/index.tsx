@@ -146,7 +146,7 @@ export function Version(props: {
           totalSelected={selectedVersionId ? 1 : 0}
           onCancel={() => setSelectedVersionId(null)}
           totalCount={filteredVersions.length}
-          className="[&_[class*=divider]]:hidden"
+          className="[&_[class*=divider]]:hidden [&_.cds--btn]:transition-colors [&_.cds--btn:hover]:!bg-primary [&_.cds--btn:hover]:!text-white"
         >
           <TableBatchAction
             renderIcon={Rocket}

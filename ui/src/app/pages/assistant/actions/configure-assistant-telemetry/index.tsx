@@ -11,11 +11,26 @@ import { CreateAssistantTelemetry } from './create-assistant-telemetry';
 import { UpdateAssistantTelemetry } from './update-assistant-telemetry';
 import { useAssistantTelemetryPageStore } from '@/app/pages/assistant/actions/store/use-telemetry-page-store';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
-import { BaseCard } from '@/app/components/base/cards';
 import { TELEMETRY_PROVIDER } from '@/providers';
-import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
-import { PrimaryButton, GhostButton, DangerButton } from '@/app/components/carbon/button';
-import { Breadcrumb, BreadcrumbItem, Button, ButtonSet } from '@carbon/react';
+import { IconOnlyButton, PrimaryButton } from '@/app/components/carbon/button';
+import { Tag } from '@carbon/react';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  Button,
+  Table,
+  TableHead,
+  TableRow,
+  TableHeader,
+  TableBody,
+  TableCell,
+  TableToolbar,
+  TableToolbarContent,
+  TableToolbarSearch,
+  TableBatchActions,
+  TableBatchAction,
+  RadioButton,
+} from '@carbon/react';
 
 export function ConfigureAssistantTelemetryPage() {
   const { assistantId } = useParams();
@@ -44,15 +59,6 @@ const providerNameByCode = new Map(
   TELEMETRY_PROVIDER.map(p => [p.code, p.name]),
 );
 
-const Info = ({ label, value }: { label: string; value: string }) => (
-  <div>
-    <dt className="text-[10px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
-      {label}
-    </dt>
-    <dd className="mt-0.5 text-xs font-medium">{value}</dd>
-  </div>
-);
-
 const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
   assistantId,
 }) => {
@@ -60,6 +66,10 @@ const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
   const action = useAssistantTelemetryPageStore();
   const { authId, token, projectId } = useCurrentCredential();
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedTelemetryId, setSelectedTelemetryId] = useState<string | null>(
+    null,
+  );
   const { showDialog, ConfirmDialogComponent } = useConfirmDialog({
     title: 'Delete telemetry?',
     content: 'This telemetry provider will be removed from the assistant.',
@@ -72,119 +82,236 @@ const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
   const get = () => {
     setLoading(true);
     action.getAssistantTelemetry(
-      assistantId, projectId, token, authId,
-      e => { toast.error(e); setLoading(false); },
-      () => { setLoading(false); },
+      assistantId,
+      projectId,
+      token,
+      authId,
+      e => {
+        toast.error(e);
+        setLoading(false);
+      },
+      () => {
+        setLoading(false);
+      },
     );
   };
 
   const deleteTelemetry = (telemetryId: string) => {
     setLoading(true);
     action.deleteAssistantTelemetry(
-      assistantId, telemetryId, projectId, token, authId,
-      e => { toast.error(e); setLoading(false); },
-      () => { toast.success('Telemetry provider deleted successfully'); get(); },
+      assistantId,
+      telemetryId,
+      projectId,
+      token,
+      authId,
+      e => {
+        toast.error(e);
+        setLoading(false);
+      },
+      () => {
+        toast.success('Telemetry provider deleted successfully');
+        get();
+      },
     );
   };
+
+  const filteredTelemetries = searchTerm.trim()
+    ? action.telemetries.filter(row =>
+        [
+          row.getProvidertype(),
+          String(row.getOptionsList().length),
+          row.getEnabled() ? 'connected' : 'inactive',
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(searchTerm.trim().toLowerCase()),
+      )
+    : action.telemetries;
+
+  const selectedTelemetry = filteredTelemetries.find(
+    row => row.getId() === selectedTelemetryId,
+  );
 
   return (
     <div className="flex flex-col w-full flex-1 overflow-auto">
       <ConfirmDialogComponent />
 
       {/* Page header */}
-      <div className="px-4 pt-4 pb-6 border-b border-gray-200 dark:border-gray-800">
-        <div className="flex items-start justify-between">
-          <div>
-            <Breadcrumb noTrailingSlash className="mb-2">
-              <BreadcrumbItem href={`/deployment/assistant/${assistantId}/overview`}>
-                Assistant
-              </BreadcrumbItem>
-            </Breadcrumb>
-            <h1 className="text-2xl font-light tracking-tight">Telemetry</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              hasIconOnly
-              renderIcon={Renew}
-              iconDescription="Refresh"
-              kind="ghost"
-              size="md"
-              onClick={get}
-              tooltipPosition="bottom"
-            />
-            <PrimaryButton
-              size="md"
-              renderIcon={Add}
-              onClick={() => navigation.goToCreateAssistantTelemetry(assistantId)}
+      <div className="px-4 pt-4 pb-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+        <div>
+          <Breadcrumb noTrailingSlash className="mb-2">
+            <BreadcrumbItem
+              href={`/deployment/assistant/${assistantId}/overview`}
             >
-              Add telemetry
-            </PrimaryButton>
-          </div>
+              Assistant
+            </BreadcrumbItem>
+          </Breadcrumb>
+          <h1 className="text-2xl font-light tracking-tight">Telemetry</h1>
         </div>
       </div>
+
+      <TableToolbar>
+        <TableBatchActions
+          shouldShowBatchActions={!!selectedTelemetry}
+          totalSelected={selectedTelemetry ? 1 : 0}
+          totalCount={filteredTelemetries.length}
+          onCancel={() => setSelectedTelemetryId(null)}
+          className="[&_[class*=divider]]:hidden [&_.cds--btn]:transition-colors [&_.cds--btn:hover]:!bg-primary [&_.cds--btn:hover]:!text-white"
+        >
+          {selectedTelemetry && (
+            <>
+              <TableBatchAction
+                renderIcon={Edit}
+                kind="ghost"
+                onClick={() => {
+                  navigation.goToEditAssistantTelemetry(
+                    assistantId,
+                    selectedTelemetry.getId(),
+                  );
+                  setSelectedTelemetryId(null);
+                }}
+              >
+                Edit telemetry
+              </TableBatchAction>
+              <TableBatchAction
+                renderIcon={TrashCan}
+                kind="ghost"
+                onClick={() => {
+                  showDialog(() => deleteTelemetry(selectedTelemetry.getId()));
+                  setSelectedTelemetryId(null);
+                }}
+              >
+                Delete telemetry
+              </TableBatchAction>
+            </>
+          )}
+        </TableBatchActions>
+        <TableToolbarContent>
+          <TableToolbarSearch
+            placeholder="Search telemetry..."
+            onChange={(e: any) => setSearchTerm(e.target?.value || '')}
+          />
+          <IconOnlyButton
+            kind="ghost"
+            size="lg"
+            renderIcon={Renew}
+            iconDescription="Refresh"
+            onClick={get}
+          />
+          <PrimaryButton
+            size="md"
+            renderIcon={Add}
+            onClick={() => navigation.goToCreateAssistantTelemetry(assistantId)}
+          >
+            Add telemetry
+          </PrimaryButton>
+        </TableToolbarContent>
+      </TableToolbar>
 
       {loading ? (
         <div className="flex flex-col flex-1 items-center justify-center">
           <SectionLoader />
         </div>
+      ) : action.telemetries.length > 0 && filteredTelemetries.length > 0 ? (
+        <div className="overflow-auto flex-1">
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeader className="!w-12" />
+                <TableHeader>Provider</TableHeader>
+                <TableHeader>Options</TableHeader>
+                <TableHeader>Enabled</TableHeader>
+                <TableHeader>Created</TableHeader>
+                <TableHeader>Actions</TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredTelemetries.map(row => {
+                const providerType = row.getProvidertype();
+                const providerName =
+                  providerNameByCode.get(providerType) || providerType;
+                const selected = row.getId() === selectedTelemetryId;
+                return (
+                  <TableRow
+                    key={row.getId()}
+                    isSelected={selected}
+                    onClick={() =>
+                      setSelectedTelemetryId(selected ? null : row.getId())
+                    }
+                    className="cursor-pointer"
+                  >
+                    <TableCell
+                      className="!w-12 !pr-0"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <RadioButton
+                        id={`telemetry-select-${row.getId()}`}
+                        name="telemetry-select"
+                        labelText=""
+                        hideLabel
+                        checked={selected}
+                        onChange={() =>
+                          setSelectedTelemetryId(selected ? null : row.getId())
+                        }
+                      />
+                    </TableCell>
+                    <TableCell>{providerName}</TableCell>
+                    <TableCell>{String(row.getOptionsList().length)}</TableCell>
+                    <TableCell>
+                      <Tag type={row.getEnabled() ? 'green' : 'gray'} size="sm">
+                        {row.getEnabled() ? 'Yes' : 'No'}
+                      </Tag>
+                    </TableCell>
+                    <TableCell>
+                      {row.getCreateddate()
+                        ? toHumanReadableDateTime(row.getCreateddate()!)
+                        : '—'}
+                    </TableCell>
+                    <TableCell onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-0">
+                        <Button
+                          hasIconOnly
+                          renderIcon={Edit}
+                          iconDescription="Edit telemetry"
+                          kind="ghost"
+                          size="sm"
+                          onClick={() =>
+                            navigation.goToEditAssistantTelemetry(
+                              assistantId,
+                              row.getId(),
+                            )
+                          }
+                        />
+                        <Button
+                          hasIconOnly
+                          renderIcon={TrashCan}
+                          iconDescription="Delete telemetry"
+                          kind="danger--ghost"
+                          size="sm"
+                          onClick={() =>
+                            showDialog(() => deleteTelemetry(row.getId()))
+                          }
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       ) : action.telemetries.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 content-start m-4">
-          {action.telemetries.map(row => {
-            const providerType = row.getProvidertype();
-            const providerName = providerNameByCode.get(providerType) || providerType;
-            const isEnabled = row.getEnabled();
-
-            return (
-              <BaseCard key={row.getId()}>
-                <div className="flex-1 p-4 md:p-5 space-y-4">
-                  <div className="flex items-start justify-between">
-                    <Activity size={24} className="text-blue-600" />
-                    <CarbonStatusIndicator state={isEnabled ? 'CONNECTED' : 'INACTIVE'} />
-                  </div>
-                  <div>
-                    <p className="text-base font-semibold">{providerName}</p>
-                    <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-                      {isEnabled ? 'Enabled' : 'Disabled'} telemetry exporter
-                    </p>
-                  </div>
-                  <dl className="grid grid-cols-3 gap-x-3 gap-y-3 pt-1">
-                    <Info label="Provider" value={providerType} />
-                    <Info label="Options" value={String(row.getOptionsList().length)} />
-                    <Info
-                      label="Created"
-                      value={row.getCreateddate() ? toHumanReadableDateTime(row.getCreateddate()!) : '—'}
-                    />
-                  </dl>
-                </div>
-                <ButtonSet className="border-t border-gray-200 dark:border-gray-800 [&>button]:!flex-1 [&>button]:!max-w-none">
-                  <GhostButton
-                    size="md"
-                    renderIcon={TrashCan}
-                    onClick={() => showDialog(() => deleteTelemetry(row.getId()))}
-                  >
-                    Delete
-                  </GhostButton>
-                  <PrimaryButton
-                    size="md"
-                    renderIcon={Edit}
-                    onClick={() => navigation.goToEditAssistantTelemetry(assistantId, row.getId())}
-                  >
-                    Edit
-                  </PrimaryButton>
-                </ButtonSet>
-              </BaseCard>
-            );
-          })}
-        </div>
+        <EmptyState
+          icon={Activity}
+          title="No telemetry providers found"
+          subtitle="No telemetry provider matched your search."
+        />
       ) : (
-        <div className="flex flex-col flex-1 items-center justify-center">
-          <EmptyState
-            title="No telemetry providers"
-            subtitle="Add a telemetry destination to export events and metrics from this assistant."
-            action="Add telemetry"
-            onAction={() => navigation.goToCreateAssistantTelemetry(assistantId)}
-          />
-        </div>
+        <EmptyState
+          icon={Activity}
+          title="No telemetry providers"
+          subtitle="Any telemetry providers you add will be listed here."
+        />
       )}
     </div>
   );

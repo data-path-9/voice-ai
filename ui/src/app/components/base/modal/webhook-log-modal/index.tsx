@@ -3,8 +3,7 @@ import toast from 'react-hot-toast/headless';
 import { useCredential } from '@/hooks/use-credential';
 import { useRapidaStore } from '@/hooks';
 import { ConnectionConfig, ServiceError } from '@rapidaai/react';
-import { Tab } from '@/app/components/tab';
-import { cn } from '@/utils';
+import { Tabs } from '@/app/components/carbon/tabs';
 import { ModalProps } from '@/app/components/base/modal';
 import { RightSideModal } from '@/app/components/base/modal/right-side-modal';
 import { GetWebhookLog } from '@rapidaai/react';
@@ -30,6 +29,7 @@ export function WebhookLogDialog(props: WebhookLogModalProps) {
   const [userId, token, projectId] = useCredential();
   const { showLoader, hideLoader } = useRapidaStore();
   const [activity, setActivity] = useState<AssistantWebhookLog | null>(null);
+  const [selectedTab, setSelectedTab] = useState(0);
 
   const getActivity = (currentProject: string, currentActivityId) => {
     return GetWebhookLog(
@@ -80,47 +80,40 @@ export function WebhookLogDialog(props: WebhookLogModalProps) {
       modalOpen={props.modalOpen}
       setModalOpen={props.setModalOpen}
       className="w-[580px]"
+      label="Webhook Log"
+      title={props.currentWebhookId}
     >
-      <div className="h-12 px-4 flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 shrink-0">
-        <span className="text-xs font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-          Webhook Log
-        </span>
-        <span className="text-gray-300 dark:text-gray-600">/</span>
-        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono truncate">
-          {props.currentWebhookId}
-        </span>
-      </div>
-      <div className="relative overflow-auto h-[calc(100vh-48px)] flex-1 flex flex-col">
-        <Tab
-          active="Request"
-          className={cn('bg-white dark:bg-gray-900 sticky top-0 z-1')}
-          tabs={[
-            {
-              label: 'Request',
-              element: (
-                <CodeHighlighting
-                  code={JSON.stringify(
-                    activity?.getRequest()?.toJavaScript(),
-                    null,
-                    2,
-                  )}
-                />
-              ),
-            },
-            {
-              label: 'Response',
-              element: (
-                <CodeHighlighting
-                  code={JSON.stringify(
-                    activity?.getResponse()?.toJavaScript(),
-                    null,
-                    2,
-                  )}
-                />
-              ),
-            },
-          ]}
-        />
+      <div className="relative flex-1 flex flex-col min-h-0">
+        <Tabs
+          tabs={['Request', 'Response']}
+          selectedIndex={selectedTab}
+          onChange={setSelectedTab}
+          contained
+          aria-label="Webhook log tabs"
+          className="!h-full !min-h-0 !flex !flex-col [&_.cds--tabs__nav]:border-b [&_.cds--tabs__nav]:border-gray-200 dark:[&_.cds--tabs__nav]:border-gray-800 [&_.cds--tab-content]:!h-full [&_.cds--tab-content]:!min-h-0 [&_.cds--tab-content]:!p-0"
+          panelClassName="!h-full !min-h-0 !overflow-auto !p-0"
+        >
+          <div className="h-full min-h-0">
+            <CodeHighlighting
+              className="!h-full !min-h-0"
+              code={JSON.stringify(
+                activity?.getRequest()?.toJavaScript(),
+                null,
+                2,
+              )}
+            />
+          </div>
+          <div className="h-full min-h-0">
+            <CodeHighlighting
+              className="!h-full !min-h-0"
+              code={JSON.stringify(
+                activity?.getResponse()?.toJavaScript(),
+                null,
+                2,
+              )}
+            />
+          </div>
+        </Tabs>
       </div>
     </RightSideModal>
   );

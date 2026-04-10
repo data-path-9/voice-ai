@@ -15,7 +15,9 @@ export function SidebarSimpleListItem(props: SidebarLinkItemProps) {
   const { active, redirect, navigate, loading, ...dProps } = props;
   const { open } = useSidebar();
 
-  if (loading) {
+  const isLoading = loading;
+
+  if (isLoading) {
     return (
       <div className="flex items-center h-10 w-full px-1">
         <div className="flex-shrink-0 flex items-center justify-center w-12 h-8">

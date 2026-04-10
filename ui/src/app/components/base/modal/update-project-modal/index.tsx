@@ -92,7 +92,6 @@ export const UpdateProjectDialog = (props: UpdateProjectDialogProps) => {
       open={props.modalOpen}
       onClose={() => props.setModalOpen(false)}
       size="sm"
-      selectorPrimaryFocus="#projectName"
     >
       <ModalHeader
         label="Project"

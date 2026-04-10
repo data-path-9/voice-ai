@@ -7,7 +7,7 @@ import { Tooltip } from '@/app/components/tooltip';
 import { BetaIcon } from '@/app/components/Icon/Beta';
 import { ChatBot, Connect } from '@carbon/icons-react';
 
-export const Deployment = memo(() => {
+export const Deployment = memo(({ isLoading }: { isLoading?: boolean }) => {
   const location = useLocation();
   const { pathname } = location;
 
@@ -16,11 +16,12 @@ export const Deployment = memo(() => {
       <SidebarSimpleListItem
         active={pathname.includes('/deployment/assistant')}
         navigate="/deployment/assistant"
+        loading={isLoading}
       >
         <SidebarIconWrapper>
           <ChatBot size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>
           Assistants
           <Tooltip
             children={
@@ -37,11 +38,12 @@ export const Deployment = memo(() => {
       <SidebarSimpleListItem
         active={pathname.includes('/deployment/endpoint')}
         navigate="/deployment/endpoint"
+        loading={isLoading}
       >
         <SidebarIconWrapper>
           <Connect size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel>Endpoints</SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>Endpoints</SidebarLabel>
       </SidebarSimpleListItem>
     </li>
   );

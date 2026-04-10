@@ -16,12 +16,14 @@ import (
 )
 
 // Call context status constants.
+//
+//	PENDING → CLAIMED
+//
+// Save creates with PENDING. Claim transitions to CLAIMED when the call ends.
+// Get reads regardless of status (callbacks may arrive after claim).
 const (
-	StatusPending   = "pending"   // Inbound: created, waiting for media connection
-	StatusQueued    = "queued"    // Outbound: created, waiting for provider to connect media
-	StatusClaimed   = "claimed"   // Media connection established (AudioSocket/WebSocket)
-	StatusCompleted = "completed" // Call ended normally
-	StatusFailed    = "failed"    // Call setup or execution failed
+	StatusPending = "pending" // Context created, call in progress
+	StatusClaimed = "claimed" // Call ended, context consumed
 )
 
 // CallContext holds all the information needed to resolve a call session.
@@ -29,7 +31,7 @@ const (
 // and the AudioSocket/WebSocket connection that follows.
 //
 // Stored in Postgres (call_contexts table). The status field provides atomic
-// claiming: only one media connection can transition pending→claimed.
+// claiming: only one caller can transition pending→claimed.
 type CallContext struct {
 	Id             uint64    `json:"id" gorm:"type:bigint;primaryKey;<-:create"`
 	ContextID      string    `json:"contextId" gorm:"column:context_id;type:varchar(36);not null;uniqueIndex"`
@@ -49,12 +51,10 @@ type CallContext struct {
 	UpdatedDate    time.Time `json:"updatedDate" gorm:"type:timestamp;default:null"`
 
 	// AssistantProviderId is the version identifier for the assistant provider.
-	// Stored so that streamer can build AssistantDefinition without re-fetching from DB.
 	AssistantProviderId uint64 `json:"assistantProviderId" gorm:"column:assistant_provider_id;type:bigint;not null;default:0"`
 
 	// ChannelUUID is the provider-specific call identifier (Twilio CallSid, Vonage UUID,
-	// Asterisk channel ID, SIP Call-ID, etc.). Stored so that any telephony operation
-	// (transfer, disconnect, hold) can reference the live call on the provider.
+	// Asterisk channel ID, SIP Call-ID, etc.).
 	ChannelUUID string `json:"channelUuid" gorm:"column:channel_uuid;type:varchar(200);not null;default:''"`
 }
 
@@ -84,26 +84,4 @@ func (cc *CallContext) ToAuth() types.SimplePrinciple {
 		auth.OrganizationId = utils.Ptr(cc.OrganizationID)
 	}
 	return auth
-}
-
-// IsPending returns true if the context has not yet been claimed.
-func (cc *CallContext) IsPending() bool {
-	return cc.Status == StatusPending
-}
-
-// IsClaimed returns true if the context has been claimed by a media connection.
-func (cc *CallContext) IsClaimed() bool {
-	return cc.Status == StatusClaimed
-}
-
-// ExtractChannelUUID extracts the provider call UUID from telemetry metadata.
-// All providers use the key "telephony.uuid" for the provider-specific call identifier
-// (Twilio CallSid, Vonage UUID, Asterisk channel ID, SIP Call-ID, etc.).
-func ExtractChannelUUID(metadatas []*types.Metadata) string {
-	for _, m := range metadatas {
-		if m.Key == "telephony.uuid" {
-			return m.Value
-		}
-	}
-	return ""
 }

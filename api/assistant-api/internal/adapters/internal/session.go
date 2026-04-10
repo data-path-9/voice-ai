@@ -110,12 +110,14 @@ func (r *genericRequestor) Disconnect(ctx context.Context) {
 	// because the dispatcher goroutine runs on the streamer context, which is
 	// already cancelled by the time Disconnect() is called. drainChannels() will
 	// have already returned, so any packet enqueued here would be silently lost.
-	r.events.Collect(context.Background(), observe.EventRecord{
-		MessageID: r.GetID(),
-		Name:      "session",
-		Data:      map[string]string{"type": "disconnected", "total_messages": fmt.Sprintf("%d", len(r.GetHistories()))},
-		Time:      time.Now(),
-	})
+	if r.observer != nil {
+		r.observer.EventCollectors().Collect(context.Background(), observe.EventRecord{
+			MessageID: r.GetID(),
+			Name:      observe.ComponentSession,
+			Data:      map[string]string{observe.DataType: observe.EventDisconnected, observe.DataMessages: fmt.Sprintf("%d", len(r.GetHistories()))},
+			Time:      time.Now(),
+		})
+	}
 	r.shutdownCollectors(ctx)
 
 	// Phase 5: Close assistant executor and stop timers
@@ -288,12 +290,12 @@ func (r *genericRequestor) createSession(
 	}
 
 	r.OnPacket(ctx, internal_type.ConversationEventPacket{
-		Name: "session",
+		Name: observe.ComponentSession,
 		Data: map[string]string{
-			"type":       "connected",
-			"source":     fmt.Sprintf("%v", r.source),
-			"is_new":     "true",
-			"identifier": r.identifier(config),
+			observe.DataType: observe.EventConnected,
+			"source":         fmt.Sprintf("%v", r.source),
+			"is_new":         "true",
+			"identifier":     r.identifier(config),
 		},
 		Time: time.Now(),
 	})
@@ -370,8 +372,8 @@ func (r *genericRequestor) initSessionBackground(ctx context.Context, isNew bool
 		r.recorder = rc
 		r.recorder.Start()
 		r.OnPacket(ctx, internal_type.ConversationEventPacket{
-			Name: "session",
-			Data: map[string]string{"type": "recording_started"},
+			Name: observe.ComponentRecording,
+			Data: map[string]string{observe.DataType: observe.EventRecordingStarted},
 			Time: time.Now(),
 		})
 	})
@@ -396,11 +398,13 @@ func (r *genericRequestor) initSessionBackground(ctx context.Context, isNew bool
 			Description: "Conversation is currently in progress",
 		}}
 		r.onAddMetrics(ctx, metrics...)
-		r.metrics.Collect(ctx, observe.ConversationMetricRecord{
-			ConversationID: fmt.Sprintf("%d", r.Conversation().Id),
-			Metrics:        metrics,
-			Time:           time.Now(),
-		})
+		if r.observer != nil {
+			r.observer.MetricCollectors().Collect(ctx, observe.ConversationMetricRecord{
+				ConversationID: fmt.Sprintf("%d", r.Conversation().Id),
+				Metrics:        metrics,
+				Time:           time.Now(),
+			})
+		}
 	})
 
 	utils.Go(ctx, func() {
@@ -465,10 +469,10 @@ func (r *genericRequestor) storeClientInformation(ctx context.Context) {
 		return
 	}
 
-	// Flatten client info into metadata with "client." prefix (same pattern
-	// as telephony.toPhone, telephony.fromPhone). This makes fields like
-	// timezone, platform, language directly available in prompt context via
-	// r.metadata["client.timezone"] etc.
+	// Flatten client info into metadata with "client." prefix.
+	// These fields are directly available in prompt context via r.metadata["client.timezone"] etc.
+	// Note: client.telephony_provider and client.direction are set by the channel pipeline
+	// (session.go / media.go) BEFORE the requestor runs — do not overwrite here.
 	flat := map[string]interface{}{}
 	if clientInfo.Timezone != "" {
 		flat["client.timezone"] = clientInfo.Timezone

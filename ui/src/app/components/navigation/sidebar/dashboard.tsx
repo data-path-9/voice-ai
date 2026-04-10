@@ -4,7 +4,7 @@ import { SidebarSimpleListItem } from '@/app/components/navigation/sidebar/sideb
 import { Dashboard as DashboardIcon } from '@carbon/icons-react';
 import { useLocation } from 'react-router-dom';
 
-export function Dashboard() {
+export function Dashboard({ isLoading }: { isLoading?: boolean }) {
   const location = useLocation();
   const { pathname } = location;
   const currentPath = '/dashboard';
@@ -12,11 +12,12 @@ export function Dashboard() {
     <SidebarSimpleListItem
       navigate={currentPath}
       active={pathname.includes(currentPath)}
+      loading={isLoading}
     >
       <SidebarIconWrapper>
         <DashboardIcon size={20} />
       </SidebarIconWrapper>
-      <SidebarLabel>Dashboard</SidebarLabel>
+      <SidebarLabel isLoading={isLoading}>Dashboard</SidebarLabel>
     </SidebarSimpleListItem>
   );
 }

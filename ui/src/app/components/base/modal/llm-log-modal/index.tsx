@@ -1,4 +1,4 @@
-import React, { useState, useEffect, FC } from 'react';
+import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast/headless';
 import { useCredential } from '@/hooks/use-credential';
 import { OverviewRow } from '@/app/components/base/modal/overview-row';
@@ -12,9 +12,8 @@ import {
 import { useRapidaStore } from '@/hooks';
 import { Metadata } from '@rapidaai/react';
 import { ServiceError } from '@rapidaai/react';
-import { Tab } from '@/app/components/tab';
-import { cn } from '@/utils';
-import { StatusIndicator } from '@/app/components/indicators/status';
+import { Tabs } from '@/app/components/carbon/tabs';
+import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
 import { ModalProps } from '@/app/components/base/modal';
 import { RightSideModal } from '@/app/components/base/modal/right-side-modal';
 import { HttpStatusSpanIndicator } from '@/app/components/indicators/http-status';
@@ -44,6 +43,7 @@ export function LLMLogDialog(props: LLMLogModalProps) {
    *
    */
   const [activity, setActivity] = useState<AuditLog | null>(null);
+  const [selectedTab, setSelectedTab] = useState(0);
 
   const getActivity = (currentProject: string, currentActivityId) => {
     return GetActivity(
@@ -95,114 +95,96 @@ export function LLMLogDialog(props: LLMLogModalProps) {
       modalOpen={props.modalOpen}
       setModalOpen={props.setModalOpen}
       className="w-[580px]"
+      label="LLM Log"
+      title={props.currentActivityId}
     >
-      <div className="h-12 px-4 flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 shrink-0">
-        <span className="text-xs font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-          LLM Log
-        </span>
-        <span className="text-gray-300 dark:text-gray-600">/</span>
-        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono truncate">
-          {props.currentActivityId}
-        </span>
-      </div>
-      <div className="relative overflow-auto h-[calc(100vh-48px)] flex flex-col flex-1">
-        <Tab
-          active="Overview"
-          className={cn('bg-white dark:bg-gray-900 sticky top-0 z-1')}
-          tabs={[
-            {
-              label: 'Overview',
-              element: (
-                <div className="divide-y divide-gray-200 dark:divide-gray-800 w-full">
-                  {activity && (
-                    <>
-                      <OverviewRow label="Status">
-                        <StatusIndicator
-                          state={activity.getStatus()}
-                          size="small"
-                        />
-                      </OverviewRow>
-                      <OverviewRow label="Time Taken">
-                        <span className="text-sm tabular-nums text-gray-900 dark:text-gray-100">
-                          {`${activity.getTimetaken() / 1000000}ms`}
-                        </span>
-                      </OverviewRow>
-                      <OverviewRow label="Created">
-                        <span className="text-sm text-gray-900 dark:text-gray-100">
-                          {toHumanReadableDateTime(activity.getCreateddate()!)}
-                        </span>
-                      </OverviewRow>
-                      {activity?.getResponsestatus() && (
-                        <OverviewRow label="Response Status">
-                          <HttpStatusSpanIndicator
-                            status={activity.getResponsestatus()}
-                          />
-                        </OverviewRow>
-                      )}
-                      {additionalData.map((ad, idx) => (
-                        <OverviewRow
-                          key={idx}
-                          label={ad.getKey().replaceAll('_', ' ')}
-                        >
-                          <span className="text-sm text-gray-900 dark:text-gray-100 truncate max-w-[20rem]">
-                            {ad.getValue()}
-                          </span>
-                        </OverviewRow>
-                      ))}
-                    </>
-                  )}
-                </div>
-              ),
-            },
-            {
-              label: 'Request',
-              element: (
-                <CodeHighlighting
-                  lang="json"
-                  lineNumbers={false}
-                  foldGutter={false}
-                  code={JSON.stringify(
-                    activity?.getRequest()?.toJavaScript(),
-                    null,
-                    2,
-                  )}
-                />
-              ),
-            },
-            {
-              label: 'Response',
-              element: (
-                <CodeHighlighting
-                  lang="json"
-                  lineNumbers={false}
-                  foldGutter={false}
-                  code={JSON.stringify(
-                    activity?.getResponse()?.toJavaScript(),
-                    null,
-                    2,
-                  )}
-                />
-              ),
-            },
-            {
-              label: 'Metrics',
-              element: (
-                <CodeHighlighting
-                  lang="json"
-                  lineNumbers={false}
-                  foldGutter={false}
-                  code={JSON.stringify(
-                    activity?.getMetricsList().map(metric => metric.toObject()),
-                    null,
-                    2,
-                  )}
-                />
-              ),
-            },
-          ]}
-        />
+      <div className="relative flex flex-col flex-1 min-h-0">
+        <Tabs
+          tabs={['Overview', 'Request', 'Response', 'Metrics']}
+          selectedIndex={selectedTab}
+          onChange={setSelectedTab}
+          contained
+          aria-label="LLM log tabs"
+          className="!h-full !min-h-0 !flex !flex-col [&_.cds--tabs__nav]:border-b [&_.cds--tabs__nav]:border-gray-200 dark:[&_.cds--tabs__nav]:border-gray-800 [&_.cds--tab-content]:!h-full [&_.cds--tab-content]:!min-h-0 [&_.cds--tab-content]:!p-0"
+          panelClassName="!h-full !min-h-0 !overflow-auto !p-0"
+        >
+          <div className="divide-y divide-gray-200 dark:divide-gray-800 w-full">
+            {activity && (
+              <>
+                <OverviewRow label="Status">
+                  <CarbonStatusIndicator state={activity.getStatus()} />
+                </OverviewRow>
+                <OverviewRow label="Time Taken">
+                  <span className="text-sm tabular-nums text-gray-900 dark:text-gray-100">
+                    {`${activity.getTimetaken() / 1000000}ms`}
+                  </span>
+                </OverviewRow>
+                <OverviewRow label="Created">
+                  <span className="text-sm text-gray-900 dark:text-gray-100">
+                    {toHumanReadableDateTime(activity.getCreateddate()!)}
+                  </span>
+                </OverviewRow>
+                {activity?.getResponsestatus() && (
+                  <OverviewRow label="Response Status">
+                    <HttpStatusSpanIndicator
+                      status={activity.getResponsestatus()}
+                    />
+                  </OverviewRow>
+                )}
+                {additionalData.map((ad, idx) => (
+                  <OverviewRow
+                    key={idx}
+                    label={ad.getKey().replaceAll('_', ' ')}
+                  >
+                    <span className="text-sm text-gray-900 dark:text-gray-100 truncate max-w-[20rem]">
+                      {ad.getValue()}
+                    </span>
+                  </OverviewRow>
+                ))}
+              </>
+            )}
+          </div>
+          <div className="h-full min-h-0">
+            <CodeHighlighting
+              className="!h-full !min-h-0"
+              lang="json"
+              lineNumbers={false}
+              foldGutter={false}
+              code={JSON.stringify(
+                activity?.getRequest()?.toJavaScript(),
+                null,
+                2,
+              )}
+            />
+          </div>
+          <div className="h-full min-h-0">
+            <CodeHighlighting
+              className="!h-full !min-h-0"
+              lang="json"
+              lineNumbers={false}
+              foldGutter={false}
+              code={JSON.stringify(
+                activity?.getResponse()?.toJavaScript(),
+                null,
+                2,
+              )}
+            />
+          </div>
+          <div className="h-full min-h-0">
+            <CodeHighlighting
+              className="!h-full !min-h-0"
+              lang="json"
+              lineNumbers={false}
+              foldGutter={false}
+              code={JSON.stringify(
+                activity?.getMetricsList().map(metric => metric.toObject()),
+                null,
+                2,
+              )}
+            />
+          </div>
+        </Tabs>
       </div>
     </RightSideModal>
   );
 }
-

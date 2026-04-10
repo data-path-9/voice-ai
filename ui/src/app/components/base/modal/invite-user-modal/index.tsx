@@ -94,7 +94,6 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
       open={props.modalOpen}
       onClose={() => props.setModalOpen(false)}
       size="sm"
-      selectorPrimaryFocus="#invite-email"
       preventCloseOnClickOutside
     >
       <ModalHeader
@@ -139,9 +138,7 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
               )}
               itemToString={(item: any) => item?.projectname || ''}
               onChange={({ selectedItems }) => {
-                setProjects(
-                  (selectedItems || []).map((p: any) => p.projectid),
-                );
+                setProjects((selectedItems || []).map((p: any) => p.projectid));
               }}
             />
           )}

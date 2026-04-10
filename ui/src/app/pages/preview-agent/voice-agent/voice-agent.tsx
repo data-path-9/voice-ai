@@ -12,24 +12,19 @@ import { MessagingAction } from '@/app/pages/preview-agent/voice-agent/actions';
 import { ConversationMessages } from '@/app/pages/preview-agent/voice-agent/text/conversations';
 import { cn } from '@/utils';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import {
-  JsonTextarea,
-  NumberTextarea,
-  ParagraphTextarea,
-  TextTextarea,
-  UrlTextarea,
-} from '@/app/components/form/textarea';
-import { InputVarForm } from '@/app/pages/endpoint/view/try-playground/experiment-prompt/components/input-var-form';
 import { InputVarType } from '@/models/common';
-import { ChevronLeft, ExternalLink, Info, X } from 'lucide-react';
-import { useRapidaStore } from '@/hooks';
-import { PageTitleBlock } from '@/app/components/blocks/page-title-block';
-import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
-import { PageLoader } from '@/app/components/loader/page-loader';
 import {
-  RedNoticeBlock,
-  YellowNoticeBlock,
-} from '@/app/components/container/message/notice-block';
+  Notification,
+  LinkNotification,
+} from '@/app/components/carbon/notification';
+import { GhostButton, IconOnlyButton } from '@/app/components/carbon/button';
+import { EmptyState } from '@/app/components/carbon/empty-state';
+import { Activity, FilterRemove } from '@carbon/icons-react';
+import { DismissibleTag, Tag } from '@carbon/react';
+import { Tabs } from '@/app/components/carbon/tabs';
+import { Text } from '@/app/components/carbon/text';
+import { ArrowLeft } from '@carbon/icons-react';
+import { TextArea } from '@/app/components/carbon/form';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -212,7 +207,6 @@ export const VoiceAgent: FC<{
     () => new VI(connectConfig, agentConfig, agentCallback),
     [connectConfig, agentConfig, agentCallback],
   );
-
   const [assistant, setAssistant] = useState<Assistant | null>(null);
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [variables, setVariables] = useState<Variable[]>([]);
@@ -222,19 +216,12 @@ export const VoiceAgent: FC<{
     useState<ConversationError.AsObject | null>(null);
   const callbackRegistered = useRef(false);
   const eventsBottomRef = useRef<HTMLDivElement>(null);
-
-  const { loading, showLoader, hideLoader } = useRapidaStore();
-
-  // Fetch assistant info
   useEffect(() => {
-    showLoader('block');
     new VI(connectConfig, agentConfig, agentCallback)
       .getAssistant()
       .then(ex => {
-        hideLoader();
         if (ex.getSuccess()) setAssistant(ex.getData()!);
-      })
-      .catch(() => hideLoader());
+      });
   }, []);
 
   // Load variables from assistant
@@ -337,8 +324,6 @@ export const VoiceAgent: FC<{
     });
   };
 
-  if (loading) return <PageLoader />;
-
   const voiceWarning = debug
     ? !assistant?.getDebuggerdeployment()?.hasInputaudio()
     : !assistant?.getApideployment()?.hasInputaudio();
@@ -357,74 +342,56 @@ export const VoiceAgent: FC<{
         {/* Header */}
         <div className="shrink-0">
           {debug && (
-            <PageHeaderBlock className="border-b pl-3">
-              <a
-                href={`/deployment/assistant/${agentConfig.id}/overview`}
-                className="flex items-center hover:text-red-600 hover:cursor-pointer"
-              >
-                <ChevronLeft className="w-5 h-5 mr-1" strokeWidth={1.5} />
-                <PageTitleBlock className="text-sm/6">
-                  Back to Assistant
-                </PageTitleBlock>
-              </a>
-            </PageHeaderBlock>
+            <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-200 dark:border-gray-800">
+              <IconOnlyButton
+                kind="ghost"
+                size="sm"
+                renderIcon={ArrowLeft}
+                iconDescription="Back to Assistant"
+                onClick={() => {
+                  window.location.href = `/deployment/assistant/${agentConfig.id}/overview`;
+                }}
+              />
+              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Back to Assistant
+              </span>
+            </div>
           )}
           {voiceWarning && (
-            <YellowNoticeBlock className="flex items-center justify-between gap-3">
-              <Info className="shrink-0 w-4 h-4" />
-              <div className="text-sm font-medium">
-                Voice functionality is currently disabled. Please enable it to
-                enjoy a voice experience with your assistant.
-              </div>
-              <a
-                target="_blank"
-                href={enableVoiceHref}
-                className="h-7 flex items-center font-medium hover:underline ml-auto text-yellow-600"
-                rel="noreferrer"
-              >
-                Enable voice
-                <ExternalLink
-                  className="shrink-0 w-4 h-4 ml-1.5"
-                  strokeWidth={1.5}
-                />
-              </a>
-            </YellowNoticeBlock>
+            <LinkNotification
+              kind="warning"
+              title="Voice disabled"
+              subtitle="Enable voice to enjoy a voice experience with your assistant."
+              linkText="Enable voice"
+              onLinkClick={() => window.open(enableVoiceHref, '_blank')}
+              hideCloseButton
+            />
           )}
           {conversationError && (
-            <RedNoticeBlock className="flex items-center justify-between gap-3">
-              <Info className="shrink-0 w-4 h-4 text-red-600" />
-              <div className="text-sm font-medium flex-1">
-                {conversationError.message ||
-                  'An error occurred during the conversation.'}
-              </div>
-              <button
-                type="button"
-                onClick={() => setConversationError(null)}
-                className="shrink-0 text-xs text-red-600 hover:underline font-medium"
-              >
-                Dismiss
-              </button>
-            </RedNoticeBlock>
+            <Notification
+              kind="error"
+              title="Error"
+              subtitle={
+                conversationError.message ||
+                'An error occurred during the conversation.'
+              }
+              hideCloseButton={false}
+              onClose={() => setConversationError(null)}
+            />
           )}
           {/* Tab bar */}
-          <div className="flex items-center border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-            {(['messages', 'events'] as MsgTab[]).map(t => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setMsgTab(t)}
-                className={cn(
-                  'relative flex items-center h-10 px-4 text-xs font-medium uppercase tracking-[0.08em] whitespace-nowrap transition-colors',
-                  msgTab === t
-                    ? 'text-gray-900 dark:text-gray-100 after:absolute after:bottom-0 after:inset-x-0 after:h-0.5 after:bg-primary'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100',
-                )}
-              >
-                {t === 'events' && events.length > 0
-                  ? `events (${events.length})`
-                  : t}
-              </button>
-            ))}
+          <div className="border-b border-gray-200 dark:border-gray-800">
+            <Tabs
+              tabs={[
+                'Messages',
+                events.length > 0 ? `Events (${events.length})` : 'Events',
+              ]}
+              selectedIndex={msgTab === 'messages' ? 0 : 1}
+              onChange={idx => setMsgTab(idx === 0 ? 'messages' : 'events')}
+              contained
+              isLoading={!assistant}
+              aria-label="Message tabs"
+            />
           </div>
         </div>
 
@@ -452,48 +419,54 @@ export const VoiceAgent: FC<{
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 select-none">
                   Filter
                 </span>
-                {availableEventLabels.map(label => {
-                  const isActive =
-                    eventFilters.size === 0 || eventFilters.has(label);
-                  return (
-                    <button
+                {availableEventLabels.map(label =>
+                  eventFilters.has(label) ? (
+                    <DismissibleTag
                       key={label}
-                      type="button"
+                      text={label}
+                      type="blue"
+                      size="md"
+                      onClose={() => toggleEventFilter(label)}
+                    />
+                  ) : (
+                    <Tag
+                      key={label}
+                      type={eventFilters.size === 0 ? 'blue' : 'cool-gray'}
+                      size="md"
                       onClick={() => toggleEventFilter(label)}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[2px] text-xs transition-colors',
-                        'border dark:border-gray-900',
-                        isActive
-                          ? 'bg-blue-600/10 text-blue-600 font-medium'
-                          : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500',
-                      )}
+                      className="cursor-pointer"
                     >
                       {label}
-                      {eventFilters.has(label) && (
-                        <X className="w-3 h-3" strokeWidth={1.5} />
-                      )}
-                    </button>
-                  );
-                })}
+                    </Tag>
+                  ),
+                )}
                 {eventFilters.size > 0 && (
-                  <button
-                    type="button"
+                  <GhostButton
+                    size="sm"
                     onClick={() => setEventFilters(new Set())}
-                    className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 ml-1"
                   >
                     Clear all
-                  </button>
+                  </GhostButton>
                 )}
               </div>
             )}
 
             <div className="flex-1 min-h-0 overflow-y-auto py-1">
               {filteredEvents.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm/6 font-mono">
-                  {events.length === 0
-                    ? 'No events yet…'
-                    : 'No events match the selected filters.'}
-                </div>
+                <EmptyState
+                  icon={events.length === 0 ? Activity : FilterRemove}
+                  title={
+                    events.length === 0
+                      ? 'No events yet'
+                      : 'No events match the selected filters'
+                  }
+                  subtitle={
+                    events.length === 0
+                      ? 'Events will appear here once a conversation starts.'
+                      : 'Try removing some filters to see more events.'
+                  }
+                  className="h-full"
+                />
               ) : (
                 <table className="w-full table-fixed font-mono text-sm/6 border-collapse">
                   <colgroup>
@@ -554,200 +527,179 @@ export const VoiceAgentDebugger: FC<{
   variables: Variable[];
   events: EventEntry[];
   onChangeArgument: (k: string, v: string) => void;
-}> = memo(
-  ({ debug, voiceAgent, assistant, variables, events, onChangeArgument }) => {
-    const [tab, setTab] = useState<RightTab>('configuration');
-    const metrics = useMemo(() => computeMetrics(events), [events]);
+}> = memo(({ debug, assistant, variables, events, onChangeArgument }) => {
+  const RIGHT_TABS: RightTab[] = ['configuration', 'arguments', 'metrics'];
+  const [tab, setTab] = useState<RightTab>('configuration');
+  const metrics = useMemo(() => computeMetrics(events), [events]);
 
-    const deployment = assistant
-      ? (debug
-          ? assistant.getDebuggerdeployment()
-          : assistant.getApideployment()) ?? null
-      : null;
-    const stt = deployment?.getInputaudio() ?? null;
-    const tts = deployment?.getOutputaudio() ?? null;
-    const model = assistant?.getAssistantprovidermodel() ?? null;
+  const deployment = assistant
+    ? (debug
+        ? assistant.getDebuggerdeployment()
+        : assistant.getApideployment()) ?? null
+    : null;
+  const stt = deployment?.getInputaudio() ?? null;
+  const tts = deployment?.getOutputaudio() ?? null;
+  const model = assistant?.getAssistantprovidermodel() ?? null;
 
-    return (
-      <div className="flex flex-col h-full overflow-hidden text-sm">
-        {/* Tab bar */}
-        <div className="shrink-0 flex items-center border-b border-gray-200 dark:border-gray-800">
-          {(['configuration', 'arguments', 'metrics'] as RightTab[]).map(t => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={cn(
-                'relative flex items-center h-10 px-4 text-xs font-medium uppercase tracking-[0.08em] whitespace-nowrap transition-colors',
-                tab === t
-                  ? 'text-gray-900 dark:text-gray-100 after:absolute after:bottom-0 after:inset-x-0 after:h-0.5 after:bg-primary'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100',
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+  return (
+    <div className="flex flex-col h-full overflow-hidden text-sm">
+      {/* Tab bar */}
+      <div className="border-b border-gray-200 dark:border-gray-800">
+        <Tabs
+          tabs={['Configuration', 'Arguments', 'Metrics']}
+          selectedIndex={RIGHT_TABS.indexOf(tab)}
+          onChange={idx => setTab(RIGHT_TABS[idx])}
+          contained
+          aria-label="Debugger tabs"
+          isLoading={!assistant}
+        />
+      </div>
 
-        {/* ── arguments tab ── */}
-        {tab === 'arguments' && (
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {variables.length > 0 ? (
-              <div className="divide-y border-b">
-                {variables.map((x, idx) => (
-                  <InputVarForm key={idx} var={x}>
-                    {(x.getType() === InputVarType.stringInput ||
-                      x.getType() === InputVarType.textInput) && (
-                      <TextTextarea
-                        id={x.getName()}
-                        defaultValue={x.getDefaultvalue()}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          onChangeArgument(x.getName(), e.target.value)
-                        }
-                      />
-                    )}
-                    {x.getType() === InputVarType.paragraph && (
-                      <ParagraphTextarea
-                        id={x.getName()}
-                        defaultValue={x.getDefaultvalue()}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          onChangeArgument(x.getName(), e.target.value)
-                        }
-                      />
-                    )}
-                    {x.getType() === InputVarType.number && (
-                      <NumberTextarea
-                        id={x.getName()}
-                        defaultValue={x.getDefaultvalue()}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          onChangeArgument(x.getName(), e.target.value)
-                        }
-                      />
-                    )}
-                    {x.getType() === InputVarType.json && (
-                      <JsonTextarea
-                        id={x.getName()}
-                        defaultValue={x.getDefaultvalue()}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          onChangeArgument(x.getName(), e.target.value)
-                        }
-                      />
-                    )}
-                    {x.getType() === InputVarType.url && (
-                      <UrlTextarea
-                        id={x.getName()}
-                        defaultValue={x.getDefaultvalue()}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          onChangeArgument(x.getName(), e.target.value)
-                        }
-                      />
-                    )}
-                  </InputVarForm>
-                ))}
-              </div>
-            ) : (
-              <p className="p-4 text-sm/6 text-gray-400 dark:text-gray-500">
-                No arguments defined.
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* ── configuration tab ── */}
-        {tab === 'configuration' && (
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {assistant ? (
-              <>
-                <ConfigBlock title="assistant">
-                  <InfoRow label="name" value={assistant.getName()} />
-                  <InfoRow
-                    label="executor"
-                    value={
-                      assistant.hasAssistantprovideragentkit()
-                        ? 'agentkit'
-                        : assistant.hasAssistantproviderwebsocket()
-                          ? 'websocket'
-                          : 'model'
-                    }
-                  />
-                  {assistant.getDescription() && (
-                    <InfoRow
-                      label="description"
-                      value={assistant.getDescription()}
+      {/* ── arguments tab ── */}
+      {tab === 'arguments' && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {variables.length > 0 ? (
+            <div className="divide-y border-b">
+              {variables.map((x, idx) => (
+                <div key={idx} className="px-4 py-3">
+                  {[
+                    InputVarType.stringInput,
+                    InputVarType.textInput,
+                    InputVarType.paragraph,
+                    InputVarType.number,
+                    InputVarType.json,
+                    InputVarType.url,
+                  ].includes(x.getType() as InputVarType) && (
+                    <TextArea
+                      id={x.getName()}
+                      labelText={`{{${x.getName()}}}`}
+                      rows={
+                        x.getType() === InputVarType.paragraph ||
+                        x.getType() === InputVarType.json
+                          ? 4
+                          : 2
+                      }
+                      defaultValue={x.getDefaultvalue()}
+                      placeholder="Enter variable value..."
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                        onChangeArgument(x.getName(), e.target.value)
+                      }
                     />
                   )}
-                </ConfigBlock>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Text
+              as="p"
+              className="p-4 text-sm/6 text-gray-400 dark:text-gray-500"
+            >
+              No arguments defined.
+            </Text>
+          )}
+        </div>
+      )}
 
-                {stt && (
-                  <ConfigBlock title="stt">
-                    <InfoRow label="provider" value={stt.getAudioprovider()} />
-                    {stt.getAudiooptionsList().map(m => (
-                      <InfoRow
-                        key={m.getKey()}
-                        label={m.getKey()}
-                        value={m.getValue()}
-                      />
-                    ))}
-                  </ConfigBlock>
-                )}
-
-                {tts && (
-                  <ConfigBlock title="tts">
-                    <InfoRow label="provider" value={tts.getAudioprovider()} />
-                    {tts.getAudiooptionsList().map(m => (
-                      <InfoRow
-                        key={m.getKey()}
-                        label={m.getKey()}
-                        value={m.getValue()}
-                      />
-                    ))}
-                  </ConfigBlock>
-                )}
-
-                {model && (
-                  <ConfigBlock title="llm">
-                    <InfoRow
-                      label="provider"
-                      value={model.getModelprovidername()}
-                    />
-                    {model.getAssistantmodeloptionsList().map(m => (
-                      <InfoRow
-                        key={m.getKey()}
-                        label={m.getKey()}
-                        value={m.getValue()}
-                      />
-                    ))}
-                  </ConfigBlock>
+      {/* ── configuration tab ── */}
+      {tab === 'configuration' && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <ConfigBlock
+            title="assistant"
+            isLoading={!assistant}
+            skeletonRows={3}
+          >
+            {assistant && (
+              <>
+                <InfoRow label="name" value={assistant.getName()} />
+                <InfoRow
+                  label="executor"
+                  value={
+                    assistant.hasAssistantprovideragentkit()
+                      ? 'agentkit'
+                      : assistant.hasAssistantproviderwebsocket()
+                        ? 'websocket'
+                        : 'model'
+                  }
+                />
+                {assistant.getDescription() && (
+                  <InfoRow
+                    label="description"
+                    value={assistant.getDescription()}
+                  />
                 )}
               </>
-            ) : (
-              <p className="p-4 text-sm/6 text-gray-400 dark:text-gray-500">
-                Loading…
-              </p>
             )}
-          </div>
-        )}
+          </ConfigBlock>
 
-        {/* ── metrics tab ── */}
-        {tab === 'metrics' && (
-          <div className="flex-1 min-h-0 overflow-y-auto p-4">
-            {Object.keys(metrics).length === 0 ? (
-              <p className="text-sm/6 text-gray-400 dark:text-gray-500">
-                No metrics yet.
-              </p>
-            ) : (
-              <div className="grid grid-cols-2 gap-x-6 gap-y-5">
-                {Object.entries(metrics).map(([k, v]) => (
-                  <MetricCard key={k} label={k} value={String(v)} />
+          <ConfigBlock title="stt" isLoading={!assistant} skeletonRows={2}>
+            {stt && (
+              <>
+                <InfoRow label="provider" value={stt.getAudioprovider()} />
+                {stt.getAudiooptionsList().map(m => (
+                  <InfoRow
+                    key={m.getKey()}
+                    label={m.getKey()}
+                    value={m.getValue()}
+                  />
                 ))}
-              </div>
+              </>
             )}
-          </div>
-        )}
-      </div>
-    );
-  },
-);
+          </ConfigBlock>
+
+          <ConfigBlock title="tts" isLoading={!assistant} skeletonRows={2}>
+            {tts && (
+              <>
+                <InfoRow label="provider" value={tts.getAudioprovider()} />
+                {tts.getAudiooptionsList().map(m => (
+                  <InfoRow
+                    key={m.getKey()}
+                    label={m.getKey()}
+                    value={m.getValue()}
+                  />
+                ))}
+              </>
+            )}
+          </ConfigBlock>
+
+          <ConfigBlock title="llm" isLoading={!assistant} skeletonRows={2}>
+            {model && (
+              <>
+                <InfoRow
+                  label="provider"
+                  value={model.getModelprovidername()}
+                />
+                {model.getAssistantmodeloptionsList().map(m => (
+                  <InfoRow
+                    key={m.getKey()}
+                    label={m.getKey()}
+                    value={m.getValue()}
+                  />
+                ))}
+              </>
+            )}
+          </ConfigBlock>
+        </div>
+      )}
+
+      {/* ── metrics tab ── */}
+      {tab === 'metrics' && (
+        <div className="flex-1 min-h-0 overflow-y-auto p-4">
+          {Object.keys(metrics).length === 0 ? (
+            <Text as="p" className="text-sm/6 text-gray-400 dark:text-gray-500">
+              No metrics yet.
+            </Text>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+              {Object.entries(metrics).map(([k, v]) => (
+                <MetricCard key={k} label={k} value={String(v)} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -759,40 +711,80 @@ export const VoiceAgentDebugger: FC<{
 
 const AssistantPlaceholder: FC<{
   assistant: Assistant | null;
-}> = ({ assistant }) => (
-  <div className="flex flex-col flex-1 min-h-0 items-start justify-end gap-1 px-2 pb-6 select-none">
-    <span className="text-2xl font-semibold text-gray-800 dark:text-gray-100 italic">
-      Hello,
-    </span>
-    <span className="text-lg text-gray-400 dark:text-gray-500 font-semibold italic">
-      How can I help you today?
-    </span>
-  </div>
-);
+}> = ({ assistant }) => {
+  const isLoading = !assistant;
+  return (
+    <div className="flex flex-col flex-1 min-h-0 items-start justify-end gap-1 px-2 pb-6 select-none">
+      <Text
+        as="span"
+        isLoading={isLoading}
+        heading
+        skeletonWidth="200px"
+        className="text-2xl font-semibold text-gray-800 dark:text-gray-100 italic"
+      >
+        Hello,
+      </Text>
+      <Text
+        as="span"
+        isLoading={isLoading}
+        skeletonWidth="280px"
+        className="text-lg text-gray-400 dark:text-gray-500 font-semibold italic"
+      >
+        How can I help you today?
+      </Text>
+    </div>
+  );
+};
 
-export const ConfigBlock: FC<{ title: string; children: React.ReactNode }> = ({
-  title,
-  children,
-}) => (
-  <div className="border-b border-gray-200 dark:border-gray-700">
-    <div className="px-4 pt-3 pb-1 text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+export const ConfigBlock: FC<{
+  title: string;
+  children: React.ReactNode;
+  isLoading?: boolean;
+  skeletonRows?: number;
+}> = ({ title, children, isLoading = false, skeletonRows = 3 }) => (
+  <section className="border-b border-gray-200/90 dark:border-gray-800">
+    <div className="px-4 pt-3 pb-2 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-400">
       {title}
     </div>
-    <div className="px-4 pb-3 space-y-2">{children}</div>
-  </div>
+    {isLoading ? (
+      <ConfigRowsSkeleton rowCount={skeletonRows} />
+    ) : (
+      <div className="px-4 pb-1">{children}</div>
+    )}
+  </section>
 );
 
 export const InfoRow: FC<{ label: string; value: string }> = ({
   label,
   value,
 }) => (
-  <div className="flex justify-between gap-4 text-sm/6">
-    <span className="text-gray-500 dark:text-gray-400 lowercase tracking-wide shrink-0">
+  <div className="grid grid-cols-[12rem_minmax(0,1fr)] gap-x-4 border-t border-gray-100/80 dark:border-gray-900/80 py-2.5 first:border-t-0">
+    <span
+      className="text-sm text-gray-500 dark:text-gray-400 lowercase tracking-wide truncate"
+      title={label}
+    >
       {label}
     </span>
-    <span className="text-gray-900 dark:text-gray-100 font-medium text-right truncate">
+    <span
+      className="text-sm font-medium text-gray-900 dark:text-gray-100 text-right whitespace-normal break-words"
+      title={value}
+    >
       {value}
     </span>
+  </div>
+);
+
+const ConfigRowsSkeleton: FC<{ rowCount: number }> = ({ rowCount }) => (
+  <div className="px-4 pb-2 animate-pulse">
+    {Array.from({ length: rowCount }).map((_, idx) => (
+      <div
+        key={idx}
+        className="grid grid-cols-[12rem_minmax(0,1fr)] gap-x-4 border-t border-gray-100/80 dark:border-gray-900/80 py-2.5 first:border-t-0"
+      >
+        <div className="h-4 w-24 rounded bg-gray-200 dark:bg-gray-800" />
+        <div className="ml-auto h-4 w-36 rounded bg-gray-200 dark:bg-gray-800" />
+      </div>
+    ))}
   </div>
 );
 

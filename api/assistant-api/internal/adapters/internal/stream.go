@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	observe "github.com/rapidaai/api/assistant-api/internal/observe"
+	obs "github.com/rapidaai/api/assistant-api/internal/observe"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -35,33 +35,7 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 		req, err := t.streamer.Recv()
 		if err != nil {
 			if initialized {
-				// Persist completion metrics directly — the dispatcher goroutine
-				// uses the streamer context, which is already cancelled when
-				// Recv() returns an error. Routing through OnPacket/lowCh risks
-				// the dispatcher exiting via ctx.Done() before it processes these
-				// packets, leaving STATUS stuck at IN_PROGRESS and TIME_TAKEN
-				// empty. Writing directly with a background context guarantees
-				// the final state is persisted.
-				completionMetrics := []*protos.Metric{
-					{
-						Name:        type_enums.CONVERSATION_STATUS.String(),
-						Value:       type_enums.CONVERSATION_COMPLETE.String(),
-						Description: "Status of current conversation",
-					},
-					{
-						Name:        type_enums.CONVERSATION_DURATION.String(),
-						Value:       fmt.Sprintf("%d", time.Since(totalTime)),
-						Description: "Time taken to complete the conversation from the first message received to the end of the conversation.",
-					},
-				}
-				if err := t.onAddMetrics(context.Background(), completionMetrics...); err != nil {
-					t.logger.Errorf("talk: failed to persist completion metrics: %v", err)
-				}
-				t.metrics.Collect(context.Background(), observe.ConversationMetricRecord{
-					ConversationID: fmt.Sprintf("%d", t.Conversation().Id),
-					Metrics:        completionMetrics,
-					Time:           time.Now(),
-				})
+				t.emitCallCompletion(totalTime)
 				t.Disconnect(context.Background())
 			}
 			return nil
@@ -69,23 +43,34 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 
 		switch payload := req.(type) {
 		case *protos.ConversationInitialization:
-			t.logger.Infof("talk: received initialization, initialized=%v", initialized)
 			if err := t.Connect(t.streamer.Context(), auth, payload); err != nil {
-				t.logger.Errorf("unexpected error while connect assistant, might be problem in configuration %+v", err)
+				t.OnPacket(context.Background(), internal_type.ConversationEventPacket{
+					ContextID: t.GetID(),
+					Name:      obs.ComponentSession,
+					Data:      map[string]string{obs.DataType: obs.EventConnectFailed, obs.DataError: err.Error()},
+					Time:      time.Now(),
+				})
+				t.onAddMetrics(context.Background(), &protos.Metric{
+					Name:        type_enums.CONVERSATION_STATUS.String(),
+					Value:       "FAILED",
+					Description: fmt.Sprintf("Connection failed: %v", err),
+				})
 				return fmt.Errorf("talking.Connect error: %w", err)
 			}
 			initialized = true
-			// Now that Connect() has finished (STT/TTS ready), trigger transport
-			// setup for the requested mode. For AUDIO this starts the WebRTC
-			// handshake; for TEXT or non-WebRTC streamers this is a no-op.
+			t.OnPacket(t.streamer.Context(), internal_type.ConversationEventPacket{
+				ContextID: t.GetID(),
+				Name:      obs.ComponentSession,
+				Data:      map[string]string{obs.DataType: obs.EventConnected, obs.DataMode: payload.GetStreamMode().String()},
+				Time:      time.Now(),
+			})
 			t.streamer.NotifyMode(payload.GetStreamMode())
 
 		case *protos.ConversationConfiguration:
 			if initialized {
+				prevMode := t.GetMode().String()
 				switch payload.StreamMode {
 				case protos.StreamMode_STREAM_MODE_TEXT:
-					// Switching to text mode — tear down audio subsystems
-					// only if they are currently active.
 					if t.speechToTextTransformer != nil {
 						utils.Go(t.streamer.Context(), func() {
 							t.disconnectSpeechToText(t.streamer.Context())
@@ -98,8 +83,6 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 					}
 					t.SwitchMode(type_enums.TextMode)
 				case protos.StreamMode_STREAM_MODE_AUDIO:
-					// Switching to audio mode — initialize subsystems synchronously
-					// so they are ready before audio packets arrive from WebRTC.
 					if t.textToSpeechTransformer == nil {
 						t.initializeTextToSpeech(t.streamer.Context())
 					}
@@ -110,6 +93,12 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 					}
 					t.SwitchMode(type_enums.AudioMode)
 				}
+				t.OnPacket(t.streamer.Context(), internal_type.ConversationEventPacket{
+					ContextID: t.GetID(),
+					Name:      obs.ComponentSession,
+					Data:      map[string]string{obs.DataType: obs.EventModeSwitch, obs.DataFrom: prevMode, obs.DataTo: payload.StreamMode.String()},
+					Time:      time.Now(),
+				})
 			}
 
 		case *protos.ConversationUserMessage:
@@ -163,6 +152,12 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 
 		case *protos.ConversationDisconnection:
 			if initialized {
+				t.OnPacket(context.Background(), internal_type.ConversationEventPacket{
+					ContextID: t.GetID(),
+					Name:      obs.ComponentSession,
+					Data:      map[string]string{obs.DataType: obs.EventDisconnectRequested, obs.DataReason: payload.GetType().String()},
+					Time:      time.Now(),
+				})
 				t.OnPacket(context.Background(),
 					internal_type.ConversationMetadataPacket{
 						ContextID: t.Conversation().Id,
@@ -174,6 +169,45 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 				)
 			}
 		}
+	}
+}
+
+// emitCallCompletion persists final metrics and events when the talk loop exits.
+// Written directly with a background context because the dispatcher goroutine's
+// context is already cancelled when Recv() returns an error.
+func (t *genericRequestor) emitCallCompletion(startTime time.Time) {
+	duration := time.Since(startTime)
+	completionMetrics := []*protos.Metric{
+		{
+			Name:        type_enums.CONVERSATION_STATUS.String(),
+			Value:       type_enums.CONVERSATION_COMPLETE.String(),
+			Description: "Status of current conversation",
+		},
+		{
+			Name:        type_enums.CONVERSATION_DURATION.String(),
+			Value:       fmt.Sprintf("%d", duration),
+			Description: "Conversation duration from first message to end",
+		},
+	}
+	if err := t.onAddMetrics(context.Background(), completionMetrics...); err != nil {
+		t.logger.Errorf("talk: failed to persist completion metrics: %v", err)
+	}
+	if t.observer != nil {
+		t.observer.MetricCollectors().Collect(context.Background(), obs.ConversationMetricRecord{
+			ConversationID: fmt.Sprintf("%d", t.Conversation().Id),
+			Metrics:        completionMetrics,
+			Time:           time.Now(),
+		})
+		t.observer.EventCollectors().Collect(context.Background(), obs.EventRecord{
+			MessageID: t.GetID(),
+			Name:      obs.ComponentSession,
+			Data: map[string]string{
+				obs.DataType:     obs.EventCompleted,
+				obs.DataDuration: fmt.Sprintf("%d", duration.Milliseconds()),
+				obs.DataMessages: fmt.Sprintf("%d", len(t.GetHistories())),
+			},
+			Time: time.Now(),
+		})
 	}
 }
 

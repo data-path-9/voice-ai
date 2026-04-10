@@ -4,7 +4,11 @@ import { DateFilter } from '@/app/components/carbon/date-filter';
 import { useCredential } from '@/hooks/use-credential';
 import toast from 'react-hot-toast/headless';
 import { useRapidaStore } from '@/hooks';
-import { formatNanoToReadableMilli, toDateString, toHumanReadableDateTime } from '@/utils/date';
+import {
+  formatNanoToReadableMilli,
+  toDateString,
+  toHumanReadableDateTime,
+} from '@/utils/date';
 import { PageTitleWithCount } from '@/app/components/blocks/page-title-with-count';
 import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
 import { useKnowledgeActivityLogPage } from '@/hooks/use-knowledge-activity-log-page-store';
@@ -161,8 +165,9 @@ export function ListingPage() {
                     </TableCell>
                   )}
                   {visibleColumn('created_date') && (
-                    <TableCell className="!font-mono !text-xs whitespace-nowrap">
-                      {at.getCreateddate() && toHumanReadableDateTime(at.getCreateddate()!)}
+                    <TableCell className="!text-xs whitespace-nowrap">
+                      {at.getCreateddate() &&
+                        toHumanReadableDateTime(at.getCreateddate()!)}
                     </TableCell>
                   )}
                   <TableCell>

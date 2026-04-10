@@ -10,7 +10,11 @@ import { CopyButton } from '@/app/components/carbon/button/copy-button';
 import { YellowNoticeBlock } from '@/app/components/container/message/notice-block';
 import { ProviderPill } from '@/app/components/pill/provider-model-pill';
 import { FC } from 'react';
-import { DeploymentRow, DeploymentSectionHeader } from '@/app/components/base/modal/deployment-modal-primitives';
+import { createPortal } from 'react-dom';
+import {
+  DeploymentRow,
+  DeploymentSectionHeader,
+} from '@/app/components/base/modal/deployment-modal-primitives';
 
 interface AssistantDebugDeploymentDialogProps extends ModalProps {
   deployment: AssistantDebuggerDeployment;
@@ -19,7 +23,7 @@ interface AssistantDebugDeploymentDialogProps extends ModalProps {
 export function AssistantDebugDeploymentDialog(
   props: AssistantDebugDeploymentDialogProps,
 ) {
-  return (
+  const modalContent = (
     <RightSideModal
       modalOpen={props.modalOpen}
       setModalOpen={props.setModalOpen}
@@ -59,6 +63,10 @@ export function AssistantDebugDeploymentDialog(
       </div>
     </RightSideModal>
   );
+
+  if (typeof document === 'undefined') return modalContent;
+
+  return createPortal(modalContent, document.body);
 }
 
 const Row = DeploymentRow;

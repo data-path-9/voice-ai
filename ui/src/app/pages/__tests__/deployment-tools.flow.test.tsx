@@ -373,8 +373,9 @@ describe('Deployment and tool flows', () => {
       getSuccess: () => true,
       getData: () => ({
         getApideployment: () => ({
-          getInputaudio: () => false,
-          getOutputaudio: () => false,
+          getId: () => 'api-dep-1',
+          getInputaudio: () => null,
+          getOutputaudio: () => null,
           getCreateddate: () => '2026-01-01',
         }),
         hasApideployment: () => true,
@@ -458,11 +459,11 @@ describe('Deployment and tool flows', () => {
     render(<ConfigureAssistantDeploymentPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('No deployments yet')).toBeInTheDocument();
+      expect(screen.getByText('No deployments found')).toBeInTheDocument();
     });
 
     fireEvent.click(
-      screen.getAllByRole('button', { name: /Add deployment/i })[1],
+      screen.getAllByRole('button', { name: /Add deployment/i })[0],
     );
     fireEvent.click(screen.getByRole('menuitem', { name: /Debugger/i }));
     expect(mockGlobalNavigation.goToConfigureDebugger).toHaveBeenCalledWith(
@@ -511,11 +512,12 @@ describe('Deployment and tool flows', () => {
     render(<ConfigureAssistantDeploymentPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Edit deployment' }),
+      ).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Experience' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Experience' }));
     await waitFor(() =>
       expect(screen.getByText('General Experience')).toBeInTheDocument(),
     );
@@ -531,8 +533,13 @@ describe('Deployment and tool flows', () => {
         getWebplugindeployment: () => null,
         hasWebplugindeployment: () => false,
         getDebuggerdeployment: () => ({
-          getInputaudio: () => true,
-          getOutputaudio: () => true,
+          getId: () => 'debugger-dep-1',
+          getInputaudio: () => ({
+            getAudioprovider: () => 'deepgram',
+          }),
+          getOutputaudio: () => ({
+            getAudioprovider: () => 'cartesia',
+          }),
           getCreateddate: () => '2026-01-01',
         }),
         hasDebuggerdeployment: () => true,
@@ -544,26 +551,24 @@ describe('Deployment and tool flows', () => {
     render(<ConfigureAssistantDeploymentPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Edit deployment' }),
+      ).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    expect(document.querySelector('.cds--menu-button__bottom-end')).toBeTruthy();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Experience' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Experience' }));
     await waitFor(() =>
       expect(screen.getByText('General Experience')).toBeInTheDocument(),
     );
     expect(mockGlobalNavigation.goToConfigureDebuggerExperience).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Voice Input' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Voice Input' }));
     await waitFor(() =>
       expect(screen.getByText('Voice Input')).toBeInTheDocument(),
     );
     expect(mockGlobalNavigation.goToConfigureDebuggerSTT).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Voice Output' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Voice Output' }));
     await waitFor(() =>
       expect(screen.getByText('Voice Output')).toBeInTheDocument(),
     );

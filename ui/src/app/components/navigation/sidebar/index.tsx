@@ -12,7 +12,9 @@ import { RapidaIcon } from '@/app/components/Icon/Rapida';
 import { RapidaTextIcon } from '@/app/components/Icon/RapidaText';
 import { SidePanelClose, SidePanelOpen } from '@carbon/icons-react';
 import { useSidebar } from '@/context/sidebar-context';
-import { cn } from '../../../../utils/index';
+import { cn } from '@/utils/index';
+import { useRapidaStore } from '@/hooks';
+import { Text } from '@/app/components/carbon/text';
 
 /**
  * Carbon UI Shell — Side Navigation
@@ -22,6 +24,8 @@ import { cn } from '../../../../utils/index';
 export function SidebarNavigation(props: {}) {
   const workspace = useWorkspace();
   const { locked, setLocked, open } = useSidebar();
+  const { loading, loadingType } = useRapidaStore();
+  const isLoading = loading && loadingType === 'block';
 
   return (
     <Aside className="relative shrink-0 flex flex-col">
@@ -55,69 +59,81 @@ export function SidebarNavigation(props: {}) {
 
       {/* ── Nav groups — scrollable ── */}
       <nav className="flex-1 overflow-y-auto no-scrollbar py-2">
-          {/* Group 1 — primary nav */}
-          <ul>
-            <Dashboard />
-            <Deployment />
-            {workspace.features?.knowledge !== false && <Knowledge />}
-          </ul>
+        {/* Group 1 — primary nav */}
+        <ul>
+          <Dashboard isLoading={isLoading} />
+          <Deployment isLoading={isLoading} />
+          {workspace.features?.knowledge !== false && <Knowledge isLoading={isLoading} />}
+        </ul>
 
-          {/* Group 2 — Observability */}
-          <div className="mt-2">
-            <div
-              className={cn(
-                'flex items-center px-4 py-2 border-b border-gray-200 dark:border-gray-800',
-                'text-[10px] font-medium capitalize tracking-[0.1em]',
-                'text-gray-500 dark:text-gray-400',
-                'transition-all duration-200',
-                open ? 'opacity-100' : 'opacity-0 h-0 py-0 overflow-hidden border-none',
-              )}
-            >
+        {/* Group 2 — Observability */}
+        <div className="mt-2">
+          <div
+            className={cn(
+              'flex items-center px-4 py-2 border-b border-gray-200 dark:border-gray-800',
+              'text-[10px] font-medium capitalize tracking-[0.1em]',
+              'text-gray-500 dark:text-gray-400',
+              'transition-all duration-200',
+              open
+                ? 'opacity-100'
+                : 'opacity-0 h-0 py-0 overflow-hidden border-none',
+            )}
+          >
+            <Text isLoading={isLoading} skeletonWidth="60%">
               Observability
-            </div>
-            <ul>
-              <Observability />
-            </ul>
+            </Text>
           </div>
+          <ul>
+            <Observability isLoading={isLoading} />
+          </ul>
+        </div>
 
-          {/* Group 3 — Integrations */}
-          <div className="mt-2">
-            <div
-              className={cn(
-                'flex items-center px-4 py-2 border-b border-gray-200 dark:border-gray-800',
-                'text-[10px] font-medium capitalize tracking-[0.1em]',
-                'text-gray-500 dark:text-gray-400',
-                'transition-all duration-200',
-                open ? 'opacity-100' : 'opacity-0 h-0 py-0 overflow-hidden border-none',
-              )}
-            >
+        {/* Group 3 — Integrations */}
+        <div className="mt-2">
+          <div
+            className={cn(
+              'flex items-center px-4 py-2 border-b border-gray-200 dark:border-gray-800',
+              'text-[10px] font-medium capitalize tracking-[0.1em]',
+              'text-gray-500 dark:text-gray-400',
+              'transition-all duration-200',
+              open
+                ? 'opacity-100'
+                : 'opacity-0 h-0 py-0 overflow-hidden border-none',
+            )}
+          >
+            <Text isLoading={isLoading} skeletonWidth="60%">
               Integrations
-            </div>
-            <ul>
-              <ExternalTool />
-              <Vault />
-            </ul>
+            </Text>
           </div>
+          <ul>
+            <ExternalTool isLoading={isLoading} />
+            <Vault isLoading={isLoading} />
+          </ul>
+        </div>
 
-          {/* Group 4 — Organizations */}
-          <div className="mt-2">
-            <div
-              className={cn(
-                'flex items-center px-4 py-2 border-b border-gray-200 dark:border-gray-800',
-                'text-[10px] font-medium capitalize tracking-[0.1em]',
-                'text-gray-500 dark:text-gray-400',
-                'transition-all duration-200',
-                open ? 'opacity-100' : 'opacity-0 h-0 py-0 overflow-hidden border-none',
-              )}
-            >
+        {/* Group 4 — Organizations */}
+        <div className="mt-2">
+          <div
+            className={cn(
+              'flex items-center px-4 py-2 border-b border-gray-200 dark:border-gray-800',
+              'text-[10px] font-medium capitalize tracking-[0.1em]',
+              'text-gray-500 dark:text-gray-400',
+              'transition-all duration-200',
+              open
+                ? 'opacity-100'
+                : 'opacity-0 h-0 py-0 overflow-hidden border-none',
+            )}
+          >
+            <Text isLoading={isLoading} skeletonWidth="60%">
               Organizations
-            </div>
-            <ul>
-              <Team />
-              <Project />
-            </ul>
+            </Text>
           </div>
-        </nav>
+          <ul>
+            <Team isLoading={isLoading} />
+            <Project isLoading={isLoading} />
+          </ul>
+        </div>
+      </nav>
 
       {/* ── Footer — collapse/expand button ── */}
       <div className="shrink-0 border-t border-gray-200 dark:border-gray-800">
@@ -133,7 +149,11 @@ export function SidebarNavigation(props: {}) {
           )}
         >
           <span className="shrink-0">
-            {locked ? <SidePanelClose size={16} /> : <SidePanelOpen size={16} />}
+            {locked ? (
+              <SidePanelClose size={16} />
+            ) : (
+              <SidePanelOpen size={16} />
+            )}
           </span>
           <span
             className={cn(

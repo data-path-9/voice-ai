@@ -1,17 +1,7 @@
-import { useCurrentCredential } from '@/hooks/use-credential';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { cn } from '@/utils';
-import {
-  ChatBot,
-  Connect,
-  Folders,
-  Plug,
-  Debug,
-  Activity,
-  ArrowRight,
-  Launch,
-} from '@carbon/icons-react';
-import { ClickableTile, Tag, Button, Link } from '@carbon/react';
+import { ChatBot, Connect, Plug, Activity, Launch } from '@carbon/icons-react';
+import { ClickableTile, Tag, Link } from '@carbon/react';
 import { PrimaryButton } from '@/app/components/carbon/button';
 
 const quickStart = [
@@ -80,7 +70,6 @@ const summaryCards = [
 ];
 
 export const HomePage = () => {
-  const { user } = useCurrentCredential();
   const navigation = useGlobalNavigation();
 
   return (
@@ -109,18 +98,22 @@ export const HomePage = () => {
                   '!bg-gradient-to-b !from-blue-600 !to-indigo-700 dark:!from-blue-700 dark:!to-indigo-800',
               )}
             >
-              <h3 className={cn(
-                'text-lg font-semibold mb-3',
-                item.featured && '!text-2xl !font-light !text-white',
-              )}>
+              <h3
+                className={cn(
+                  'text-lg font-semibold mb-3',
+                  item.featured && '!text-2xl !font-light !text-white',
+                )}
+              >
                 {item.title}
               </h3>
-              <p className={cn(
-                'text-sm leading-relaxed flex-1',
-                item.featured
-                  ? 'text-white/90'
-                  : 'text-gray-500 dark:text-gray-400',
-              )}>
+              <p
+                className={cn(
+                  'text-sm leading-relaxed flex-1',
+                  item.featured
+                    ? 'text-white/90'
+                    : 'text-gray-500 dark:text-gray-400',
+                )}
+              >
                 {item.description}
               </p>
               <div className="mt-auto pt-4 flex items-center justify-between">
@@ -141,7 +134,6 @@ export const HomePage = () => {
         </div>
       </section>
 
-
       {/* ── Footer ── */}
       <footer className="mt-auto shrink-0 border-t border-gray-200 dark:border-gray-800 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
         <p>
@@ -152,8 +144,12 @@ export const HomePage = () => {
         </p>
         <div className="flex items-center gap-4">
           <span>© 2025 Rapida.ai</span>
-          <Link href="/static/privacy-policy" inline>Privacy Policy</Link>
-          <Link href="/static/terms" inline>Terms</Link>
+          <Link href="/static/privacy-policy" inline>
+            Privacy Policy
+          </Link>
+          <Link href="/static/terms" inline>
+            Terms
+          </Link>
         </div>
       </footer>
     </div>

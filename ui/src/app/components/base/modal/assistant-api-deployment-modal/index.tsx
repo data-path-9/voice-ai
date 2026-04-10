@@ -10,7 +10,11 @@ import { CopyButton } from '@/app/components/carbon/button/copy-button';
 import { YellowNoticeBlock } from '@/app/components/container/message/notice-block';
 import { ProviderPill } from '@/app/components/pill/provider-model-pill';
 import { FC } from 'react';
-import { DeploymentRow, DeploymentSectionHeader } from '@/app/components/base/modal/deployment-modal-primitives';
+import { createPortal } from 'react-dom';
+import {
+  DeploymentRow,
+  DeploymentSectionHeader,
+} from '@/app/components/base/modal/deployment-modal-primitives';
 
 interface AssistantApiDeploymentDialogProps extends ModalProps {
   deployment: AssistantApiDeployment;
@@ -19,18 +23,24 @@ interface AssistantApiDeploymentDialogProps extends ModalProps {
 export function AssistantApiDeploymentDialog(
   props: AssistantApiDeploymentDialogProps,
 ) {
-  return (
+  const modalContent = (
     <RightSideModal
       modalOpen={props.modalOpen}
       setModalOpen={props.setModalOpen}
       className="w-2/3 xl:w-1/3 flex-1"
     >
       <div className="h-12 px-4 flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 shrink-0">
-        <span className="text-xs font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">Deployment</span>
+        <span className="text-xs font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+          Deployment
+        </span>
         <span className="text-gray-300 dark:text-gray-600">/</span>
-        <span className="text-xs font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">SDK / API</span>
+        <span className="text-xs font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+          SDK / API
+        </span>
         <span className="text-gray-300 dark:text-gray-600">/</span>
-        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono truncate">{props.deployment.getId()}</span>
+        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono truncate">
+          {props.deployment.getId()}
+        </span>
       </div>
       <div className="flex flex-col flex-1 overflow-auto h-[calc(100vh-48px)]">
         <Tab
@@ -42,7 +52,9 @@ export function AssistantApiDeploymentDialog(
               element: (
                 <div className="divide-y divide-gray-200 dark:divide-gray-800 w-full">
                   <VoiceInput deployment={props.deployment?.getInputaudio()} />
-                  <VoiceOutput deployment={props.deployment?.getOutputaudio()} />
+                  <VoiceOutput
+                    deployment={props.deployment?.getOutputaudio()}
+                  />
                 </div>
               ),
             },
@@ -51,6 +63,10 @@ export function AssistantApiDeploymentDialog(
       </div>
     </RightSideModal>
   );
+
+  if (typeof document === 'undefined') return modalContent;
+
+  return createPortal(modalContent, document.body);
 }
 
 const Row = DeploymentRow;

@@ -15,7 +15,7 @@ export function VersionIndicator({ id }: { id: string }) {
 
   return (
     <span className="inline-flex items-center gap-1">
-      <Tag size="md" type="cool-gray">
+      <Tag size="md" type="cool-gray" className="!inline-flex !items-center">
         <span className="font-mono leading-none">{version}</span>
       </Tag>
       <IconOnlyButton

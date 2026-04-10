@@ -3,14 +3,11 @@ import React, { useRef } from 'react';
 import { useBoolean } from 'ahooks';
 import MessageTypeSelector from './message-type-selector';
 import type { PromptRole } from '@/models/prompt';
-import { DeleteIcon } from '@/app/components/Icon/delete';
 import { GhostButton } from '@/app/components/carbon/button';
-import { TickIcon } from '@/app/components/Icon/Tick';
-import { CopyIcon } from '@/app/components/Icon/Copy';
 import { cn } from '@/utils';
 import { useToggleExpend } from '@/hooks/use-toggle-expend';
 import PromptEditor from '@/app/components/prompt-editor';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { TrashCan, Copy, Checkmark, Maximize, Minimize } from '@carbon/icons-react';
 type PromptEditorProps = {
   type?: PromptRole;
   isChatMode: boolean;
@@ -91,7 +88,7 @@ const AdvancedPromptInput: FC<PromptEditorProps> = ({
               tabIndex={-1}
               className="hover:border-red-600  dark:hover:border-red-600 transition-colors border border-transparent border-l-gray-300 dark:border-l-gray-700"
             >
-              <DeleteIcon className="w-4 h-4 text-red-600" />
+              <TrashCan size={16} className="text-red-600" />
             </GhostButton>
           )}
           <GhostButton
@@ -103,9 +100,9 @@ const AdvancedPromptInput: FC<PromptEditorProps> = ({
             className="hover:border-blue-600  dark:hover:border-blue-600  transition-colors border border-transparent border-l-gray-300 dark:border-l-gray-700"
           >
             {isChecked ? (
-              <TickIcon className="h-4 w-4 text-green-600" />
+              <Checkmark size={16} className="text-green-600" />
             ) : (
-              <CopyIcon className="h-4 w-4" />
+              <Copy size={16} />
             )}
           </GhostButton>
           <GhostButton
@@ -117,9 +114,9 @@ const AdvancedPromptInput: FC<PromptEditorProps> = ({
             className="hover:border-blue-600 dark:hover:border-blue-600  transition-colors border border-transparent border-l-gray-300 dark:border-l-gray-700"
           >
             {isExpand ? (
-              <Minimize2 className="h-4 w-4" strokeWidth={1.5} />
+              <Minimize size={16} />
             ) : (
-              <Maximize2 className="h-4 w-4" strokeWidth={1.5} />
+              <Maximize size={16} />
             )}
           </GhostButton>
         </div>

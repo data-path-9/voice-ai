@@ -10,16 +10,15 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	internal_adapter "github.com/rapidaai/api/assistant-api/internal/adapters"
-	telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
+	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
 	"github.com/rapidaai/pkg/types"
-	"github.com/rapidaai/pkg/utils"
 )
 
 func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
-	body, err := c.GetRawData() // Extract raw request body
+	body, err := c.GetRawData()
 	if err != nil {
 		cApi.logger.Errorf("failed to read event body with error %+v", err)
 	}
@@ -27,17 +26,12 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 }
 
 // CallbackByContext handles status callback webhooks using a contextId stored in Postgres.
-// The contextId resolves to the full call context (auth, assistant, conversation, provider).
-// The context is NOT deleted — callbacks fire multiple times during a call.
-// Route: GET/POST /:telephony/ctx/:contextId/event
 func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 	contextID := c.Param("contextId")
 	if contextID == "" {
-		cApi.logger.Errorf("missing contextId in CallbackByContext")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing contextId"})
 		return
 	}
-
 	if err := cApi.inboundDispatcher.HandleStatusCallbackByContext(c, contextID); err != nil {
 		cApi.logger.Errorf("status callback failed for context %s: %v", contextID, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid event to process"})
@@ -47,18 +41,10 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 }
 
 // CallReciever handles incoming calls for the given assistant.
-// The telephony provider sends a webhook when an inbound call arrives.
-// This handler creates a conversation, saves a CallContext to Postgres, and returns
-// provider-specific instructions (TwiML, NCCO, contextId) to answer the call.
-// @Router /v1/talk/:telephony/call/:assistantId [get]
-// @Summary Receive call for given assistant
-// @Produce json
-// @Success 200 {object} app.Response
-// @Failure 500 {object} app.Response
+// Thin controller — business logic delegated to pipeline's handleCallReceived.
 func (cApi *ConversationApi) CallReciever(c *gin.Context) {
 	iAuth, isAuthenticated := types.GetAuthPrinciple(c)
 	if !isAuthenticated {
-		cApi.logger.Debugf("illegal unable to authenticate")
 		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthenticated request"})
 		return
 	}
@@ -74,59 +60,49 @@ func (cApi *ConversationApi) CallReciever(c *gin.Context) {
 		return
 	}
 
-	if _, err := cApi.inboundDispatcher.HandleReceiveCall(c, c.Param("telephony"), iAuth, assistantId); err != nil {
-		cApi.logger.Errorf("failed to handle inbound call: %v", err)
+	// Pipeline handles: create conversation, answer provider, emit events
+	result := cApi.channelPipeline.Run(c, channel_pipeline.CallReceivedPipeline{
+		ID:          uuid.NewString(),
+		Provider:    c.Param("telephony"),
+		Auth:        iAuth,
+		AssistantID: assistantId,
+		GinContext:  c,
+	})
+	if result.Error != nil {
+		cApi.logger.Errorf("failed to handle inbound call: %v", result.Error)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to initiate talker"})
-		return
 	}
 }
 
-// CallTalkerByContext handles WebSocket connections using a contextId stored in Postgres.
-// The contextId was returned by CallReciever (inbound) or CreatePhoneCall (outbound).
-// All auth, assistant, conversation, and provider info is resolved from the call context.
-// Route: GET /:telephony/ctx/:contextId
+// CallTalkerByContext handles WebSocket connections for media streaming.
+// Thin controller — pipeline handles: resolve context, create streamer/talker, Talk(), cleanup.
+// contextId is read from URL path (:contextId) or query param (?contextId=).
+// Query param fallback supports Asterisk chan_websocket which appends params via v() dialstring option.
 func (cApi *ConversationApi) CallTalkerByContext(c *gin.Context) {
 	upgrader := websocket.Upgrader{ReadBufferSize: 1024, WriteBufferSize: 1024, CheckOrigin: func(r *http.Request) bool { return true }}
-	websocketConnection, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to upgrade connection"})
 		return
 	}
 
-	contextID := c.Param("contextId")
+	contextID := c.Query("contextId")
 	if contextID == "" {
-		cApi.logger.Errorf("missing contextId in CallTalkerByContext")
+		contextID = c.Param("contextId")
+	}
+	if contextID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing contextId"})
 		return
 	}
 
-	cc, vaultCred, err := cApi.inboundDispatcher.ResolveCallSessionByContext(c, contextID)
-	if err != nil {
-		cApi.logger.Errorf("error resolving session for context %s: %v", contextID, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid call context"})
-		return
-	}
-
-	streamer, err := telephony.Telephony(cc.Provider).NewStreamer(cApi.logger, cc, vaultCred, telephony.StreamerOption{
-		WebSocketConn: websocketConnection,
+	// Pipeline handles: resolve context, create streamer, create talker,
+	// create observer+hooks, hooks.OnBegin, Talk() (blocks), hooks.OnEnd, cleanup.
+	result := cApi.channelPipeline.Run(c, channel_pipeline.SessionConnectedPipeline{
+		ID:        contextID,
+		ContextID: contextID,
+		WebSocket: ws,
 	})
-	if err != nil {
-		cApi.logger.Errorf("error creating streamer for context %s: %v", contextID, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid telephony streamer"})
-		return
+	if result != nil && result.Error != nil {
+		cApi.logger.Errorf("talk failed for context %s: %v", contextID, result.Error)
 	}
-
-	talker, err := internal_adapter.GetTalker(utils.PhoneCall, c, cApi.cfg, cApi.logger, cApi.postgres, cApi.opensearch, cApi.redis, cApi.storage, streamer)
-	if err != nil {
-		cApi.logger.Errorf("error creating talker for context %s: %v", contextID, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid talker"})
-		return
-	}
-
-	if err := talker.Talk(c, cc.ToAuth()); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid talk"})
-	}
-
-	// Mark call context as completed now that the call has ended
-	cApi.inboundDispatcher.CompleteCallSession(c, contextID)
 }

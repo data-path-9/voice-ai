@@ -38,6 +38,7 @@ import {
   TelephonyProvider,
   ValidateTelephonyOptions,
 } from '@/app/components/providers/telephony';
+import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
 import { TabForm } from '@/app/components/form/tab-form';
 import {
   PrimaryButton,
@@ -94,6 +95,7 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
   const [activeTab, setActiveTab] = useState('telephony');
   const [errorMessage, setErrorMessage] = useState('');
   const [isDeploying, setIsDeploying] = useState(false);
+  const { showDialog, ConfirmDialogComponent } = useConfirmDialog({});
 
   const [experienceConfig, setExperienceConfig] = useState<ExperienceConfig>({
     greeting: undefined,
@@ -378,6 +380,7 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-white dark:bg-gray-900">
+      <ConfirmDialogComponent />
       <TabForm
         formHeading="Complete all steps to configure your phone call deployment."
         activeTab={activeTab}
@@ -407,7 +410,9 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
                 <SecondaryButton size="lg"
                   className="w-full h-full"
-                  onClick={() => goToDeploymentAssistant(assistantId)}
+                  onClick={() =>
+                    showDialog(() => goToDeploymentAssistant(assistantId))
+                  }
                 >
                   Cancel
                 </SecondaryButton>
@@ -442,7 +447,9 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
                 </GhostButton>
                 <SecondaryButton size="lg"
                   className="w-full h-full"
-                  onClick={() => goToDeploymentAssistant(assistantId)}
+                  onClick={() =>
+                    showDialog(() => goToDeploymentAssistant(assistantId))
+                  }
                 >
                   Cancel
                 </SecondaryButton>
@@ -477,7 +484,9 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
                 </GhostButton>
                 <SecondaryButton size="lg"
                   className="w-full h-full"
-                  onClick={() => goToDeploymentAssistant(assistantId)}
+                  onClick={() =>
+                    showDialog(() => goToDeploymentAssistant(assistantId))
+                  }
                 >
                   Cancel
                 </SecondaryButton>
@@ -512,7 +521,9 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
                 </GhostButton>
                 <SecondaryButton size="lg"
                   className="w-full h-full"
-                  onClick={() => goToDeploymentAssistant(assistantId)}
+                  onClick={() =>
+                    showDialog(() => goToDeploymentAssistant(assistantId))
+                  }
                 >
                   Cancel
                 </SecondaryButton>

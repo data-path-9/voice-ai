@@ -8,24 +8,31 @@ package assistant_sip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"net"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"gorm.io/gorm/clause"
 
 	"github.com/rapidaai/api/assistant-api/config"
 	internal_adapter "github.com/rapidaai/api/assistant-api/internal/adapters"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	observe "github.com/rapidaai/api/assistant-api/internal/observe"
+	observe_exporters "github.com/rapidaai/api/assistant-api/internal/observe/exporters"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
+	sip_pipeline "github.com/rapidaai/api/assistant-api/sip/pipeline"
 	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/connectors"
+	gorm_models "github.com/rapidaai/pkg/models/gorm"
 	"github.com/rapidaai/pkg/storages"
 	storage_files "github.com/rapidaai/pkg/storages/file-storage"
 	"github.com/rapidaai/pkg/types"
@@ -34,15 +41,13 @@ import (
 	"github.com/rapidaai/protos"
 )
 
-// SIPManager manages SIP connections for voice conversations
-// SIP uses native signaling (UDP/TCP/TLS) and RTP for audio - no WebSocket
-// Multi-tenant: Single shared server, config resolved per-call from assistant's deployment
+// SIPEngine manages a multi-tenant SIP server. Config is resolved per-call
+// from each assistant's phone deployment and vault credentials.
 type SIPEngine struct {
-	mu       sync.RWMutex
-	cfg      *config.AssistantConfig
-	logger   commons.Logger
-	server   *sip_infra.Server
-	sessions map[string]*sip_infra.SIPSession
+	cfg    *config.AssistantConfig
+	logger commons.Logger
+	mu     sync.RWMutex
+	server *sip_infra.Server
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -54,12 +59,16 @@ type SIPEngine struct {
 
 	assistantConversationService internal_services.AssistantConversationService
 	assistantService             internal_services.AssistantService
+	deploymentService            internal_services.AssistantDeploymentService
 	vaultClient                  web_client.VaultClient
-	authClient                   web_client.AuthClient
+
+	// Registration client for maintaining SIP REGISTER with external providers.
+	registrationClient *sip_infra.RegistrationClient
+
+	// Pipeline dispatcher — routes SIP call lifecycle through extensible stages.
+	dispatcher *sip_pipeline.Dispatcher
 }
 
-// SIPEngine creates a new SIP manager
-// Multi-tenant: single server, config resolved per-call via ConfigResolver
 func NewSIPEngine(config *config.AssistantConfig, logger commons.Logger,
 	postgres connectors.PostgresConnector,
 	redis connectors.RedisConnector,
@@ -73,15 +82,12 @@ func NewSIPEngine(config *config.AssistantConfig, logger commons.Logger,
 		opensearch:                   opensearch,
 		assistantConversationService: internal_assistant_service.NewAssistantConversationService(logger, postgres, storage_files.NewStorage(config.AssetStoreConfig, logger)),
 		assistantService:             internal_assistant_service.NewAssistantService(config, logger, postgres, opensearch),
+		deploymentService:            internal_assistant_service.NewAssistantDeploymentService(config, logger, postgres),
 		storage:                      storage_files.NewStorage(config.AssetStoreConfig, logger),
 		vaultClient:                  web_client.NewVaultClientGRPC(&config.AppConfig, logger, redis),
-		authClient:                   web_client.NewAuthenticator(&config.AppConfig, logger, redis),
-		sessions:                     make(map[string]*sip_infra.SIPSession),
 	}
 }
 
-// NewSIPListenConfig creates a ListenConfig for the shared SIP server
-// Multi-tenant: Server listens on this address, tenant config resolved per-call
 func (m *SIPEngine) listenConfig() *sip_infra.ListenConfig {
 	transportType := sip_infra.TransportUDP
 	switch m.cfg.SIPConfig.Transport {
@@ -106,12 +112,10 @@ func (m *SIPEngine) listenConfig() *sip_infra.ListenConfig {
 	return lc
 }
 
-// Start initializes the shared SIP server with per-call middleware-based authentication.
-// The middleware chain authenticates every SIP request (not just INVITE):
+// Connect initializes the SIP server. The middleware chain resolves the
+// assistant from the DID in the To-URI:
 //
-//	CredentialMiddleware → AuthMiddleware → AssistantMiddleware → VaultConfigMiddleware
-//
-// URI format: sip:{assistantID}:{apiKey}@aws.ap-south-east-01.rapida.ai
+//	routingMiddleware (DID lookup) -> assistantMiddleware -> vaultConfigResolver
 func (m *SIPEngine) Connect(ctx context.Context) error {
 	m.ctx, m.cancel = context.WithCancel(ctx)
 
@@ -126,63 +130,56 @@ func (m *SIPEngine) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to create SIP server: %w", err)
 	}
 
-	// Register middleware chain for SIP request authentication.
-	// Each middleware enriches the SIPRequestContext; the final handler
-	// returns the InviteResult with the resolved SIP config.
 	server.SetMiddlewares(
 		[]sip_infra.Middleware{
-			sip_infra.CredentialMiddleware, // Parse assistantID:apiKey from URI
-			m.authMiddleware,               // Validate API key → set auth principal
-			m.assistantMiddleware,          // Load assistant → set assistant entity
+			m.routingMiddleware,   // Resolve assistant by DID
+			m.assistantMiddleware, // Load assistant entity
 		},
-		m.vaultConfigResolver, // Fetch SIP config from vault (final handler)
+		m.vaultConfigResolver, // Fetch SIP config from vault
 	)
 
-	// Set up handlers for incoming calls
-	server.SetOnInvite(m.handleInvite)
-	server.SetOnBye(m.handleBye)
-	server.SetOnCancel(m.handleCancel)
+	server.SetOnInvite(m.onInvite)
+	server.SetOnBye(m.onBye)
+	server.SetOnCancel(m.onCancel)
+	server.SetOnError(m.onError)
 
-	// Start the server
+	m.registrationClient = sip_infra.NewRegistrationClient(server.Client(), server.GetListenConfig(), m.logger)
+
+	m.dispatcher = sip_pipeline.NewDispatcher(&sip_pipeline.DispatcherConfig{
+		Logger:               m.logger,
+		Server:               server,
+		RegistrationClient:   m.registrationClient,
+		DIDResolver:          m.resolveAssistantByDID,
+		OnCreateConversation: m.pipelineCreateConversation,
+		OnCallSetup:          m.pipelineCallSetup,
+		OnCallStart:          m.pipelineCallStart,
+		OnCallEnd:            m.pipelineCallEnd,
+		OnCreateObserver:     m.createObserver,
+	})
+	m.dispatcher.Start(m.ctx)
+
+	// Start server AFTER dispatcher is ready — incoming INVITEs call m.dispatcher.OnPipeline
 	if err := server.Start(); err != nil {
 		return fmt.Errorf("failed to start SIP server: %w", err)
 	}
 	m.server = server
+
+	// Initial registration sync — runs before returning so DIDs are active before calls arrive.
+	m.reconcileRegistrations(m.ctx)
+
+	// Background watcher — polls DB every 5 minutes for new/removed/changed deployments.
+	go m.startRegistrationWatcher(m.ctx)
+
 	return nil
 }
 
-// GetServer returns the shared SIP server instance.
-// Used for dependency injection into outbound call providers.
 func (m *SIPEngine) GetServer() *sip_infra.Server {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.server
 }
 
-// authMiddleware validates the API key extracted by CredentialMiddleware.
-// Sets Extra["auth"] with the authenticated principal for downstream middlewares.
-//
-// URI format: sip:{assistantID}:{apiKey}@aws.ap-south-east-01.rapida.ai
-//   - apiKey is a project-scoped token (rpd-prj-xxx or raw key)
-func (m *SIPEngine) authMiddleware(ctx *sip_infra.SIPRequestContext, next func() (*sip_infra.InviteResult, error)) (*sip_infra.InviteResult, error) {
-	if ctx.APIKey == "" {
-		m.logger.Warnw("SIP: missing API key", "call_id", ctx.CallID, "method", ctx.Method, "from", ctx.FromURI)
-		return sip_infra.Reject(401, "Missing credentials. Use sip:{assistantID}:{apiKey}@host"), nil
-	}
-
-	auth, err := m.validateAPIKey(ctx.APIKey)
-	if err != nil {
-		m.logger.Warnw("SIP: invalid API key", "call_id", ctx.CallID, "method", ctx.Method, "error", err)
-		return sip_infra.Reject(403, "Invalid API key"), nil
-	}
-
-	ctx.Set("auth", auth)
-	return next()
-}
-
-// assistantMiddleware loads the assistant entity and verifies access.
-// Requires Extra["auth"] to be set by authMiddleware.
-// Sets Extra["assistant"] for downstream middlewares.
+// assistantMiddleware loads the assistant entity and verifies project-level access.
 func (m *SIPEngine) assistantMiddleware(ctx *sip_infra.SIPRequestContext, next func() (*sip_infra.InviteResult, error)) (*sip_infra.InviteResult, error) {
 	authVal, _ := ctx.Get("auth")
 	auth, _ := authVal.(types.SimplePrinciple)
@@ -214,9 +211,8 @@ func (m *SIPEngine) assistantMiddleware(ctx *sip_infra.SIPRequestContext, next f
 	return next()
 }
 
-// vaultConfigResolver is the final handler in the middleware chain.
-// It fetches the SIP provider config from vault and returns the InviteResult
-// with the resolved config and all middleware-enriched metadata.
+// vaultConfigResolver is the terminal middleware handler. It fetches provider
+// config from vault and returns the InviteResult with resolved metadata.
 func (m *SIPEngine) vaultConfigResolver(ctx *sip_infra.SIPRequestContext) (*sip_infra.InviteResult, error) {
 	authVal, _ := ctx.Get("auth")
 	auth, _ := authVal.(types.SimplePrinciple)
@@ -227,20 +223,22 @@ func (m *SIPEngine) vaultConfigResolver(ctx *sip_infra.SIPRequestContext) (*sip_
 		return sip_infra.Reject(500, "Middleware chain incomplete"), nil
 	}
 
-	// Fetch both SIP config and vault credential from vault
 	sipConfig, vaultCred, err := m.fetchSIPConfigAndVaultCredential(auth, assistant)
 	if err != nil {
 		m.logger.Error("SIP: failed to resolve config", "call_id", ctx.CallID, "method", ctx.Method, "error", err)
 		return sip_infra.Reject(500, "Failed to resolve SIP configuration"), nil
 	}
 
+	var orgID uint64
+	if auth.GetCurrentOrganizationId() != nil {
+		orgID = *auth.GetCurrentOrganizationId()
+	}
 	m.logger.Infow("SIP request authenticated",
 		"call_id", ctx.CallID,
 		"method", ctx.Method,
 		"assistant_id", assistant.Id,
-		"org_id", *auth.GetCurrentOrganizationId())
+		"org_id", orgID)
 
-	// Pass auth/assistant/config to session via Extra
 	return sip_infra.AllowWithExtra(sipConfig, map[string]interface{}{
 		"auth":             auth,
 		"assistant":        assistant,
@@ -249,657 +247,184 @@ func (m *SIPEngine) vaultConfigResolver(ctx *sip_infra.SIPRequestContext) (*sip_
 	}), nil
 }
 
-// validateAPIKey validates the API key as a project-scoped authentication token.
-// It strips the "rpd-prj-" prefix (if present) and calls the auth service to
-// resolve the project and organization context — exactly like the HTTP/gRPC
-// project authenticator middleware does.
-func (m *SIPEngine) validateAPIKey(apiKey string) (types.SimplePrinciple, error) {
-	if apiKey == "" {
-		return nil, fmt.Errorf("empty API key")
-	}
-
-	// Strip the project key prefix (same as grpc project middleware)
-	cleanKey := strings.Replace(apiKey, types.PROJECT_KEY_PREFIX, "", 1)
-
-	// Resolve via auth service (cached, gRPC call to web-api)
-	scoped, err := m.authClient.ScopeAuthorize(m.ctx, cleanKey, "project")
-	if err != nil {
-		return nil, fmt.Errorf("project auth failed: %w", err)
-	}
-
-	projectScope := &types.ProjectScope{
-		ProjectId:      &scoped.ProjectId,
-		OrganizationId: &scoped.OrganizationId,
-		Status:         scoped.GetStatus(),
-		CurrentToken:   apiKey,
-	}
-
-	if !projectScope.IsAuthenticated() {
-		return nil, fmt.Errorf("API key is not active (status: %s)", scoped.GetStatus())
-	}
-
-	return projectScope, nil
-}
-
-// hasAccessToAssistant checks if the auth context has access to the assistant
 func (m *SIPEngine) hasAccessToAssistant(auth types.SimplePrinciple, assistant *internal_assistant_entity.Assistant) bool {
-	// Check if the assistant belongs to the same project/organization
 	if auth.GetCurrentProjectId() == nil || assistant.ProjectId == 0 {
-		return true // Skip check if project info not available
+		return false
 	}
 	return *auth.GetCurrentProjectId() == assistant.ProjectId
 }
 
-// handleInvite processes incoming SIP INVITE requests
-func (m *SIPEngine) handleInvite(session *sip_infra.Session, fromURI, toURI string) error {
+// onInvite routes incoming INVITE into the pipeline.
+// For inbound: middleware chain sets "auth" and "assistant" on the session.
+// For outbound: telephony.OutboundCall sets "auth" + "assistant_id" (uint64) but
+// not the full entity, so we resolve it here from the ID.
+func (m *SIPEngine) onInvite(session *sip_infra.Session, fromURI, toURI string) error {
 	info := session.GetInfo()
 	callID := info.CallID
 
-	m.logger.Infow("Incoming SIP INVITE", "from", fromURI, "to", toURI, "call_id", callID, "direction", info.Direction)
-
-	// For outbound calls (answered), use the pre-stored context from the
-	// original OutboundCall flow instead of re-resolving and creating a duplicate conversation.
-	if info.Direction == sip_infra.CallDirectionOutbound {
-		if err := m.handleOutboundAnswered(session, fromURI, toURI); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// Check if session is still alive (may have been terminated by a race with BYE)
 	if session.IsEnded() {
-		m.logger.Warnw("Session already ended, skipping INVITE handling", "call_id", callID)
 		return fmt.Errorf("session already ended")
 	}
 
-	// Retrieve middleware-resolved auth & assistant from session metadata
-	// (set by the SIP middleware chain and propagated by infra server.go)
 	authVal, _ := session.GetMetadata("auth")
 	auth, _ := authVal.(types.SimplePrinciple)
+	if auth == nil {
+		return fmt.Errorf("missing auth on session %s", callID)
+	}
+
+	var assistantID uint64
 	assistantVal, _ := session.GetMetadata("assistant")
-	assistant, _ := assistantVal.(*internal_assistant_entity.Assistant)
-	sipConfigVal, _ := session.GetMetadata("sip_config")
-	sipConfig, _ := sipConfigVal.(*sip_infra.Config)
-
-	if auth == nil || assistant == nil {
-		m.logger.Error("SIP session missing auth/assistant metadata (middleware chain issue)",
-			"call_id", callID, "has_auth", auth != nil, "has_assistant", assistant != nil)
-		return fmt.Errorf("missing auth context on session")
+	if assistant, ok := assistantVal.(*internal_assistant_entity.Assistant); ok && assistant != nil {
+		assistantID = assistant.Id
+	} else if idVal, ok := session.GetMetadata("assistant_id"); ok {
+		if id, ok := idVal.(uint64); ok && id > 0 {
+			assistantID = id
+			assistant, err := m.assistantService.Get(m.ctx, auth, id, utils.GetVersionDefinition("latest"),
+				&internal_services.GetAssistantOption{InjectPhoneDeployment: true})
+			if err != nil {
+				return fmt.Errorf("failed to load assistant %d for outbound call: %w", id, err)
+			}
+			session.SetMetadata("assistant", assistant)
+		}
+	}
+	if assistantID == 0 {
+		return fmt.Errorf("missing assistant context on session %s", callID)
 	}
 
-	// Create conversation for inbound call
-	callerID := fromURI
-	conversation, err := m.assistantConversationService.CreateConversation(
-		m.ctx, auth,
-		callerID,
-		assistant.Id, assistant.AssistantProviderId,
-		type_enums.DIRECTION_INBOUND, utils.SIP,
-	)
-	if err != nil {
-		m.logger.Error("Failed to create conversation", "error", err, "call_id", callID)
-		return fmt.Errorf("failed to create conversation: %w", err)
+	// For outbound, pass conversation_id from session metadata (created by channel pipeline)
+	var conversationID uint64
+	if convIDVal, ok := session.GetMetadata("conversation_id"); ok {
+		if id, ok := convIDVal.(uint64); ok {
+			conversationID = id
+		}
 	}
 
-	_, _ = m.assistantConversationService.ApplyConversationMetadata(m.ctx, auth, assistant.Id, conversation.Id,
-		[]*types.Metadata{types.NewMetadata("sip.caller_uri", fromURI)})
-
-	// Build CallContext for the streamer — SIP inbound handles media directly (no store lookup needed)
-	cc := &callcontext.CallContext{
-		AssistantID:         assistant.Id,
-		ConversationID:      conversation.Id,
-		AssistantProviderId: assistant.AssistantProviderId,
-		AuthToken:           auth.GetCurrentToken(),
-		AuthType:            auth.Type(),
-		Direction:           "inbound",
-		CallerNumber:        callerID,
-		Provider:            "sip",
-		ChannelUUID:         session.GetCallID(),
-	}
-	if auth.GetCurrentProjectId() != nil {
-		cc.ProjectID = *auth.GetCurrentProjectId()
-	}
-	if auth.GetCurrentOrganizationId() != nil {
-		cc.OrganizationID = *auth.GetCurrentOrganizationId()
-	}
-
-	// Start the call in a goroutine with tenant-specific config
-	go m.startCall(m.ctx, session, cc, session.GetVaultCredential(), sipConfig, utils.SIP)
+	m.dispatcher.OnPipeline(m.ctx, sip_infra.SessionEstablishedPipeline{
+		ID:              callID,
+		Session:         session,
+		Config:          session.GetConfig(),
+		VaultCredential: session.GetVaultCredential(),
+		Direction:       info.Direction,
+		AssistantID:     assistantID,
+		Auth:            auth,
+		FromURI:         fromURI,
+		ConversationID:  conversationID,
+	})
 
 	return nil
 }
 
-// handleOutboundAnswered processes the onInvite callback for outbound calls that have been answered.
-// It retrieves the assistant and conversation from metadata set during OutboundCall
-// instead of re-resolving everything and creating a duplicate conversation.
-func (m *SIPEngine) handleOutboundAnswered(session *sip_infra.Session, fromURI, toURI string) error {
-	callID := session.GetInfo().CallID
+func (m *SIPEngine) onBye(session *sip_infra.Session) error {
+	m.dispatcher.OnPipeline(m.ctx, sip_infra.ByeReceivedPipeline{
+		ID: session.GetInfo().CallID,
+	})
+	return nil
+}
 
-	// Retrieve outbound call context from session metadata.
-	// All these were stored by telephony.OutboundCall to avoid expensive re-lookups.
-	assistantIDVal, ok := session.GetMetadata("assistant_id")
-	if !ok {
-		return fmt.Errorf("outbound session missing assistant_id metadata")
+func (m *SIPEngine) onCancel(session *sip_infra.Session) error {
+	m.dispatcher.OnPipeline(m.ctx, sip_infra.CancelReceivedPipeline{
+		ID: session.GetInfo().CallID,
+	})
+	return nil
+}
+
+// onError handles SIP-level errors (e.g., outbound call failed before pipeline ran).
+// For outbound calls with a conversation_id in metadata, creates a short-lived observer
+// to persist the FAILED status metric so the conversation is not left indeterminate.
+func (m *SIPEngine) onError(session *sip_infra.Session, callErr error) {
+	callID := session.GetCallID()
+	m.logger.Warnw("SIP error", "call_id", callID, "error", callErr)
+
+	convIDVal, hasConv := session.GetMetadata("conversation_id")
+	if !hasConv {
+		return
 	}
-	conversationIDVal, ok := session.GetMetadata("conversation_id")
-	if !ok {
-		return fmt.Errorf("outbound session missing conversation_id metadata")
-	}
-	authVal, ok := session.GetMetadata("auth")
-	if !ok {
-		return fmt.Errorf("outbound session missing auth metadata")
-	}
-	sipConfigVal, ok := session.GetMetadata("sip_config")
-	if !ok {
-		return fmt.Errorf("outbound session missing sip_config metadata")
+	convID, ok := convIDVal.(uint64)
+	if !ok || convID == 0 {
+		return
 	}
 
-	assistantID, _ := assistantIDVal.(uint64)
-	conversationID, _ := conversationIDVal.(uint64)
+	authVal, _ := session.GetMetadata("auth")
 	auth, _ := authVal.(types.SimplePrinciple)
-	sipConfig, _ := sipConfigVal.(*sip_infra.Config)
-
-	toPhone := ""
-	if v, ok := session.GetMetadata("to_phone"); ok {
-		toPhone, _ = v.(string)
+	if auth == nil {
+		return
 	}
 
-	m.logger.Infow("Outbound call answered, resolving context",
-		"call_id", callID,
-		"assistant_id", assistantID,
-		"conversation_id", conversationID)
+	assistantIDVal, _ := session.GetMetadata("assistant_id")
+	assistantID, _ := assistantIDVal.(uint64)
 
-	// Early BYE check — if BYE already arrived (e.g., Asterisk Dial() timeout
-	// race), skip expensive DB work and return immediately.
-	if isByeReceived(session) {
-		m.logger.Warnw("BYE already received before outbound context resolution — aborting",
-			"call_id", callID)
-		return fmt.Errorf("call ended before setup (early BYE)")
-	}
-
-	// Load assistant — still needed for AssistantProviderId and the fallback CreateConversation path.
-	assistant, err := m.assistantService.Get(m.ctx, auth, assistantID, utils.GetVersionDefinition("latest"),
-		&internal_services.GetAssistantOption{InjectPhoneDeployment: true})
-	if err != nil {
-		return fmt.Errorf("failed to get assistant for outbound call: %w", err)
-	}
-
-	// Check again after DB query — BYE may have arrived during the ~20ms query.
-	if isByeReceived(session) {
-		m.logger.Warnw("BYE received during outbound context resolution — aborting",
-			"call_id", callID)
-		return fmt.Errorf("call ended during setup (BYE during assistant lookup)")
-	}
-
-	// Verify the conversation exists; if not, create a fallback.
-	actualConversationID := conversationID
-	_, getErr := m.assistantConversationService.GetConversation(
-		m.ctx, auth, assistantID, conversationID,
-		&internal_services.GetConversationOption{InjectMetadata: true},
-	)
-	if getErr != nil {
-		m.logger.Warnw("Could not retrieve existing conversation, creating new one",
-			"call_id", callID,
-			"conversation_id", conversationID,
-			"error", getErr)
-		fallback, err := m.assistantConversationService.CreateConversation(
-			m.ctx, auth, toPhone, assistant.Id, assistant.AssistantProviderId,
-			type_enums.DIRECTION_OUTBOUND, utils.PhoneCall,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create fallback conversation: %w", err)
-		}
-		actualConversationID = fallback.Id
-	}
-
-	_, _ = m.assistantConversationService.ApplyConversationMetadata(m.ctx, auth, assistant.Id, actualConversationID,
-		[]*types.Metadata{types.NewMetadata("sip.callee_uri", toURI)})
-
-	// Build CallContext from session metadata + resolved assistant.
-	cc := &callcontext.CallContext{
-		AssistantID:         assistantID,
-		ConversationID:      actualConversationID,
-		AssistantProviderId: assistant.AssistantProviderId,
-		AuthToken:           auth.GetCurrentToken(),
-		AuthType:            auth.Type(),
-		Direction:           "outbound",
-		CallerNumber:        toPhone,
-		Provider:            string(utils.SIP),
-		ChannelUUID:         callID,
+	setup := &sip_pipeline.CallSetupResult{
+		AssistantID:    assistantID,
+		ConversationID: convID,
 	}
 	if auth.GetCurrentProjectId() != nil {
-		cc.ProjectID = *auth.GetCurrentProjectId()
+		setup.ProjectID = *auth.GetCurrentProjectId()
 	}
 	if auth.GetCurrentOrganizationId() != nil {
-		cc.OrganizationID = *auth.GetCurrentOrganizationId()
+		setup.OrganizationID = *auth.GetCurrentOrganizationId()
 	}
 
-	// Run startCall synchronously for outbound calls. This is called from
-	// handleOutboundDialog (which runs in its own goroutine), so blocking here is
-	// safe and intentional. Running synchronously prevents the race condition where
-	// handleOutboundDialog tears down the session (on BYE) before startCall has
-	// registered its context cancellation. onInvite returns only after the call
-	// fully ends, keeping the dialog alive in sipgo's cache for the entire duration.
-	m.startCall(m.ctx, session, cc, session.GetVaultCredential(), sipConfig, utils.PhoneCall)
-
-	return nil
-}
-
-// startCall starts the SIP conversation with the assistant.
-// Multi-tenant: receives config specific to this call/tenant.
-//
-// State-machine approach: instead of waiting for setup to complete before
-// allowing BYE, each step checks session.IsEnded() or session.ByeReceived().
-// For outbound calls, startCall runs synchronously from onInvite (inside
-// handleOutboundDialog's goroutine), so it owns the session lifecycle.
-// When startCall returns, it calls session.End() to signal handleOutboundDialog
-// that cleanup can proceed.
-func (m *SIPEngine) startCall(ctx context.Context, session *sip_infra.Session, cc *callcontext.CallContext, vaultCred *protos.VaultCredential, sipConfig *sip_infra.Config, source utils.RapidaSource) {
-	callID := session.GetInfo().CallID
-	isOutbound := session.GetInfo().Direction == sip_infra.CallDirectionOutbound
-	auth := cc.ToAuth()
-
-	// For outbound calls, we own the session lifecycle — ensure session.End() is
-	// called when we return so handleOutboundDialog can proceed with cleanup.
-	if isOutbound {
-		defer func() {
-			if !session.IsEnded() {
-				session.End()
-			}
-		}()
-	}
-
-	// Bail out early if session already ended (e.g., setup failure).
-	if session.IsEnded() {
-		m.logger.Warnw("Session already ended before startCall", "call_id", callID)
-		return
-	}
-
-	callCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	tenantID := fmt.Sprintf("%d", cc.OrganizationID)
-
-	// Register session so handleBye can find it and cancel the context.
-	m.mu.Lock()
-	m.sessions[callID] = &sip_infra.SIPSession{
-		CallID:      callID,
-		AssistantID: cc.AssistantID,
-		TenantID:    tenantID,
-		Auth:        auth,
-		Config:      sipConfig,
-		Cancel:      cancel,
-	}
-	m.mu.Unlock()
-
-	defer func() {
-		m.mu.Lock()
-		delete(m.sessions, callID)
-		m.mu.Unlock()
-	}()
-
-	// Check if BYE arrived before we registered. If so, handleBye (sip.go) couldn't
-	// find us in m.sessions to cancel callCtx. Cancel it now ourselves.
-	// For outbound calls, handleBye does NOT call session.End() (to avoid killing
-	// startCall prematurely), so we must check ByeReceived() rather than IsEnded().
-	select {
-	case <-session.ByeReceived():
-		m.logger.Infow("BYE was received before startCall registered — aborting call setup",
-			"call_id", callID)
-		cancel()
-		return
-	default:
-	}
-
-	// Checkpoint: BYE may have arrived while we registered.
-	if session.IsEnded() {
-		m.logger.Warnw("Session ended during setup (post-register)", "call_id", callID)
-		return
-	}
-
-	// Create SIP streamer (uses existing session's RTP handler)
-	streamer, err := internal_telephony.Telephony(internal_telephony.SIP).
-		NewStreamer(m.logger, cc, vaultCred, internal_telephony.StreamerOption{
-			Ctx:        callCtx,
-			SIPSession: session,
-			SIPConfig:  sipConfig,
+	observer := m.createObserver(m.ctx, setup, auth)
+	if observer != nil {
+		reason := "call_failed"
+		if callErr != nil {
+			reason = callErr.Error()
+		}
+		observer.EmitMetric(m.ctx, observe.CallStatusMetric("FAILED", reason))
+		observer.EmitEvent(m.ctx, observe.ComponentTelephony, map[string]string{
+			observe.DataType:   observe.EventCallEnded,
+			observe.DataReason: reason,
 		})
-	if err != nil {
-		m.logger.Error("Failed to create SIP streamer", "error", err, "call_id", callID)
-		return
-	}
-
-	// Checkpoint: BYE may have arrived during streamer creation.
-	// For outbound calls, handleBye does NOT call session.End(), so also check ByeReceived().
-	if session.IsEnded() || isByeReceived(session) {
-		if closeable, ok := streamer.(io.Closer); ok {
-			closeable.Close()
-		}
-		m.logger.Warnw("Session ended during setup (post-streamer)", "call_id", callID)
-		return
-	}
-
-	talker, err := internal_adapter.GetTalker(
-		utils.PhoneCall,
-		callCtx,
-		m.cfg,
-		m.logger,
-		m.postgres,
-		m.opensearch,
-		m.redis,
-		m.storage,
-		streamer,
-	)
-	if err != nil {
-		if closeable, ok := streamer.(io.Closer); ok {
-			closeable.Close()
-		}
-		m.logger.Error("Failed to create SIP talker", "error", err, "call_id", callID)
-		return
-	}
-
-	m.logger.Infow("SIP call started",
-		"call_id", callID,
-		"assistant_id", cc.AssistantID,
-		"conversation_id", cc.ConversationID,
-		"caller", cc.CallerNumber)
-
-	// talker.Talk blocks for the call duration. If BYE cancels callCtx,
-	// Talk will observe it and return.
-	if err := talker.Talk(callCtx, auth); err != nil {
-		m.logger.Warnw("SIP talker exited", "error", err, "call_id", callID)
-	}
-
-	m.logger.Infow("SIP call ended", "call_id", callID)
-}
-
-// isByeReceived does a non-blocking check on whether a SIP BYE has been received
-// for the given session. For outbound calls, handleBye does NOT call session.End()
-// (to avoid killing startCall prematurely), so this is the correct way to detect
-// an early BYE during outbound call setup.
-func isByeReceived(session *sip_infra.Session) bool {
-	select {
-	case <-session.ByeReceived():
-		return true
-	default:
-		return false
+		observer.Shutdown(m.ctx)
 	}
 }
 
-// handleBye processes SIP BYE requests
-func (m *SIPEngine) handleBye(session *sip_infra.Session) error {
-	callID := session.GetInfo().CallID
-	m.logger.Infow("SIP BYE received", "call_id", callID)
-
-	// Cancel the call context
-	m.mu.Lock()
-	if sipSession, exists := m.sessions[callID]; exists {
-		if sipSession.Cancel != nil {
-			sipSession.Cancel()
-		}
-		delete(m.sessions, callID)
-	}
-	m.mu.Unlock()
-
-	return nil
-}
-
-// handleCancel processes SIP CANCEL requests
-func (m *SIPEngine) handleCancel(session *sip_infra.Session) error {
-	callID := session.GetInfo().CallID
-	m.logger.Infow("SIP CANCEL received", "call_id", callID)
-
-	// Cancel the call context
-	m.mu.Lock()
-	if sipSession, exists := m.sessions[callID]; exists {
-		if sipSession.Cancel != nil {
-			sipSession.Cancel()
-		}
-		delete(m.sessions, callID)
-	}
-	m.mu.Unlock()
-
-	return nil
-}
-
-// HandleIncomingCall processes an incoming SIP INVITE
-// This is called when a SIP call arrives for an assistant
-func (m *SIPEngine) HandleIncomingCall(
-	ctx context.Context,
-	auth types.SimplePrinciple,
-	assistantID uint64,
-	callerID string,
-	sipConfig *sip_infra.Config,
-) error {
-	m.logger.Infow("Incoming SIP call",
-		"assistant", assistantID,
-		"caller", callerID)
-
-	// Load assistant
-	assistant, err := m.assistantService.Get(ctx, auth, assistantID, nil, nil)
-	if err != nil {
-		m.logger.Errorf("Failed to load assistant for SIP call: %v", err)
-		return fmt.Errorf("failed to load assistant: %w", err)
-	}
-
-	// Create identifier for the conversation
-
-	// Create new conversation for SIP session
-	conversation, err := m.assistantConversationService.
-		CreateConversation(
-			ctx, auth, callerID, assistantID, assistant.AssistantProviderId,
-			type_enums.DIRECTION_INBOUND, utils.SIP,
-		)
-	if err != nil {
-		m.logger.Errorf("Failed to create conversation for SIP call: %v", err)
-		return fmt.Errorf("failed to create conversation: %w", err)
-	}
-
-	// Build CallContext for the streamer.
-	cc := &callcontext.CallContext{
-		AssistantID:         assistantID,
-		ConversationID:      conversation.Id,
-		AssistantProviderId: assistant.AssistantProviderId,
-		AuthToken:           auth.GetCurrentToken(),
-		AuthType:            auth.Type(),
-		Direction:           "inbound",
-		CallerNumber:        callerID,
-		Provider:            string(utils.SIP),
-	}
-	if auth.GetCurrentProjectId() != nil {
-		cc.ProjectID = *auth.GetCurrentProjectId()
-	}
-	if auth.GetCurrentOrganizationId() != nil {
-		cc.OrganizationID = *auth.GetCurrentOrganizationId()
-	}
-
-	// Create SIP streamer
-	// TODO: HandleIncomingCall needs a session from SIP server — this path is for webhook-based calls
-	// TODO: Also need to pass vault credential here — currently nil for webhook-based calls
-	sipCtx, cancel := context.WithCancel(ctx)
-	streamer, err := internal_telephony.Telephony(internal_telephony.SIP).NewStreamer(
-		m.logger, cc, nil, internal_telephony.StreamerOption{
-			Ctx:       sipCtx,
-			SIPConfig: sipConfig,
-		},
-	)
-	if err != nil {
-		cancel()
-		m.assistantConversationService.ApplyConversationMetrics(ctx, auth, assistantID, conversation.Id,
-			[]*types.Metric{{Name: type_enums.STATUS.String(), Value: type_enums.RECORD_FAILED.String(), Description: "SIP setup failed"}})
-		m.logger.Errorf("Failed to create SIP streamer: %v", err)
-		return fmt.Errorf("failed to create SIP streamer: %w", err)
-	}
-
-	// Create talker with SIP source
-	talker, err := internal_adapter.GetTalker(
-		utils.SIP,
-		ctx,
-		m.cfg,
-		m.logger,
-		m.postgres,
-		m.opensearch,
-		m.redis,
-		m.storage,
-		streamer,
-	)
-	if err != nil {
-		if closeable, ok := streamer.(io.Closer); ok {
-			closeable.Close()
-		}
-		cancel()
-		m.assistantConversationService.ApplyConversationMetrics(ctx, auth, assistantID, conversation.Id,
-			[]*types.Metric{{Name: type_enums.STATUS.String(), Value: type_enums.RECORD_FAILED.String(), Description: "Talker creation failed"}})
-		m.logger.Errorf("Failed to create SIP talker: %v", err)
-		return fmt.Errorf("failed to create talker: %w", err)
-	}
-
-	// Store session with tenant-specific config
-	tenantID := fmt.Sprintf("%d", *auth.GetCurrentOrganizationId())
-	callID := fmt.Sprintf("sip-%s-%d-%d", tenantID, assistantID, conversation.Id)
-	m.mu.Lock()
-	m.sessions[callID] = &sip_infra.SIPSession{
-		CallID:      callID,
-		AssistantID: assistantID,
-		TenantID:    tenantID,
-		Auth:        auth,
-		Config:      sipConfig,
-		Cancel:      cancel,
-	}
-	m.mu.Unlock()
-
-	m.logger.Infof("SIP session started: assistant=%d, conversation=%d, caller=%s",
-		assistantID, conversation.Id, callerID)
-
-	// Start the conversation in a goroutine
-	go func() {
-		defer func() {
-			m.mu.Lock()
-			delete(m.sessions, callID)
-			m.mu.Unlock()
-			cancel()
-		}()
-
-		if err := talker.Talk(sipCtx, auth); err != nil {
-			m.logger.Errorf("SIP conversation error: %v", err)
-		}
-
-		m.logger.Infof("SIP session ended: assistant=%d, conversation=%d",
-			assistantID, conversation.Id)
-	}()
-
-	return nil
-}
-
-// EndCall terminates an active SIP call.
-// First closes the streamer (which sends SIP BYE to the remote party),
-// then cancels the session context for full cleanup.
 func (m *SIPEngine) EndCall(callID string) error {
-	m.mu.Lock()
-	session, exists := m.sessions[callID]
-	if !exists {
-		m.mu.Unlock()
-		return fmt.Errorf("call not found: %s", callID)
+	m.mu.RLock()
+	srv := m.server
+	m.mu.RUnlock()
+	if srv == nil {
+		return fmt.Errorf("SIP server not running")
 	}
-	delete(m.sessions, callID)
-	m.mu.Unlock()
-
-	// Close the streamer first — this sends SIP BYE via session.Disconnect()
-	// before performing local cleanup.
-	if session.Streamer != nil {
-		if closeable, ok := session.Streamer.(io.Closer); ok {
-			if err := closeable.Close(); err != nil {
-				m.logger.Warnw("EndCall: streamer close failed", "callID", callID, "error", err)
-			}
-		}
+	session, ok := srv.GetSession(callID)
+	if !ok {
+		return fmt.Errorf("session %s not found", callID)
 	}
-
-	if session.Cancel != nil {
-		session.Cancel()
-	}
-
-	m.logger.Infow("SIP call ended", "callID", callID)
-	return nil
+	return srv.EndCall(session)
 }
 
-// GetActiveCalls returns the number of active SIP calls
 func (m *SIPEngine) GetActiveCalls() int {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(m.sessions)
+	srv := m.server
+	m.mu.RUnlock()
+	if srv != nil {
+		return srv.SessionCount()
+	}
+	return 0
 }
 
-// Stop stops the SIP manager and terminates all active calls
 func (m *SIPEngine) Stop() {
+	if m.registrationClient != nil {
+		m.registrationClient.UnregisterAll(context.Background())
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
-
 	m.mu.Lock()
-	// Stop the shared server
-	if m.server != nil {
-		m.server.Stop()
-		m.server = nil
-	}
-
-	// Cancel all active sessions
-	for callID, session := range m.sessions {
-		if session.Cancel != nil {
-			session.Cancel()
-		}
-		delete(m.sessions, callID)
-	}
+	srv := m.server
+	m.server = nil
 	m.mu.Unlock()
-
+	if srv != nil {
+		srv.Stop()
+	}
 	m.logger.Infow("SIP Manager stopped")
 }
 
-// Close implements the closeable interface for graceful shutdown
 func (m *SIPEngine) Disconnect(ctx context.Context) error {
 	m.Stop()
 	return nil
 }
 
-// fetchSIPConfigFromVault fetches SIP provider credentials from vault, then overlays
-// platform operational settings (port, transport, RTP range) from app config.
-// Twilio/providers give: sip_uri, sip_username, sip_password
-// Our platform provides: port, transport, rtp_port_range from app config
-func (m *SIPEngine) fetchSIPConfigFromVault(auth types.SimplePrinciple, assistant *internal_assistant_entity.Assistant) (*sip_infra.Config, error) {
-	if assistant.AssistantPhoneDeployment == nil {
-		return nil, fmt.Errorf("assistant has no phone deployment configured")
-	}
-
-	opts := assistant.AssistantPhoneDeployment.GetOptions()
-	credentialID, err := opts.GetUint64("rapida.credential_id")
-	if err != nil {
-		return nil, fmt.Errorf("no credential_id in phone deployment: %w", err)
-	}
-
-	vaultCred, err := m.vaultClient.GetCredential(m.ctx, auth, credentialID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch vault credential %d: %w", credentialID, err)
-	}
-
-	// Parse provider credentials from vault
-	sipConfig, err := GetSIPConfigFromVault(vaultCred)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse SIP config from vault: %w", err)
-	}
-
-	// Overlay platform operational settings from app config
-	if m.cfg.SIPConfig != nil {
-		sipConfig.ApplyOperationalDefaults(
-			m.cfg.SIPConfig.Port,
-			sip_infra.Transport(m.cfg.SIPConfig.Transport),
-			m.cfg.SIPConfig.RTPPortRangeStart,
-			m.cfg.SIPConfig.RTPPortRangeEnd,
-		)
-	}
-
-	return sipConfig, nil
-}
-
-// fetchSIPConfigAndVaultCredential fetches both the SIP config and the raw vault credential.
-// Returns (*sip_infra.Config, *protos.VaultCredential, error)
 func (m *SIPEngine) fetchSIPConfigAndVaultCredential(auth types.SimplePrinciple, assistant *internal_assistant_entity.Assistant) (*sip_infra.Config, *protos.VaultCredential, error) {
 	if assistant.AssistantPhoneDeployment == nil {
 		return nil, nil, fmt.Errorf("assistant has no phone deployment configured")
@@ -916,13 +441,11 @@ func (m *SIPEngine) fetchSIPConfigAndVaultCredential(auth types.SimplePrinciple,
 		return nil, nil, fmt.Errorf("failed to fetch vault credential %d: %w", credentialID, err)
 	}
 
-	// Parse provider credentials from vault
-	sipConfig, err := GetSIPConfigFromVault(vaultCred)
+	sipConfig, err := sip_infra.ParseConfigFromVault(vaultCred)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse SIP config from vault: %w", err)
 	}
 
-	// Overlay platform operational settings from app config
 	if m.cfg.SIPConfig != nil {
 		sipConfig.ApplyOperationalDefaults(
 			m.cfg.SIPConfig.Port,
@@ -935,224 +458,518 @@ func (m *SIPEngine) fetchSIPConfigAndVaultCredential(auth types.SimplePrinciple,
 	return sipConfig, vaultCred, nil
 }
 
-// GetSIPConfigFromVault extracts SIP provider credentials from vault.
-// Only parses what a provider (Twilio, etc.) gives:
-//
-//	sip_uri      - SIP URI (e.g. "sip:pstn.twilio.com") → parsed into Server (and Port if present)
-//	sip_username - SIP username for registration
-//	sip_password - SIP password for registration
-//	sip_server   - (optional) explicit server address, overrides sip_uri
-//	sip_realm    - (optional) SIP realm for auth
-//	sip_domain   - (optional) SIP domain
-//
-// Does NOT set operational fields (port, transport, RTP range) — those come from app config.
-func GetSIPConfigFromVault(vaultCredential *protos.VaultCredential) (*sip_infra.Config, error) {
-	if vaultCredential == nil || vaultCredential.GetValue() == nil {
-		return nil, fmt.Errorf("vault credential is required")
+// routingMiddleware resolves the assistant for an inbound INVITE by looking up
+// the DID from the To-URI (or From-URI fallback) against phone deployments.
+func (m *SIPEngine) routingMiddleware(ctx *sip_infra.SIPRequestContext, next func() (*sip_infra.InviteResult, error)) (*sip_infra.InviteResult, error) {
+	did := sip_infra.ExtractDIDFromURI(ctx.ToURI)
+	if did == "" {
+		did = sip_infra.ExtractDIDFromURI(ctx.FromURI)
+	}
+	if did == "" {
+		return sip_infra.Reject(404, "No DID found in SIP URI"), nil
 	}
 
-	credMap := vaultCredential.GetValue().AsMap()
-	cfg := &sip_infra.Config{}
+	assistantID, auth, err := m.resolveAssistantByDID(did)
+	if err != nil {
+		m.logger.Warnw("SIP: DID lookup failed",
+			"call_id", ctx.CallID,
+			"did", did,
+			"error", err)
+		return sip_infra.Reject(404, "No assistant found for this number"), nil
+	}
 
-	// Parse sip_uri to extract server and port (e.g. "sip:192.168.1.5:5060")
-	if sipURI, ok := credMap["sip_uri"].(string); ok && sipURI != "" {
-		server, port, err := parseSIPURI(sipURI)
-		if err == nil {
-			cfg.Server = server
-			if port > 0 {
-				cfg.Port = port
+	ctx.AssistantID = strconv.FormatUint(assistantID, 10)
+	ctx.Set("auth", auth)
+
+	m.logger.Infow("SIP: Routed by DID",
+		"call_id", ctx.CallID,
+		"did", did,
+		"assistant_id", assistantID)
+
+	return next()
+}
+
+// resolveAssistantByDID looks up which assistant owns the given DID (phone number)
+// using a single joined query across assistants, phone deployments, and telephony options.
+func (m *SIPEngine) resolveAssistantByDID(did string) (uint64, types.SimplePrinciple, error) {
+	db := m.postgres.DB(m.ctx)
+
+	type didLookupResult struct {
+		AssistantID    uint64
+		ProjectID      uint64
+		OrganizationID uint64
+	}
+	var result didLookupResult
+	tx := db.Raw(`
+		SELECT a.id as assistant_id, a.project_id, a.organization_id
+		FROM assistants a
+		JOIN assistant_phone_deployments apd ON apd.assistant_id = a.id
+		JOIN assistant_deployment_telephony_options o ON o.assistant_deployment_telephony_id = apd.id
+		WHERE apd.telephony_provider = ? AND o.key = ? AND (o.value = ? OR o.value = ?)`,
+		"sip", "phone", did, strings.TrimPrefix(did, "+")).
+		First(&result)
+	if tx.Error != nil {
+		return 0, nil, fmt.Errorf("no SIP phone deployment found for DID %s: %w", did, tx.Error)
+	}
+
+	projectScope := &types.ProjectScope{
+		ProjectId:      &result.ProjectID,
+		OrganizationId: &result.OrganizationID,
+	}
+	return result.AssistantID, projectScope, nil
+}
+
+const registrationPollInterval = 5 * time.Minute
+
+// startRegistrationWatcher polls DB every 5 minutes for new/removed SIP phone deployments.
+func (m *SIPEngine) startRegistrationWatcher(ctx context.Context) {
+	ticker := time.NewTicker(registrationPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.reconcileRegistrations(ctx)
+		}
+	}
+}
+
+// reconcileRegistrations syncs active SIP registrations with DB phone deployments.
+// - New deployments → register
+// - Removed deployments → unregister
+// - Failed/disabled deployments → skip
+// - Already active → no-op (renewLoop handles renewal)
+func (m *SIPEngine) reconcileRegistrations(ctx context.Context) {
+	db := m.postgres.DB(ctx)
+
+	var deployments []internal_assistant_entity.AssistantPhoneDeployment
+	tx := db.
+		Preload("TelephonyOption").
+		Where("telephony_provider = ?", "sip").
+		Find(&deployments)
+	if tx.Error != nil {
+		m.logger.Warnw("Failed to load SIP phone deployments", "error", tx.Error)
+		return
+	}
+
+	// Build desired state from DB
+	type desiredDID struct {
+		DID          string
+		CredentialID uint64
+		AssistantID  uint64
+		DeploymentID uint64
+		Status       string
+	}
+	desired := make(map[string]desiredDID)
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 10)
+
+	for _, dep := range deployments {
+		opts := dep.GetOptions()
+		did, _ := opts.GetString("phone")
+		if did == "" {
+			continue
+		}
+		credentialID, err := opts.GetUint64("rapida.credential_id")
+		if err != nil {
+			continue
+		}
+		sipStatus, _ := opts.GetString("rapida.sip_status")
+
+		// Skip failed/disabled deployments
+		if sipStatus == "failed" || sipStatus == "disabled" {
+			continue
+		}
+
+		desired[did] = desiredDID{
+			DID:          did,
+			CredentialID: credentialID,
+			AssistantID:  dep.AssistantId,
+			DeploymentID: dep.Id,
+			Status:       sipStatus,
+		}
+	}
+
+	// Current active registrations
+	activeDIDs := m.registrationClient.GetRegisteredDIDs()
+	activeSet := make(map[string]bool, len(activeDIDs))
+	for _, did := range activeDIDs {
+		activeSet[did] = true
+	}
+
+	// Register new DIDs (in DB but not active)
+	for did, d := range desired {
+		if activeSet[did] {
+			continue
+		}
+		d := d
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			m.registerDID(ctx, d.DID, d.CredentialID, d.AssistantID, d.DeploymentID)
+		}()
+	}
+
+	// Unregister removed DIDs (active but not in DB)
+	for _, did := range activeDIDs {
+		if _, ok := desired[did]; !ok {
+			m.logger.Infow("Unregistering removed DID", "did", did)
+			if err := m.registrationClient.Unregister(ctx, did); err != nil {
+				m.logger.Warnw("Failed to unregister removed DID", "did", did, "error", err)
 			}
 		}
 	}
 
-	// Explicit sip_server overrides sip_uri
-	if server, ok := credMap["sip_server"].(string); ok && server != "" {
-		cfg.Server = server
-	}
+	wg.Wait()
 
-	// Provider credentials
-	if username, ok := credMap["sip_username"].(string); ok {
-		cfg.Username = username
+	if len(desired) > 0 {
+		m.logger.Debugw("Registration reconciliation complete",
+			"desired", len(desired),
+			"active", m.registrationClient.ActiveCount())
 	}
-	if password, ok := credMap["sip_password"].(string); ok {
-		cfg.Password = password
-	}
-	if realm, ok := credMap["sip_realm"].(string); ok {
-		cfg.Realm = realm
-	}
-	if domain, ok := credMap["sip_domain"].(string); ok {
-		cfg.Domain = domain
-	}
-
-	return cfg, nil
 }
 
-// parseSIPURI parses a SIP URI into host and port
-// Supports formats: "sip:host:port", "sip:host", "host:port", "host"
-func parseSIPURI(uri string) (string, int, error) {
-	// Strip sip: or sips: scheme
-	raw := uri
-	raw = strings.TrimPrefix(raw, "sips:")
-	raw = strings.TrimPrefix(raw, "sip:")
+// registerDID registers a single DID with its SIP provider and writes status back to DB.
+func (m *SIPEngine) registerDID(ctx context.Context, did string, credentialID, assistantID, deploymentID uint64) {
+	db := m.postgres.DB(ctx)
 
-	host, portStr, err := net.SplitHostPort(raw)
+	var assistant internal_assistant_entity.Assistant
+	if err := db.Where("id = ?", assistantID).First(&assistant).Error; err != nil {
+		m.logger.Warnw("Failed to load assistant for registration",
+			"assistant_id", assistantID, "error", err)
+		return
+	}
+	auth := &types.ProjectScope{
+		ProjectId:      &assistant.ProjectId,
+		OrganizationId: &assistant.OrganizationId,
+	}
+
+	vaultCred, err := m.vaultClient.GetCredential(ctx, auth, credentialID)
 	if err != nil {
-		// No port in URI, treat whole string as host
-		return raw, 0, nil
+		m.logger.Warnw("Failed to fetch vault credential for registration",
+			"assistant_id", assistantID, "credential_id", credentialID, "error", err)
+		return
 	}
 
-	port, err := strconv.Atoi(portStr)
+	sipConfig, err := sip_infra.ParseConfigFromVault(vaultCred)
 	if err != nil {
-		return host, 0, fmt.Errorf("invalid port in SIP URI %q: %w", uri, err)
+		m.logger.Warnw("Failed to parse SIP config for registration",
+			"assistant_id", assistantID, "error", err)
+		return
 	}
 
-	return host, port, nil
+	if m.cfg.SIPConfig != nil {
+		sipConfig.ApplyOperationalDefaults(
+			m.cfg.SIPConfig.Port,
+			sip_infra.Transport(m.cfg.SIPConfig.Transport),
+			m.cfg.SIPConfig.RTPPortRangeStart,
+			m.cfg.SIPConfig.RTPPortRangeEnd,
+		)
+	}
+
+	if err := m.registrationClient.Register(ctx, &sip_infra.Registration{
+		DID:         did,
+		Config:      sipConfig,
+		AssistantID: assistantID,
+	}); err != nil {
+		// Auth failure → mark as failed so we don't retry
+		if errors.Is(err, sip_infra.ErrAuthFailed) {
+			m.logger.Errorw("SIP registration auth failed — marking deployment as failed",
+				"did", did, "assistant_id", assistantID, "error", err)
+			m.upsertDeploymentOption(ctx, deploymentID, "rapida.sip_status", "failed")
+			m.upsertDeploymentOption(ctx, deploymentID, "rapida.sip_error", err.Error())
+			return
+		}
+		// Transient failure → will retry next poll
+		m.logger.Warnw("SIP registration failed (will retry)",
+			"did", did, "assistant_id", assistantID, "error", err)
+		return
+	}
+
+	// Success → mark as active
+	m.upsertDeploymentOption(ctx, deploymentID, "rapida.sip_status", "active")
+	m.upsertDeploymentOption(ctx, deploymentID, "rapida.sip_error", "")
+
+	m.logger.Infow("SIP DID registered",
+		"did", did,
+		"assistant_id", assistantID,
+		"server", sipConfig.Server)
 }
 
-// GetSIPConfigFromDeployment extracts SIP provider credentials from assistant deployment options.
-// Only parses credential fields — operational settings must be applied separately via ApplyOperationalDefaults.
-func GetSIPConfigFromDeployment(opts map[string]interface{}) (*sip_infra.Config, error) {
-	cfg := &sip_infra.Config{}
-
-	if server, ok := opts["sip_server"].(string); ok {
-		cfg.Server = server
+// upsertDeploymentOption writes a key-value option to a phone deployment using the
+// same GORM upsert pattern as CreatePhoneDeployment.
+func (m *SIPEngine) upsertDeploymentOption(ctx context.Context, deploymentID uint64, key, value string) {
+	db := m.postgres.DB(ctx)
+	opt := &internal_assistant_entity.AssistantDeploymentTelephonyOption{
+		AssistantDeploymentTelephonyId: deploymentID,
+		Metadata: gorm_models.Metadata{
+			Key:   key,
+			Value: value,
+		},
 	}
-	if username, ok := opts["sip_username"].(string); ok {
-		cfg.Username = username
+	if err := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "assistant_deployment_telephony_id"}, {Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value", "updated_date"}),
+	}).Create(opt).Error; err != nil {
+		m.logger.Warnw("Failed to upsert deployment option", "deployment_id", deploymentID, "key", key, "error", err)
 	}
-	if password, ok := opts["sip_password"].(string); ok {
-		cfg.Password = password
-	}
-	if realm, ok := opts["sip_realm"].(string); ok {
-		cfg.Realm = realm
-	}
-	if domain, ok := opts["sip_domain"].(string); ok {
-		cfg.Domain = domain
-	}
-
-	return cfg, nil
 }
 
-// // SIPCallReceiver handles incoming SIP call webhooks (for SIP trunks that support webhooks)
-// // This is similar to telephony providers like Twilio that use webhooks for call events
-// // Multi-tenant: Config is passed per-call, resolved from assistant's deployment settings
-// // Note: This doesn't start a SIP server - it handles webhook-based calls where the provider manages SIP
-// func (cApi *ConversationApi) SIPCallReceiver(ctx context.Context, auth types.SimplePrinciple, assistantID uint64, callerID string, sipConfig *sip_infra.Config) error {
-// 	manager := SIPEngine(cApi)
-// 	manager.ctx, manager.cancel = context.WithCancel(ctx)
-// 	return manager.HandleIncomingCall(ctx, auth, assistantID, callerID, sipConfig)
-// }
+// RegisterAssistant registers a specific assistant's DID with its SIP provider.
+// Called dynamically when a phone deployment is created or updated.
+func (m *SIPEngine) RegisterAssistant(ctx context.Context, auth types.SimplePrinciple, assistantID uint64) error {
+	if m.registrationClient == nil {
+		return fmt.Errorf("registration client not initialized")
+	}
 
-// // SIPCallWebhookRequest represents an incoming SIP call webhook
-// type SIPCallWebhookRequest struct {
-// 	CallID    string                 `json:"call_id"`
-// 	From      string                 `json:"from"`
-// 	To        string                 `json:"to"`
-// 	Direction string                 `json:"direction"`
-// 	SIPConfig map[string]interface{} `json:"sip_config,omitempty"`
-// }
+	assistant, err := m.assistantService.Get(ctx, auth, assistantID, nil,
+		&internal_services.GetAssistantOption{InjectPhoneDeployment: true})
+	if err != nil {
+		return fmt.Errorf("failed to load assistant %d: %w", assistantID, err)
+	}
+	if assistant.AssistantPhoneDeployment == nil {
+		return fmt.Errorf("no phone deployment for assistant %d", assistantID)
+	}
+	if assistant.AssistantPhoneDeployment.TelephonyProvider != "sip" {
+		return nil // Not a SIP deployment
+	}
 
-// // SIPEventWebhookRequest represents a SIP event webhook
-// type SIPEventWebhookRequest struct {
-// 	CallID    string                 `json:"call_id"`
-// 	EventType string                 `json:"event_type"` // answered, hangup, dtmf, etc.
-// 	Timestamp string                 `json:"timestamp"`
-// 	Data      map[string]interface{} `json:"data,omitempty"`
-// }
+	did, _ := assistant.AssistantPhoneDeployment.GetOptions().GetString("phone")
+	if did == "" {
+		return fmt.Errorf("phone deployment has no DID configured")
+	}
 
-// // SIPCallWebhook handles incoming SIP call webhooks from SIP trunks
-// // POST /v1/talk/sip/call/:assistantId
-// // This endpoint is called by SIP providers (Telnyx, SignalWire, etc.) when a call arrives
-// func (cApi *ConversationApi) SIPCallWebhook(c *gin.Context) {
-// 	auth, isAuthenticated := types.GetAuthPrinciple(c)
-// 	if !isAuthenticated {
-// 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthenticated request"})
-// 		return
-// 	}
+	sipConfig, _, err := m.fetchSIPConfigAndVaultCredential(auth, assistant)
+	if err != nil {
+		return fmt.Errorf("failed to fetch SIP config: %w", err)
+	}
 
-// 	assistantIdStr := c.Param("assistantId")
-// 	assistantId, err := strconv.ParseUint(assistantIdStr, 10, 64)
-// 	if err != nil {
-// 		logger.Errorf("Invalid assistantId: %v", err)
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assistantId"})
-// 		return
-// 	}
+	return m.registrationClient.Register(ctx, &sip_infra.Registration{
+		DID:         did,
+		Config:      sipConfig,
+		AssistantID: assistantID,
+	})
+}
 
-// 	var req SIPCallWebhookRequest
-// 	if err := c.ShouldBindJSON(&req); err != nil {
-// 		logger.Errorf("Invalid SIP webhook request: %v", err)
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
-// 		return
-// 	}
+func (m *SIPEngine) UnregisterAssistant(ctx context.Context, did string) error {
+	if m.registrationClient == nil {
+		return nil
+	}
+	return m.registrationClient.Unregister(ctx, did)
+}
 
-// 	// Extract SIP config from request or use defaults
-// 	sipConfig, err := GetSIPConfigFromDeployment(req.SIPConfig)
-// 	if err != nil {
-// 		logger.Errorf("Invalid SIP config: %v", err)
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid SIP configuration"})
-// 		return
-// 	}
+// pipelineCreateConversation creates a conversation for inbound calls.
+// For outbound calls, the conversation is already created by the channel pipeline.
+func (m *SIPEngine) pipelineCreateConversation(ctx context.Context, auth types.SimplePrinciple, assistantID uint64, fromURI string, direction string) (uint64, error) {
+	dirEnum := type_enums.DIRECTION_INBOUND
 
-// 	// Handle the incoming call
-// 	if err := SIPCallReceiver(c.Request.Context(), auth, assistantId, req.From, sipConfig); err != nil {
-// 		logger.Errorf("Failed to handle SIP call: %v", err)
-// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to handle call"})
-// 		return
-// 	}
+	if direction == "outbound" {
+		dirEnum = type_enums.DIRECTION_OUTBOUND
+	}
 
-// 	logger.Infof("SIP call webhook received: assistant=%d, from=%s, callId=%s",
-// 		assistantId, req.From, req.CallID)
+	// Normalize SIP URI to phone number for caller identity
+	callerNumber := sip_infra.ExtractDIDFromURI(fromURI)
+	if callerNumber == "" {
+		callerNumber = fromURI
+	}
 
-// 	c.JSON(http.StatusOK, gin.H{
-// 		"status":  "accepted",
-// 		"call_id": req.CallID,
-// 	})
-// }
+	assistant, err := m.assistantService.Get(ctx, auth, assistantID, utils.GetVersionDefinition("latest"),
+		&internal_services.GetAssistantOption{InjectPhoneDeployment: true})
+	if err != nil {
+		return 0, fmt.Errorf("failed to load assistant %d: %w", assistantID, err)
+	}
 
-// // SIPEventWebhook handles SIP event webhooks (hangup, dtmf, etc.)
-// // POST /v1/talk/sip/event/:assistantId/:conversationId
-// func (cApi *ConversationApi) SIPEventWebhook(c *gin.Context) {
-// 	auth, isAuthenticated := types.GetAuthPrinciple(c)
-// 	if !isAuthenticated {
-// 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthenticated request"})
-// 		return
-// 	}
+	conversation, err := m.assistantConversationService.CreateConversation(
+		ctx, auth, callerNumber, assistant.Id, assistant.AssistantProviderId, dirEnum, utils.PhoneCall,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create conversation: %w", err)
+	}
+	return conversation.Id, nil
+}
 
-// 	assistantIdStr := c.Param("assistantId")
-// 	assistantId, err := strconv.ParseUint(assistantIdStr, 10, 64)
-// 	if err != nil {
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assistantId"})
-// 		return
-// 	}
+// pipelineCallSetup builds the CallSetupResult from auth and IDs.
+// Pure function — conversation must already exist (created by pipeline or channel layer).
+func (m *SIPEngine) pipelineCallSetup(ctx context.Context, session *sip_infra.Session, auth types.SimplePrinciple, assistantID uint64, conversationID uint64) (*sip_pipeline.CallSetupResult, error) {
+	var assistant *internal_assistant_entity.Assistant
+	if assistantVal, ok := session.GetMetadata("assistant"); ok {
+		assistant, _ = assistantVal.(*internal_assistant_entity.Assistant)
+	}
+	if assistant == nil {
+		var err error
+		assistant, err = m.assistantService.Get(ctx, auth, assistantID, utils.GetVersionDefinition("latest"),
+			&internal_services.GetAssistantOption{InjectPhoneDeployment: true})
+		if err != nil {
+			return nil, fmt.Errorf("failed to load assistant %d: %w", assistantID, err)
+		}
+	}
 
-// 	conversationIdStr := c.Param("conversationId")
-// 	conversationId, err := strconv.ParseUint(conversationIdStr, 10, 64)
-// 	if err != nil {
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversationId"})
-// 		return
-// 	}
+	result := &sip_pipeline.CallSetupResult{
+		AssistantID:         assistant.Id,
+		ConversationID:      conversationID,
+		AssistantProviderId: assistant.AssistantProviderId,
+		AuthToken:           auth.GetCurrentToken(),
+		AuthType:            auth.Type(),
+	}
+	if auth.GetCurrentProjectId() != nil {
+		result.ProjectID = *auth.GetCurrentProjectId()
+	}
+	if auth.GetCurrentOrganizationId() != nil {
+		result.OrganizationID = *auth.GetCurrentOrganizationId()
+	}
 
-// 	var req SIPEventWebhookRequest
-// 	if err := c.ShouldBindJSON(&req); err != nil {
-// 		logger.Errorf("Invalid SIP event webhook: %v", err)
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
-// 		return
-// 	}
+	return result, nil
+}
 
-// 	logger.Infof("SIP event webhook: assistant=%d, conversation=%d, event=%s",
-// 		assistantId, conversationId, req.EventType)
+// pipelineCallStart creates a streamer and talker, then blocks on talker.Talk
+// until the call ends. Returns error for setup failures (streamer/talker creation);
+// nil means the call connected and Talk() completed normally or via disconnect.
+func (m *SIPEngine) pipelineCallStart(ctx context.Context, session *sip_infra.Session, setup *sip_pipeline.CallSetupResult, vaultCred interface{}, sipConfig *sip_infra.Config, direction string) error {
+	callID := session.GetCallID()
+	isOutbound := session.GetInfo().Direction == sip_infra.CallDirectionOutbound
 
-// 	// Process event based on type
-// 	switch req.EventType {
-// 	case "hangup", "bye":
-// 		// Apply end metrics
-// 		assistantConversationService.ApplyConversationMetrics(c, auth, assistantId, conversationId,
-// 			[]*types.Metric{{Name: type_enums.STATUS.String(), Value: type_enums.RECORD_COMPLETE.String(), Description: "SIP call ended"}})
-// 	case "answered":
-// 		// Apply connected metrics
-// 		assistantConversationService.ApplyConversationMetrics(c, auth, assistantId, conversationId,
-// 			[]*types.Metric{{Name: "sip_answered", Value: "true", Description: "SIP call answered"}})
-// 	}
+	// Outbound: ensure session.End() so handleOutboundDialog can proceed.
+	if isOutbound {
+		defer func() {
+			if !session.IsEnded() {
+				session.End()
+			}
+		}()
+	}
 
-// 	c.JSON(http.StatusOK, gin.H{"status": "processed"})
-// }
+	if session.IsEnded() {
+		m.logger.Warnw("Session already ended before call start", "call_id", callID)
+		return fmt.Errorf("session_ended_before_start")
+	}
+
+	authVal, _ := session.GetMetadata("auth")
+	auth, _ := authVal.(types.SimplePrinciple)
+
+	cc := &callcontext.CallContext{
+		AssistantID:         setup.AssistantID,
+		ConversationID:      setup.ConversationID,
+		AssistantProviderId: setup.AssistantProviderId,
+		AuthToken:           setup.AuthToken,
+		AuthType:            setup.AuthType,
+		Direction:           direction,
+		Provider:            "sip",
+		ChannelUUID:         callID,
+		ProjectID:           setup.ProjectID,
+		OrganizationID:      setup.OrganizationID,
+	}
+
+	callCtx, cancel := context.WithCancel(session.Context())
+	defer cancel()
+
+	select {
+	case <-session.ByeReceived():
+		m.logger.Infow("BYE received before call start", "call_id", callID)
+		return fmt.Errorf("bye_before_start")
+	default:
+	}
+
+	var vc *protos.VaultCredential
+	if v, ok := vaultCred.(*protos.VaultCredential); ok {
+		vc = v
+	} else {
+		vc = session.GetVaultCredential()
+	}
+
+	streamer, err := internal_telephony.Telephony(internal_telephony.SIP).
+		NewStreamer(m.logger, cc, vc, internal_telephony.StreamerOption{
+			Ctx:        callCtx,
+			SIPSession: session,
+			SIPConfig:  sipConfig,
+		})
+	if err != nil {
+		m.logger.Error("Failed to create SIP streamer", "error", err, "call_id", callID)
+		return fmt.Errorf("streamer_failed: %w", err)
+	}
+
+	if session.IsEnded() {
+		if closeable, ok := streamer.(io.Closer); ok {
+			closeable.Close()
+		}
+		return fmt.Errorf("session_ended_after_streamer")
+	}
+
+	talker, err := internal_adapter.GetTalker(
+		utils.PhoneCall, callCtx, m.cfg, m.logger,
+		m.postgres, m.opensearch, m.redis, m.storage, streamer,
+	)
+	if err != nil {
+		if closeable, ok := streamer.(io.Closer); ok {
+			closeable.Close()
+		}
+		m.logger.Error("Failed to create SIP talker", "error", err, "call_id", callID)
+		return fmt.Errorf("talker_failed: %w", err)
+	}
+
+	m.logger.Infow("SIP call started",
+		"call_id", callID,
+		"assistant_id", cc.AssistantID,
+		"conversation_id", cc.ConversationID,
+		"direction", direction)
+
+	if err := talker.Talk(callCtx, auth); err != nil {
+		m.logger.Warnw("SIP talker exited", "error", err, "call_id", callID)
+	}
+
+	m.logger.Infow("SIP call ended", "call_id", callID)
+	return nil
+}
+
+func (m *SIPEngine) pipelineCallEnd(callID string) {
+	m.mu.RLock()
+	srv := m.server
+	m.mu.RUnlock()
+	if srv == nil {
+		return
+	}
+	if session, ok := srv.GetSession(callID); ok {
+		session.End()
+	}
+}
+
+func (m *SIPEngine) createObserver(ctx context.Context, setup *sip_pipeline.CallSetupResult, auth types.SimplePrinciple) *observe.ConversationObserver {
+	meta := observe.SessionMeta{
+		AssistantID:             setup.AssistantID,
+		AssistantConversationID: setup.ConversationID,
+		ProjectID:               setup.ProjectID,
+		OrganizationID:          setup.OrganizationID,
+	}
+	var eventExporters []observe.EventExporter
+	var metricExporters []observe.MetricExporter
+	if m.cfg.TelemetryConfig != nil {
+		if envType := m.cfg.TelemetryConfig.Type(); envType != "" {
+			evtExp, metExp, err := observe_exporters.GetExporter(
+				ctx, m.logger, &m.cfg.AppConfig, m.opensearch, string(envType), m.cfg.TelemetryConfig.ToMap(),
+			)
+			if err != nil {
+				m.logger.Warnf("SIP observer: default exporter creation failed: %v", err)
+			} else if evtExp != nil && metExp != nil {
+				eventExporters = append(eventExporters, evtExp)
+				metricExporters = append(metricExporters, metExp)
+			}
+		}
+	}
+	return observe.NewConversationObserver(&observe.ConversationObserverConfig{
+		Logger:         m.logger,
+		Auth:           auth,
+		AssistantID:    setup.AssistantID,
+		ConversationID: setup.ConversationID,
+		ProjectID:      setup.ProjectID,
+		OrganizationID: setup.OrganizationID,
+		Persist:        m.assistantConversationService,
+		Events:         observe.NewEventCollector(m.logger, meta, eventExporters...),
+		Metrics:        observe.NewMetricCollector(m.logger, meta, metricExporters...),
+	})
+}

@@ -4,7 +4,7 @@ import { SidebarSimpleListItem } from '@/app/components/navigation/sidebar/sideb
 import { Folders } from '@carbon/icons-react';
 import { useLocation } from 'react-router-dom';
 
-export function Knowledge() {
+export function Knowledge({ isLoading }: { isLoading?: boolean }) {
   const location = useLocation();
   const { pathname } = location;
   const currentPath = '/knowledge';
@@ -14,11 +14,12 @@ export function Knowledge() {
       <SidebarSimpleListItem
         navigate={currentPath}
         active={pathname === currentPath}
+        loading={isLoading}
       >
         <SidebarIconWrapper>
           <Folders size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel>Knowledge</SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>Knowledge</SidebarLabel>
       </SidebarSimpleListItem>
     </li>
   );

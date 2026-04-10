@@ -58,7 +58,7 @@ export const Modal: FC<CarbonModalProps> = ({
   size = 'md',
   danger = false,
   preventCloseOnClickOutside = false,
-  selectorPrimaryFocus = '[data-modal-primary-focus]',
+  selectorPrimaryFocus,
   children,
   ...rest
 }) => {

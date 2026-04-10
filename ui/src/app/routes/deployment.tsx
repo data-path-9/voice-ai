@@ -37,7 +37,6 @@ import {
   DeploymentCreateAgentKitPage,
   DeploymentCreateWebsocketPage,
 } from '@/app/pages/assistant';
-import { AssistantManageLayout } from '@/app/pages/assistant/actions/assistant-manage.layout';
 import { AssistantViewLayout } from '@/app/pages/assistant/view/assistant-view.layout';
 import { StaticPageNotFoundPage } from '@/app/pages/static-pages';
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';

@@ -1,8 +1,5 @@
 import type { FC, ReactNode } from 'react';
-import {
-  InlineNotification,
-  ActionableNotification,
-} from '@carbon/react';
+import { InlineNotification, ActionableNotification } from '@carbon/react';
 import { cn } from '@/utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -109,6 +106,7 @@ export const LinkNotification: FC<LinkNotificationProps> = ({
   hideCloseButton = true,
 }) => (
   <ActionableNotification
+    role="none"
     kind={kind}
     title={title}
     subtitle={subtitle}

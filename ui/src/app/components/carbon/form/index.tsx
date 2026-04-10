@@ -56,11 +56,7 @@ export const Stack: FC<CarbonStackProps> = ({
   orientation = 'vertical',
 }) => {
   return (
-    <CarbonStack
-      className={cn(className)}
-      gap={gap}
-      orientation={orientation}
-    >
+    <CarbonStack className={cn(className)} gap={gap} orientation={orientation}>
       {children}
     </CarbonStack>
   );
@@ -132,24 +128,20 @@ export interface CarbonTextInputProps {
 }
 
 /** Carbon TextInput — single-line text field with label, helper, and validation. */
-export const TextInput = forwardRef<HTMLInputElement, CarbonTextInputProps>(({
-  id,
-  labelText,
-  className,
-  size = 'md',
-  ...rest
-}, ref) => {
-  return (
-    <CarbonTextInput
-      ref={ref}
-      id={id}
-      labelText={labelText}
-      className={cn(className)}
-      size={size}
-      {...rest}
-    />
-  );
-});
+export const TextInput = forwardRef<HTMLInputElement, CarbonTextInputProps>(
+  ({ id, labelText, className, size = 'md', ...rest }, ref) => {
+    return (
+      <CarbonTextInput
+        ref={ref}
+        id={id}
+        labelText={labelText}
+        className={cn(className)}
+        size={size}
+        {...rest}
+      />
+    );
+  },
+);
 
 /** Carbon TextInputSkeleton — loading placeholder for TextInput. */
 export const TextInputSkeleton: FC<{
@@ -218,7 +210,7 @@ export const TextAreaSkeleton: FC<{
 
 export interface CarbonCheckboxProps {
   id: string;
-  labelText: ReactNode;
+  labelText: string;
   className?: string;
   checked?: boolean;
   defaultChecked?: boolean;
@@ -256,8 +248,6 @@ export const Checkbox: FC<CarbonCheckboxProps> = ({
 };
 
 /** Carbon CheckboxSkeleton — loading placeholder for Checkbox. */
-export const CheckboxSkeleton: FC<{ className?: string }> = ({
-  className,
-}) => {
+export const CheckboxSkeleton: FC<{ className?: string }> = ({ className }) => {
   return <CarbonCheckboxSkeleton className={cn(className)} />;
 };

@@ -13,22 +13,24 @@ export const InputVarForm = React.forwardRef<
   return (
     <div
       className={cn(
-        'bg-white dark:bg-gray-900 focus-within:border-blue-600! border border-transparent!',
+        'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 transition-colors',
         props.className,
       )}
     >
       <label
         htmlFor={props.var.getName()}
-        className="flex shrink-0 items-center justify-between break-all p-3 pr-5 font-mono text-sm font-medium tracking-wide border-b border-gray-100 dark:border-gray-800"
+        className="flex shrink-0 items-center justify-between gap-3 break-all px-4 py-3 border-b border-gray-100 dark:border-gray-800"
       >
-        <span>
+        <span className="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">
           {'{{'}
           {props.var.getName()}
           {'}}'}
         </span>
-        <Pill className="py-0.5 px-2">{props.var.getType()}</Pill>
+        <Pill className="py-0.5 px-2 shrink-0">{props.var.getType()}</Pill>
       </label>
-      {props.children}
+      <div className="px-4 py-3 bg-gray-50/50 dark:bg-gray-950/40">
+        {props.children}
+      </div>
     </div>
   );
 });

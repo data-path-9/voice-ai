@@ -8,7 +8,7 @@ import {
   motion,
 } from 'framer-motion';
 import { CloseIcon } from '@/app/components/Icon/Close';
-import { TitleHeading } from '@/app/components/heading/title-heading';
+import { ModalHeader } from '@/app/components/carbon/modal';
 import { cn } from '@/utils';
 /**
  *
@@ -18,6 +18,7 @@ export interface SideModalProps
     HTMLAttributes<HTMLDivElement> {
   // title
   title?: string;
+  label?: string;
 
   // children
   children: any;
@@ -29,6 +30,7 @@ export interface SideModalProps
 // const DragCloseDrawer = ({ open, setModalOpen, children }) => {
 export const RightSideModal: FC<SideModalProps> = ({
   title,
+  label,
   modalOpen,
   setModalOpen,
   children,
@@ -102,13 +104,12 @@ export const RightSideModal: FC<SideModalProps> = ({
               ></button>
             </div>
             <div className="relative z-0 h-full overflow-auto flex flex-col">
-              {title ? (
-                <header className="flex justify-between items-center py-4 dark:bg-gray-800 bg-gray-100 px-4 shadow-md sticky top-0 z-10">
-                  <TitleHeading className="text-base">{title}</TitleHeading>
-                  <span className="cursor-pointer" onClick={handleClose}>
-                    <CloseIcon />
-                  </span>
-                </header>
+              {title || label ? (
+                <ModalHeader
+                  title={title}
+                  label={label}
+                  onClose={handleClose}
+                />
               ) : (
                 <header className="absolute top-0 z-10 right-0 p-4">
                   <span className="cursor-pointer" onClick={handleClose}>

@@ -4,15 +4,19 @@ import { TableBody } from '@/app/components/base/tables/table-body';
 import { TableCell } from '@/app/components/base/tables/table-cell';
 import { TableHead } from '@/app/components/base/tables/table-head';
 import { TableRow } from '@/app/components/base/tables/table-row';
-import { BlueNoticeBlock } from '@/app/components/container/message/notice-block';
 import { FC } from 'react';
+import { EmptyState } from '@/app/components/carbon/empty-state';
+import { DataCheck } from '@carbon/icons-react';
 
 export const EndpointArguments: FC<{ args: Array<Argument> }> = ({ args }) => {
   if (args.length <= 0)
     return (
-      <BlueNoticeBlock>
-        There are no args for given endpoint execution.
-      </BlueNoticeBlock>
+      <EmptyState
+        className="h-full min-h-[420px]"
+        icon={DataCheck}
+        title="No arguments found"
+        subtitle="No runtime arguments were recorded for this trace."
+      />
     );
   return (
     <Table className="w-full">

@@ -89,8 +89,16 @@ export const ListingPage: FC<{}> = () => {
 
   const onDateSelect = (to: Date, from: Date) => {
     conversationLogAction.setCriterias([
-      { k: 'assistant_conversation_messages.created_date', v: toDateString(from), logic: '>=' },
-      { k: 'assistant_conversation_messages.created_date', v: toDateString(to), logic: '<=' },
+      {
+        k: 'assistant_conversation_messages.created_date',
+        v: toDateString(from),
+        logic: '>=',
+      },
+      {
+        k: 'assistant_conversation_messages.created_date',
+        v: toDateString(to),
+        logic: '<=',
+      },
     ]);
   };
 
@@ -107,10 +115,18 @@ export const ListingPage: FC<{}> = () => {
       const [, filterType, filterValue] = match;
       switch (filterType) {
         case 'id':
-          criterias.push({ k: 'assistant_conversation_messages.id', v: filterValue, logic: '=' });
+          criterias.push({
+            k: 'assistant_conversation_messages.id',
+            v: filterValue,
+            logic: '=',
+          });
           break;
         case 'session':
-          criterias.push({ k: 'assistant_conversation_messages.assistant_conversation_id', v: filterValue, logic: '=' });
+          criterias.push({
+            k: 'assistant_conversation_messages.assistant_conversation_id',
+            v: filterValue,
+            logic: '=',
+          });
           break;
       }
     }
@@ -299,14 +315,18 @@ export const ListingPage: FC<{}> = () => {
                     'assistant_conversation_id',
                   ) && (
                     <TableCell>
-                      <TableLink href={`/deployment/assistant/${row.getAssistantid()}/sessions/${row.getAssistantconversationid()}`}>
+                      <TableLink
+                        href={`/deployment/assistant/${row.getAssistantid()}/sessions/${row.getAssistantconversationid()}`}
+                      >
                         {row.getAssistantconversationid()}
                       </TableLink>
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('assistant_id') && (
                     <TableCell>
-                      <TableLink href={`/deployment/assistant/${row.getAssistantid()}`}>
+                      <TableLink
+                        href={`/deployment/assistant/${row.getAssistantid()}`}
+                      >
                         {row.getAssistantid()}
                       </TableLink>
                     </TableCell>
@@ -319,10 +339,23 @@ export const ListingPage: FC<{}> = () => {
                   {conversationLogAction.visibleColumn('role') && (
                     <TableCell>
                       {row.getRole() ? (
-                        <Tag size="md" type={row.getRole().toLowerCase() === 'assistant' ? 'teal' : 'cool-gray'}>
+                        <Tag
+                          size="md"
+                          type={
+                            row.getRole().toLowerCase() === 'assistant'
+                              ? 'teal'
+                              : 'cool-gray'
+                          }
+                        >
                           <span className="inline-flex items-center gap-1.5 leading-none">
-                            {row.getRole().toLowerCase() === 'assistant' ? <Bot size={16} /> : <UserIcon size={16} />}
-                            {row.getRole().toLowerCase() === 'assistant' ? 'Assistant' : 'User'}
+                            {row.getRole().toLowerCase() === 'assistant' ? (
+                              <Bot size={16} />
+                            ) : (
+                              <UserIcon size={16} />
+                            )}
+                            {row.getRole().toLowerCase() === 'assistant'
+                              ? 'Assistant'
+                              : 'User'}
                           </span>
                         </Tag>
                       ) : (
@@ -340,7 +373,7 @@ export const ListingPage: FC<{}> = () => {
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('created_date') && (
-                    <TableCell className="!font-mono !text-xs whitespace-nowrap">
+                    <TableCell className="!text-xs whitespace-nowrap">
                       {row.getCreateddate() &&
                         toHumanReadableDateTime(row.getCreateddate()!)}
                     </TableCell>
@@ -387,9 +420,17 @@ export const ListingPage: FC<{}> = () => {
                       <CarbonStatusIndicator
                         state={
                           row.getRole()?.toLowerCase() === 'assistant'
-                            ? getMetricValueOrDefault(row.getMetricsList(), 'assistant_turn', row.getStatus())
+                            ? getMetricValueOrDefault(
+                                row.getMetricsList(),
+                                'assistant_turn',
+                                row.getStatus(),
+                              )
                             : row.getRole()?.toLowerCase() === 'user'
-                              ? getMetricValueOrDefault(row.getMetricsList(), 'user_turn', row.getStatus())
+                              ? getMetricValueOrDefault(
+                                  row.getMetricsList(),
+                                  'user_turn',
+                                  row.getStatus(),
+                                )
                               : row.getStatus()
                         }
                       />
@@ -416,7 +457,9 @@ export const ListingPage: FC<{}> = () => {
                       )}
                     </TableCell>
                   )}
-                  {conversationLogAction.visibleColumn('user_text_feedback') && (
+                  {conversationLogAction.visibleColumn(
+                    'user_text_feedback',
+                  ) && (
                     <TableCell className="!text-xs">
                       {getMetricValueOrDefault(
                         row.getMetricsList(),

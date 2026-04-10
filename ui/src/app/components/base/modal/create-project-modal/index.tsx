@@ -90,7 +90,6 @@ export const CreateProjectDialog = (props: CreateProjectDialogProps) => {
       open={props.modalOpen}
       onClose={() => props.setModalOpen(false)}
       size="sm"
-      selectorPrimaryFocus="#projectName"
     >
       <ModalHeader
         label="Project"

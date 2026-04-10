@@ -6,7 +6,7 @@ import { useLocation } from 'react-router-dom';
 import { Activity, DataBase, Chat, Webhook, ToolKit } from '@carbon/icons-react';
 import { useWorkspace } from '@/workspace';
 
-export const Observability = memo(() => {
+export const Observability = memo(({ isLoading }: { isLoading?: boolean }) => {
   const location = useLocation();
   const { pathname } = location;
   const workspace = useWorkspace();
@@ -16,50 +16,55 @@ export const Observability = memo(() => {
       <SidebarSimpleListItem
         active={pathname.endsWith('/logs')}
         navigate="/logs"
+        loading={isLoading}
       >
         <SidebarIconWrapper>
           <Activity size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel>LLM logs</SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>LLM logs</SidebarLabel>
       </SidebarSimpleListItem>
 
       <SidebarSimpleListItem
         active={pathname.includes('/logs/tool')}
         navigate="/logs/tool"
+        loading={isLoading}
       >
         <SidebarIconWrapper>
           <ToolKit size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel>Tool logs</SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>Tool logs</SidebarLabel>
       </SidebarSimpleListItem>
       <SidebarSimpleListItem
         active={pathname.includes('/logs/webhook')}
         navigate="/logs/webhook"
+        loading={isLoading}
       >
         <SidebarIconWrapper>
           <Webhook size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel>Webhook logs</SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>Webhook logs</SidebarLabel>
       </SidebarSimpleListItem>
       {workspace.features?.knowledge !== false && (
         <SidebarSimpleListItem
           active={pathname.includes('/logs/knowledge')}
           navigate="/logs/knowledge"
+          loading={isLoading}
         >
           <SidebarIconWrapper>
             <DataBase size={20} />
           </SidebarIconWrapper>
-          <SidebarLabel>Knowledge logs</SidebarLabel>
+          <SidebarLabel isLoading={isLoading}>Knowledge logs</SidebarLabel>
         </SidebarSimpleListItem>
       )}
       <SidebarSimpleListItem
         active={pathname.includes('/logs/conversation')}
         navigate="/logs/conversation"
+        loading={isLoading}
       >
         <SidebarIconWrapper>
           <Chat size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel>Conversation logs</SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>Conversation logs</SidebarLabel>
       </SidebarSimpleListItem>
     </li>
   );

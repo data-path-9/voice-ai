@@ -6,21 +6,23 @@ import { CustomLink } from '@/app/components/custom-link';
 import { useDarkMode } from '@/context/dark-mode-context';
 import { AuthContext } from '@/context/auth-context';
 import { Moon, Sun, UserAvatar } from '@carbon/icons-react';
-import { Label } from '../../form/label/index';
 import {
-  Breadcrumb,
-  BreadcrumbItem,
   HeaderGlobalAction,
   HeaderGlobalBar,
   HeaderPanel,
-  Dropdown,
   Switcher,
   SwitcherItem,
 } from '@carbon/react';
+import { Breadcrumb } from '@/app/components/carbon/breadcrumb';
+import { Dropdown } from '@/app/components/carbon/dropdown';
+import { useRapidaStore } from '@/hooks';
 
 export function ActionableHeader(props: { reload?: boolean }) {
   const location = useLocation();
   const { pathname } = location;
+  const { loading, loadingType } = useRapidaStore();
+  const isLoading = loading && loadingType === 'block';
+
   const [breadcrumbs, setBreadcrumbs] = useState<
     { label: string; href: string }[]
   >([]);
@@ -50,29 +52,29 @@ export function ActionableHeader(props: { reload?: boolean }) {
         'shrink-0',
       )}
     >
-      <Breadcrumb noTrailingSlash className="pl-4">
-        {breadcrumbs.map((x, idx) => (
-          <BreadcrumbItem key={idx}>
+      <Breadcrumb
+        isLoading={isLoading}
+        className="pl-4"
+        items={breadcrumbs.map(x => ({
+          label: x.label,
+          render: () => (
             <CustomLink className="capitalize" to={x.href}>
               {x.label}
             </CustomLink>
-          </BreadcrumbItem>
-        ))}
-      </Breadcrumb>
-      <CustomerOptions />
+          ),
+        }))}
+      />
+      <CustomerOptions isLoading={isLoading} />
     </header>
   );
 }
 
-export const CustomerOptions: FC<{ placement?: 'top' | 'bottom' }> = ({
-  placement,
-}) => {
-  const {
-    currentUser,
-    projectRoles,
-    currentProjectRole,
-    setCurrentProjectRole,
-  } = useContext(AuthContext);
+export const CustomerOptions: FC<{
+  placement?: 'top' | 'bottom';
+  isLoading?: boolean;
+}> = ({ placement, isLoading }) => {
+  const { projectRoles, currentProjectRole, setCurrentProjectRole } =
+    useContext(AuthContext);
 
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const { isDarkMode, toggleDarkMode } = useDarkMode();
@@ -97,6 +99,7 @@ export const CustomerOptions: FC<{ placement?: 'top' | 'bottom' }> = ({
             if (selectedItem) setCurrentProjectRole(selectedItem);
           }}
           className="project-selector-dropdown"
+          isLoading={isLoading}
         />
       )}
 

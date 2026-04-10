@@ -75,19 +75,38 @@ class FeaturePermission(_message.Message):
     isEnable: bool
     def __init__(self, id: _Optional[int] = ..., feature: _Optional[str] = ..., isEnable: bool = ...) -> None: ...
 
+class AuthBillingPlan(_message.Message):
+    __slots__ = ("planSlug", "planName", "quotas")
+    class QuotasEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: int
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[int] = ...) -> None: ...
+    PLANSLUG_FIELD_NUMBER: _ClassVar[int]
+    PLANNAME_FIELD_NUMBER: _ClassVar[int]
+    QUOTAS_FIELD_NUMBER: _ClassVar[int]
+    planSlug: str
+    planName: str
+    quotas: _containers.ScalarMap[str, int]
+    def __init__(self, planSlug: _Optional[str] = ..., planName: _Optional[str] = ..., quotas: _Optional[_Mapping[str, int]] = ...) -> None: ...
+
 class Authentication(_message.Message):
-    __slots__ = ("user", "token", "organizationRole", "projectRoles", "featurePermissions")
+    __slots__ = ("user", "token", "organizationRole", "projectRoles", "featurePermissions", "billingPlan")
     USER_FIELD_NUMBER: _ClassVar[int]
     TOKEN_FIELD_NUMBER: _ClassVar[int]
     ORGANIZATIONROLE_FIELD_NUMBER: _ClassVar[int]
     PROJECTROLES_FIELD_NUMBER: _ClassVar[int]
     FEATUREPERMISSIONS_FIELD_NUMBER: _ClassVar[int]
+    BILLINGPLAN_FIELD_NUMBER: _ClassVar[int]
     user: _common_pb2.User
     token: Token
     organizationRole: OrganizationRole
     projectRoles: _containers.RepeatedCompositeFieldContainer[ProjectRole]
     featurePermissions: _containers.RepeatedCompositeFieldContainer[FeaturePermission]
-    def __init__(self, user: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., token: _Optional[_Union[Token, _Mapping]] = ..., organizationRole: _Optional[_Union[OrganizationRole, _Mapping]] = ..., projectRoles: _Optional[_Iterable[_Union[ProjectRole, _Mapping]]] = ..., featurePermissions: _Optional[_Iterable[_Union[FeaturePermission, _Mapping]]] = ...) -> None: ...
+    billingPlan: AuthBillingPlan
+    def __init__(self, user: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., token: _Optional[_Union[Token, _Mapping]] = ..., organizationRole: _Optional[_Union[OrganizationRole, _Mapping]] = ..., projectRoles: _Optional[_Iterable[_Union[ProjectRole, _Mapping]]] = ..., featurePermissions: _Optional[_Iterable[_Union[FeaturePermission, _Mapping]]] = ..., billingPlan: _Optional[_Union[AuthBillingPlan, _Mapping]] = ...) -> None: ...
 
 class ScopedAuthentication(_message.Message):
     __slots__ = ("userId", "organizationId", "projectId", "status")

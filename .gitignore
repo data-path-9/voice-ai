@@ -12,3 +12,6 @@ license-check-and-add.json
 
 # Integration test credentials (never commit real API keys)
 **/integration_config.yaml
+
+.codex
+.claude

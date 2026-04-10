@@ -16,9 +16,8 @@ import { AuthContext } from '@/context/auth-context';
 import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
 import { PageTitleBlock } from '@/app/components/blocks/page-title-block';
 import { PageTitleWithCount } from '@/app/components/blocks/page-title-with-count';
-import { Plus, RotateCw } from 'lucide-react';
+import { Add, Renew, View, ViewOff, Copy, Checkmark } from '@carbon/icons-react';
 import { connectionConfig } from '@/configs';
-import { Eye, EyeOff, Copy, CheckCircle } from 'lucide-react';
 import { toHumanReadableDate } from '@/utils/date';
 import { DocNoticeBlock } from '@/app/components/container/message/notice-block/doc-notice-block';
 import { FieldSet } from '@/app/components/form/fieldset';
@@ -140,7 +139,7 @@ export function ProjectCredentialPage() {
         </PageTitleWithCount>
         <div className="flex items-stretch h-12 border-l border-gray-200 dark:border-gray-800">
           <GhostButton size="md" onClick={shouldReload} className="h-full">
-            <RotateCw strokeWidth={1.5} className="w-4 h-4" />
+            <Renew size={16} />
           </GhostButton>
           <button
             type="button"
@@ -148,7 +147,7 @@ export function ProjectCredentialPage() {
             className="flex items-center gap-2 px-4 text-sm text-white bg-primary hover:bg-primary/90 transition-colors whitespace-nowrap"
           >
             Create credential
-            <Plus strokeWidth={1.5} className="w-4 h-4" />
+            <Add size={16} />
           </button>
         </div>
       </PageHeaderBlock>
@@ -226,9 +225,9 @@ const CredentialCard: FC<{ credential: ProjectCredential }> = ({
               title={isVisible ? 'Hide' : 'Show'}
             >
               {isVisible ? (
-                <EyeOff className="w-4 h-4" />
+                <ViewOff size={16} />
               ) : (
-                <Eye className="w-4 h-4" />
+                <View size={16} />
               )}
             </GhostButton>
             <GhostButton
@@ -237,9 +236,9 @@ const CredentialCard: FC<{ credential: ProjectCredential }> = ({
               title="Copy"
             >
               {isCopied ? (
-                <CheckCircle className="w-4 h-4 text-emerald-400" />
+                <Checkmark size={16} />
               ) : (
-                <Copy className="w-4 h-4" />
+                <Copy size={16} />
               )}
             </GhostButton>
           </div>
@@ -311,16 +310,16 @@ export function PersonalCredentialPage() {
                     title={isVisible ? 'Hide' : 'Show'}
                   >
                     {isVisible ? (
-                      <EyeOff className="w-4 h-4" />
+                      <ViewOff size={16} />
                     ) : (
-                      <Eye className="w-4 h-4" />
+                      <View size={16} />
                     )}
                   </GhostButton>
                   <GhostButton size="md" onClick={() => copyToClipboard(token)} title="Copy">
                     {isCopied ? (
-                      <CheckCircle className="w-4 h-4 text-emerald-400" />
+                      <Checkmark size={16} />
                     ) : (
-                      <Copy className="w-4 h-4" />
+                      <Copy size={16} />
                     )}
                   </GhostButton>
                 </div>

@@ -487,6 +487,19 @@ li::marker {
     min-inline-size: 0;
 }
 
+.cds--menu-button__menu,
+.cds--menu-button__menu .cds--popover-content,
+.cds--menu {
+    box-shadow: none !important;
+    border: 0.5px solid var(--cds-border-subtle) !important;
+}
+
+.cds--menu-button__menu .cds--menu-item__label,
+.cds--menu .cds--menu-item__label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
 .listening::after {
     width: 20vmax;
     height: 20vmax;

@@ -20,8 +20,8 @@ export const ProviderTag: FC<{ provider?: string }> = ({ provider }) => {
   const label = providerLabels[key] || provider || 'Unknown';
 
   return (
-    <Tag size="md" type="cool-gray">
-      <span className="inline-flex items-center gap-1.5 leading-none">
+    <Tag size="md" type="cool-gray" className="!inline-flex !items-center">
+      <span className="inline-flex items-center gap-1.5 leading-none [&>svg]:block">
         <Ai size={16} />
         {label}
       </span>
