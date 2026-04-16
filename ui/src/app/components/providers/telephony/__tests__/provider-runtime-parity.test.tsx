@@ -56,6 +56,12 @@ jest.mock('@/app/components/providers/telephony/twilio', () => ({
     '@/app/components/providers/telephony/twilio',
   ).ValidateTwilioTelephonyOptions,
 }));
+jest.mock('@/app/components/providers/telephony/telnyx', () => ({
+  ConfigureTelnyxTelephony: () => <div>telnyx-config</div>,
+  ValidateTelnyxTelephonyOptions: jest.requireActual(
+    '@/app/components/providers/telephony/telnyx',
+  ).ValidateTelnyxTelephonyOptions,
+}));
 jest.mock('@/app/components/providers/telephony/vonage', () => ({
   ConfigureVonageTelephony: () => <div>vonage-config</div>,
   ValidateVonageTelephonyOptions: jest.requireActual(
@@ -99,6 +105,7 @@ describe('Telephony provider runtime parity', () => {
 
   it.each([
     ['twilio', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
+    ['telnyx', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
     ['exotel', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
     ['vonage', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
     ['sip', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],

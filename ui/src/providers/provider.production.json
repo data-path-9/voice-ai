@@ -127,6 +127,28 @@
         ]
     },
     {
+        "code": "telnyx",
+        "name": "Telnyx",
+        "description": "Programmable telephony platform offering Call Control API and bidirectional WebSocket media streaming.",
+        "image": "https://cdn-01.rapida.ai/partners/telnyx.png",
+        "featureList": [
+            "telephony",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "api_key",
+                "type": "string",
+                "label": "API key"
+            },
+            {
+                "name": "connection_id",
+                "type": "string",
+                "label": "Connection id"
+            }
+        ]
+    },
+    {
         "code": "asterisk",
         "name": "Asterisk",
         "description": "Open-source PBX platform for building custom telephony solutions with SIP/PJSIP support.",

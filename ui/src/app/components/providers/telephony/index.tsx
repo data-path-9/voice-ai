@@ -8,6 +8,10 @@ import {
   ValidateTwilioTelephonyOptions,
 } from '@/app/components/providers/telephony/twilio';
 import {
+  ConfigureTelnyxTelephony,
+  ValidateTelnyxTelephonyOptions,
+} from '@/app/components/providers/telephony/telnyx';
+import {
   ConfigureVonageTelephony,
   ValidateVonageTelephonyOptions,
 } from '@/app/components/providers/telephony/vonage';
@@ -35,6 +39,8 @@ export const ValidateTelephonyOptions = (
       return ValidateVonageTelephonyOptions(parameters);
     case 'twilio':
       return ValidateTwilioTelephonyOptions(parameters);
+    case 'telnyx':
+      return ValidateTelnyxTelephonyOptions(parameters);
     case 'exotel':
       return ValidateExotelTelephonyOptions(parameters);
     case 'sip':
@@ -69,6 +75,13 @@ export const ConfigureTelephonyComponent: React.FC<ProviderComponentProps> = ({
     case 'twilio':
       return (
         <ConfigureTwilioTelephony
+          parameters={parameters || []}
+          onParameterChange={onChangeParameter}
+        />
+      );
+    case 'telnyx':
+      return (
+        <ConfigureTelnyxTelephony
           parameters={parameters || []}
           onParameterChange={onChangeParameter}
         />
