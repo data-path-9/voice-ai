@@ -126,6 +126,20 @@ describe('Telephony provider runtime parity', () => {
     expect(ValidateTelephonyOptions('unknown-telephony', [])).toBe(false);
   });
 
+  it.each([
+    ['missing credential_id', [meta('phone', '+15551234567')]],
+    [
+      'empty credential_id',
+      [meta('rapida.credential_id', ''), meta('phone', '+15551234567')],
+    ],
+    [
+      'empty phone when present',
+      [meta('rapida.credential_id', 'cred-1'), meta('phone', '')],
+    ],
+  ])('telnyx rejects invalid options: %s', (_label, options) => {
+    expect(ValidateTelephonyOptions('telnyx', options)).toBe(false);
+  });
+
   it('updates provider and credential from TelephonyProvider UI interactions', () => {
     const onChangeProvider = jest.fn();
     const onChangeParameter = jest.fn();
