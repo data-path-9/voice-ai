@@ -26,9 +26,13 @@ const mockHideLoader = jest.fn();
 const mockGlobalNavigation = {
   goBack: jest.fn(),
   goToConfigureWeb: jest.fn(),
+  goToEditWeb: jest.fn(),
   goToConfigureApi: jest.fn(),
+  goToEditApi: jest.fn(),
   goToConfigureCall: jest.fn(),
+  goToEditCall: jest.fn(),
   goToConfigureDebugger: jest.fn(),
+  goToEditDebugger: jest.fn(),
   goToConfigureDebuggerExperience: jest.fn(),
   goToConfigureDebuggerSTT: jest.fn(),
   goToConfigureDebuggerTTS: jest.fn(),
@@ -517,14 +521,15 @@ describe('Deployment and tool flows', () => {
       ).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Experience' }));
-    await waitFor(() =>
-      expect(screen.getByText('General Experience')).toBeInTheDocument(),
+    fireEvent.click(screen.getByRole('button', { name: 'Edit deployment' }));
+    expect(mockGlobalNavigation.goToEditApi).toHaveBeenCalledWith(
+      'assistant-1',
+      'api-dep-1',
     );
     await act(async () => {});
   });
 
-  it('debugger edit menu opens section modals', async () => {
+  it('debugger edit routes to debugger edit page', async () => {
     (GetAssistant as jest.Mock).mockResolvedValue({
       getSuccess: () => true,
       getData: () => ({
@@ -556,23 +561,11 @@ describe('Deployment and tool flows', () => {
       ).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Experience' }));
-    await waitFor(() =>
-      expect(screen.getByText('General Experience')).toBeInTheDocument(),
+    fireEvent.click(screen.getByRole('button', { name: 'Edit deployment' }));
+    expect(mockGlobalNavigation.goToEditDebugger).toHaveBeenCalledWith(
+      'assistant-1',
+      'debugger-dep-1',
     );
-    expect(mockGlobalNavigation.goToConfigureDebuggerExperience).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Voice Input' }));
-    await waitFor(() =>
-      expect(screen.getByText('Voice Input')).toBeInTheDocument(),
-    );
-    expect(mockGlobalNavigation.goToConfigureDebuggerSTT).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Voice Output' }));
-    await waitFor(() =>
-      expect(screen.getByText('Voice Output')).toBeInTheDocument(),
-    );
-    expect(mockGlobalNavigation.goToConfigureDebuggerTTS).not.toHaveBeenCalled();
   });
 
   it('create tool validates missing name before submit', () => {

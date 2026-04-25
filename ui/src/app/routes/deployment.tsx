@@ -14,11 +14,15 @@ import {
   DeploymentViewAssistantPage,
   DeploymentCreateVersionAssistantPage,
   DeploymentConfigureAssistantWebDeploymentPage,
+  DeploymentEditAssistantWebDeploymentPage,
   DeploymentConfigureAssistantCallDeploymentPage,
+  DeploymentEditAssistantCallDeploymentPage,
   DeploymentConfigureAssistantToolPage,
   DeploymentConfigureAssistantAnalysisPage,
   DeploymentConfigureAssistantApiDeploymentPage,
+  DeploymentEditAssistantApiDeploymentPage,
   DeploymentConfigureAssistantDebuggerDeploymentPage,
+  DeploymentEditAssistantDebuggerDeploymentPage,
   DeploymentEditAssistantPage,
   DeploymentConfigureAssistantWebhookPage,
   DeploymentCreateAssistantWebhookPage,
@@ -195,16 +199,32 @@ export function DeploymentRoute() {
             element={<DeploymentConfigureAssistantWebDeploymentPage />}
           />
           <Route
+            path={'deployment/web/:deploymentId/'}
+            element={<DeploymentEditAssistantWebDeploymentPage />}
+          />
+          <Route
             path={'deployment/call/'}
             element={<DeploymentConfigureAssistantCallDeploymentPage />}
+          />
+          <Route
+            path={'deployment/call/:deploymentId/'}
+            element={<DeploymentEditAssistantCallDeploymentPage />}
           />
           <Route
             path={'deployment/api/'}
             element={<DeploymentConfigureAssistantApiDeploymentPage />}
           />
           <Route
+            path={'deployment/api/:deploymentId/'}
+            element={<DeploymentEditAssistantApiDeploymentPage />}
+          />
+          <Route
             path={'deployment/debugger/'}
             element={<DeploymentConfigureAssistantDebuggerDeploymentPage />}
+          />
+          <Route
+            path={'deployment/debugger/:deploymentId/'}
+            element={<DeploymentEditAssistantDebuggerDeploymentPage />}
           />
         </Route>
         <Route

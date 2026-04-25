@@ -9,6 +9,7 @@ package internal_vonage_telephony
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -17,10 +18,8 @@ import (
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
-	rapida_utils "github.com/rapidaai/pkg/utils"
 	protos "github.com/rapidaai/protos"
 	"github.com/vonage/vonage-go-sdk"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -54,7 +53,9 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
-			vng.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
+			if msg := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
+				vng.Input(msg)
+			}
 			vng.BaseStreamer.Cancel()
 			return
 		}
@@ -67,14 +68,16 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 			}
 			switch textEvent["event"] {
 			case "websocket:connected":
-				vng.PushInput(vng.CreateConnectionRequest())
-				vng.PushInputLow(&protos.ConversationEvent{
+				vng.Input(vng.CreateConnectionRequest())
+				vng.Input(&protos.ConversationEvent{
 					Name: "channel",
 					Data: map[string]string{"type": "connected", "provider": "vonage"},
 					Time: timestamppb.Now(),
 				})
 			case "stop":
-				vng.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
+				if msg := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
+					vng.Input(msg)
+				}
 				vng.BaseStreamer.Cancel()
 				return
 			default:
@@ -83,7 +86,7 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 		case websocket.BinaryMessage:
 			msg, _ := vng.handleMediaEvent(message)
 			if msg != nil {
-				vng.PushInput(msg)
+				vng.Input(msg)
 			}
 		default:
 			vng.Logger.Warn("Unhandled message type", "type", messageType)
@@ -140,28 +143,60 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 			}
 			vng.writeMu.Unlock()
 		}
-	case *protos.ConversationDirective:
-		switch data.GetType() {
-		case protos.ConversationDirective_END_CONVERSATION:
+	case *protos.ConversationDisconnection:
+		if vng.GetConversationUuid() != "" {
+			if cAuth, err := vonageAuth(vng.VaultCredential()); err == nil {
+				vonage.NewVoiceClient(cAuth).Hangup(vng.GetConversationUuid())
+			}
+		}
+		if disc := vng.Disconnect(data.GetType()); disc != nil {
+			vng.Input(disc)
+		}
+	case *protos.ConversationToolCall:
+		switch data.GetAction() {
+		case protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION:
 			if vng.GetConversationUuid() != "" {
 				cAuth, err := vonageAuth(vng.VaultCredential())
 				if err != nil {
 					vng.Logger.Errorf("Error creating Vonage client:", err)
-					vng.Cancel()
+					vng.Input(&protos.ConversationToolCallResult{
+						Id: data.GetId(), ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
+						Result: map[string]string{"status": "failed", "reason": fmt.Sprintf("vonage client error: %v", err)},
+					})
+					if disc := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL); disc != nil {
+						vng.Input(disc)
+					}
 					return nil
 				}
 				if _, _, err := vonage.NewVoiceClient(cAuth).Hangup(vng.GetConversationUuid()); err != nil {
 					vng.Logger.Errorf("Error ending Vonage call:", err)
-					vng.Cancel()
+					vng.Input(&protos.ConversationToolCallResult{
+						Id: data.GetId(), ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
+						Result: map[string]string{"status": "failed", "reason": fmt.Sprintf("hangup failed: %v", err)},
+					})
+					if disc := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL); disc != nil {
+						vng.Input(disc)
+					}
 					return nil
 				}
 			}
-			vng.Cancel()
-		case protos.ConversationDirective_TRANSFER_CONVERSATION:
-			to := extractTransferTarget(data.GetArgs())
-			vng.Logger.Warnw("Vonage call transfer not yet implemented", "to", to)
-			// TODO: Vonage transfer requires NCCO URL hosting for PUT /calls/{uuid}
-			// with action: "transfer" and destination NCCO containing connect action.
+			vng.Input(&protos.ConversationToolCallResult{
+				Id:     data.GetId(),
+				ToolId: data.GetToolId(),
+				Name:   data.GetName(),
+				Action: data.GetAction(),
+				Result: map[string]string{"status": "completed"},
+			})
+			if disc := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL); disc != nil {
+				vng.Input(disc)
+			}
+		case protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION:
+			vng.Logger.Warnw("Vonage call transfer not yet implemented", "to", data.GetArgs()["to"])
+			vng.Input(&protos.ConversationToolCallResult{
+				Id:     data.GetId(),
+				ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
+				Result: map[string]string{"status": "failed", "reason": "transfer not supported for Vonage"},
+			})
 		}
 	}
 	return nil
@@ -196,18 +231,4 @@ func (vng *vonageWebsocketStreamer) Cancel() error {
 	}
 	vng.BaseStreamer.Cancel()
 	return nil
-}
-
-func extractTransferTarget(args map[string]*anypb.Any) string {
-	if args == nil {
-		return ""
-	}
-	iface, err := rapida_utils.AnyMapToInterfaceMap(args)
-	if err != nil {
-		return ""
-	}
-	if to, ok := iface["to"].(string); ok {
-		return to
-	}
-	return ""
 }

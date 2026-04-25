@@ -9,7 +9,6 @@ import {
   LogoReact,
   LogoPython,
 } from '@carbon/icons-react';
-import { WhatsappIcon } from '@/app/components/Icon/whatsapp';
 
 interface SourceIndicatorProps {
   source: string;
@@ -75,11 +74,6 @@ const sourceConfig: Record<
     icon: <Phone size={16} />,
     label: 'Phone',
   },
-  'twilio-whatsapp': {
-    tagType: 'teal',
-    icon: <WhatsappIcon size={16} />,
-    label: 'WhatsApp',
-  },
 };
 
 const defaultConfig = {
@@ -99,9 +93,9 @@ export const SourceIndicator: React.FC<SourceIndicatorProps> = ({
         <Tag
           size="md"
           type={config.tagType as any}
-          className="!inline-flex !items-center"
+          className="flex items-center"
         >
-          <span className="inline-flex items-center justify-center leading-none [&>svg]:block">
+          <span className="flex items-center justify-center leading-none [&>svg]:block">
             {config.icon}
           </span>
         </Tag>
@@ -113,9 +107,9 @@ export const SourceIndicator: React.FC<SourceIndicatorProps> = ({
     <Tag
       size="md"
       type={config.tagType as any}
-      className="!inline-flex !items-center"
+      className="inline-flex items-center"
     >
-      <span className="inline-flex items-center gap-1.5 leading-none [&>svg]:block">
+      <span className="flex items-center gap-1.5 leading-none [&>svg]:block">
         {config.icon}
         {config.label}
       </span>

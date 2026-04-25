@@ -44,13 +44,13 @@ func NewEventCollector(logger commons.Logger, meta SessionMeta, exporters ...Exp
 	return &fanoutEventCollector{logger: logger, meta: meta, exporters: exporters}
 }
 
-func (c *fanoutEventCollector) Collect(ctx context.Context, rec EventRecord) {
+func (c *fanoutEventCollector) Collect(_ context.Context, rec EventRecord) {
 	for _, exp := range c.exporters {
 		exp := exp
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			if err := exp.ExportEvent(ctx, c.meta, rec); err != nil {
+			if err := exp.ExportEvent(context.Background(), c.meta, rec); err != nil {
 				c.logger.Errorf("telemetry: event export error: %v", err)
 			}
 		}()
@@ -88,13 +88,13 @@ func NewMetricCollector(logger commons.Logger, meta SessionMeta, exporters ...Ex
 	return &fanoutMetricCollector{logger: logger, meta: meta, exporters: exporters}
 }
 
-func (c *fanoutMetricCollector) Collect(ctx context.Context, rec MetricRecord) {
+func (c *fanoutMetricCollector) Collect(_ context.Context, rec MetricRecord) {
 	for _, exp := range c.exporters {
 		exp := exp
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			if err := exp.ExportMetric(ctx, c.meta, rec); err != nil {
+			if err := exp.ExportMetric(context.Background(), c.meta, rec); err != nil {
 				c.logger.Errorf("telemetry: metric export error: %v", err)
 			}
 		}()

@@ -1,0 +1,103 @@
+package internal_sip_telephony
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	"github.com/rapidaai/pkg/commons"
+	"github.com/rapidaai/protos"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func newTestSIPStreamer(t *testing.T) *Streamer {
+	t.Helper()
+	logger, err := commons.NewApplicationLogger()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	return &Streamer{
+		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, &callcontext.CallContext{}, nil),
+		ctx:                   ctx,
+		cancel:                cancel,
+	}
+}
+
+func TestSend_EndConversation_PushesToolResultAndToolDisconnection(t *testing.T) {
+	s := newTestSIPStreamer(t)
+
+	err := s.Send(&protos.ConversationToolCall{
+		Id:     "ctx-1",
+		ToolId: "tool-1",
+		Name:   "end_conversation",
+		Action: protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION,
+	})
+	require.NoError(t, err)
+
+	select {
+	case msg := <-s.CriticalCh:
+		result, ok := msg.(*protos.ConversationToolCallResult)
+		require.True(t, ok, "expected ConversationToolCallResult, got %T", msg)
+		assert.Equal(t, "ctx-1", result.GetId())
+		assert.Equal(t, "tool-1", result.GetToolId())
+		assert.Equal(t, map[string]string{"status": "completed"}, result.GetResult())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ConversationToolCallResult")
+	}
+
+	select {
+	case msg := <-s.CriticalCh:
+		disc, ok := msg.(*protos.ConversationDisconnection)
+		require.True(t, ok, "expected ConversationDisconnection, got %T", msg)
+		assert.Equal(t, protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL, disc.GetType())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ConversationDisconnection")
+	}
+
+	select {
+	case <-s.Context().Done():
+		t.Fatal("streamer context should remain open; teardown is owned by Talk loop")
+	default:
+	}
+}
+
+func TestSend_ConversationDisconnection_RequeuesToTalkLoop(t *testing.T) {
+	s := newTestSIPStreamer(t)
+
+	err := s.Send(&protos.ConversationDisconnection{
+		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT,
+	})
+	require.NoError(t, err)
+
+	select {
+	case msg := <-s.CriticalCh:
+		disc, ok := msg.(*protos.ConversationDisconnection)
+		require.True(t, ok, "expected ConversationDisconnection, got %T", msg)
+		assert.Equal(t, protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT, disc.GetType())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for requeued ConversationDisconnection")
+	}
+}
+
+func TestSend_ConversationDisconnection_PreservesExplicitReason(t *testing.T) {
+	s := newTestSIPStreamer(t)
+
+	err := s.Send(&protos.ConversationDisconnection{
+		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION,
+	})
+	require.NoError(t, err)
+
+	select {
+	case msg := <-s.CriticalCh:
+		disc, ok := msg.(*protos.ConversationDisconnection)
+		require.True(t, ok, "expected ConversationDisconnection, got %T", msg)
+		assert.Equal(t, protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION, disc.GetType())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for requeued ConversationDisconnection")
+	}
+}

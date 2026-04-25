@@ -61,6 +61,7 @@ type SIPEngine struct {
 	assistantService             internal_services.AssistantService
 	deploymentService            internal_services.AssistantDeploymentService
 	vaultClient                  web_client.VaultClient
+	callContextStore             callcontext.Store
 
 	// Registration client for maintaining SIP REGISTER with external providers.
 	registrationClient *sip_infra.RegistrationClient
@@ -85,6 +86,7 @@ func NewSIPEngine(config *config.AssistantConfig, logger commons.Logger,
 		deploymentService:            internal_assistant_service.NewAssistantDeploymentService(config, logger, postgres),
 		storage:                      storage_files.NewStorage(config.AssetStoreConfig, logger),
 		vaultClient:                  web_client.NewVaultClientGRPC(&config.AppConfig, logger, redis),
+		callContextStore:             callcontext.NewStore(postgres, logger),
 	}
 }
 
@@ -266,38 +268,19 @@ func (m *SIPEngine) onInvite(session *sip_infra.Session, fromURI, toURI string) 
 		return fmt.Errorf("session already ended")
 	}
 
-	authVal, _ := session.GetMetadata("auth")
-	auth, _ := authVal.(types.SimplePrinciple)
+	auth := session.GetAuth()
 	if auth == nil {
 		return fmt.Errorf("missing auth on session %s", callID)
 	}
 
-	var assistantID uint64
-	assistantVal, _ := session.GetMetadata("assistant")
-	if assistant, ok := assistantVal.(*internal_assistant_entity.Assistant); ok && assistant != nil {
-		assistantID = assistant.Id
-	} else if idVal, ok := session.GetMetadata("assistant_id"); ok {
-		if id, ok := idVal.(uint64); ok && id > 0 {
-			assistantID = id
-			assistant, err := m.assistantService.Get(m.ctx, auth, id, utils.GetVersionDefinition("latest"),
-				&internal_services.GetAssistantOption{InjectPhoneDeployment: true})
-			if err != nil {
-				return fmt.Errorf("failed to load assistant %d for outbound call: %w", id, err)
-			}
-			session.SetMetadata("assistant", assistant)
-		}
-	}
-	if assistantID == 0 {
+	assistant := session.GetAssistant()
+	if assistant == nil {
 		return fmt.Errorf("missing assistant context on session %s", callID)
 	}
 
-	// For outbound, pass conversation_id from session metadata (created by channel pipeline)
-	var conversationID uint64
-	if convIDVal, ok := session.GetMetadata("conversation_id"); ok {
-		if id, ok := convIDVal.(uint64); ok {
-			conversationID = id
-		}
-	}
+	// For outbound, conversation_id is set on the session by MakeCall.
+	// For inbound, it's 0 here — created later by handleSessionEstablished.
+	conversationID := session.GetConversationID()
 
 	m.dispatcher.OnPipeline(m.ctx, sip_infra.SessionEstablishedPipeline{
 		ID:              callID,
@@ -305,7 +288,7 @@ func (m *SIPEngine) onInvite(session *sip_infra.Session, fromURI, toURI string) 
 		Config:          session.GetConfig(),
 		VaultCredential: session.GetVaultCredential(),
 		Direction:       info.Direction,
-		AssistantID:     assistantID,
+		AssistantID:     assistant.Id,
 		Auth:            auth,
 		FromURI:         fromURI,
 		ConversationID:  conversationID,
@@ -316,67 +299,29 @@ func (m *SIPEngine) onInvite(session *sip_infra.Session, fromURI, toURI string) 
 
 func (m *SIPEngine) onBye(session *sip_infra.Session) error {
 	m.dispatcher.OnPipeline(m.ctx, sip_infra.ByeReceivedPipeline{
-		ID: session.GetInfo().CallID,
+		ID:      session.GetInfo().CallID,
+		Session: session,
 	})
 	return nil
 }
 
 func (m *SIPEngine) onCancel(session *sip_infra.Session) error {
 	m.dispatcher.OnPipeline(m.ctx, sip_infra.CancelReceivedPipeline{
-		ID: session.GetInfo().CallID,
+		ID:      session.GetInfo().CallID,
+		Session: session,
 	})
 	return nil
 }
 
-// onError handles SIP-level errors (e.g., outbound call failed before pipeline ran).
-// For outbound calls with a conversation_id in metadata, creates a short-lived observer
-// to persist the FAILED status metric so the conversation is not left indeterminate.
+// onError handles SIP-level errors by emitting a CallFailedPipeline event.
+// The pipeline handler (signal.go) creates the observer and persists metrics.
 func (m *SIPEngine) onError(session *sip_infra.Session, callErr error) {
-	callID := session.GetCallID()
-	m.logger.Warnw("SIP error", "call_id", callID, "error", callErr)
-
-	convIDVal, hasConv := session.GetMetadata("conversation_id")
-	if !hasConv {
-		return
-	}
-	convID, ok := convIDVal.(uint64)
-	if !ok || convID == 0 {
-		return
-	}
-
-	authVal, _ := session.GetMetadata("auth")
-	auth, _ := authVal.(types.SimplePrinciple)
-	if auth == nil {
-		return
-	}
-
-	assistantIDVal, _ := session.GetMetadata("assistant_id")
-	assistantID, _ := assistantIDVal.(uint64)
-
-	setup := &sip_pipeline.CallSetupResult{
-		AssistantID:    assistantID,
-		ConversationID: convID,
-	}
-	if auth.GetCurrentProjectId() != nil {
-		setup.ProjectID = *auth.GetCurrentProjectId()
-	}
-	if auth.GetCurrentOrganizationId() != nil {
-		setup.OrganizationID = *auth.GetCurrentOrganizationId()
-	}
-
-	observer := m.createObserver(m.ctx, setup, auth)
-	if observer != nil {
-		reason := "call_failed"
-		if callErr != nil {
-			reason = callErr.Error()
-		}
-		observer.EmitMetric(m.ctx, observe.CallStatusMetric("FAILED", reason))
-		observer.EmitEvent(m.ctx, observe.ComponentTelephony, map[string]string{
-			observe.DataType:   observe.EventCallEnded,
-			observe.DataReason: reason,
-		})
-		observer.Shutdown(m.ctx)
-	}
+	m.logger.Warnw("SIP error", "call_id", session.GetCallID(), "error", callErr)
+	m.dispatcher.OnPipeline(m.ctx, sip_infra.CallFailedPipeline{
+		ID:      session.GetCallID(),
+		Session: session,
+		Error:   callErr,
+	})
 }
 
 func (m *SIPEngine) EndCall(callID string) error {
@@ -444,6 +389,12 @@ func (m *SIPEngine) fetchSIPConfigAndVaultCredential(auth types.SimplePrinciple,
 	sipConfig, err := sip_infra.ParseConfigFromVault(vaultCred)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse SIP config from vault: %w", err)
+	}
+
+	// Set CallerID to the assistant's DID from the phone deployment.
+	// This is used as the From URI user in outbound INVITEs (prepareOutboundInvite).
+	if did, err := opts.GetString("phone"); err == nil && did != "" {
+		sipConfig.CallerID = strings.TrimPrefix(did, "+")
 	}
 
 	if m.cfg.SIPConfig != nil {
@@ -572,7 +523,6 @@ func (m *SIPEngine) reconcileRegistrations(ctx context.Context) {
 		if did == "" {
 			continue
 		}
-		did = sip_infra.NormalizeDID(did)
 		credentialID, err := opts.GetUint64("rapida.credential_id")
 		if err != nil {
 			continue
@@ -810,7 +760,7 @@ func (m *SIPEngine) RegisterAssistant(ctx context.Context, auth types.SimplePrin
 	}
 
 	return m.registrationClient.Register(ctx, &sip_infra.Registration{
-		DID:         sip_infra.NormalizeDID(did),
+		DID:         did,
 		Config:      sipConfig,
 		AssistantID: assistantID,
 	})
@@ -856,10 +806,7 @@ func (m *SIPEngine) pipelineCreateConversation(ctx context.Context, auth types.S
 // pipelineCallSetup builds the CallSetupResult from auth and IDs.
 // Pure function — conversation must already exist (created by pipeline or channel layer).
 func (m *SIPEngine) pipelineCallSetup(ctx context.Context, session *sip_infra.Session, auth types.SimplePrinciple, assistantID uint64, conversationID uint64) (*sip_pipeline.CallSetupResult, error) {
-	var assistant *internal_assistant_entity.Assistant
-	if assistantVal, ok := session.GetMetadata("assistant"); ok {
-		assistant, _ = assistantVal.(*internal_assistant_entity.Assistant)
-	}
+	assistant := session.GetAssistant()
 	if assistant == nil {
 		var err error
 		assistant, err = m.assistantService.Get(ctx, auth, assistantID, utils.GetVersionDefinition("latest"),
@@ -883,6 +830,12 @@ func (m *SIPEngine) pipelineCallSetup(ctx context.Context, session *sip_infra.Se
 		result.OrganizationID = *auth.GetCurrentOrganizationId()
 	}
 
+	if ctxID := session.GetContextID(); ctxID != "" {
+		if _, err := m.callContextStore.Claim(ctx, ctxID); err != nil {
+			m.logger.Warnw("Failed to claim call context", "context_id", ctxID, "error", err)
+		}
+	}
+
 	return result, nil
 }
 
@@ -894,9 +847,14 @@ func (m *SIPEngine) pipelineCallStart(ctx context.Context, session *sip_infra.Se
 	isOutbound := session.GetInfo().Direction == sip_infra.CallDirectionOutbound
 
 	// Outbound: ensure session.End() so handleOutboundDialog can proceed.
+	// Skip if a bridge transfer is active — the pipeline transfer handler owns the session.
 	if isOutbound {
 		defer func() {
 			if !session.IsEnded() {
+				state := session.GetState()
+				if state == sip_infra.CallStateTransferring || state == sip_infra.CallStateBridgeConnected {
+					return
+				}
 				session.End()
 			}
 		}()
@@ -907,8 +865,7 @@ func (m *SIPEngine) pipelineCallStart(ctx context.Context, session *sip_infra.Se
 		return fmt.Errorf("session_ended_before_start")
 	}
 
-	authVal, _ := session.GetMetadata("auth")
-	auth, _ := authVal.(types.SimplePrinciple)
+	auth := session.GetAuth()
 
 	cc := &callcontext.CallContext{
 		AssistantID:         setup.AssistantID,
@@ -969,6 +926,60 @@ func (m *SIPEngine) pipelineCallStart(ctx context.Context, session *sip_infra.Se
 		return fmt.Errorf("session_ended_after_streamer")
 	}
 
+	type transferable interface {
+		SetOnTransferInitiated(func(targets []string, message string))
+		SetBridgeOutRTP(*sip_infra.RTPHandler)
+		ClearBridgeTarget()
+		StopRingback()
+		ExitTransferMode()
+		PushBridgeOperatorAudio([]byte)
+		PushToolCallResult(contextID, toolID, toolName string, action protos.ToolCallAction, result map[string]string)
+	}
+	if ts, ok := streamer.(transferable); ok {
+		ts.SetOnTransferInitiated(func(targets []string, message string) {
+			toolID, _ := session.GetMetadata("tool_id")
+			toolIDStr, _ := toolID.(string)
+			toolCtxID, _ := session.GetMetadata("tool_context_id")
+			toolCtxIDStr, _ := toolCtxID.(string)
+			primaryTarget := targets[0]
+			m.dispatcher.OnPipeline(m.ctx, sip_infra.TransferInitiatedPipeline{
+				ID:        callID,
+				Session:   session,
+				TargetURI: primaryTarget,
+				Targets:   targets,
+				Config:    sipConfig,
+				OnConnected: func(outboundRTP *sip_infra.RTPHandler) {
+					ts.StopRingback()
+					ts.SetBridgeOutRTP(outboundRTP)
+				},
+				OnFailed: func() {
+					ts.ExitTransferMode()
+					if toolIDStr != "" {
+						ts.PushToolCallResult(toolCtxIDStr, toolIDStr, "transfer_call", protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION, map[string]string{
+							"status": "failed",
+							"reason": fmt.Sprintf("Transfer to %s failed", primaryTarget),
+						})
+					}
+				},
+				OnTeardown: func() {
+					ts.ClearBridgeTarget()
+					if toolIDStr != "" {
+						status, _ := session.GetMetadata(sip_infra.MetadataBridgeTransferStatus)
+						statusStr, _ := status.(string)
+						ts.PushToolCallResult(toolCtxIDStr, toolIDStr, "transfer_call", protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION, map[string]string{
+							"status": statusStr,
+							"reason": fmt.Sprintf("Transfer to %s %s", primaryTarget, statusStr),
+						})
+					}
+				},
+				OnResumeAI: func() {
+					ts.ExitTransferMode()
+				},
+				OnOperatorAudio: func(audio []byte) { ts.PushBridgeOperatorAudio(audio) },
+			})
+		})
+	}
+
 	talker, err := internal_adapter.GetTalker(
 		utils.PhoneCall, callCtx, m.cfg, m.logger,
 		m.postgres, m.opensearch, m.redis, m.storage, streamer,
@@ -1002,9 +1013,17 @@ func (m *SIPEngine) pipelineCallEnd(callID string) {
 	if srv == nil {
 		return
 	}
-	if session, ok := srv.GetSession(callID); ok {
-		session.End()
+	session, ok := srv.GetSession(callID)
+	if !ok {
+		return
 	}
+	// Don't end the session if a bridge transfer is active — the pipeline
+	// transfer handler owns the session lifecycle during bridging.
+	if session.GetState() == sip_infra.CallStateTransferring || session.GetState() == sip_infra.CallStateBridgeConnected {
+		m.logger.Infow("pipelineCallEnd: skipping session.End — transfer active", "call_id", callID)
+		return
+	}
+	session.End()
 }
 
 func (m *SIPEngine) createObserver(ctx context.Context, setup *sip_pipeline.CallSetupResult, auth types.SimplePrinciple) *observe.ConversationObserver {

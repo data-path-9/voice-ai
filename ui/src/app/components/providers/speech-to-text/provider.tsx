@@ -1,5 +1,6 @@
 import { Metadata } from '@rapidaai/react';
 import { ProviderComponentProps } from '@/app/components/providers';
+import { GetDefaultEOSConfig } from '@/app/components/providers/end-of-speech/provider';
 import { loadProviderConfig } from '@/providers/config-loader';
 import { getDefaultsFromConfig, validateFromConfig } from '@/providers/config-defaults';
 import { ConfigRenderer } from '@/app/components/providers/config-renderer';
@@ -52,17 +53,34 @@ export const GetDefaultMicrophoneConfig = (
   existing: Metadata[] = [],
   defaults?: {
     'microphone.eos.fallback_timeout'?: string;
+    'microphone.eos.threshold'?: string;
+    'microphone.eos.quick_timeout'?: string;
+    'microphone.eos.extended_timeout'?: string;
+    'microphone.eos.model'?: string;
     'microphone.eos.provider'?: string;
     'microphone.denoising.provider'?: string;
     'microphone.vad.provider'?: string;
     'microphone.vad.threshold'?: string;
   },
 ): Metadata[] => {
+  const upsertMetadata = (
+    parameters: Metadata[],
+    key: string,
+    value: string,
+  ): Metadata[] => {
+    const metadata = new Metadata();
+    metadata.setKey(key);
+    metadata.setValue(value);
+
+    const index = parameters.findIndex(param => param.getKey() === key);
+    if (index === -1) return [...parameters, metadata];
+
+    const updated = [...parameters];
+    updated[index] = metadata;
+    return updated;
+  };
+
   const defaultConfig = [
-    {
-      key: 'microphone.eos.fallback_timeout',
-      value: defaults?.['microphone.eos.fallback_timeout'] ?? '700',
-    },
     {
       key: 'microphone.eos.provider',
       value: defaults?.['microphone.eos.provider'] ?? 'pipecat_smart_turn_eos',
@@ -92,7 +110,19 @@ export const GetDefaultMicrophoneConfig = (
       return metadata;
     });
 
-  return [...existing, ...newConfigs];
+  const eosProvider =
+    defaults?.['microphone.eos.provider'] ??
+    existing.find(m => m.getKey() === 'microphone.eos.provider')?.getValue() ??
+    'pipecat_smart_turn_eos';
+
+  let hydrated = GetDefaultEOSConfig(eosProvider, [...existing, ...newConfigs]);
+
+  for (const [key, value] of Object.entries(defaults ?? {})) {
+    if (!value || existingKeys.has(key)) continue;
+    hydrated = upsertMetadata(hydrated, key, value);
+  }
+
+  return hydrated;
 };
 
 export const SpeechToTextConfigComponent: FC<ProviderComponentProps> = ({

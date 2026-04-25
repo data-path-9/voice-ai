@@ -10,15 +10,15 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/emiago/sipgo"
-	"github.com/emiago/sipgo/sip"
 	"github.com/google/uuid"
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	"github.com/rapidaai/pkg/commons"
+	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/protos"
 )
 
@@ -35,9 +35,11 @@ type SessionConfig struct {
 	CallID          string // Optional: if empty, a new UUID will be generated
 	Codec           *Codec
 	Logger          commons.Logger
-	Auth            interface{}             // Authentication principal (types.SimplePrinciple)
-	Assistant       interface{}             // Assistant entity (*internal_assistant_entity.Assistant)
-	VaultCredential *protos.VaultCredential // Vault-resolved SIP provider credential
+	Auth            types.SimplePrinciple                // Authentication principal
+	Assistant       *internal_assistant_entity.Assistant // Assistant entity
+	ConversationID  uint64                               // Conversation ID (outbound: set by channel pipeline)
+	ContextID       string                               // Call context ID (outbound: set by channel pipeline)
+	VaultCredential *protos.VaultCredential              // Vault-resolved SIP provider credential
 }
 
 // Session manages a single SIP call session
@@ -67,9 +69,11 @@ type Session struct {
 	metadata map[string]interface{}
 
 	// Authentication and authorization context - available in all session methods
-	auth            interface{}             // Authentication principal (types.SimplePrinciple)
-	assistant       interface{}             // Assistant entity (*internal_assistant_entity.Assistant)
-	vaultCredential *protos.VaultCredential // Vault-resolved SIP provider credential
+	auth            types.SimplePrinciple                // Authentication principal
+	assistant       *internal_assistant_entity.Assistant // Assistant entity
+	conversationID  uint64                               // Conversation ID
+	contextID       string                               // Call context ID (outbound)
+	vaultCredential *protos.VaultCredential              // Vault-resolved SIP provider credential
 
 	// byeReceived is closed when a SIP BYE is received for this session.
 	// Used to notify startCall about early BYE without fully ending the session.
@@ -142,6 +146,8 @@ func NewSession(ctx context.Context, cfg *SessionConfig) (*Session, error) {
 		negotiatedCodec: codec,
 		auth:            cfg.Auth,
 		assistant:       cfg.Assistant,
+		conversationID:  cfg.ConversationID,
+		contextID:       cfg.ContextID,
 		vaultCredential: cfg.VaultCredential,
 		byeReceived:     make(chan struct{}),
 	}
@@ -224,11 +230,12 @@ func (s *Session) isValidTransition(from, to CallState) bool {
 
 	// Define valid transitions
 	validTransitions := map[CallState][]CallState{
-		CallStateInitializing: {CallStateRinging, CallStateConnected},
-		CallStateRinging:      {CallStateConnected, CallStateEnding},
-		CallStateConnected:    {CallStateOnHold, CallStateEnding},
-		CallStateOnHold:       {CallStateConnected, CallStateEnding},
-		CallStateEnding:       {CallStateEnded},
+		CallStateInitializing:    {CallStateRinging, CallStateConnected},
+		CallStateRinging:         {CallStateConnected, CallStateEnding},
+		CallStateConnected:       {CallStateOnHold, CallStateTransferring, CallStateEnding},
+		CallStateOnHold:          {CallStateConnected, CallStateEnding},
+		CallStateTransferring:    {CallStateConnected, CallStateBridgeConnected, CallStateEnding},
+		CallStateBridgeConnected: {CallStateEnding},
 	}
 
 	allowed, exists := validTransitions[from]
@@ -406,49 +413,13 @@ func (s *Session) SetOnDisconnect(fn func(session *Session)) {
 	s.onDisconnect = fn
 }
 
-// SendRefer sends a SIP REFER to transfer the call to another target.
-// The target can be a phone number (+15551234567) or SIP URI (sip:user@domain).
-// Uses the dialog session (client or server) to send an in-dialog REFER.
-func (s *Session) SendRefer(target string) error {
-	s.mu.RLock()
-	logger := s.logger
-	callID := s.info.CallID
-	s.mu.RUnlock()
-
-	if logger != nil {
-		logger.Infow("Sending SIP REFER", "call_id", callID, "refer_to", target)
-	}
-
-	// Build Refer-To URI
-	referTo := target
-	if !strings.HasPrefix(referTo, "sip:") && !strings.HasPrefix(referTo, "sips:") {
-		referTo = "sip:" + strings.TrimPrefix(target, "+") + "@" + s.config.Server
-	}
-
-	// Try client dialog (outbound calls) first, then server dialog (inbound)
-	if ds := s.GetDialogClientSession(); ds != nil {
-		req := sip.NewRequest(sip.REFER, ds.InviteRequest.Recipient)
-		req.AppendHeader(sip.NewHeader("Refer-To", "<"+referTo+">"))
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := ds.Do(ctx, req); err != nil {
-			return fmt.Errorf("REFER via client dialog failed: %w", err)
-		}
-		return nil
-	}
-
-	if ds := s.GetDialogServerSession(); ds != nil {
-		req := sip.NewRequest(sip.REFER, sip.Uri{Host: s.config.Server, Port: s.config.Port})
-		req.AppendHeader(sip.NewHeader("Refer-To", "<"+referTo+">"))
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := ds.Do(ctx, req); err != nil {
-			return fmt.Errorf("REFER via server dialog failed: %w", err)
-		}
-		return nil
-	}
-
-	return fmt.Errorf("no dialog session available for REFER")
+// ClearOnDisconnect removes the disconnect callback without invoking it.
+// Used when the remote party initiated teardown (BYE/CANCEL) so session.End()
+// does not send BYE back to a party that already knows the call is over.
+func (s *Session) ClearOnDisconnect() {
+	s.mu.Lock()
+	s.onDisconnect = nil
+	s.mu.Unlock()
 }
 
 // Disconnect performs transport-level call teardown by invoking the onDisconnect callback.
@@ -465,24 +436,55 @@ func (s *Session) Disconnect() {
 	}
 }
 
-// GetAuth returns the authentication principal (types.SimplePrinciple) for this session.
-// Available in all session methods after session creation.
-func (s *Session) GetAuth() interface{} {
+// GetAuth returns the authentication principal for this session.
+func (s *Session) GetAuth() types.SimplePrinciple {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.auth
 }
 
+// SetAuth sets the authentication principal for this session.
+func (s *Session) SetAuth(auth types.SimplePrinciple) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.auth = auth
+}
+
 // GetAssistant returns the assistant entity for this session.
-// Available in all session methods after session creation.
-func (s *Session) GetAssistant() interface{} {
+func (s *Session) GetAssistant() *internal_assistant_entity.Assistant {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.assistant
 }
 
+// SetAssistant sets the assistant entity for this session.
+func (s *Session) SetAssistant(assistant *internal_assistant_entity.Assistant) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.assistant = assistant
+}
+
+// GetConversationID returns the conversation ID for this session.
+func (s *Session) GetConversationID() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.conversationID
+}
+
+func (s *Session) GetContextID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.contextID
+}
+
+// SetConversationID sets the conversation ID for this session.
+func (s *Session) SetConversationID(id uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.conversationID = id
+}
+
 // GetVaultCredential returns the vault-resolved SIP provider credential for this session.
-// Available in all session methods after session creation.
 func (s *Session) GetVaultCredential() *protos.VaultCredential {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

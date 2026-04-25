@@ -62,7 +62,7 @@ func (e *websocketExecutor) Initialize(ctx context.Context, comm internal_type.C
 	// Start listener - stops on context cancel or server close
 	utils.Go(ctx, func() {
 		if err := e.listen(ctx, comm.OnPacket); err != nil && ctx.Err() == nil {
-			comm.OnPacket(ctx, internal_type.DirectivePacket{Directive: protos.ConversationDirective_END_CONVERSATION, Arguments: map[string]interface{}{"reason": err.Error()}})
+			comm.OnPacket(ctx, internal_type.LLMToolCallPacket{Action: protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION, Arguments: map[string]string{"reason": err.Error()}})
 		}
 	})
 
@@ -176,10 +176,10 @@ func (e *websocketExecutor) listen(ctx context.Context, onPacket func(ctx contex
 				continue
 			}
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				onPacket(ctx, internal_type.DirectivePacket{Directive: protos.ConversationDirective_END_CONVERSATION, Arguments: map[string]interface{}{"reason": "websocket closed the connection"}})
+				onPacket(ctx, internal_type.LLMToolCallPacket{Action: protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION, Arguments: map[string]string{"reason": "websocket closed the connection"}})
 				return nil
 			}
-			onPacket(ctx, internal_type.DirectivePacket{Directive: protos.ConversationDirective_END_CONVERSATION, Arguments: map[string]interface{}{"reason": err.Error()}})
+			onPacket(ctx, internal_type.LLMToolCallPacket{Action: protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION, Arguments: map[string]string{"reason": err.Error()}})
 			return nil
 		}
 
@@ -242,7 +242,7 @@ func (e *websocketExecutor) handleResponse(ctx context.Context, resp *Response, 
 	case TypeClose:
 		var d CloseData
 		json.Unmarshal(resp.Data, &d)
-		onPacket(ctx, internal_type.DirectivePacket{Directive: protos.ConversationDirective_END_CONVERSATION, Arguments: map[string]interface{}{"reason": d.Reason}})
+		onPacket(ctx, internal_type.LLMToolCallPacket{Action: protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION, Arguments: map[string]string{"reason": d.Reason}})
 
 	case TypePing:
 		e.send(Request{Type: TypePong, Timestamp: time.Now().UnixMilli()})
@@ -262,7 +262,7 @@ func (e *websocketExecutor) handleResponse(ctx context.Context, resp *Response, 
 // Execute sends a packet to the WebSocket server.
 func (e *websocketExecutor) Execute(ctx context.Context, comm internal_type.Communication, packet internal_type.Packet) error {
 	switch p := packet.(type) {
-	case internal_type.NormalizedUserTextPacket:
+	case internal_type.UserInputPacket:
 		return e.sendUserMessage(p.ContextID, p.Text)
 	case internal_type.UserTextReceivedPacket:
 		return e.sendUserMessage(p.ContextID, p.Text)
@@ -274,6 +274,11 @@ func (e *websocketExecutor) Execute(ctx context.Context, comm internal_type.Comm
 	default:
 		return fmt.Errorf("unsupported packet: %T", packet)
 	}
+}
+
+// GetToolExecutor returns nil — the websocket executor does not manage tools locally.
+func (e *websocketExecutor) GetToolExecutor() internal_agent_executor.ToolExecutor {
+	return nil
 }
 
 // Close terminates the WebSocket connection.

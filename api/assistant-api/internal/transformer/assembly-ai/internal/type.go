@@ -14,6 +14,8 @@ type TranscriptMessage struct {
 	EndOfTurnConfidence float64 `json:"end_of_turn_confidence"`
 	Words               []Word  `json:"words"`
 	Type                string  `json:"type"`
+	ErrorCode           int     `json:"error_code,omitempty"`
+	Error               string  `json:"error,omitempty"`
 }
 
 type Word struct {

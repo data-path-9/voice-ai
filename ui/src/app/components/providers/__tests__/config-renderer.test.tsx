@@ -269,6 +269,24 @@ jest.mock('@/providers/config-loader', () => {
             ],
           },
         },
+        {
+          id: 'model-d',
+          name: 'Model D',
+          config: {
+            parameters: [
+              {
+                key: 'model.temperature',
+                label: 'Temperature',
+                type: 'slider',
+                required: true,
+                default: '0.33',
+                min: 0,
+                max: 1,
+                step: 0.01,
+              },
+            ],
+          },
+        },
       ];
     }
     if (filename === 'languages.json') {
@@ -416,6 +434,21 @@ describe('ConfigRenderer', () => {
       const slider = screen.getByRole('slider') as HTMLInputElement;
       expect(slider).toBeInTheDocument();
       expect(slider).toHaveAttribute('type', 'range');
+      expect(slider.value).toBe('0.5');
+    });
+
+    it('uses slider default when metadata is missing', () => {
+      render(
+        <ConfigRenderer
+          provider="test"
+          category="stt"
+          config={sliderConfig}
+          parameters={[]}
+          onParameterChange={mockOnChange}
+        />,
+      );
+
+      const slider = screen.getByRole('slider') as HTMLInputElement;
       expect(slider.value).toBe('0.5');
     });
 
@@ -974,6 +1007,24 @@ describe('ConfigRenderer', () => {
       expect(
         updated.find(m => m.getKey() === 'model.temperature')?.getValue(),
       ).toBe('1.1');
+    });
+
+    it('renders model override slider defaults for text configs', () => {
+      render(
+        <ConfigRenderer
+          provider="test"
+          category="text"
+          config={modelAwareConfig}
+          parameters={[
+            createMetadata('model.id', 'model-d'),
+            createMetadata('model.name', 'Model D'),
+          ]}
+          onParameterChange={mockOnChange}
+        />,
+      );
+
+      const slider = screen.getByRole('slider') as HTMLInputElement;
+      expect(slider.value).toBe('0.33');
     });
   });
 

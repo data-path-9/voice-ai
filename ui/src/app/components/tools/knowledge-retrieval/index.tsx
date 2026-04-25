@@ -15,6 +15,8 @@ import {
   ToolDefinitionForm,
   useParameterManager,
 } from '../common';
+import { Stack } from '../../carbon/form';
+import { InputGroup } from '../../input-group/index';
 
 // ============================================================================
 // Constants
@@ -65,8 +67,8 @@ export const ConfigureKnowledgeRetrieval: FC<ConfigureToolProps> = ({
 
   return (
     <>
-      <div className="px-6 pb-6">
-        <div className="flex flex-col gap-6 max-w-6xl">
+      <InputGroup title="Action Definition">
+        <Stack gap={7}>
           <KnowledgeDropdown
             className={cn('bg-light-background', inputClass)}
             currentKnowledge={getParamValue('tool.knowledge_id')}
@@ -118,8 +120,8 @@ export const ConfigureKnowledgeRetrieval: FC<ConfigureToolProps> = ({
               onChange={value => updateParameter('tool.score_threshold', value)}
             />
           </div>
-        </div>
-      </div>
+        </Stack>
+      </InputGroup>
 
       {toolDefinition && onChangeToolDefinition && (
         <ToolDefinitionForm

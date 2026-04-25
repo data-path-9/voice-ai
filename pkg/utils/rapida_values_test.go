@@ -117,3 +117,39 @@ func TestToUInt64Any(t *testing.T) {
 		t.Errorf("expected 42, got %v", result)
 	}
 }
+
+// TestInterfaceMapRoundTrip reproduces the exact path that tool call
+// arguments take: map[string]interface{} → InterfaceMapToAnyMap → wire →
+// AnyMapToInterfaceMap → type-assert string. This is the transfer_call flow.
+func TestInterfaceMapRoundTrip(t *testing.T) {
+	original := map[string]interface{}{
+		"to":     "+14155551234",
+		"reason": "customer requested agent",
+	}
+
+	anyMap, err := InterfaceMapToAnyMap(original)
+	if err != nil {
+		t.Fatalf("InterfaceMapToAnyMap error: %v", err)
+	}
+
+	recovered, err := AnyMapToInterfaceMap(anyMap)
+	if err != nil {
+		t.Fatalf("AnyMapToInterfaceMap error: %v", err)
+	}
+
+	to, ok := recovered["to"].(string)
+	if !ok {
+		t.Fatalf("expected recovered[\"to\"] to be string, got %T: %v", recovered["to"], recovered["to"])
+	}
+	if to != "+14155551234" {
+		t.Errorf("expected '+14155551234', got %q", to)
+	}
+
+	reason, ok := recovered["reason"].(string)
+	if !ok {
+		t.Fatalf("expected recovered[\"reason\"] to be string, got %T: %v", recovered["reason"], recovered["reason"])
+	}
+	if reason != "customer requested agent" {
+		t.Errorf("expected 'customer requested agent', got %q", reason)
+	}
+}

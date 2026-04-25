@@ -306,8 +306,12 @@ function CredentialKeyValueField({
         <tbody>
           {entries.length === 0 && (
             <tr>
-              <td colSpan={3} className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
-                No entries yet. Click <strong>Add {label.toLowerCase()}</strong> below to add key-value pairs.
+              <td
+                colSpan={3}
+                className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400"
+              >
+                No entries yet. Click <strong>Add {label.toLowerCase()}</strong>{' '}
+                below to add key-value pairs.
               </td>
             </tr>
           )}
@@ -350,17 +354,6 @@ function CredentialKeyValueField({
               </td>
             </tr>
           ))}
-          {entries.length === 0 && (
-            <tr>
-              <td
-                colSpan={3}
-                className="px-3 py-4 text-xs text-gray-500 dark:text-gray-400 text-center"
-              >
-                No {label.toLowerCase()} added yet. Add at least one key-value
-                pair.
-              </td>
-            </tr>
-          )}
         </tbody>
       </table>
       <TertiaryButton

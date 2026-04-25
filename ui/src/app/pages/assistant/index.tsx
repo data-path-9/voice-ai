@@ -121,9 +121,25 @@ export const DeploymentConfigureAssistantWebDeploymentPage = lazyLoad(
   },
 );
 
+export const DeploymentEditAssistantWebDeploymentPage = lazyLoad(
+  () => import('./actions/create-deployment/web-plugin/edit'),
+  module => module.EditAssistantWebDeploymentPage,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
 export const DeploymentConfigureAssistantCallDeploymentPage = lazyLoad(
   () => import('./actions/create-deployment/phone'),
   module => module.ConfigureAssistantCallDeploymentPage,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
+export const DeploymentEditAssistantCallDeploymentPage = lazyLoad(
+  () => import('./actions/create-deployment/phone/edit'),
+  module => module.EditAssistantCallDeploymentPage,
   {
     fallback: <PageLoader />,
   },
@@ -145,9 +161,25 @@ export const DeploymentConfigureAssistantApiDeploymentPage = lazyLoad(
   },
 );
 
+export const DeploymentEditAssistantApiDeploymentPage = lazyLoad(
+  () => import('./actions/create-deployment/api/edit'),
+  module => module.EditAssistantApiDeploymentPage,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
 export const DeploymentConfigureAssistantDebuggerDeploymentPage = lazyLoad(
   () => import('./actions/create-deployment/debugger'),
   module => module.ConfigureAssistantDebuggerDeploymentPage,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
+export const DeploymentEditAssistantDebuggerDeploymentPage = lazyLoad(
+  () => import('./actions/create-deployment/debugger/edit'),
+  module => module.EditAssistantDebuggerDeploymentPage,
   {
     fallback: <PageLoader />,
   },

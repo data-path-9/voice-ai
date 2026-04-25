@@ -100,7 +100,7 @@ func (*neuphonicTTS) Name() string {
 // readLoop owns a single WebSocket connection for the duration of one TTS turn.
 // It exits when the connection closes — intentionally (interrupt / done) or
 // unexpectedly (network drop). Neuphonic has no server-side completion ACK so
-// the turn ends when Transform receives LLMResponseDonePacket.
+// the turn ends when Transform receives TTSDonePacket.
 func (rt *neuphonicTTS) readLoop(conn *websocket.Conn) {
 	for {
 		select {
@@ -158,7 +158,7 @@ func (rt *neuphonicTTS) readLoop(conn *websocket.Conn) {
 	}
 }
 
-func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.LLMPacket) error {
+func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.Packet) error {
 	t.mu.Lock()
 	if in.ContextId() != t.contextId {
 		t.contextId = in.ContextId()
@@ -169,7 +169,7 @@ func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.LLMPacket
 	t.mu.Unlock()
 
 	switch input := in.(type) {
-	case internal_type.InterruptionDetectedPacket:
+	case internal_type.TTSInterruptPacket:
 		t.mu.Lock()
 		t.contextId = ""
 		t.ttsStartedAt = time.Time{}
@@ -190,11 +190,16 @@ func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.LLMPacket
 		}
 		return nil
 
-	case internal_type.LLMResponseDeltaPacket:
+	case internal_type.TTSTextPacket:
 		// Fallback reconnect: handles Initialize() failure or an unintentional drop.
 		if connection == nil {
 			if err := t.Initialize(); err != nil {
-				return fmt.Errorf("neuphonic-tts: failed to connect: %w", err)
+				t.onPacket(internal_type.TTSErrorPacket{
+					ContextID: input.ContextID,
+					Error:     fmt.Errorf("neuphonic-tts: failed to connect: %w", err),
+					Type:      internal_type.TTSNetworkTimeout,
+				})
+				return nil
 			}
 			t.mu.Lock()
 			connection = t.connection
@@ -213,7 +218,12 @@ func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.LLMPacket
 			"text": input.Text + " <STOP>",
 		}); err != nil {
 			t.logger.Errorf("neuphonic-tts: unable to write json for text to speech: %v", err)
-			return err
+			t.onPacket(internal_type.TTSErrorPacket{
+				ContextID: input.ContextID,
+				Error:     fmt.Errorf("neuphonic-tts: failed to write text: %w", err),
+				Type:      internal_type.TTSNetworkTimeout,
+			})
+			return nil
 		}
 		t.onPacket(internal_type.ConversationEventPacket{
 			Name: "tts",
@@ -225,7 +235,7 @@ func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.LLMPacket
 		})
 		return nil
 
-	case internal_type.LLMResponseDonePacket:
+	case internal_type.TTSDonePacket:
 		// Interrupted before done arrived — nothing to flush.
 		if connection == nil {
 			return nil

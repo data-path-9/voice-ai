@@ -63,7 +63,7 @@ export const SimpleMessagingAction: FC<SimpleMessagingAcitonProps> = ({
         />
 
         {/* Action row — always below textarea, right-aligned */}
-        <div className="flex items-center justify-end px-3 pb-3 pt-1 border-t border-gray-100 dark:border-gray-800 gap-2">
+        <div className="flex items-center justify-end px-3 pb-3 pt-1 border-t border-gray-100 dark:border-gray-800">
           {isValid ? (
             <PrimaryButton size="md" type="submit" renderIcon={Send}>
               Send
@@ -91,7 +91,7 @@ export const SimpleMessagingAction: FC<SimpleMessagingAcitonProps> = ({
               className="group h-10 px-3 flex items-center justify-center bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white transition-all duration-200 cursor-pointer"
             >
               <StopFilledAlt size={16} className="shrink-0" />
-              <span className="max-w-0 group-hover:max-w-[60px] overflow-hidden transition-all duration-200 whitespace-nowrap group-hover:ml-2 text-sm font-medium">
+              <span className="max-w-0 group-hover:max-w-15 overflow-hidden transition-all duration-200 whitespace-nowrap group-hover:ml-2 text-sm font-medium">
                 Stop
               </span>
             </button>

@@ -110,12 +110,22 @@ func (t *nvidiaTTS) streamHTTPTTS(text string, ctxId string) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.logger.Errorf("nvidia-tts: error marshalling request: %v", err)
+		t.onPacket(internal_type.TTSErrorPacket{
+			ContextID: ctxId,
+			Error:     fmt.Errorf("nvidia-tts: error marshalling request: %w", err),
+			Type:      internal_type.TTSNetworkTimeout,
+		})
 		return
 	}
 
 	req, err := http.NewRequestWithContext(t.ctx, "POST", apiURL, bytes.NewReader(body))
 	if err != nil {
 		t.logger.Errorf("nvidia-tts: error creating request: %v", err)
+		t.onPacket(internal_type.TTSErrorPacket{
+			ContextID: ctxId,
+			Error:     fmt.Errorf("nvidia-tts: error creating request: %w", err),
+			Type:      internal_type.TTSNetworkTimeout,
+		})
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+t.GetKey())
@@ -125,6 +135,11 @@ func (t *nvidiaTTS) streamHTTPTTS(text string, ctxId string) {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.logger.Errorf("nvidia-tts: error sending request: %v", err)
+		t.onPacket(internal_type.TTSErrorPacket{
+			ContextID: ctxId,
+			Error:     fmt.Errorf("nvidia-tts: error sending request: %w", err),
+			Type:      internal_type.TTSNetworkTimeout,
+		})
 		return
 	}
 	defer resp.Body.Close()
@@ -132,6 +147,11 @@ func (t *nvidiaTTS) streamHTTPTTS(text string, ctxId string) {
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		t.logger.Errorf("nvidia-tts: unexpected status code: %d, body: %s", resp.StatusCode, string(respBody))
+		t.onPacket(internal_type.TTSErrorPacket{
+			ContextID: ctxId,
+			Error:     fmt.Errorf("nvidia-tts: unexpected status code: %d", resp.StatusCode),
+			Type:      internal_type.TTSNetworkTimeout,
+		})
 		return
 	}
 
@@ -173,6 +193,11 @@ func (t *nvidiaTTS) streamHTTPTTS(text string, ctxId string) {
 		if err != nil {
 			if err != io.EOF {
 				t.logger.Errorf("nvidia-tts: error reading response body: %v", err)
+				t.onPacket(internal_type.TTSErrorPacket{
+					ContextID: ctxId,
+					Error:     fmt.Errorf("nvidia-tts: error reading response body: %w", err),
+					Type:      internal_type.TTSNetworkTimeout,
+				})
 			}
 			break
 		}
@@ -188,7 +213,7 @@ func (t *nvidiaTTS) streamHTTPTTS(text string, ctxId string) {
 	)
 }
 
-func (t *nvidiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket) error {
+func (t *nvidiaTTS) Transform(ctx context.Context, in internal_type.Packet) error {
 	t.mu.Lock()
 	currentCtx := t.contextId
 	if in.ContextId() != t.contextId {
@@ -200,7 +225,7 @@ func (t *nvidiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket) e
 	t.mu.Unlock()
 
 	switch input := in.(type) {
-	case internal_type.InterruptionDetectedPacket:
+	case internal_type.TTSInterruptPacket:
 		if currentCtx != "" {
 			t.mu.Lock()
 			t.ttsStartedAt = time.Time{}
@@ -214,7 +239,7 @@ func (t *nvidiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket) e
 			})
 		}
 		return nil
-	case internal_type.LLMResponseDeltaPacket:
+	case internal_type.TTSTextPacket:
 		t.mu.Lock()
 		if t.ttsStartedAt.IsZero() {
 			t.ttsStartedAt = time.Now()
@@ -229,7 +254,7 @@ func (t *nvidiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket) e
 			},
 			Time: time.Now(),
 		})
-	case internal_type.LLMResponseDonePacket:
+	case internal_type.TTSDonePacket:
 		t.flush()
 		return nil
 	default:

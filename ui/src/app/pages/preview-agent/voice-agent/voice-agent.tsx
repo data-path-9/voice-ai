@@ -38,6 +38,7 @@ type EventEntry = {
     | 'assistantMessage'
     | 'interrupt'
     | 'pipelineEvent'
+    | 'tool_call'
     | 'metric';
   ts: Date;
   payload: any;
@@ -214,6 +215,9 @@ export const VoiceAgent: FC<{
   const [eventFilters, setEventFilters] = useState<Set<string>>(new Set());
   const [conversationError, setConversationError] =
     useState<ConversationError.AsObject | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<
+    'idle' | 'connecting' | 'connected'
+  >('idle');
   const callbackRegistered = useRef(false);
   const eventsBottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -243,16 +247,35 @@ export const VoiceAgent: FC<{
     }
   }, [assistant]);
 
+  // Track connection state from agent events
+  useEffect(() => {
+    const handler = (state: string) => {
+      if (state === 'connecting') {
+        setConnectionStatus('connecting');
+      } else if (state === 'connected') {
+        setConnectionStatus('connected');
+        setTimeout(() => setConnectionStatus('idle'), 2000);
+      } else {
+        setConnectionStatus('idle');
+      }
+    };
+    voiceAgentContextValue.on('onConnectionStateEvent', handler);
+    return () => {
+      voiceAgentContextValue.off('onConnectionStateEvent', handler);
+    };
+  }, [voiceAgentContextValue]);
+
   // Register callbacks once
   useEffect(() => {
     if (callbackRegistered.current) return;
     callbackRegistered.current = true;
     voiceAgentContextValue.registerCallback({
-      onDirective: arg =>
+      onToolCall: toolCall => {
         setEvents(p => [
           ...p,
-          { type: 'directive', ts: new Date(), payload: arg },
-        ]),
+          { type: 'tool_call', ts: new Date(), payload: toolCall },
+        ]);
+      },
       onConfiguration: args =>
         setEvents(p => [
           ...p,
@@ -364,6 +387,21 @@ export const VoiceAgent: FC<{
               subtitle="Enable voice to enjoy a voice experience with your assistant."
               linkText="Enable voice"
               onLinkClick={() => window.open(enableVoiceHref, '_blank')}
+              hideCloseButton
+            />
+          )}
+          {connectionStatus === 'connecting' && (
+            <Notification
+              kind="info"
+              title="Establishing connection to the assistant..."
+              hideCloseButton
+            />
+          )}
+          {connectionStatus === 'connected' && (
+            <Notification
+              kind="success"
+              title="Connected"
+              subtitle="You are now connected. Start speaking."
               hideCloseButton
             />
           )}

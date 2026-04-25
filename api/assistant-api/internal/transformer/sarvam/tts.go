@@ -227,16 +227,17 @@ func (rt *sarvamTextToSpeech) handleServerError(conn *websocket.Conn, response s
 	}
 	rt.mu.Lock()
 	rt.connection = nil
+	ctxID := rt.contextId
 	rt.mu.Unlock()
-	rt.onPacket(internal_type.ConversationEventPacket{
-		Name: "tts",
-		Data: map[string]string{"type": "error", "message": msg},
-		Time: time.Now(),
+	rt.onPacket(internal_type.TTSErrorPacket{
+		ContextID: ctxID,
+		Error:     fmt.Errorf("sarvam-tts: failed : %v", msg),
+		Type:      internal_type.TTSInvalidInput,
 	})
 	conn.Close()
 }
 
-func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.LLMPacket) error {
+func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.Packet) error {
 	rt.mu.Lock()
 	if in.ContextId() != rt.contextId {
 		rt.contextId = in.ContextId()
@@ -247,7 +248,7 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.LL
 	rt.mu.Unlock()
 
 	switch input := in.(type) {
-	case internal_type.InterruptionDetectedPacket:
+	case internal_type.TTSInterruptPacket:
 		// Close the current connection immediately — the readLoop goroutine will
 		// exit, discarding any in-flight audio. Reconnect now so the fresh
 		// connection is ready before the next text delta arrives.
@@ -272,12 +273,17 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.LL
 		}
 		return nil
 
-	case internal_type.LLMResponseDeltaPacket:
+	case internal_type.TTSTextPacket:
 		// Fallback reconnect: handles Initialize() failure during interrupt or
 		// an unintentional connection drop between turns.
 		if connection == nil {
 			if err := rt.Initialize(); err != nil {
-				return fmt.Errorf("sarvam-tts: failed to connect: %w", err)
+				rt.onPacket(internal_type.TTSErrorPacket{
+					ContextID: input.ContextID,
+					Error:     fmt.Errorf("sarvam-tts: failed to connect: %w", err),
+					Type:      internal_type.TTSNetworkTimeout,
+				})
+				return nil
 			}
 			rt.mu.Lock()
 			connection = rt.connection
@@ -297,7 +303,12 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.LL
 			"data": map[string]interface{}{"text": input.Text},
 		}); err != nil {
 			rt.logger.Errorf("sarvam-tts: write failed: %v", err)
-			return err
+			rt.onPacket(internal_type.TTSErrorPacket{
+				ContextID: input.ContextID,
+				Error:     fmt.Errorf("sarvam-tts: failed to write text: %w", err),
+				Type:      internal_type.TTSNetworkTimeout,
+			})
+			return nil
 		}
 		rt.onPacket(internal_type.ConversationEventPacket{
 			Name: "tts",
@@ -305,14 +316,19 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.LL
 			Time: time.Now(),
 		})
 
-	case internal_type.LLMResponseDonePacket:
+	case internal_type.TTSDonePacket:
 		// Interrupted before done arrived — nothing to flush.
 		if connection == nil {
 			return nil
 		}
 		if err := connection.WriteJSON(map[string]interface{}{"type": "flush"}); err != nil {
 			rt.logger.Errorf("sarvam-tts: flush failed: %v", err)
-			return err
+			rt.onPacket(internal_type.TTSErrorPacket{
+				ContextID: input.ContextID,
+				Error:     fmt.Errorf("sarvam-tts: flush failed: %w", err),
+				Type:      internal_type.TTSNetworkTimeout,
+			})
+			return nil
 		}
 		// TextToSpeechEndPacket is emitted by handleFlushComplete once Sarvam
 		// confirms all audio has been delivered via the "event" response.

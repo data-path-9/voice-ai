@@ -598,7 +598,7 @@ func (openSearch *openSearchConnector) Bulk(ctx context.Context, body string) er
 		Body:    strings.NewReader(body),
 		Refresh: "true",
 	}
-	bulkResponse, err := req.Do(context.Background(), openSearch.Connection)
+	bulkResponse, err := req.Do(ctx, openSearch.Connection)
 	if err != nil {
 		openSearch.logger.Errorf("error while bulk operation to opensearch got error %v", err)
 		return err

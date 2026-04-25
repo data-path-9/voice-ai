@@ -33,6 +33,11 @@ describe('useGlobalNavigation', () => {
     result.current.goToAssistantVersions('a-1');
     result.current.goToCreateAssistantVersion('a-1');
     result.current.goToConfigureApi('a-1');
+    result.current.goToEditApi('a-1', 'api-1');
+    result.current.goToConfigureCall('a-1');
+    result.current.goToEditCall('a-1', 'dep-1');
+    result.current.goToEditWeb('a-1', 'web-1');
+    result.current.goToEditDebugger('a-1', 'dbg-1');
     result.current.goToConfigureDebuggerExperience('a-1');
     result.current.goToConfigureDebuggerSTT('a-1');
     result.current.goToConfigureDebuggerTTS('a-1');
@@ -53,18 +58,38 @@ describe('useGlobalNavigation', () => {
     );
     expect(mockNavigate).toHaveBeenNthCalledWith(
       5,
-      '/deployment/assistant/a-1/deployment/debugger?editMode=section&section=experience',
+      '/deployment/assistant/a-1/deployment/api/api-1',
     );
     expect(mockNavigate).toHaveBeenNthCalledWith(
       6,
-      '/deployment/assistant/a-1/deployment/debugger?editMode=section&section=stt',
+      '/deployment/assistant/a-1/deployment/call',
     );
     expect(mockNavigate).toHaveBeenNthCalledWith(
       7,
-      '/deployment/assistant/a-1/deployment/debugger?editMode=section&section=tts',
+      '/deployment/assistant/a-1/deployment/call/dep-1',
     );
     expect(mockNavigate).toHaveBeenNthCalledWith(
       8,
+      '/deployment/assistant/a-1/deployment/web/web-1',
+    );
+    expect(mockNavigate).toHaveBeenNthCalledWith(
+      9,
+      '/deployment/assistant/a-1/deployment/debugger/dbg-1',
+    );
+    expect(mockNavigate).toHaveBeenNthCalledWith(
+      10,
+      '/deployment/assistant/a-1/deployment/debugger?editMode=section&section=experience',
+    );
+    expect(mockNavigate).toHaveBeenNthCalledWith(
+      11,
+      '/deployment/assistant/a-1/deployment/debugger?editMode=section&section=stt',
+    );
+    expect(mockNavigate).toHaveBeenNthCalledWith(
+      12,
+      '/deployment/assistant/a-1/deployment/debugger?editMode=section&section=tts',
+    );
+    expect(mockNavigate).toHaveBeenNthCalledWith(
+      13,
       '/deployment/assistant/a-1/configure-tool/create',
     );
   });

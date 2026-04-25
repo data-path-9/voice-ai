@@ -6,6 +6,7 @@
 package internal_type
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -49,6 +50,13 @@ type LLMPacket interface {
 // LLMToolPacket is a marker interface for LLM tool-related packets.
 type LLMToolPacket interface {
 	ToolId() string
+}
+
+type ErrorPacket interface {
+	Packet
+	IsRecoverable() bool
+	Err() error
+	ErrMessage() string
 }
 
 // =============================================================================
@@ -142,25 +150,14 @@ type InterimEndOfSpeechPacket struct {
 
 func (p InterimEndOfSpeechPacket) ContextId() string { return p.ContextID }
 
-// NormalizedUserTextPacket carries the final normalized user text after language detection.
-type NormalizedUserTextPacket struct {
+// UserInputPacket carries the processed user text after input preprocessing (language detection, etc.).
+type UserInputPacket struct {
 	ContextID string
 	Text      string
 	Language  types.Language
 }
 
-func (f NormalizedUserTextPacket) ContextId() string { return f.ContextID }
-
-// NormalizeInputPacket triggers the input normalizer with the finalized speech.
-// Isolates the normalization step so it can be swapped or skipped without
-// modifying the EndOfSpeech handler.
-type NormalizeInputPacket struct {
-	ContextID string
-	Speech    string
-	Speechs   []SpeechToTextPacket
-}
-
-func (f NormalizeInputPacket) ContextId() string { return f.ContextID }
+func (f UserInputPacket) ContextId() string { return f.ContextID }
 
 // =============================================================================
 // Control — interrupts, directives, injected messages
@@ -184,21 +181,55 @@ type InterruptionDetectedPacket struct {
 
 func (f InterruptionDetectedPacket) ContextId() string { return f.ContextID }
 
-// InterruptTTSPacket signals the TTS transformer to stop current playback.
-type InterruptTTSPacket struct {
+// TTSInterruptPacket signals the TTS transformer to stop current playback.
+type TTSInterruptPacket struct {
 	ContextID string
 	StartAt   float64
 	EndAt     float64
 }
 
-func (f InterruptTTSPacket) ContextId() string { return f.ContextID }
+func (f TTSInterruptPacket) ContextId() string { return f.ContextID }
+
+type STTErrorType int
+
+const (
+	STTRateLimit = 1
+	STTNetworkTimeout
+
+	// Non-Recoverable STT errors (e.g., bad API keys, invalid audio formats)
+	STTAuthentication
+	STTInvalidInput
+	STTSystemPanic
+)
+
+// When IsRecoverable is true, the conversation should be gracefully terminated.
+type STTErrorPacket struct {
+	ContextID string
+	Error     error
+	Type      STTErrorType
+}
+
+func (f STTErrorPacket) ContextId() string { return f.ContextID }
+func (f STTErrorPacket) IsRecoverable() bool {
+	return f.Type == STTRateLimit || f.Type == STTNetworkTimeout
+}
+func (f STTErrorPacket) Err() error         { return f.Error }
+func (f STTErrorPacket) ErrMessage() string { return fmt.Sprintf("stt: %s", f.Error.Error()) }
+
+type STTInterruptPacket struct {
+	ContextID string
+	StartAt   float64
+	EndAt     float64
+}
+
+func (f STTInterruptPacket) ContextId() string { return f.ContextID }
 
 // InterruptLLMPacket signals the LLM executor to cancel current generation.
-type InterruptLLMPacket struct {
+type LLMInterruptPacket struct {
 	ContextID string
 }
 
-func (f InterruptLLMPacket) ContextId() string { return f.ContextID }
+func (f LLMInterruptPacket) ContextId() string { return f.ContextID }
 
 // TurnChangePacket notifies components that active context changed to a new turn.
 type TurnChangePacket struct {
@@ -210,15 +241,6 @@ type TurnChangePacket struct {
 }
 
 func (f TurnChangePacket) ContextId() string { return f.ContextID }
-
-// DirectivePacket carries a typed control action (e.g. end conversation).
-type DirectivePacket struct {
-	ContextID string
-	Directive protos.ConversationDirective_DirectiveType
-	Arguments map[string]interface{}
-}
-
-func (f DirectivePacket) ContextId() string { return f.ContextID }
 
 // InjectMessagePacket injects a pre-written message (greeting, error, idle timeout) into the pipeline.
 type InjectMessagePacket struct {
@@ -233,15 +255,6 @@ func (f InjectMessagePacket) Role() string      { return "rapida" }
 // =============================================================================
 // LLM Pipeline — execute -> delta -> done -> error -> tools
 // =============================================================================
-
-// ExecuteLLMPacket triggers the LLM pipeline with the user's final transcript.
-type ExecuteLLMPacket struct {
-	ContextID  string
-	Input      string
-	Normalized NormalizedUserTextPacket
-}
-
-func (f ExecuteLLMPacket) ContextId() string { return f.ContextID }
 
 // LLMResponseDeltaPacket represents a streaming text delta from the LLM.
 type LLMResponseDeltaPacket struct {
@@ -262,60 +275,168 @@ func (f LLMResponseDonePacket) Role() string      { return "assistant" }
 func (f LLMResponseDonePacket) ContextId() string { return f.ContextID }
 
 // LLMErrorPacket signals that the LLM encountered an error during generation.
+
+type LLMErrorType int
+
+const (
+	// UnknownError is the default zero-value fallback
+	UnknownError LLMErrorType = iota
+
+	// Recoverable errors (e.g., API rate limits, temporary network drops)
+	LLMRateLimit
+	LLMNetworkTimeout
+
+	// Non-Recoverable LLMors (e.g., bad API keys, invalid prompt formats)
+	LLMAuthentication
+	LLMInvalidInput
+	LLMSystemPanic
+)
+
+// When IsRecoverable is true, the conversation should be gracefully terminated.
 type LLMErrorPacket struct {
 	ContextID string
 	Error     error
+	Type      LLMErrorType
 }
 
 func (f LLMErrorPacket) ContextId() string { return f.ContextID }
+func (f LLMErrorPacket) IsRecoverable() bool {
+	return f.Type == LLMRateLimit || f.Type == LLMNetworkTimeout
+}
+func (f LLMErrorPacket) Err() error         { return f.Error }
+func (f LLMErrorPacket) ErrMessage() string { return fmt.Sprintf("llm: %s", f.Error.Error()) }
 
-// LLMToolCallPacket signals that the LLM invoked a tool.
+// LLMToolCallPacket signals that a tool was invoked.
+// Action determines whether the client/channel needs to act (e.g. end call, transfer).
 type LLMToolCallPacket struct {
 	ToolID    string
 	Name      string
 	ContextID string
-	Arguments map[string]interface{}
+	Action    protos.ToolCallAction
+	Arguments map[string]string
 }
 
 func (f LLMToolCallPacket) ContextId() string { return f.ContextID }
 func (f LLMToolCallPacket) ToolId() string    { return f.ToolID }
 
+func (f LLMToolCallPacket) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"tool_id":    f.ToolID,
+		"name":       f.Name,
+		"context_id": f.ContextID,
+		"action":     f.Action.String(),
+		"arguments":  f.Arguments,
+	})
+}
+
+func (f *LLMToolCallPacket) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ToolID    string            `json:"tool_id"`
+		Name      string            `json:"name"`
+		ContextID string            `json:"context_id"`
+		Action    string            `json:"action"`
+		Arguments map[string]string `json:"arguments"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	f.ToolID = raw.ToolID
+	f.Name = raw.Name
+	f.ContextID = raw.ContextID
+	f.Action = protos.ToolCallAction(protos.ToolCallAction_value[raw.Action])
+	f.Arguments = raw.Arguments
+	return nil
+}
+
 // LLMToolResultPacket carries the result of a tool execution.
+// Arrives from server-side tools (immediate) or from client/channel (directive).
 type LLMToolResultPacket struct {
 	ToolID    string
 	Name      string
 	ContextID string
-	TimeTaken int64 // nanoseconds
-	Result    map[string]interface{}
+	Action    protos.ToolCallAction
+	Result    map[string]string
 }
 
 func (f LLMToolResultPacket) ToolId() string    { return f.ToolID }
 func (f LLMToolResultPacket) ContextId() string { return f.ContextID }
 
+func (f LLMToolResultPacket) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"tool_id":    f.ToolID,
+		"name":       f.Name,
+		"context_id": f.ContextID,
+		"action":     f.Action.String(),
+		"result":     f.Result,
+	})
+}
+
+func (f *LLMToolResultPacket) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ToolID    string            `json:"tool_id"`
+		Name      string            `json:"name"`
+		ContextID string            `json:"context_id"`
+		Action    string            `json:"action"`
+		Result    map[string]string `json:"result"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	f.ToolID = raw.ToolID
+	f.Name = raw.Name
+	f.ContextID = raw.ContextID
+	f.Action = protos.ToolCallAction(protos.ToolCallAction_value[raw.Action])
+	f.Result = raw.Result
+	return nil
+}
+
 // =============================================================================
 // Output Pipeline — aggregate -> speak -> TTS audio -> TTS end
 // =============================================================================
 
-// AggregateTextPacket triggers the text aggregator with validated LLM output.
-// The aggregator batches deltas into sentence-sized chunks before emitting
-// SpeakTextPacket. IsFinal=true signals end of generation.
-type AggregateTextPacket struct {
+type TTSErrorType int
+
+const (
+	TTSUnknownError TTSErrorType = iota
+
+	// Recoverable
+	TTSRateLimit
+	TTSNetworkTimeout
+
+	// Non-Recoverable
+	TTSAuthentication
+	TTSInvalidInput
+	TTSSystemPanic
+)
+
+type TTSErrorPacket struct {
 	ContextID string
-	Text      string
-	IsFinal   bool
+	Error     error
+	Type      TTSErrorType
 }
 
-func (f AggregateTextPacket) ContextId() string { return f.ContextID }
+func (f TTSErrorPacket) ContextId() string { return f.ContextID }
+func (f TTSErrorPacket) IsRecoverable() bool {
+	return f.Type == TTSRateLimit || f.Type == TTSNetworkTimeout
+}
+func (f TTSErrorPacket) Err() error         { return f.Error }
+func (f TTSErrorPacket) ErrMessage() string { return fmt.Sprintf("tts: %s", f.Error.Error()) }
 
-// SpeakTextPacket routes text into the TTS pipeline or directly to the client.
-// IsFinal=true signals a flush (end of generation); IsFinal=false is a streaming delta.
-type SpeakTextPacket struct {
+// TTSTextPacket carries a sentence-ready text chunk for TTS synthesis.
+type TTSTextPacket struct {
 	ContextID string
 	Text      string
-	IsFinal   bool
 }
 
-func (f SpeakTextPacket) ContextId() string { return f.ContextID }
+func (f TTSTextPacket) ContextId() string { return f.ContextID }
+
+// TTSDonePacket signals end of this turn's output. TTS flushes remaining audio.
+type TTSDonePacket struct {
+	ContextID string
+	Text      string
+}
+
+func (f TTSDonePacket) ContextId() string { return f.ContextID }
 
 // TextToSpeechAudioPacket carries a TTS audio chunk produced by the TTS provider.
 type TextToSpeechAudioPacket struct {
@@ -371,6 +492,25 @@ type SaveMessagePacket struct {
 func (f SaveMessagePacket) ContextId() string { return f.ContextID }
 func (f SaveMessagePacket) Role() string      { return f.MessageRole }
 func (f SaveMessagePacket) Content() string   { return f.Text }
+
+// ToolLogCreatePacket persists a tool call start to the database.
+type ToolLogCreatePacket struct {
+	ContextID string
+	ToolID    string
+	Name      string
+	Request   []byte
+}
+
+func (f ToolLogCreatePacket) ContextId() string { return f.ContextID }
+
+// ToolLogUpdatePacket persists a tool call result to the database.
+type ToolLogUpdatePacket struct {
+	ContextID string
+	ToolID    string
+	Response  []byte
+}
+
+func (f ToolLogUpdatePacket) ContextId() string { return f.ContextID }
 
 // =============================================================================
 // Metrics & Metadata

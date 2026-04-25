@@ -9,7 +9,9 @@ package internal_asterisk_websocket
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -22,9 +24,7 @@ import (
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
-	rapida_utils "github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -101,15 +101,16 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
-			aws.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
-			aws.BaseStreamer.Cancel()
+			if msg := aws.Disconnect(disconnectTypeFromReadError(err)); msg != nil {
+				aws.Input(msg)
+			}
 			return
 		}
 		switch messageType {
 		case websocket.BinaryMessage:
 			msg, _ := aws.handleAudioData(message)
 			if msg != nil {
-				aws.PushInput(msg)
+				aws.Input(msg)
 			}
 		case websocket.TextMessage:
 			event, err := internal_asterisk.ParseAsteriskEvent(string(message))
@@ -126,8 +127,8 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 					aws.audioProcessor.SetOptimalFrameSize(event.OptimalFrameSize)
 				}
 				aws.startOutputSender()
-				aws.PushInput(aws.CreateConnectionRequest())
-				aws.PushInputLow(&protos.ConversationEvent{
+				aws.Input(aws.CreateConnectionRequest())
+				aws.Input(&protos.ConversationEvent{
 					Name: "channel",
 					Data: map[string]string{"type": "media_started", "provider": "asterisk_ws", "channel_name": aws.channelName},
 					Time: timestamppb.Now(),
@@ -135,19 +136,20 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 			case "MEDIA_STOP":
 				aws.Logger.Info("Asterisk media stopped")
 				aws.stopAudioProcessing()
-				aws.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
-				aws.Cancel()
+				if msg := aws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
+					aws.Input(msg)
+				}
 				return
 			case "MEDIA_XON":
 				aws.audioProcessor.SetXON()
-				aws.PushInputLow(&protos.ConversationEvent{
+				aws.Input(&protos.ConversationEvent{
 					Name: "channel",
 					Data: map[string]string{"type": "flow_control", "provider": "asterisk_ws", "state": "xon"},
 					Time: timestamppb.Now(),
 				})
 			case "MEDIA_XOFF":
 				aws.audioProcessor.SetXOFF()
-				aws.PushInputLow(&protos.ConversationEvent{
+				aws.Input(&protos.ConversationEvent{
 					Name: "channel",
 					Data: map[string]string{"type": "flow_control", "provider": "asterisk_ws", "state": "xoff"},
 					Time: timestamppb.Now(),
@@ -162,8 +164,9 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 				}
 			}
 		case websocket.CloseMessage:
-			aws.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
-			aws.BaseStreamer.Cancel()
+			if msg := aws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
+				aws.Input(msg)
+			}
 			return
 		default:
 			aws.Logger.Warn("Received unsupported WebSocket message type", "type", messageType)
@@ -207,34 +210,96 @@ func (aws *asteriskWebsocketStreamer) Send(response internal_type.Stream) error 
 			}
 		}
 
-	case *protos.ConversationDirective:
-		switch data.GetType() {
-		case protos.ConversationDirective_END_CONVERSATION:
+	case *protos.ConversationDisconnection:
+		aws.stopAudioProcessing()
+		if err := aws.hangupCall(); err != nil {
+			aws.Logger.Warnw("Failed to hang up call for disconnection", "error", err)
+		}
+		if disc := aws.Disconnect(data.GetType()); disc != nil {
+			aws.Input(disc)
+		}
+	case *protos.ConversationToolCall:
+		switch data.GetAction() {
+		case protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION:
 			aws.stopAudioProcessing()
-			if err := aws.sendCommand("HANGUP"); err != nil {
-				aws.Logger.Warn("Failed to send HANGUP via WebSocket, trying ARI API", "error", err)
-				if aws.channelName != "" {
-					if err := aws.hangupViaARI(); err != nil {
-						aws.Logger.Error("Failed to hangup via ARI API", "error", err)
-					}
-				}
+			if err := aws.hangupCall(); err != nil {
+				aws.Logger.Error("Failed to hang up call", "error", err)
+				aws.Input(&protos.ConversationToolCallResult{
+					Id:     data.GetId(),
+					ToolId: data.GetToolId(),
+					Name:   data.GetName(),
+					Action: data.GetAction(),
+					Result: map[string]string{"status": "failed", "reason": fmt.Sprintf("hangup failed: %v", err)},
+				})
+				return nil
 			}
-			aws.Cancel()
-		case protos.ConversationDirective_TRANSFER_CONVERSATION:
-			to := extractTransferTarget(data.GetArgs())
+			aws.Input(&protos.ConversationToolCallResult{
+				Id:     data.GetId(),
+				ToolId: data.GetToolId(),
+				Name:   data.GetName(),
+				Action: data.GetAction(),
+				Result: map[string]string{"status": "completed"},
+			})
+			if disc := aws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL); disc != nil {
+				aws.Input(disc)
+			}
+		case protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION:
+			to := data.GetArgs()["to"]
 			if to == "" || aws.channelName == "" {
-				aws.Logger.Warnw("Transfer directive missing target or channel name")
+				aws.Input(&protos.ConversationToolCallResult{
+					Id:     data.GetId(),
+					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
+					Result: map[string]string{"status": "failed", "reason": "missing target or channel name"},
+				})
 				return nil
 			}
 			aws.Logger.Infow("Transferring Asterisk call via ARI redirect", "to", to, "channel", aws.channelName)
 			aws.stopAudioProcessing()
 			if err := aws.redirectViaARI(to); err != nil {
 				aws.Logger.Errorw("ARI redirect failed", "error", err, "to", to)
+				aws.Input(&protos.ConversationToolCallResult{
+					Id:     data.GetId(),
+					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
+					Result: map[string]string{"status": "failed", "reason": fmt.Sprintf("ARI redirect failed: %v", err)},
+				})
+			} else {
+				aws.Input(&protos.ConversationToolCallResult{
+					Id:     data.GetId(),
+					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
+					Result: map[string]string{"status": "completed"},
+				})
 			}
 			aws.Cancel()
 		}
 	}
 
+	return nil
+}
+
+func disconnectTypeFromReadError(err error) protos.ConversationDisconnection_DisconnectionType {
+	if err == nil {
+		return protos.ConversationDisconnection_DISCONNECTION_TYPE_UNSPECIFIED
+	}
+	if errors.Is(err, io.EOF) {
+		return protos.ConversationDisconnection_DISCONNECTION_TYPE_USER
+	}
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		return protos.ConversationDisconnection_DISCONNECTION_TYPE_USER
+	}
+	return protos.ConversationDisconnection_DISCONNECTION_TYPE_UNSPECIFIED
+}
+
+func (aws *asteriskWebsocketStreamer) hangupCall() error {
+	if wsErr := aws.sendCommand("HANGUP"); wsErr != nil {
+		aws.Logger.Warn("Failed to send HANGUP via WebSocket, trying ARI API", "error", wsErr)
+		if aws.channelName == "" {
+			return wsErr
+		}
+		if ariErr := aws.hangupViaARI(); ariErr != nil {
+			return fmt.Errorf("ws hangup failed: %w; ari hangup failed: %w", wsErr, ariErr)
+		}
+	}
 	return nil
 }
 
@@ -349,20 +414,6 @@ func (aws *asteriskWebsocketStreamer) redirectViaARI(target string) error {
 	}
 	aws.Logger.Infow("Asterisk call redirected via ARI", "channel", aws.channelName, "target", target)
 	return nil
-}
-
-func extractTransferTarget(args map[string]*anypb.Any) string {
-	if args == nil {
-		return ""
-	}
-	iface, err := rapida_utils.AnyMapToInterfaceMap(args)
-	if err != nil {
-		return ""
-	}
-	if to, ok := iface["to"].(string); ok {
-		return to
-	}
-	return ""
 }
 
 func (aws *asteriskWebsocketStreamer) Cancel() error {

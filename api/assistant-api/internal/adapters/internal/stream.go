@@ -117,6 +117,27 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 				}
 			}
 
+		case *protos.ConversationToolCallResult:
+			if initialized {
+				t.OnPacket(t.streamer.Context(), internal_type.LLMToolResultPacket{
+					ToolID:    payload.GetToolId(),
+					Name:      payload.GetName(),
+					ContextID: payload.GetId(),
+					Action:    payload.GetAction(),
+					Result:    payload.GetResult(),
+				})
+			}
+
+		case *protos.ConversationBridgeUserAudio:
+			if initialized {
+				t.OnPacket(t.streamer.Context(), internal_type.RecordUserAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
+			}
+
+		case *protos.ConversationBridgeOperatorAudio:
+			if initialized {
+				t.OnPacket(t.streamer.Context(), internal_type.RecordAssistantAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
+			}
+
 		case *protos.ConversationMetadata:
 			if initialized {
 				if err := t.OnPacket(t.streamer.Context(),
@@ -167,6 +188,9 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 						}},
 					},
 				)
+				t.emitCallCompletion(totalTime)
+				t.Disconnect(context.Background())
+				return nil
 			}
 		}
 	}

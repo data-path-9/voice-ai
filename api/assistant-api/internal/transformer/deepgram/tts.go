@@ -61,7 +61,7 @@ func NewDeepgramTextToSpeech(ctx context.Context, logger commons.Logger, credent
 		ctxCancel:      cancel,
 		logger:         logger,
 		onPacket:       onPacket,
-		normalizer:     NewDeepgramNormalizer(logger, opts),
+		normalizer:     deepgram_internal.NewDeepgramNormalizer(logger, opts),
 	}, nil
 }
 
@@ -194,7 +194,7 @@ func (t *deepgramTTS) readLoop(conn *websocket.Conn) {
 }
 
 // Transform streams text into Deepgram
-func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.LLMPacket) error {
+func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) error {
 	t.mu.Lock()
 	if in.ContextId() != t.contextId {
 		t.contextId = in.ContextId()
@@ -205,7 +205,7 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.LLMPacket)
 	t.mu.Unlock()
 
 	switch input := in.(type) {
-	case internal_type.InterruptionDetectedPacket:
+	case internal_type.TTSInterruptPacket:
 		t.mu.Lock()
 		t.contextId = ""
 		t.ttsStartedAt = time.Time{}
@@ -226,11 +226,15 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.LLMPacket)
 		}
 		return nil
 
-	case internal_type.LLMResponseDeltaPacket:
-		// Fallback reconnect: handles Initialize() failure or an unintentional drop.
+	case internal_type.TTSTextPacket:
 		if connection == nil {
 			if err := t.Initialize(); err != nil {
-				return fmt.Errorf("deepgram-tts: failed to connect: %w", err)
+				t.onPacket(internal_type.TTSErrorPacket{
+					ContextID: input.ContextID,
+					Error:     fmt.Errorf("deepgram-tts: failed to connect: %w", err),
+					Type:      internal_type.TTSNetworkTimeout,
+				})
+				return nil
 			}
 			t.mu.Lock()
 			connection = t.connection
@@ -245,13 +249,18 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.LLMPacket)
 			}
 			t.mu.Unlock()
 		}
-		normalized := t.normalizer.Normalize(ctx, input.Text)
+		normalized := t.normalizer.Normalize(input.Text)
 		if err := connection.WriteJSON(map[string]interface{}{
 			"type": "Speak",
 			"text": normalized,
 		}); err != nil {
 			t.logger.Errorf("deepgram-tts: failed to send Speak message %v", err)
-			return err
+			t.onPacket(internal_type.TTSErrorPacket{
+				ContextID: input.ContextID,
+				Error:     fmt.Errorf("deepgram-tts: failed to send Speak message: %w", err),
+				Type:      internal_type.TTSNetworkTimeout,
+			})
+			return nil
 		}
 		t.onPacket(internal_type.ConversationEventPacket{
 			Name: "tts",
@@ -263,7 +272,7 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.LLMPacket)
 		})
 		return nil
 
-	case internal_type.LLMResponseDonePacket:
+	case internal_type.TTSDonePacket:
 		// Interrupted before done arrived — nothing to flush.
 		if connection == nil {
 			return nil
@@ -271,7 +280,12 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.LLMPacket)
 		// Signal end of text stream; Deepgram will respond with Flushed.
 		if err := connection.WriteJSON(map[string]string{"type": "Flush"}); err != nil {
 			t.logger.Errorf("deepgram-tts: failed to send Flush %v", err)
-			return err
+			t.onPacket(internal_type.TTSErrorPacket{
+				ContextID: input.ContextID,
+				Error:     fmt.Errorf("deepgram-tts: failed to send Flush: %w", err),
+				Type:      internal_type.TTSNetworkTimeout,
+			})
+			return nil
 		}
 		// TextToSpeechEndPacket is emitted by handleFlushComplete once Flushed received.
 		return nil

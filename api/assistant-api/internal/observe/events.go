@@ -104,6 +104,9 @@ const (
 	EventResume            = "resume"
 	EventReInvite          = "reinvite"
 	EventTransferRequested = "transfer_requested"
+	EventTransferConnected = "transfer_connected"
+	EventTransferCompleted = "transfer_completed"
+	EventTransferFailed    = "transfer_failed"
 	EventRegisterActive    = "register_active"
 	EventRegisterFailed    = "register_failed"
 	EventDTMF              = "dtmf"
@@ -113,6 +116,10 @@ const (
 	EventICEFailed        = "ice_failed"
 	EventPeerConnected    = "peer_connected"
 	EventPeerDisconnected = "peer_disconnected"
+
+	// --- Tool ---
+	EventToolCallStarted   = "tool_call_started"
+	EventToolCallCompleted = "tool_call_completed"
 
 	// --- Recording ---
 	EventRecordingStarted = "recording_started"
@@ -140,6 +147,9 @@ const (
 	// --- SIP ---
 	MetricSIPRegisterFailure = "sip.register_failure"
 
+	// --- Transfer ---
+	MetricTransferDurationMs = "transfer.bridge_duration_ms"
+
 	// --- RTP ---
 	MetricRTPPacketsSent     = "rtp.packets_sent"
 	MetricRTPPacketsReceived = "rtp.packets_received"
@@ -158,23 +168,26 @@ const (
 // =============================================================================
 
 const (
-	DataType      = "type"
-	DataProvider  = "provider"
-	DataDirection = "direction"
-	DataReason    = "reason"
-	DataError     = "error"
-	DataStage     = "stage"
-	DataDID       = "did"
-	DataCaller    = "caller"
-	DataCallee    = "callee"
-	DataContextID = "context_id"
-	DataCodec     = "codec"
-	DataMode      = "mode"
-	DataFrom      = "from"
-	DataTo        = "to"
-	DataDuration  = "duration_ms"
-	DataMessages  = "messages"
-	DataDigit     = "digit"
+	DataType           = "type"
+	DataProvider       = "provider"
+	DataDirection      = "direction"
+	DataReason         = "reason"
+	DataError          = "error"
+	DataStage          = "stage"
+	DataDID            = "did"
+	DataCaller         = "caller"
+	DataCallee         = "callee"
+	DataContextID      = "context_id"
+	DataCodec          = "codec"
+	DataMode           = "mode"
+	DataFrom           = "from"
+	DataTo             = "to"
+	DataDuration       = "duration_ms"
+	DataMessages       = "messages"
+	DataDigit          = "digit"
+	DataTarget         = "target"
+	DataOutboundCallID = "outbound_call_id"
+	DataStatus         = "status"
 )
 
 // =============================================================================

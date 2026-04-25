@@ -72,7 +72,7 @@ func (r *genericRequestor) initializeGreeting(ctx context.Context, behavior *int
 		return
 	}
 
-	greetingContent := r.templateParser.Parse(*behavior.Greeting, r.GetArgs())
+	greetingContent := *behavior.Greeting
 	if strings.TrimSpace(greetingContent) == "" {
 		return
 	}
@@ -90,6 +90,17 @@ func (r *genericRequestor) initializeGreeting(ctx context.Context, behavior *int
 	}
 }
 
+// restartTimers restarts idle timeout and max session duration timers from scratch.
+// Called after an action tool call completes (e.g., transfer returns to agent).
+func (r *genericRequestor) restartTimers(ctx context.Context) {
+	behavior, err := r.GetBehavior()
+	if err != nil {
+		return
+	}
+	r.startIdleTimeoutTimer(ctx)
+	r.initializeMaxSessionDuration(ctx, behavior)
+}
+
 // initializeIdleTimeout starts the idle timeout timer if configured.
 func (r *genericRequestor) initializeIdleTimeout(ctx context.Context, behavior *internal_assistant_entity.AssistantDeploymentBehavior) {
 	if behavior.IdleTimeout == nil || *behavior.IdleTimeout <= 0 {
@@ -103,15 +114,10 @@ func (r *genericRequestor) initializeMaxSessionDuration(ctx context.Context, beh
 	if behavior.MaxSessionDuration == nil || *behavior.MaxSessionDuration <= 0 {
 		return
 	}
-
 	timeoutDuration := time.Duration(*behavior.MaxSessionDuration) * time.Second
 	r.maxSessionTimer = time.AfterFunc(timeoutDuration, func() {
-		r.OnPacket(ctx, internal_type.DirectivePacket{
-			ContextID: r.GetID(),
-			Directive: protos.ConversationDirective_END_CONVERSATION,
-			Arguments: map[string]interface{}{
-				"reason": "max session duration reached",
-			},
+		r.Notify(ctx, &protos.ConversationDisconnection{
+			Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION,
 		})
 	})
 }
@@ -128,7 +134,7 @@ func (r *genericRequestor) OnError(ctx context.Context) error {
 
 	mistakeContent := defaultMistakeMessage
 	if behavior.Mistake != nil {
-		mistakeContent = r.templateParser.Parse(*behavior.Mistake, r.GetArgs())
+		mistakeContent = *behavior.Mistake
 	}
 
 	r.Transition(Interrupted)
@@ -163,12 +169,8 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 	// Check if max backoff retries reached
 	if behavior.IdleTimeoutBackoff != nil && *behavior.IdleTimeoutBackoff > 0 {
 		if r.idleTimeoutCount >= *behavior.IdleTimeoutBackoff {
-			r.OnPacket(ctx, internal_type.DirectivePacket{
-				ContextID: r.GetID(),
-				Directive: protos.ConversationDirective_END_CONVERSATION,
-				Arguments: map[string]interface{}{
-					"reason": "max session duration reached",
-				},
+			r.Notify(ctx, &protos.ConversationDisconnection{
+				Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT,
 			})
 			return nil
 		}
@@ -218,7 +220,7 @@ func (r *genericRequestor) getIdleTimeoutMessage(behavior *internal_assistant_en
 	const defaultTimeoutMessage = "Are you still there?"
 
 	if behavior.IdleTimeoutMessage != nil && strings.TrimSpace(*behavior.IdleTimeoutMessage) != "" {
-		return r.templateParser.Parse(*behavior.IdleTimeoutMessage, r.GetArgs())
+		return *behavior.IdleTimeoutMessage
 	}
 
 	return defaultTimeoutMessage
@@ -273,17 +275,6 @@ func (r *genericRequestor) extendIdleTimeoutTimer(d time.Duration) {
 func (r *genericRequestor) stopIdleTimeoutTimerAndResetCount() {
 	r.stopIdleTimeoutTimer()
 	r.idleTimeoutCount = 0
-}
-
-// ResetIdleTimeoutTimer resets the idle timeout timer when the user responds,
-// indicating they are still engaged in the conversation.
-// The inputDuration parameter extends the idle timeout to account for user input time.
-func (r *genericRequestor) resetIdleTimeoutTimer(ctx context.Context, inputDuration ...time.Duration) {
-	if r.idleTimeoutTimer == nil {
-		return
-	}
-	r.idleTimeoutCount = 0
-	r.startIdleTimeoutTimer(ctx, inputDuration...)
 }
 
 // stopIdleTimeoutTimer stops the idle timeout timer without resetting the

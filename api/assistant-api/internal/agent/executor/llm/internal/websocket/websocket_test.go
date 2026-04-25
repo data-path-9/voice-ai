@@ -91,9 +91,9 @@ func TestHandleResponse_Stream_CurrentContextEmits(t *testing.T) {
 	assert.Equal(t, "hello", delta.Text)
 }
 
-func TestExecute_NormalizedUserTextPacket_EmptyContextNoop(t *testing.T) {
+func TestExecute_UserInputPacket_EmptyContextNoop(t *testing.T) {
 	e := newTestExecutor(t)
-	err := e.Execute(context.Background(), nil, internal_type.NormalizedUserTextPacket{Text: "hello"})
+	err := e.Execute(context.Background(), nil, internal_type.UserInputPacket{Text: "hello"})
 	require.NoError(t, err)
 	assert.Equal(t, "", e.currentID)
 }
@@ -237,9 +237,9 @@ func TestHandleResponse_Close(t *testing.T) {
 	}, onPacket)
 
 	require.Len(t, collected, 1)
-	dir, ok := collected[0].(internal_type.DirectivePacket)
+	dir, ok := collected[0].(internal_type.LLMToolCallPacket)
 	require.True(t, ok)
-	assert.Equal(t, protos.ConversationDirective_END_CONVERSATION, dir.Directive)
+	assert.Equal(t, protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION, dir.Action)
 	assert.Equal(t, "session ended", dir.Arguments["reason"])
 }
 
@@ -419,9 +419,9 @@ func TestE2E_ServerClose(t *testing.T) {
 		Data: json.RawMessage(`{"reason":"timeout","code":1001}`),
 	}, onPacket)
 
-	dirs := findPackets[internal_type.DirectivePacket](collector.all())
+	dirs := findPackets[internal_type.LLMToolCallPacket](collector.all())
 	require.Len(t, dirs, 1)
-	assert.Equal(t, protos.ConversationDirective_END_CONVERSATION, dirs[0].Directive)
+	assert.Equal(t, protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION, dirs[0].Action)
 }
 
 // =============================================================================
@@ -513,7 +513,7 @@ func TestConcurrency_ExecuteAndInterruptRace(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 200; i++ {
-			_ = e.Execute(context.Background(), nil, internal_type.NormalizedUserTextPacket{
+			_ = e.Execute(context.Background(), nil, internal_type.UserInputPacket{
 				ContextID: fmt.Sprintf("ctx-%d", i),
 				Text:      fmt.Sprintf("msg-%d", i),
 			})

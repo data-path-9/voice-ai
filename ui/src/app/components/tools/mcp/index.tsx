@@ -1,10 +1,11 @@
 import { FC } from 'react';
 import { Select, SelectItem } from '@carbon/react';
-import { TextInput, TextArea } from '@/app/components/carbon/form';
+import { TextInput, TextArea, Stack } from '@/app/components/carbon/form';
 import { ConfigureToolProps, useParameterManager } from '../common';
 import { BlueNoticeBlock } from '@/app/components/container/message/notice-block';
 import { APiStringHeader } from '@/app/components/external-api/api-header';
 import { MCP_PROTOCOL_OPTIONS } from './constant';
+import { InputGroup } from '../../input-group/index';
 
 // ============================================================================
 // Main Component
@@ -35,8 +36,8 @@ export const ConfigureMCP: FC<ConfigureToolProps> = ({
 
   return (
     <>
-      <div className="px-6 pb-6">
-        <div className="flex flex-col gap-6 max-w-6xl">
+      <InputGroup title="Action Definition">
+        <Stack gap={7}>
           <TextInput
             id="mcp-tool-name"
             labelText="Name"
@@ -104,8 +105,8 @@ export const ConfigureMCP: FC<ConfigureToolProps> = ({
               </div>
             </div>
           </BlueNoticeBlock>
-        </div>
-      </div>
+        </Stack>
+      </InputGroup>
     </>
   );
 };

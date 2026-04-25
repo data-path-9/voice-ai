@@ -14,7 +14,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
@@ -35,7 +34,6 @@ type Streamer struct {
 	writer         *bufio.Writer
 	writeMu        sync.Mutex
 	audioProcessor *internal_asterisk.AudioProcessor
-	closed         atomic.Bool
 
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -132,7 +130,7 @@ func (as *Streamer) Context() context.Context {
 }
 
 func (as *Streamer) runFrameReader() {
-	as.PushInputLow(&protos.ConversationEvent{
+	as.Input(&protos.ConversationEvent{
 		Name: "channel",
 		Data: map[string]string{
 			"type":     "connected",
@@ -141,7 +139,7 @@ func (as *Streamer) runFrameReader() {
 		Time: timestamppb.Now(),
 	})
 	if as.initialUUID != "" {
-		as.PushInput(as.CreateConnectionRequest())
+		as.Input(as.CreateConnectionRequest())
 	}
 	for {
 		select {
@@ -151,20 +149,20 @@ func (as *Streamer) runFrameReader() {
 		}
 		frame, err := ReadFrame(as.reader)
 		if err != nil {
+			disconnectType := protos.ConversationDisconnection_DISCONNECTION_TYPE_UNSPECIFIED
 			if err == io.EOF {
-				as.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
-				as.BaseStreamer.Cancel()
-				return
+				disconnectType = protos.ConversationDisconnection_DISCONNECTION_TYPE_USER
 			}
-			as.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
-			as.BaseStreamer.Cancel()
+			if msg := as.Disconnect(disconnectType); msg != nil {
+				as.Input(msg)
+			}
 			return
 		}
 		switch frame.Type {
 		case FrameTypeUUID:
 			if as.initialUUID == "" {
 				as.initialUUID = strings.TrimSpace(string(frame.Payload))
-				as.PushInput(as.CreateConnectionRequest())
+				as.Input(as.CreateConnectionRequest())
 			}
 		case FrameTypeAudio:
 			if err := as.audioProcessor.ProcessInputAudio(frame.Payload); err != nil {
@@ -179,17 +177,19 @@ func (as *Streamer) runFrameReader() {
 				}
 			})
 			if audioRequest != nil {
-				as.PushInput(audioRequest)
+				as.Input(audioRequest)
 			}
 		case FrameTypeSilence:
 			// no-op
 		case FrameTypeHangup:
-			as.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
-			as.BaseStreamer.Cancel()
+			if msg := as.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
+				as.Input(msg)
+			}
 			return
 		case FrameTypeError:
-			as.PushDisconnection(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER)
-			as.BaseStreamer.Cancel()
+			if msg := as.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_UNSPECIFIED); msg != nil {
+				as.Input(msg)
+			}
 			return
 		}
 	}
@@ -208,36 +208,34 @@ func (as *Streamer) Send(response internal_type.Stream) error {
 		if data.GetType() == protos.ConversationInterruption_INTERRUPTION_TYPE_WORD {
 			as.audioProcessor.ClearOutputBuffer()
 		}
-	case *protos.ConversationDirective:
-		switch data.GetType() {
-		case protos.ConversationDirective_END_CONVERSATION:
+	case *protos.ConversationDisconnection:
+		_ = as.writeFrame(FrameTypeHangup, nil)
+		if disc := as.Disconnect(data.GetType()); disc != nil {
+			as.Input(disc)
+		}
+	case *protos.ConversationToolCall:
+		switch data.GetAction() {
+		case protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION:
+			as.Input(&protos.ConversationToolCallResult{
+				Id:     data.GetId(),
+				ToolId: data.GetToolId(),
+				Name:   data.GetName(),
+				Action: data.GetAction(),
+				Result: map[string]string{"status": "completed"},
+			})
 			_ = as.writeFrame(FrameTypeHangup, nil)
-			return as.close()
-		case protos.ConversationDirective_TRANSFER_CONVERSATION:
+			if disc := as.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL); disc != nil {
+				as.Input(disc)
+			}
+		case protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION:
 			as.Logger.Warnw("Call transfer not supported for AudioSocket")
+			as.Input(&protos.ConversationToolCallResult{
+				Id:     data.GetId(),
+				ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
+				Result: map[string]string{"status": "failed", "reason": "transfer not supported for AudioSocket"},
+			})
 		}
 	}
 
-	return nil
-}
-
-func (as *Streamer) close() error {
-	if !as.closed.CompareAndSwap(false, true) {
-		return nil
-	}
-	if as.outputCancel != nil {
-		as.outputCancel()
-	}
-	if as.cancel != nil {
-		as.cancel()
-	}
-	as.BaseStreamer.Cancel()
-	if as.conn != nil {
-		if as.writer != nil {
-			_ = as.writer.Flush()
-		}
-		_ = as.conn.Close()
-		as.conn = nil
-	}
 	return nil
 }

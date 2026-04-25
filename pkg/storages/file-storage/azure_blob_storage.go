@@ -82,10 +82,12 @@ func (az *azureBlobStorage) Name() string {
 }
 
 // Store implements storages.Storage.
-func (az *azureBlobStorage) Store(ctx context.Context, key string, fileContent []byte) storages.StorageOutput {
+func (az *azureBlobStorage) Store(_ context.Context, key string, fileContent []byte) storages.StorageOutput {
 	az.logger.Debugf("azure.store key=%s container=%s", key, az.config.StoragePathPrefix)
 	completePath := az.blobURL(key)
-	_, err := az.client.UploadStream(ctx, az.config.StoragePathPrefix, key,
+	uploadCtx, cancel := context.WithTimeout(context.Background(), storages.FileWriteTimeout)
+	defer cancel()
+	_, err := az.client.UploadStream(uploadCtx, az.config.StoragePathPrefix, key,
 		bytes.NewReader(fileContent), nil)
 	if err != nil {
 		az.logger.Errorf("azure.store error: %v", err)

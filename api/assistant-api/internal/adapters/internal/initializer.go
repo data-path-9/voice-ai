@@ -7,8 +7,8 @@ package adapter_internal
 
 import (
 	"context"
+	"fmt"
 
-	internal_sentence_aggregator "github.com/rapidaai/api/assistant-api/internal/aggregator/text"
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_denoiser "github.com/rapidaai/api/assistant-api/internal/denoiser"
 	internal_end_of_speech "github.com/rapidaai/api/assistant-api/internal/end_of_speech"
@@ -16,6 +16,7 @@ import (
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	internal_vad "github.com/rapidaai/api/assistant-api/internal/vad"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/protos"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -130,26 +131,11 @@ func (listening *genericRequestor) initializeEndOfSpeech(ctx context.Context) er
 	return nil
 }
 
-func (listening *genericRequestor) initializeInputNormalizer(ctx context.Context) error {
-	if err := listening.normalizer.Initialize(ctx, func(pkts ...internal_type.Packet) error {
-		return listening.OnPacket(ctx, pkts...)
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (listening *genericRequestor) disconnectEndOfSpeech(ctx context.Context) error {
 	if listening.endOfSpeech != nil {
 		if err := listening.endOfSpeech.Close(); err != nil {
 			listening.logger.Warnf("cancel end of speech with error %v", err)
 		}
-	}
-	if listening.normalizer != nil {
-		if err := listening.normalizer.Close(ctx); err != nil {
-			listening.logger.Warnf("cancel input normalizer with error %v", err)
-		}
-		listening.normalizer = nil
 	}
 	return nil
 }
@@ -216,33 +202,40 @@ func (spk *genericRequestor) initializeTextToSpeech(ctx context.Context) error {
 	return eGroup.Wait()
 }
 
+func (listening *genericRequestor) initializeInputNormalizer(ctx context.Context, cfg *protos.ConversationInitialization) error {
+	if err := listening.inputNormalizer.Initialize(ctx, listening, cfg); err != nil {
+		return fmt.Errorf("input normalizer init: %w", err)
+	}
+	return nil
+}
+
+func (spk *genericRequestor) disconnectInputNormalizer(ctx context.Context) {
+	if spk.inputNormalizer != nil {
+		spk.inputNormalizer.Close(ctx)
+		spk.inputNormalizer = nil
+	}
+}
+
+func (listening *genericRequestor) initializeOutputNormalizer(ctx context.Context, cfg *protos.ConversationInitialization) error {
+	if err := listening.outputNormalizer.Initialize(ctx, listening, cfg); err != nil {
+		return fmt.Errorf("output normalizer init: %w", err)
+	}
+	return nil
+}
+
+func (spk *genericRequestor) disconnectOutputNormalizer(ctx context.Context) {
+	if spk.outputNormalizer != nil {
+		spk.outputNormalizer.Close(ctx)
+		spk.outputNormalizer = nil
+	}
+}
+
 func (spk *genericRequestor) disconnectTextToSpeech(ctx context.Context) error {
 	if spk.textToSpeechTransformer != nil {
 		if err := spk.textToSpeechTransformer.Close(ctx); err != nil {
 			spk.logger.Errorf("cancel all output transformer with error %v", err)
 		}
 		spk.textToSpeechTransformer = nil
-	}
-	return nil
-}
-
-// Initialize the text aggregator for assembling sentences from tokens.
-// Aggregated sentences are pushed directly to OnPacket as SpeakTextPacket
-// values — no intermediate goroutine or channel needed.
-func (spk *genericRequestor) initializeTextAggregator(ctx context.Context) error {
-	textAggregator, err := internal_sentence_aggregator.GetLLMTextAggregator(ctx, spk.logger,
-		func(pctx context.Context, pkts ...internal_type.Packet) error {
-			return spk.OnPacket(pctx, pkts...)
-		})
-	if err == nil {
-		spk.textAggregator = textAggregator
-	}
-	return nil
-}
-
-func (io *genericRequestor) disconnectTextAggregator() error {
-	if io.textAggregator != nil {
-		io.textAggregator.Close()
 	}
 	return nil
 }

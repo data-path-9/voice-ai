@@ -37,7 +37,8 @@ const (
 	// dbWriteTimeout is the maximum duration allowed for database write operations
 	// (inserts, updates, metric flushes). Uses a background context so that writes
 	// are not cancelled by the caller's context lifecycle.
-	dbWriteTimeout = 1 * time.Second
+	dbWriteTimeout        = 5 * time.Second
+	collectorWriteTimeout = 10 * time.Second
 )
 
 // =============================================================================
@@ -65,7 +66,7 @@ func (r *genericRequestor) Disconnect(ctx context.Context) {
 
 	// Phase 1: Close all session resources concurrently
 	var waitGroup sync.WaitGroup
-	waitGroup.Add(2)
+	waitGroup.Add(4)
 
 	// Close speech-to-text listener
 	utils.Go(ctx, func() {
@@ -86,11 +87,19 @@ func (r *genericRequestor) Disconnect(ctx context.Context) {
 		if err := r.disconnectTextToSpeech(ctx); err != nil {
 			r.logger.Tracef(ctx, "failed to close output transformer: %+v", err)
 		}
-
-		if err := r.disconnectTextAggregator(); err != nil {
-			r.logger.Tracef(ctx, "failed to close text aggregator: %+v", err)
-		}
 	})
+
+	// Close input and output normalizers concurrently
+	utils.Go(ctx, func() {
+		defer waitGroup.Done()
+		r.disconnectOutputNormalizer(ctx)
+	})
+	utils.Go(ctx, func() {
+		defer waitGroup.Done()
+		r.disconnectInputNormalizer(ctx)
+	})
+	// end disconnection phase 1 and wait for all cleanup operations to complete before proceeding to phase 2
+
 	waitGroup.Wait()
 
 	// Drain low-priority packets (STT/TTS duration metrics, close events)
@@ -230,13 +239,6 @@ func (r *genericRequestor) resumeSession(
 	})
 
 	errGroup.Go(func() error {
-		if err := r.initializeTextAggregator(ctx); err != nil {
-			r.logger.Errorf("unable to initialize sentence assembler with error %v", err)
-		}
-		return nil
-	})
-
-	errGroup.Go(func() error {
 		switch config.StreamMode {
 		case protos.StreamMode_STREAM_MODE_TEXT:
 			r.SwitchMode(type_enums.TextMode)
@@ -261,7 +263,7 @@ func (r *genericRequestor) resumeSession(
 		return nil
 	})
 
-	r.initSessionBackground(ctx, false)
+	r.initSessionBackground(ctx, false, config)
 
 	if err = errGroup.Wait(); err != nil {
 		r.notifyInitializationError(ctx, conversation.Id, err)
@@ -325,13 +327,6 @@ func (r *genericRequestor) createSession(
 	})
 
 	errGroup.Go(func() error {
-		if err := r.initializeTextAggregator(ctx); err != nil {
-			r.logger.Errorf("unable to initialize sentence assembler with error %v", err)
-		}
-		return nil
-	})
-
-	errGroup.Go(func() error {
 		switch config.StreamMode {
 		case protos.StreamMode_STREAM_MODE_AUDIO:
 			if err := r.initializeSpeechToText(ctx); err != nil {
@@ -341,7 +336,7 @@ func (r *genericRequestor) createSession(
 		}
 		return nil
 	})
-	r.initSessionBackground(ctx, true)
+	r.initSessionBackground(ctx, true, config)
 	if err = errGroup.Wait(); err != nil {
 		r.notifyInitializationError(ctx, conversation.Id, err)
 		return err
@@ -353,7 +348,7 @@ func (r *genericRequestor) createSession(
 
 // initSessionBackground launches non-critical background tasks common to both
 // new and resumed sessions. isNew distinguishes which lifecycle hook to fire.
-func (r *genericRequestor) initSessionBackground(ctx context.Context, isNew bool) {
+func (r *genericRequestor) initSessionBackground(ctx context.Context, isNew bool, config *protos.ConversationInitialization) {
 	// Initialize telemetry collectors in the background so that DB lookups,
 	// vault credential resolution, and OTLP connection setup do not add
 	// latency to the connect path. The no-op collectors set in
@@ -381,8 +376,12 @@ func (r *genericRequestor) initSessionBackground(ctx context.Context, isNew bool
 	// Input normalizer init is synchronous — it only sets a callback, no I/O.
 	// Must be ready before the first EndOfSpeechPacket arrives, otherwise the
 	// turn is silently dropped (onPacket == nil in the OutputPipeline stage).
-	if err := r.initializeInputNormalizer(ctx); err != nil {
+	if err := r.initializeInputNormalizer(ctx, config); err != nil {
 		r.logger.Tracef(ctx, "failed to initialize input normalizer: %+v", err)
+	}
+
+	if err := r.initializeOutputNormalizer(ctx, config); err != nil {
+		r.logger.Errorf("failed to initialize output normalizer: %v", err)
 	}
 
 	utils.Go(ctx, func() {

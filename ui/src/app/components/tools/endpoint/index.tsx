@@ -10,6 +10,7 @@ import {
   PARAMETER_TYPE_OPTIONS,
   useParameterManager,
 } from '../common';
+import { Stack } from '../../carbon/form';
 
 // ============================================================================
 // Constants
@@ -39,7 +40,7 @@ export const ConfigureEndpoint: FC<ConfigureToolProps> = ({
   return (
     <>
       <InputGroup title="Action Definition">
-        <div className="flex flex-col gap-6 max-w-6xl">
+        <Stack gap={7}>
           <EndpointDropdown
             className={cn('bg-light-background', inputClass)}
             currentEndpoint={getParamValue('tool.endpoint_id')}
@@ -55,7 +56,7 @@ export const ConfigureEndpoint: FC<ConfigureToolProps> = ({
             typeOptions={ENDPOINT_TYPE_OPTIONS}
             inputClass={inputClass}
           />
-        </div>
+        </Stack>
       </InputGroup>
 
       {toolDefinition && onChangeToolDefinition && (

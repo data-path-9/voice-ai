@@ -25,7 +25,8 @@ import (
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_knowledge_gorm "github.com/rapidaai/api/assistant-api/internal/entity/knowledges"
-	internal_input_normalizers "github.com/rapidaai/api/assistant-api/internal/normalizers/input"
+	internal_input_normalizer "github.com/rapidaai/api/assistant-api/internal/normalizer/input"
+	internal_output_normalizer "github.com/rapidaai/api/assistant-api/internal/normalizer/output"
 	observe "github.com/rapidaai/api/assistant-api/internal/observe"
 	observe_exporters "github.com/rapidaai/api/assistant-api/internal/observe/exporters"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
@@ -34,7 +35,6 @@ import (
 	endpoint_client "github.com/rapidaai/pkg/clients/endpoint"
 	integration_client "github.com/rapidaai/pkg/clients/integration"
 	web_client "github.com/rapidaai/pkg/clients/web"
-	"github.com/rapidaai/pkg/parsers"
 
 	//
 	"github.com/rapidaai/pkg/commons"
@@ -126,14 +126,14 @@ type genericRequestor struct {
 	endOfSpeech internal_type.EndOfSpeech
 	vad         internal_type.Vad
 	denoiser    internal_type.Denoiser
-	normalizer  internal_input_normalizers.InputNormalizer
 
-	// speak
+	// output preprocessor + TTS
+	inputNormalizer  internal_type.PacketNormalizer
+	outputNormalizer internal_type.PacketNormalizer
+
 	textToSpeechTransformer internal_type.TextToSpeechTransformer
-	textAggregator          internal_type.LLMTextAggregator
 
-	recorder       internal_type.Recorder
-	templateParser parsers.StringTemplateParser
+	recorder internal_type.Recorder
 
 	// executor
 	assistantExecutor internal_agent_executor.AssistantExecutor
@@ -178,7 +178,6 @@ func NewGenericRequestor(
 		conversationService:  internal_assistant_service.NewAssistantConversationService(logger, postgres, storage),
 		webhookService:       internal_assistant_service.NewAssistantWebhookService(logger, postgres, storage),
 		assistantToolService: internal_assistant_service.NewAssistantToolService(logger, postgres, storage),
-		templateParser:       parsers.NewPongo2StringTemplateParser(logger),
 		//
 
 		postgres:      postgres,
@@ -198,7 +197,8 @@ func NewGenericRequestor(
 		interactionState:  Unknown,
 		msgMode:           type_enums.TextMode,
 		assistantExecutor: internal_agent_executor_llm.NewAssistantExecutor(logger),
-		normalizer:        internal_input_normalizers.NewInputNormalizer(logger),
+		inputNormalizer:   internal_input_normalizer.NewInputNormalizer(logger),
+		outputNormalizer:  internal_output_normalizer.NewOutputNormalizer(logger),
 
 		//
 		histories: make([]internal_type.MessagePacket, 0),
@@ -489,12 +489,12 @@ func (r *genericRequestor) initializeCollectors(ctx context.Context) {
 		OrganizationID: orgID,
 		Persist: &observe.ServicePersister{
 			ApplyMetrics: func(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, metrics []*types.Metric) (interface{}, error) {
-				dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 				defer cancel()
 				return r.conversationService.ApplyConversationMetrics(dbCtx, auth, assistantID, conversationID, metrics)
 			},
 			ApplyMetadata: func(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, metadata []*types.Metadata) (interface{}, error) {
-				dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 				defer cancel()
 				return r.conversationService.ApplyConversationMetadata(dbCtx, auth, assistantID, conversationID, metadata)
 			},
@@ -544,7 +544,7 @@ func (r *genericRequestor) buildSnapshot() *observe.ConversationSnapshot {
 // shutdownCollectors waits for in-flight exports and shuts down all exporters.
 func (r *genericRequestor) shutdownCollectors(_ context.Context) {
 	if r.observer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), collectorWriteTimeout)
 		defer cancel()
 		r.observer.Shutdown(shutdownCtx)
 	}

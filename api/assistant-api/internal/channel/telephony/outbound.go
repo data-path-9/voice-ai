@@ -135,7 +135,7 @@ func (d *OutboundDispatcher) performOutbound(ctx context.Context, cc *callcontex
 	opts := assistant.AssistantPhoneDeployment.GetOptions()
 	opts["rapida.context_id"] = cc.ContextID
 
-	callInfo, callErr := telephony.OutboundCall(auth, cc.CallerNumber, cc.FromNumber, cc.AssistantID, cc.ConversationID, vltC, opts)
+	callInfo, callErr := telephony.OutboundCall(auth, cc.CallerNumber, cc.FromNumber, assistant, cc.ConversationID, vltC, opts)
 	if callErr != nil {
 		d.logger.Errorf("outbound dispatcher[%s]: telephony call failed for contextId=%s: %v", cc.Provider, cc.ContextID, callErr)
 	}

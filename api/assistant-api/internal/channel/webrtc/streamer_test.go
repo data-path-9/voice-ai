@@ -53,8 +53,8 @@ func TestBuildGRPCResponse_Disconnection(t *testing.T) {
 
 	msg := &protos.ConversationDisconnection{}
 	resp := s.buildGRPCResponse(msg)
-	// Disconnection is not in the switch — returns nil
-	assert.Nil(t, resp)
+	require.NotNil(t, resp)
+	assert.NotNil(t, resp.GetDisconnection())
 }
 
 func TestBuildGRPCResponse_AssistantText(t *testing.T) {
@@ -69,14 +69,14 @@ func TestBuildGRPCResponse_AssistantText(t *testing.T) {
 	assert.NotNil(t, resp.GetAssistant())
 }
 
-func TestBuildGRPCResponse_Directive(t *testing.T) {
+func TestBuildGRPCResponse_ToolCall(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
 
-	msg := &protos.ConversationDirective{Type: protos.ConversationDirective_END_CONVERSATION}
+	msg := &protos.ConversationToolCall{Action: protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION}
 	resp := s.buildGRPCResponse(msg)
 	require.NotNil(t, resp)
-	assert.NotNil(t, resp.GetDirective())
+	assert.NotNil(t, resp.GetToolCall())
 }
 
 func TestBuildGRPCResponse_Event(t *testing.T) {
@@ -203,8 +203,8 @@ func TestSend_EndConversation(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
 
-	msg := &protos.ConversationDirective{
-		Type: protos.ConversationDirective_END_CONVERSATION,
+	msg := &protos.ConversationToolCall{
+		Action: protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION,
 	}
 	err := s.Send(msg)
 	assert.NoError(t, err)

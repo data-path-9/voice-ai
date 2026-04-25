@@ -32,6 +32,8 @@ export const useGlobalNavigation = () => {
 
   const goToConfigureWeb = (assistantId: string) =>
     navigate(`/deployment/assistant/${assistantId}/deployment/web`);
+  const goToEditWeb = (assistantId: string, deploymentId: string) =>
+    navigate(`/deployment/assistant/${assistantId}/deployment/web/${deploymentId}`);
 
   const goToConfigureApp = (assistantId: string) =>
     navigate(`/deployment/assistant/${assistantId}/deployment/app`);
@@ -42,11 +44,22 @@ export const useGlobalNavigation = () => {
   const goToConfigureCall = (assistantId: string) =>
     navigate(`/deployment/assistant/${assistantId}/deployment/call`);
 
+  const goToEditCall = (assistantId: string, deploymentId: string) =>
+    navigate(
+      `/deployment/assistant/${assistantId}/deployment/call/${deploymentId}`,
+    );
+
   const goToConfigureApi = (assistantId: string) =>
     navigate(`/deployment/assistant/${assistantId}/deployment/api`);
+  const goToEditApi = (assistantId: string, deploymentId: string) =>
+    navigate(`/deployment/assistant/${assistantId}/deployment/api/${deploymentId}`);
 
   const goToConfigureDebugger = (assistantId: string) =>
     navigate(`/deployment/assistant/${assistantId}/deployment/debugger`);
+  const goToEditDebugger = (assistantId: string, deploymentId: string) =>
+    navigate(
+      `/deployment/assistant/${assistantId}/deployment/debugger/${deploymentId}`,
+    );
   const goToConfigureDebuggerExperience = (assistantId: string) =>
     navigate(
       `/deployment/assistant/${assistantId}/deployment/debugger?editMode=section&section=experience`,
@@ -179,6 +192,7 @@ export const useGlobalNavigation = () => {
 
     goToDeploymentAssistant,
     goToConfigureWeb,
+    goToEditWeb,
     goToConfigureApp,
     goToConfigureSlack,
     goToAssistantPreview,
@@ -190,8 +204,11 @@ export const useGlobalNavigation = () => {
     goToKnowledgeAddCloudFile,
     goToKnowledgeAddStructureFile,
     goToConfigureCall,
+    goToEditCall,
     goToConfigureApi,
+    goToEditApi,
     goToConfigureDebugger,
+    goToEditDebugger,
     goToConfigureDebuggerExperience,
     goToConfigureDebuggerSTT,
     goToConfigureDebuggerTTS,

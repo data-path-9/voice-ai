@@ -4,6 +4,7 @@ import '@testing-library/jest-dom';
 import {
   ConfigureAssistantCallDeploymentPage,
 } from '@/app/pages/assistant/actions/create-deployment/phone';
+import { EditAssistantCallDeploymentPage } from '@/app/pages/assistant/actions/create-deployment/phone/edit';
 import {
   CreateAssistantPhoneDeployment,
   GetAssistantPhoneDeployment,
@@ -152,10 +153,21 @@ jest.mock('@/hooks/use-global-navigator', () => ({
 jest.mock('@/app/components/helmet', () => ({ Helmet: () => null }));
 
 jest.mock('@/app/components/form/tab-form', () => ({
-  TabForm: ({ activeTab, form, errorMessage }: any) => {
+  TabForm: ({ activeTab, form, errorMessage, onChangeActiveTab }: any) => {
     const active = form.find((x: any) => x.code === activeTab);
     return (
       <div>
+        <div>
+          {form.map((item: any) => (
+            <button
+              key={item.code}
+              type="button"
+              onClick={() => onChangeActiveTab(item.code)}
+            >
+              {item.name}
+            </button>
+          ))}
+        </div>
         {errorMessage ? <div>{errorMessage}</div> : null}
         <div>{active?.body}</div>
         <div>
@@ -163,6 +175,28 @@ jest.mock('@/app/components/form/tab-form', () => ({
             <div key={idx}>{action}</div>
           ))}
         </div>
+      </div>
+    );
+  },
+}));
+
+jest.mock('@/app/components/carbon/tabs', () => ({
+  Tabs: ({ tabs = [], children, selectedIndex = 0, onChange }: any) => {
+    const panels = Array.isArray(children) ? children : [children];
+    return (
+      <div>
+        <div>
+          {tabs.map((tab: string, index: number) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => onChange?.(index)}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+        <div>{panels[selectedIndex]}</div>
       </div>
     );
   },
@@ -180,6 +214,8 @@ jest.mock('@/app/pages/assistant/actions/create-deployment/commons/configure-aud
 
 jest.mock('@/app/components/providers/telephony', () => ({
   TelephonyProvider: () => <div>telephony</div>,
+  GetDefaultTelephonyConfigIfInvalid: (_provider: string, parameters: any[]) =>
+    parameters || [],
   ValidateTelephonyOptions: (...args: any[]) =>
     mockValidateTelephonyOptions(...args),
 }));
@@ -206,6 +242,7 @@ jest.mock('@/app/components/carbon/button', () => ({
 describe('Phone deployment create and edit flows', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    window.history.replaceState(null, '', '/');
     mockValidateTelephonyOptions.mockReturnValue(true);
     mockValidateSpeechToTextIfInvalid.mockReturnValue(undefined);
     mockValidateTextToSpeechIfInvalid.mockReturnValue(undefined);
@@ -337,5 +374,26 @@ describe('Phone deployment create and edit flows', () => {
     ).toBeInTheDocument();
     expect(CreateAssistantPhoneDeployment).not.toHaveBeenCalled();
     expect(mockValidateTextToSpeechIfInvalid).toHaveBeenCalled();
+  });
+
+  it('allows switching tabs without step-by-step progression', async () => {
+    (GetAssistantPhoneDeployment as jest.Mock).mockResolvedValue({
+      getData: () => null,
+    });
+
+    render(<EditAssistantCallDeploymentPage />);
+
+    expect(screen.getByText('telephony')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Voice Output' }));
+    expect(screen.getByText('audio-output')).toBeInTheDocument();
+  });
+
+  it('opens edit page with telephony tab selected by default', async () => {
+    (GetAssistantPhoneDeployment as jest.Mock).mockResolvedValue({
+      getData: () => null,
+    });
+
+    render(<EditAssistantCallDeploymentPage />);
+    expect(screen.getByText('telephony')).toBeInTheDocument();
   });
 });

@@ -1,7 +1,10 @@
 import { Metadata } from '@rapidaai/react';
 import { FC } from 'react';
 import { loadProviderConfig } from '@/providers/config-loader';
-import { getDefaultsFromConfig, validateFromConfig } from '@/providers/config-defaults';
+import {
+  getDefaultsFromConfig,
+  validateFromConfig,
+} from '@/providers/config-defaults';
 import { ConfigRenderer } from '@/app/components/providers/config-renderer';
 import { ProviderComponentProps } from '@/app/components/providers';
 
@@ -40,7 +43,8 @@ export const GetDefaultTextToSpeechIfInvalid = (
   parameters: Metadata[],
 ): Metadata[] => {
   const config = loadProviderConfig(provider);
-  if (config?.tts) return getDefaultsFromConfig(config, 'tts', parameters, provider);
+  if (config?.tts)
+    return getDefaultsFromConfig(config, 'tts', parameters, provider);
   return parameters;
 };
 
@@ -52,14 +56,19 @@ export const ValidateTextToSpeechIfInvalid = (
   const config = loadProviderConfig(provider);
   if (!config?.tts) return undefined;
 
-  const validationError = validateFromConfig(config, 'tts', provider, parameters);
+  const validationError = validateFromConfig(
+    config,
+    'tts',
+    provider,
+    parameters,
+  );
   if (validationError) return validationError;
 
   if (!providerCredentialIds) return undefined;
 
-  const credentialID = parameters.find(
-    opt => opt.getKey() === 'rapida.credential_id',
-  )?.getValue();
+  const credentialID = parameters
+    .find(opt => opt.getKey() === 'rapida.credential_id')
+    ?.getValue();
   if (!credentialID) {
     return `Please provide a valid ${provider} credential.`;
   }

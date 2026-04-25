@@ -3,17 +3,12 @@ package internal_transformer_elevenlabs
 import (
 	"testing"
 
-	"github.com/rapidaai/pkg/commons"
+	testutil "github.com/rapidaai/api/assistant-api/internal/transformer/internal/testutil"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/structpb"
 )
-
-func newTestLogger() commons.Logger {
-	l, _ := commons.NewApplicationLogger()
-	return l
-}
 
 func newVaultCredential(m map[string]interface{}) *protos.VaultCredential {
 	val, _ := structpb.NewStruct(m)
@@ -24,7 +19,7 @@ func newVaultCredential(m map[string]interface{}) *protos.VaultCredential {
 
 func TestNewElevenLabsOption_ValidCredentials(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{"key": "test-api-key"})
-	opt, err := NewElevenLabsOption(newTestLogger(), cred, utils.Option{})
+	opt, err := NewElevenLabsOption(testutil.NewTestLogger(), cred, utils.Option{})
 	assert.NoError(t, err)
 	assert.NotNil(t, opt)
 	assert.Equal(t, "test-api-key", opt.GetKey())
@@ -32,7 +27,7 @@ func TestNewElevenLabsOption_ValidCredentials(t *testing.T) {
 
 func TestNewElevenLabsOption_MissingKey(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{"other": "value"})
-	opt, err := NewElevenLabsOption(newTestLogger(), cred, utils.Option{})
+	opt, err := NewElevenLabsOption(testutil.NewTestLogger(), cred, utils.Option{})
 	assert.Error(t, err)
 	assert.Nil(t, opt)
 	assert.Contains(t, err.Error(), "illegal vault config")
@@ -40,7 +35,7 @@ func TestNewElevenLabsOption_MissingKey(t *testing.T) {
 
 func TestNewElevenLabsOption_EmptyVault(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{})
-	opt, err := NewElevenLabsOption(newTestLogger(), cred, utils.Option{})
+	opt, err := NewElevenLabsOption(testutil.NewTestLogger(), cred, utils.Option{})
 	assert.Error(t, err)
 	assert.Nil(t, opt)
 }
@@ -49,7 +44,7 @@ func TestNewElevenLabsOption_EmptyVault(t *testing.T) {
 
 func TestElevenLabsGetEncoding(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{"key": "k"})
-	opt, _ := NewElevenLabsOption(newTestLogger(), cred, utils.Option{})
+	opt, _ := NewElevenLabsOption(testutil.NewTestLogger(), cred, utils.Option{})
 	assert.Equal(t, "pcm_16000", opt.GetEncoding())
 }
 
@@ -57,7 +52,7 @@ func TestElevenLabsGetEncoding(t *testing.T) {
 
 func TestGetTextToSpeechConnectionString_Default(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{"key": "k"})
-	opt, _ := NewElevenLabsOption(newTestLogger(), cred, utils.Option{})
+	opt, _ := NewElevenLabsOption(testutil.NewTestLogger(), cred, utils.Option{})
 	connStr := opt.GetTextToSpeechConnectionString()
 
 	assert.Contains(t, connStr, "wss://api.elevenlabs.io/v1/text-to-speech/")
@@ -71,7 +66,7 @@ func TestGetTextToSpeechConnectionString_WithVoiceOverride(t *testing.T) {
 	opts := utils.Option{
 		"speak.voice.id": "custom-voice-id",
 	}
-	opt, _ := NewElevenLabsOption(newTestLogger(), cred, opts)
+	opt, _ := NewElevenLabsOption(testutil.NewTestLogger(), cred, opts)
 	connStr := opt.GetTextToSpeechConnectionString()
 
 	assert.Contains(t, connStr, "/custom-voice-id/multi-stream-input?")
@@ -85,7 +80,7 @@ func TestGetTextToSpeechConnectionString_WithLanguageAndModel(t *testing.T) {
 		"speak.language": "fr",
 		"speak.model":    "eleven_turbo_v2",
 	}
-	opt, _ := NewElevenLabsOption(newTestLogger(), cred, opts)
+	opt, _ := NewElevenLabsOption(testutil.NewTestLogger(), cred, opts)
 	connStr := opt.GetTextToSpeechConnectionString()
 
 	assert.Contains(t, connStr, "language=fr")
@@ -100,7 +95,7 @@ func TestGetTextToSpeechConnectionString_AllOptions(t *testing.T) {
 		"speak.language": "es",
 		"speak.model":    "eleven_multilingual_v2",
 	}
-	opt, _ := NewElevenLabsOption(newTestLogger(), cred, opts)
+	opt, _ := NewElevenLabsOption(testutil.NewTestLogger(), cred, opts)
 	connStr := opt.GetTextToSpeechConnectionString()
 
 	assert.Contains(t, connStr, "/my-voice/multi-stream-input?")

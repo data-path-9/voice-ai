@@ -8,24 +8,51 @@ package internal_tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 
 	"github.com/rapidaai/protos"
 )
 
-type ToolCallResult map[string]interface{}
+type ToolCallResult map[string]string
 
 func Result(msg string, success bool) ToolCallResult {
 	if success {
-		return map[string]interface{}{"data": msg, "status": "SUCCESS"}
+		return map[string]string{"data": msg, "status": "SUCCESS"}
 	} else {
-		return map[string]interface{}{"error": msg, "status": "FAIL"}
+		return map[string]string{"error": msg, "status": "FAIL"}
 	}
 }
 
+// JustResult converts an arbitrary map to ToolCallResult by serializing
+// non-string values to their JSON representation. This keeps callers that
+// pass map[string]interface{} (e.g. from API responses) working while
+// producing the map[string]string that LLMToolResultPacket now requires.
 func JustResult(data map[string]interface{}) ToolCallResult {
-	return ToolCallResult(data)
+	out := make(ToolCallResult, len(data))
+	for k, v := range data {
+		switch val := v.(type) {
+		case string:
+			out[k] = val
+		default:
+			b, err := json.Marshal(val)
+			if err != nil {
+				out[k] = fmt.Sprintf("%v", val)
+			} else {
+				out[k] = string(b)
+			}
+		}
+	}
+	return out
+}
+
+// ErrorResult creates an error result map
+func ErrorResult(errorMsg string) ToolCallResult {
+	return ToolCallResult{
+		"status": "FAIL",
+		"error":  errorMsg,
+	}
 }
 
 func (rt ToolCallResult) Result() string {
@@ -37,33 +64,31 @@ func (rt ToolCallResult) Result() string {
 	return string(bytes)
 }
 
-// ToolCaller defines the contract for invoking a tool/function that can be
-// executed by the agent runtime. Implementations encapsulate tool metadata,
-// execution semantics, and request/response handling.
-//
-// A ToolCaller is responsible for:
-//   - Exposing a unique identifier and human-readable name
-//   - Providing a function definition consumable by the LLM/runtime
-//   - Declaring the execution method (e.g., sync, async, streaming)
-//   - Executing the tool call and returning response packets
+// StringifyArgs converts map[string]interface{} to map[string]string for
+// LLMToolCallPacket.Arguments. Non-string values are formatted with %v.
+func StringifyArgs(args map[string]interface{}) map[string]string {
+	if args == nil {
+		return nil
+	}
+	out := make(map[string]string, len(args))
+	for k, v := range args {
+		switch val := v.(type) {
+		case string:
+			out[k] = val
+		default:
+			out[k] = fmt.Sprintf("%v", val)
+		}
+	}
+	return out
+}
+
+// ToolCaller defines the contract for invoking a tool/function.
+// Call executes the tool — the tool pushes its result (ToolResultPacket)
+// or LLMToolCallPacket with Action via communication.OnPacket.
 type ToolCaller interface {
-	// Id returns the unique identifier of the tool.
 	Id() uint64
-
-	// Name returns the human-readable name of the tool.
 	Name() string
-
-	// Definition returns the function definition describing the tool's
-	// input parameters and behavior, or an error if the definition
-	// cannot be constructed.
 	Definition() (*protos.FunctionDefinition, error)
-
-	// ExecutionMethod returns the execution strategy used by the tool
-	// (for example, synchronous or asynchronous execution).
 	ExecutionMethod() string
-
-	// Call executes the tool with the given arguments and communication
-	// context. It returns a slice of Packets representing the tool's
-	// response(s) to be consumed by the agent runtime.
-	Call(ctx context.Context, messageId string, toolId string, args map[string]interface{}, communication internal_type.Communication) ToolCallResult
+	Call(ctx context.Context, contextID string, toolId string, args map[string]interface{}, communication internal_type.Communication)
 }

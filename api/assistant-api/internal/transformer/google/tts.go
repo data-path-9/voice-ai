@@ -15,6 +15,7 @@ import (
 
 	texttospeech "cloud.google.com/go/texttospeech/apiv1"
 	"cloud.google.com/go/texttospeech/apiv1/texttospeechpb"
+	google_internal "github.com/rapidaai/api/assistant-api/internal/transformer/google/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -78,7 +79,7 @@ func NewGoogleTextToSpeech(ctx context.Context, logger commons.Logger, credentia
 		onPacket:     onPacket,
 		client:       client,
 		googleOption: googleOption,
-		normalizer:   NewGoogleNormalizer(logger, opts),
+		normalizer:   google_internal.NewGoogleNormalizer(logger, opts),
 	}, nil
 }
 
@@ -131,7 +132,7 @@ func (google *googleTextToSpeech) Initialize() error {
 }
 
 // Transform handles streaming synthesis requests for input text.
-func (google *googleTextToSpeech) Transform(ctx context.Context, in internal_type.LLMPacket) error {
+func (google *googleTextToSpeech) Transform(ctx context.Context, in internal_type.Packet) error {
 	google.mu.Lock()
 	currentCtx := google.contextId
 	if in.ContextId() != google.contextId {
@@ -142,11 +143,16 @@ func (google *googleTextToSpeech) Transform(ctx context.Context, in internal_typ
 	sCli := google.streamClient
 	google.mu.Unlock()
 	if sCli == nil {
-		return fmt.Errorf("google-tts: calling transform without initialize")
+		google.onPacket(internal_type.TTSErrorPacket{
+			ContextID: in.ContextId(),
+			Error:     fmt.Errorf("google-tts: calling transform without initialize"),
+			Type:      internal_type.TTSNetworkTimeout,
+		})
+		return nil
 	}
 
 	switch input := in.(type) {
-	case internal_type.InterruptionDetectedPacket:
+	case internal_type.TTSInterruptPacket:
 		if currentCtx != "" {
 			google.mu.Lock()
 			google.ttsStartedAt = time.Time{}
@@ -158,20 +164,25 @@ func (google *googleTextToSpeech) Transform(ctx context.Context, in internal_typ
 				Time: time.Now(),
 			})
 			if err := google.Initialize(); err != nil {
-				return fmt.Errorf("failed to reinitialize stream on context change: %w", err)
+				google.onPacket(internal_type.TTSErrorPacket{
+					ContextID: input.ContextID,
+					Error:     fmt.Errorf("google-tts: failed to reinitialize stream on context change: %w", err),
+					Type:      internal_type.TTSNetworkTimeout,
+				})
+				return nil
 			}
 			google.mu.Lock()
 			sCli = google.streamClient
 			google.mu.Unlock()
 		}
 		return nil
-	case internal_type.LLMResponseDeltaPacket:
+	case internal_type.TTSTextPacket:
 		google.mu.Lock()
 		if google.ttsStartedAt.IsZero() {
 			google.ttsStartedAt = time.Now()
 		}
 		google.mu.Unlock()
-		normalized := google.normalizer.Normalize(ctx, input.Text)
+		normalized := google.normalizer.Normalize(input.Text)
 		if err := sCli.Send(&texttospeechpb.StreamingSynthesizeRequest{
 			StreamingRequest: &texttospeechpb.StreamingSynthesizeRequest_Input{
 				Input: &texttospeechpb.StreamingSynthesisInput{
@@ -180,7 +191,12 @@ func (google *googleTextToSpeech) Transform(ctx context.Context, in internal_typ
 			},
 		}); err != nil {
 			google.logger.Errorf("google-tts: failed to synthesize text: %v", err)
-			return fmt.Errorf("failed to synthesize text: %w", err)
+			google.onPacket(internal_type.TTSErrorPacket{
+				ContextID: input.ContextID,
+				Error:     fmt.Errorf("google-tts: failed to synthesize text: %w", err),
+				Type:      internal_type.TTSNetworkTimeout,
+			})
+			return nil
 		}
 		google.onPacket(internal_type.ConversationEventPacket{
 			Name: "tts",
@@ -191,12 +207,17 @@ func (google *googleTextToSpeech) Transform(ctx context.Context, in internal_typ
 			Time: time.Now(),
 		})
 		return nil
-	case internal_type.LLMResponseDonePacket:
+	case internal_type.TTSDonePacket:
 		// Signal to the server that no more input will be sent.
 		// This triggers server-side EOF → recvLoop emits TextToSpeechEndPacket.
 		if err := sCli.CloseSend(); err != nil {
 			google.logger.Errorf("google-tts: failed to close send: %v", err)
-			return fmt.Errorf("failed to close send: %w", err)
+			google.onPacket(internal_type.TTSErrorPacket{
+				ContextID: input.ContextID,
+				Error:     fmt.Errorf("google-tts: failed to close send: %w", err),
+				Type:      internal_type.TTSNetworkTimeout,
+			})
+			return nil
 		}
 		return nil
 	default:

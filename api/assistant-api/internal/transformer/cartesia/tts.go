@@ -183,7 +183,7 @@ func (cst *cartesiaTTS) readLoop(conn *websocket.Conn) {
 	}
 }
 
-func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket) error {
+func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.Packet) error {
 	ct.mu.Lock()
 	if in.ContextId() != ct.contextId {
 		ct.contextId = in.ContextId()
@@ -194,7 +194,7 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket
 	ct.mu.Unlock()
 
 	switch input := in.(type) {
-	case internal_type.InterruptionDetectedPacket:
+	case internal_type.TTSInterruptPacket:
 		ct.mu.Lock()
 		ct.contextId = ""
 		ct.ttsStartedAt = time.Time{}
@@ -215,11 +215,16 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket
 		}
 		return nil
 
-	case internal_type.LLMResponseDeltaPacket:
+	case internal_type.TTSTextPacket:
 		// Fallback reconnect: handles Initialize() failure or an unintentional drop.
 		if connection == nil {
 			if err := ct.Initialize(); err != nil {
-				return fmt.Errorf("cartesia-tts: failed to connect: %w", err)
+				ct.onPacket(internal_type.TTSErrorPacket{
+					ContextID: input.ContextID,
+					Error:     fmt.Errorf("cartesia-tts: failed to connect: %w", err),
+					Type:      internal_type.TTSNetworkTimeout,
+				})
+				return nil
 			}
 			ct.mu.Lock()
 			connection = ct.connection
@@ -239,7 +244,12 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket
 		ct.mu.Unlock()
 		message := ct.GetTextToSpeechInput(input.Text, map[string]interface{}{"continue": true, "context_id": ctxId, "max_buffer_delay_ms": "0ms"})
 		if err := connection.WriteJSON(message); err != nil {
-			return err
+			ct.onPacket(internal_type.TTSErrorPacket{
+				ContextID: input.ContextID,
+				Error:     fmt.Errorf("cartesia-tts: failed to write text: %w", err),
+				Type:      internal_type.TTSNetworkTimeout,
+			})
+			return nil
 		}
 		ct.onPacket(internal_type.ConversationEventPacket{
 			Name: "tts",
@@ -250,7 +260,7 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket
 			Time: time.Now(),
 		})
 
-	case internal_type.LLMResponseDonePacket:
+	case internal_type.TTSDonePacket:
 		// Interrupted before done arrived — nothing to flush.
 		if connection == nil {
 			return nil
@@ -261,7 +271,12 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.LLMPacket
 		// Signal end of text stream; Cartesia will respond with done:true.
 		message := ct.GetTextToSpeechInput("", map[string]interface{}{"continue": false, "flush": true, "context_id": ctxId})
 		if err := connection.WriteJSON(message); err != nil {
-			return err
+			ct.onPacket(internal_type.TTSErrorPacket{
+				ContextID: input.ContextID,
+				Error:     fmt.Errorf("cartesia-tts: flush failed: %w", err),
+				Type:      internal_type.TTSNetworkTimeout,
+			})
+			return nil
 		}
 		// TextToSpeechEndPacket is emitted by handleFlushComplete once done received.
 

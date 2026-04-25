@@ -1,10 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Metadata } from '@rapidaai/react';
 import { SettingsAdjust, Add, TrashCan } from '@carbon/icons-react';
-import {
-  PrimaryButton,
-  SecondaryButton,
-} from '@/app/components/carbon/button';
+import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import { cn } from '@/utils';
 import { TextInput, TextArea } from '@/app/components/carbon/form';
 import { TertiaryButton } from '@/app/components/carbon/button';
@@ -34,7 +31,15 @@ import { getDefaultsFromConfig } from '@/providers/config-defaults';
 
 export const ConfigRenderer: React.FC<{
   provider: string;
-  category: 'stt' | 'tts' | 'text' | 'vad' | 'eos' | 'noise' | 'telemetry';
+  category:
+    | 'stt'
+    | 'tts'
+    | 'text'
+    | 'telephony'
+    | 'vad'
+    | 'eos'
+    | 'noise'
+    | 'telemetry';
   config: CategoryConfig;
   parameters: Metadata[] | null;
   onParameterChange: (parameters: Metadata[]) => void;
@@ -161,9 +166,15 @@ export const ConfigRenderer: React.FC<{
 
       case 'slider':
         const sliderRawValue = getParamValue(param.key);
-        const sliderParsedValue = Number.parseFloat(sliderRawValue);
+        const sliderSourceValue =
+          sliderRawValue !== ''
+            ? sliderRawValue
+            : param.default !== undefined
+              ? String(param.default)
+              : '';
+        const sliderParsedValue = Number.parseFloat(sliderSourceValue);
         const sliderValue = Number.isNaN(sliderParsedValue)
-          ? (param.min ?? 0)
+          ? param.min ?? 0
           : sliderParsedValue;
         return (
           <div className={cn(colSpanClass)} key={param.key}>
@@ -174,9 +185,13 @@ export const ConfigRenderer: React.FC<{
               max={param.max ?? 1}
               step={param.step ?? 0.1}
               value={sliderValue}
-              onChange={({ value: v }: { value: number }) => updateParameter(param.key, v.toString())}
+              onChange={({ value: v }: { value: number }) =>
+                updateParameter(param.key, v.toString())
+              }
             />
-            {param.helpText && <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>}
+            {param.helpText && (
+              <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>
+            )}
           </div>
         );
 
@@ -238,7 +253,10 @@ export const ConfigRenderer: React.FC<{
               helperText={param.helpText}
               onChange={e => updateParameter(param.key, e.target.value)}
             >
-              <SelectItem value="" text={`Select ${param.label.toLowerCase()}`} />
+              <SelectItem
+                value=""
+                text={`Select ${param.label.toLowerCase()}`}
+              />
               {(param.choices ?? []).map(c => (
                 <SelectItem key={c.value} value={c.value} text={c.label} />
               ))}
@@ -379,10 +397,10 @@ const TextCategoryLayout: React.FC<{
             </div>
           </ModalBody>
           <ModalFooter>
-            <SecondaryButton onClick={handleClose}>
+            <SecondaryButton size="md" onClick={handleClose}>
               Close
             </SecondaryButton>
-            <PrimaryButton onClick={handleComplete}>
+            <PrimaryButton size="md" onClick={handleComplete}>
               Complete
             </PrimaryButton>
           </ModalFooter>
@@ -401,7 +419,8 @@ const DropdownField: React.FC<{
 }> = ({ param, provider, value, onChange, colSpanClass }) => {
   const data = param.data ? loadProviderData(provider, param.data) : [];
   const valueField = param.valueField || 'id';
-  const selectedItem = data.find((item: any) => item[valueField] === value) || null;
+  const selectedItem =
+    data.find((item: any) => item[valueField] === value) || null;
 
   if (param.customValue || param.searchable) {
     return (
@@ -419,7 +438,11 @@ const DropdownField: React.FC<{
             }
           }}
           onInputChange={(inputValue: string) => {
-            if (param.customValue && inputValue && !data.find((d: any) => d.name === inputValue)) {
+            if (
+              param.customValue &&
+              inputValue &&
+              !data.find((d: any) => d.name === inputValue)
+            ) {
               onChange(inputValue);
             }
           }}
@@ -477,8 +500,8 @@ const KeyValueField: React.FC<{
     return Object.keys(obj).length > 0 ? JSON.stringify(obj) : '';
   };
 
-  const [entries, setEntries] = useState<{ key: string; value: string }[]>(
-    () => parseEntries(value),
+  const [entries, setEntries] = useState<{ key: string; value: string }[]>(() =>
+    parseEntries(value),
   );
 
   const syncEntries = (next: { key: string; value: string }[]) => {
@@ -508,14 +531,21 @@ const KeyValueField: React.FC<{
       <table className="w-full border-collapse border border-gray-200 dark:border-gray-700 text-sm [&_input]:!border-none [&_.cds--text-input]:!border-none [&_.cds--text-input]:!outline-none [&_.cds--form-item]:!m-0">
         <thead>
           <tr className="bg-gray-50 dark:bg-gray-900">
-            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">Key</th>
-            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">Value</th>
+            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">
+              Key
+            </th>
+            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">
+              Value
+            </th>
             <th className="border-b border-gray-200 dark:border-gray-700 w-8" />
           </tr>
         </thead>
         <tbody>
           {entries.map((entry, index) => (
-            <tr key={index} className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
+            <tr
+              key={index}
+              className="border-b border-gray-200 dark:border-gray-700 last:border-b-0"
+            >
               <td className="border-r border-gray-200 dark:border-gray-700 p-0">
                 <TextInput
                   id={`kv-key-${param.key}-${index}`}
@@ -560,7 +590,9 @@ const KeyValueField: React.FC<{
       >
         Add {param.label.toLowerCase()}
       </TertiaryButton>
-      {param.helpText && <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>}
+      {param.helpText && (
+        <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>
+      )}
     </div>
   );
 };
@@ -582,7 +614,8 @@ function renderTextMainDropdown(
   const data = param.data ? loadProviderData(provider, param.data) : [];
   const valueField = param.valueField || 'id';
   const currentValue = getParamValue(param.key);
-  const selectedItem = data.find((x: any) => x[valueField] === currentValue) || null;
+  const selectedItem =
+    data.find((x: any) => x[valueField] === currentValue) || null;
 
   const handleSelect = (item: any) => {
     if (!item) return;
@@ -621,7 +654,6 @@ function renderTextMainDropdown(
       <ComboBox
         id={`text-main-combo-${param.key}`}
         titleText=""
-        hideLabel
         items={data}
         size="md"
         selectedItem={selectedItem}

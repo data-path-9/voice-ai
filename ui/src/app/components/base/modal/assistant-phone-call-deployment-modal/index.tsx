@@ -2,8 +2,6 @@ import {
   AssistantPhoneDeployment,
   DeploymentAudioProvider,
 } from '@rapidaai/react';
-import { Tab } from '@/app/components/tab';
-import { cn } from '@/utils';
 import { ModalProps } from '@/app/components/base/modal';
 import { RightSideModal } from '@/app/components/base/modal/right-side-modal';
 import { CONFIG } from '@/configs';
@@ -11,12 +9,13 @@ import { CopyButton } from '@/app/components/carbon/button/copy-button';
 import { InputHelper } from '@/app/components/input-helper';
 import { YellowNoticeBlock } from '@/app/components/container/message/notice-block';
 import { ProviderPill } from '@/app/components/pill/provider-model-pill';
-import { FC, ReactNode, useMemo } from 'react';
+import { FC, ReactNode, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   DeploymentRow,
   DeploymentSectionHeader,
 } from '@/app/components/base/modal/deployment-modal-primitives';
+import { Tabs } from '@/app/components/carbon/tabs';
 
 interface AssistantPhoneCallDeploymentDialogProps extends ModalProps {
   deployment: AssistantPhoneDeployment;
@@ -25,89 +24,70 @@ interface AssistantPhoneCallDeploymentDialogProps extends ModalProps {
 export function AssistantPhoneCallDeploymentDialog(
   props: AssistantPhoneCallDeploymentDialogProps,
 ) {
-  const providerName = props.deployment?.getPhoneprovidername()?.toLowerCase();
+  const [selectedTab, setSelectedTab] = useState(0);
+  const providerName = props.deployment?.getPhoneprovidername()?.toLowerCase() || '';
   const assistantId = props.deployment?.getAssistantid();
   const mediaHost = CONFIG.connection.media;
   const sipHost = CONFIG.connection.sip;
   const socketHost = CONFIG.connection.socket;
 
-  const webhookUrl = `${mediaHost}/v1/talk/${providerName}/call/${assistantId}?x-api-key={{PROJECT_CRDENTIAL_KEY}}`;
-  const eventUrl = `${mediaHost}/v1/talk/${providerName}/event/${assistantId}?x-api-key={{PROJECT_CRDENTIAL_KEY}}`;
+  const webhookUrl = `${mediaHost}/v1/talk/${providerName || '<provider>'}/call/${assistantId}?x-api-key={{PROJECT_CRDENTIAL_KEY}}`;
+  const eventUrl = `${mediaHost}/v1/talk/${providerName || '<provider>'}/event/${assistantId}?x-api-key={{PROJECT_CRDENTIAL_KEY}}`;
 
   const modalContent = (
     <RightSideModal
       modalOpen={props.modalOpen}
       setModalOpen={props.setModalOpen}
-      className="w-2/3 xl:w-1/3 flex-1"
+      className="w-[580px]"
+      label="Phone Deployment"
+      title={props.deployment.getId()}
     >
-      <div className="h-12 px-4 flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 shrink-0">
-        <span className="text-xs font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-          Deployment
-        </span>
-        <span className="text-gray-300 dark:text-gray-600">/</span>
-        <span className="text-xs font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-          Phone
-        </span>
-        <span className="text-gray-300 dark:text-gray-600">/</span>
-        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono truncate">
-          {props.deployment.getId()}
-        </span>
-      </div>
-      <div className="flex flex-col flex-1 overflow-auto h-[calc(100vh-48px)]">
-        <Tab
-          active="Integration"
-          className={cn('bg-white dark:bg-gray-900 sticky top-0 z-1')}
-          tabs={[
-            {
-              label: 'Integration',
-              element: (
-                <div className="divide-y divide-gray-200 dark:divide-gray-800 w-full">
-                  {providerName === 'sip' && (
-                    <SipIntegrationInstructions
-                      sipHost={sipHost}
-                      assistantId={assistantId}
-                    />
-                  )}
-                  {providerName === 'asterisk' && (
-                    <AsteriskIntegrationInstructions
-                      mediaHost={mediaHost}
-                      audioSocketHost={socketHost}
-                      assistantId={assistantId}
-                    />
-                  )}
-                  {providerName !== 'sip' && providerName !== 'asterisk' && (
-                    <>
-                      <CodeRow label="Inbound webhook url" value={webhookUrl}>
-                        <InputHelper>
-                          You can add additional agent arguments as query
-                          parameters — e.g.{' '}
-                          <code className="text-red-600">
-                            `?name=your-name`
-                          </code>
-                        </InputHelper>
-                      </CodeRow>
-                      <CodeRow
-                        label="Call status / Event callback webhook"
-                        value={eventUrl}
-                      />
-                    </>
-                  )}
-                </div>
-              ),
-            },
-            {
-              label: 'Audio',
-              element: (
-                <div className="divide-y divide-gray-200 dark:divide-gray-800 w-full">
-                  <VoiceInput deployment={props.deployment?.getInputaudio()} />
-                  <VoiceOutput
-                    deployment={props.deployment?.getOutputaudio()}
-                  />
-                </div>
-              ),
-            },
-          ]}
-        />
+      <div className="relative flex flex-col flex-1 min-h-0">
+        <Tabs
+          tabs={['Integration', 'Audio']}
+          selectedIndex={selectedTab}
+          onChange={setSelectedTab}
+          contained
+          aria-label="Phone deployment tabs"
+          className="!h-full !min-h-0 !flex !flex-col [&_.cds--tabs__nav]:border-b [&_.cds--tabs__nav]:border-gray-200 dark:[&_.cds--tabs__nav]:border-gray-800 [&_.cds--tab-content]:!h-full [&_.cds--tab-content]:!min-h-0 [&_.cds--tab-content]:!p-0"
+          panelClassName="!h-full !min-h-0 !overflow-auto !p-0"
+        >
+          <div className="divide-y divide-gray-200 dark:divide-gray-800 w-full">
+            <TelephonyConfig deployment={props.deployment} />
+            {providerName === 'sip' && (
+              <SipIntegrationInstructions
+                sipHost={sipHost}
+                assistantId={assistantId}
+              />
+            )}
+            {providerName === 'asterisk' && (
+              <AsteriskIntegrationInstructions
+                mediaHost={mediaHost}
+                audioSocketHost={socketHost}
+                assistantId={assistantId}
+              />
+            )}
+            {providerName !== 'sip' && providerName !== 'asterisk' && (
+              <>
+                <CodeRow label="Inbound webhook url" value={webhookUrl}>
+                  <InputHelper>
+                    You can add additional agent arguments as query
+                    parameters — e.g.{' '}
+                    <code className="text-red-600">`?name=your-name`</code>
+                  </InputHelper>
+                </CodeRow>
+                <CodeRow
+                  label="Call status / Event callback webhook"
+                  value={eventUrl}
+                />
+              </>
+            )}
+          </div>
+          <div className="divide-y divide-gray-200 dark:divide-gray-800 w-full">
+            <VoiceInput deployment={props.deployment?.getInputaudio()} />
+            <VoiceOutput deployment={props.deployment?.getOutputaudio()} />
+          </div>
+        </Tabs>
       </div>
     </RightSideModal>
   );
@@ -123,6 +103,39 @@ export function AssistantPhoneCallDeploymentDialog(
 
 const Row = DeploymentRow;
 const SectionHeader = DeploymentSectionHeader;
+
+const TelephonyConfig: FC<{ deployment: AssistantPhoneDeployment }> = ({
+  deployment,
+}) => {
+  const options = (deployment.getPhoneoptionsList() || []).filter(
+    d => d.getKey() && d.getValue(),
+  );
+
+  return (
+    <>
+      <SectionHeader label="Telephony" />
+      <Row label="Provider">
+        <ProviderPill provider={deployment.getPhoneprovidername()} />
+      </Row>
+      {options.length > 0 ? (
+        options.map((detail, index) => (
+          <Row key={`phone-option-${index}`} label={detail.getKey()}>
+            <span className="text-sm font-mono text-gray-900 dark:text-gray-100 truncate max-w-[200px] text-right">
+              {detail.getValue()}
+            </span>
+            <CopyButton className="h-6 w-6 shrink-0">
+              {detail.getValue()}
+            </CopyButton>
+          </Row>
+        ))
+      ) : (
+        <div className="px-4 py-3">
+          <YellowNoticeBlock>No telephony options configured.</YellowNoticeBlock>
+        </div>
+      )}
+    </>
+  );
+};
 
 const CodeRow: FC<{ label: string; value: string; children?: ReactNode }> = ({
   label,

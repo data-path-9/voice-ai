@@ -6,7 +6,6 @@ import { ConfigureAudioInputProvider } from '@/app/pages/assistant/actions/creat
 import { ConfigureAudioOutputProvider } from '@/app/pages/assistant/actions/create-deployment/commons/configure-audio-output';
 import { useRapidaStore } from '@/hooks';
 import { useAllProviderCredentials } from '@/hooks/use-model';
-import { Phone } from 'lucide-react';
 import { FC, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
@@ -36,6 +35,7 @@ import {
 import { connectionConfig } from '@/configs';
 import {
   TelephonyProvider,
+  GetDefaultTelephonyConfigIfInvalid,
   ValidateTelephonyOptions,
 } from '@/app/components/providers/telephony';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
@@ -130,7 +130,10 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
     parameters: Metadata[];
   }>({
     provider: 'cartesia',
-    parameters: GetDefaultTextToSpeechIfInvalid('cartesia', GetDefaultSpeakerConfig()),
+    parameters: GetDefaultTextToSpeechIfInvalid(
+      'cartesia',
+      GetDefaultSpeakerConfig(),
+    ),
   });
 
   const hasFetched = useRef(false);
@@ -166,9 +169,13 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
         });
 
         if (deployment.getPhoneprovidername()) {
+          const provider = deployment.getPhoneprovidername() || '';
           setTelephonyConfig({
-            provider: deployment.getPhoneprovidername() || '',
-            parameters: deployment.getPhoneoptionsList() || [],
+            provider,
+            parameters: GetDefaultTelephonyConfigIfInvalid(
+              provider,
+              deployment.getPhoneoptionsList() || [],
+            ),
           });
         }
 
@@ -178,9 +185,7 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
             provider: provider.getAudioprovider() || 'deepgram',
             parameters: GetDefaultSpeechToTextIfInvalid(
               provider.getAudioprovider() || 'deepgram',
-              GetDefaultMicrophoneConfig(
-                provider.getAudiooptionsList() || [],
-              ),
+              GetDefaultMicrophoneConfig(provider.getAudiooptionsList() || []),
             ),
           });
         }
@@ -191,9 +196,7 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
             provider: provider.getAudioprovider() || 'cartesia',
             parameters: GetDefaultTextToSpeechIfInvalid(
               provider.getAudioprovider() || 'cartesia',
-              GetDefaultSpeakerConfig(
-                provider.getAudiooptionsList() || [],
-              ),
+              GetDefaultSpeakerConfig(provider.getAudiooptionsList() || []),
             ),
           });
         }
@@ -226,12 +229,11 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
     const idx = STEPS.findIndex(s => s.code === activeTab);
 
     if (activeTab === 'telephony') {
-      if (
-        !ValidateTelephonyOptions(
-          telephonyConfig.provider,
-          telephonyConfig.parameters,
-        )
-      ) {
+      const resolvedTelephonyParameters = GetDefaultTelephonyConfigIfInvalid(
+        telephonyConfig.provider,
+        telephonyConfig.parameters,
+      );
+      if (!ValidateTelephonyOptions(telephonyConfig.provider, resolvedTelephonyParameters)) {
         setErrorMessage('Please provide a valid telephony configuration.');
         return;
       }
@@ -270,12 +272,11 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
     setIsDeploying(true);
     setErrorMessage('');
 
-    if (
-      !ValidateTelephonyOptions(
-        telephonyConfig.provider,
-        telephonyConfig.parameters,
-      )
-    ) {
+    const resolvedTelephonyParameters = GetDefaultTelephonyConfigIfInvalid(
+      telephonyConfig.provider,
+      telephonyConfig.parameters,
+    );
+    if (!ValidateTelephonyOptions(telephonyConfig.provider, resolvedTelephonyParameters)) {
       setIsDeploying(false);
       setErrorMessage('Please provide a valid telephony configuration.');
       return;
@@ -334,7 +335,7 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
       deployment.setMaxsessionduration(experienceConfig.maxCallDuration);
 
     deployment.setPhoneprovidername(telephonyConfig.provider);
-    deployment.setPhoneoptionsList(telephonyConfig.parameters);
+    deployment.setPhoneoptionsList(resolvedTelephonyParameters);
 
     const inputAudio = new DeploymentAudioProvider();
     inputAudio.setAudioprovider(audioInputConfig.provider);
@@ -398,17 +399,27 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
                   provider={telephonyConfig.provider}
                   parameters={telephonyConfig.parameters}
                   onChangeProvider={provider =>
-                    setTelephonyConfig({ provider, parameters: [] })
+                    setTelephonyConfig({
+                      provider,
+                      parameters: GetDefaultTelephonyConfigIfInvalid(provider, []),
+                    })
                   }
                   onChangeParameter={parameters =>
-                    setTelephonyConfig(c => ({ ...c, parameters }))
+                    setTelephonyConfig(c => ({
+                      ...c,
+                      parameters: GetDefaultTelephonyConfigIfInvalid(
+                        c.provider,
+                        parameters,
+                      ),
+                    }))
                   }
                 />
               </div>
             ),
             actions: [
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <SecondaryButton size="lg"
+                <SecondaryButton
+                  size="lg"
                   className="w-full h-full"
                   onClick={() =>
                     showDialog(() => goToDeploymentAssistant(assistantId))
@@ -416,7 +427,8 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
                 >
                   Cancel
                 </SecondaryButton>
-                <PrimaryButton size="lg"
+                <PrimaryButton
+                  size="lg"
                   type="button"
                   className="w-full h-full"
                   onClick={handleNext}
@@ -439,13 +451,15 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
             ),
             actions: [
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <GhostButton size="lg"
+                <GhostButton
+                  size="lg"
                   className="w-full h-full"
                   onClick={handlePrevious}
                 >
                   Previous
                 </GhostButton>
-                <SecondaryButton size="lg"
+                <SecondaryButton
+                  size="lg"
                   className="w-full h-full"
                   onClick={() =>
                     showDialog(() => goToDeploymentAssistant(assistantId))
@@ -453,7 +467,8 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
                 >
                   Cancel
                 </SecondaryButton>
-                <PrimaryButton size="lg"
+                <PrimaryButton
+                  size="lg"
                   type="button"
                   className="w-full h-full"
                   onClick={handleNext}
@@ -476,13 +491,15 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
             ),
             actions: [
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <GhostButton size="lg"
+                <GhostButton
+                  size="lg"
                   className="w-full h-full"
                   onClick={handlePrevious}
                 >
                   Previous
                 </GhostButton>
-                <SecondaryButton size="lg"
+                <SecondaryButton
+                  size="lg"
                   className="w-full h-full"
                   onClick={() =>
                     showDialog(() => goToDeploymentAssistant(assistantId))
@@ -490,7 +507,8 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
                 >
                   Cancel
                 </SecondaryButton>
-                <PrimaryButton size="lg"
+                <PrimaryButton
+                  size="lg"
                   type="button"
                   className="w-full h-full"
                   onClick={handleNext}
@@ -513,13 +531,15 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
             ),
             actions: [
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <GhostButton size="lg"
+                <GhostButton
+                  size="lg"
                   className="w-full h-full"
                   onClick={handlePrevious}
                 >
                   Previous
                 </GhostButton>
-                <SecondaryButton size="lg"
+                <SecondaryButton
+                  size="lg"
                   className="w-full h-full"
                   onClick={() =>
                     showDialog(() => goToDeploymentAssistant(assistantId))
@@ -527,7 +547,8 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
                 >
                   Cancel
                 </SecondaryButton>
-                <PrimaryButton size="lg"
+                <PrimaryButton
+                  size="lg"
                   type="button"
                   className="w-full h-full"
                   isLoading={isDeploying}
