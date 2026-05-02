@@ -115,13 +115,6 @@ func (p *AudioProcessor) ConfigureAmbient(cfg internal_ambient.Config) error {
 	return p.ambientMixer.Configure(cfg)
 }
 
-func (p *AudioProcessor) ResetAmbient() {
-	if p.ambientMixer == nil {
-		return
-	}
-	p.ambientMixer.Reset()
-}
-
 // SetInputAudioCallback sets the callback for processed input audio
 func (p *AudioProcessor) SetInputAudioCallback(callback func(audio []byte)) {
 	p.onInputAudio = callback
@@ -130,11 +123,6 @@ func (p *AudioProcessor) SetInputAudioCallback(callback func(audio []byte)) {
 // SetOutputChunkCallback sets the callback for sending audio chunks to Exotel
 func (p *AudioProcessor) SetOutputChunkCallback(callback func(chunk *AudioChunk) error) {
 	p.onOutputChunk = callback
-}
-
-// GetDownstreamConfig returns the downstream audio configuration (16kHz linear16)
-func (p *AudioProcessor) GetDownstreamConfig() *protos.AudioConfig {
-	return p.downstreamConfig
 }
 
 // ============================================================================
@@ -169,11 +157,6 @@ func (p *AudioProcessor) bufferAndSendInput(audio []byte) {
 	if p.onInputAudio != nil {
 		p.onInputAudio(audioData)
 	}
-}
-
-// ClearInputBuffer clears the input audio buffer
-func (p *AudioProcessor) ClearInputBuffer() {
-	p.inputBuffer.Clear()
 }
 
 // ============================================================================

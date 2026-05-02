@@ -60,6 +60,12 @@ func NewTwilioWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 		})
 	})
 	tws.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
+		if event != nil {
+			if event.Data == nil {
+				event.Data = map[string]string{}
+			}
+			event.Data["provider"] = "twilio"
+		}
 		tws.Input(event)
 	})
 	go tws.runWebSocketReader()
@@ -243,6 +249,8 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 				})
 			}
 		}
+	default:
+		tws.Logger.Warnw("Twilio Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
 	}
 	return nil
 }

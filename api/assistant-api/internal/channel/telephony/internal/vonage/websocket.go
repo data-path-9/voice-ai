@@ -64,6 +64,12 @@ func NewVonageWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 		})
 	})
 	vng.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
+		if event != nil {
+			if event.Data == nil {
+				event.Data = map[string]string{}
+			}
+			event.Data["provider"] = "vonage"
+		}
 		vng.Input(event)
 	})
 	go vng.runWebSocketReader()
@@ -104,11 +110,10 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 					Time: timestamppb.Now(),
 				})
 			case "stop":
-				vng.stopAudioProcessing()
 				if msg := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 					vng.Input(msg)
 				}
-				vng.BaseStreamer.Cancel()
+				vng.Cancel()
 				return
 			default:
 				vng.Logger.Debugf("Unhandled event type: %s", textEvent["event"])
@@ -194,6 +199,8 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 				Result: map[string]string{"status": "failed", "reason": "transfer not supported for Vonage", "next_action": "end_call"},
 			})
 		}
+	default:
+		vng.Logger.Warnw("Vonage Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
 	}
 	return nil
 }

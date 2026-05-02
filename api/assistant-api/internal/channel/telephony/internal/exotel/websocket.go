@@ -62,6 +62,12 @@ func NewExotelWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 		})
 	})
 	exotel.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
+		if event != nil {
+			if event.Data == nil {
+				event.Data = map[string]string{}
+			}
+			event.Data["provider"] = "exotel"
+		}
 		exotel.Input(event)
 	})
 	go exotel.runWebSocketReader()
@@ -182,6 +188,8 @@ func (exotel *exotelWebsocketStreamer) Send(response internal_type.Stream) error
 				Result: map[string]string{"status": "failed", "reason": "transfer not supported for Exotel", "next_action": "end_call"},
 			})
 		}
+	default:
+		exotel.Logger.Warnw("Exotel Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
 	}
 	return nil
 }

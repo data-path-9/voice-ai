@@ -122,13 +122,6 @@ func (p *AudioProcessor) ConfigureAmbient(cfg internal_ambient.Config) error {
 	return p.ambientMixer.Configure(cfg)
 }
 
-func (p *AudioProcessor) ResetAmbient() {
-	if p.ambientMixer == nil {
-		return
-	}
-	p.ambientMixer.Reset()
-}
-
 func (p *AudioProcessor) ringtoneBytes() []byte {
 	p.ringtoneMu.RLock()
 	defer p.ringtoneMu.RUnlock()

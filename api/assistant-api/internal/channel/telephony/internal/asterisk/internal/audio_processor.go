@@ -141,13 +141,6 @@ func (p *AudioProcessor) ConfigureAmbient(cfg internal_ambient.Config) error {
 	return p.ambientMixer.Configure(cfg)
 }
 
-func (p *AudioProcessor) ResetAmbient() {
-	if p.ambientMixer == nil {
-		return
-	}
-	p.ambientMixer.Reset()
-}
-
 func (p *AudioProcessor) SetOptimalFrameSize(size int) {
 	if size > 0 {
 		p.stateMu.Lock()

@@ -238,7 +238,7 @@ func (s *Streamer) Send(response internal_type.Stream) error {
 			return nil
 		}
 	default:
-		s.Logger.Warnw("SIP Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
+		// s.Logger.Warnw("SIP Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
 	}
 	return nil
 }
