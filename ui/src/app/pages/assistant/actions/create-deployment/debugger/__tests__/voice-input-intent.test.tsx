@@ -275,7 +275,9 @@ describe('Debugger deployment voice input intent actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() =>
-      expect(screen.getByText(/Voice input is currently/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(/receive user input via audio and text/i),
+      ).toBeInTheDocument(),
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
@@ -296,13 +298,13 @@ describe('Debugger deployment voice input intent actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() =>
-      expect(screen.getByText(/Voice input is currently/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(/receive user input via audio and text/i),
+      ).toBeInTheDocument(),
     );
-    fireEvent.click(
-      screen.getByLabelText('Enable voice input (Speech-to-Text)'),
-    );
+    fireEvent.click(screen.getByLabelText('Enable'));
     expect(
-      screen.getByText(/Voice input is disabled\./i),
+      screen.getByText(/receive user input via text only/i),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     fireEvent.click(screen.getByRole('button', { name: 'Deploy Debugger' }));
@@ -323,10 +325,12 @@ describe('Debugger deployment voice input intent actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() =>
-      expect(screen.getByText(/Voice output is currently/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(/delivered via audio and text/i),
+      ).toBeInTheDocument(),
     );
     fireEvent.click(
-      screen.getByLabelText('Enable voice output (Text-to-Speech)'),
+      screen.getByLabelText('Enable'),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Deploy Debugger' }));
 
@@ -371,12 +375,12 @@ describe('Debugger deployment voice input intent actions', () => {
     render(<ConfigureAssistantDebuggerDeploymentPage />);
 
     await waitFor(() =>
-      expect(screen.getByText(/Voice input is currently/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(/receive user input via audio and text/i),
+      ).toBeInTheDocument(),
     );
 
-    fireEvent.click(
-      screen.getByLabelText('Enable voice input (Speech-to-Text)'),
-    );
+    fireEvent.click(screen.getByLabelText('Enable'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>

@@ -55,6 +55,18 @@ describe('transfer-call default options', () => {
     expect(byKey['tool.transfer_delay']).toBe('500');
   });
 
+  it('defaults ringtone to default when not provided', () => {
+    const options = GetTransferCallDefaultOptions([
+      createMetadata('tool.transfer_to', '+14155551234'),
+    ]);
+
+    const byKey = Object.fromEntries(
+      options.map(option => [option.getKey(), option.getValue()]),
+    );
+
+    expect(byKey['tool.ringtone']).toBe('default');
+  });
+
   it('validates transfer destination as required', () => {
     const error = ValidateTransferCallDefaultOptions([
       createMetadata('tool.transfer_message', 'message'),
@@ -62,5 +74,16 @@ describe('transfer-call default options', () => {
     ]);
 
     expect(error).toContain('Please provide at least one phone number');
+  });
+
+  it('validates ringtone against the supported values', () => {
+    const error = ValidateTransferCallDefaultOptions([
+      createMetadata('tool.transfer_to', '+14155551234'),
+      createMetadata('tool.ringtone', 'ringtone_us'),
+    ]);
+
+    expect(error).toContain(
+      'Ringtone must be one of: default, dial-and-ring, ring-ring, transfer-music.',
+    );
   });
 });

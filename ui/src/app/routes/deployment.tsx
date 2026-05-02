@@ -30,6 +30,7 @@ import {
   DeploymentConfigureAssistantTelemetryPage,
   DeploymentCreateAssistantTelemetryPage,
   DeploymentUpdateAssistantTelemetryPage,
+  DeploymentConfigureAssistantAuthenticationPage,
   DeploymentConversationDetailPage,
   DeploymentCreateAssistantAnalysisPage,
   DeploymentUpdateAssistantAnalysisPage,
@@ -177,6 +178,10 @@ export function DeploymentRoute() {
           <Route
             path={'configure-webhook/:webhookId'}
             element={<DeploymentUpdateAssistantWebhookPage />}
+          />
+          <Route
+            path={'configure-authentication/'}
+            element={<DeploymentConfigureAssistantAuthenticationPage />}
           />
           <Route
             path={'configure-telemetry/'}

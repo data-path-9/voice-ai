@@ -419,6 +419,9 @@
   .-top-1 {
     top: calc(var(--spacing) * -1);
   }
+  .-top-3 {
+    top: calc(var(--spacing) * -3);
+  }
   .-top-6 {
     top: calc(var(--spacing) * -6);
   }
@@ -496,6 +499,9 @@
   }
   .left-1\/2 {
     left: calc(1/2 * 100%);
+  }
+  .left-3 {
+    left: calc(var(--spacing) * 3);
   }
   .left-4 {
     left: calc(var(--spacing) * 4);
@@ -3748,6 +3754,9 @@
   .rounded-none\! {
     border-radius: 0 !important;
   }
+  .rounded-sm {
+    border-radius: var(--radius-sm);
+  }
   .rounded-xl {
     border-radius: var(--radius-xl);
   }
@@ -3785,6 +3794,10 @@
   .border-\[0\.5px\] {
     border-style: var(--tw-border-style);
     border-width: 0.5px;
+  }
+  .border-\[1px\] {
+    border-style: var(--tw-border-style);
+    border-width: 1px;
   }
   .border-\[2\.5px\] {
     border-style: var(--tw-border-style);
@@ -3858,6 +3871,10 @@
     --tw-border-style: none !important;
     border-style: none !important;
   }
+  .border-dashed {
+    --tw-border-style: dashed;
+    border-style: dashed;
+  }
   .border-none {
     --tw-border-style: none;
     border-style: none;
@@ -3872,6 +3889,9 @@
   }
   .\!border-gray-200 {
     border-color: var(--color-gray-200) !important;
+  }
+  .border-\[var\(--color-primary\)\] {
+    border-color: var(--color-primary);
   }
   .border-black {
     border-color: var(--color-black);
@@ -4008,6 +4028,12 @@
   .\!bg-\[var\(--cds-field\)\] {
     background-color: var(--cds-field) !important;
   }
+  .\!bg-\[var\(--cds-layer\)\] {
+    background-color: var(--cds-layer) !important;
+  }
+  .\!bg-\[var\(--cds-layer-02\)\] {
+    background-color: var(--cds-layer-02) !important;
+  }
   .\!bg-primary {
     background-color: var(--color-primary) !important;
   }
@@ -4019,6 +4045,9 @@
   }
   .bg-\[var\(--cds-field\)\] {
     background-color: var(--cds-field);
+  }
+  .bg-\[var\(--cds-layer\)\] {
+    background-color: var(--cds-layer);
   }
   .bg-amber-100 {
     background-color: var(--color-amber-100);
@@ -4698,6 +4727,9 @@
   .pl-4 {
     padding-left: calc(var(--spacing) * 4);
   }
+  .pl-6 {
+    padding-left: calc(var(--spacing) * 6);
+  }
   .pl-8 {
     padding-left: calc(var(--spacing) * 8);
   }
@@ -4986,6 +5018,9 @@
   }
   .\!text-white {
     color: var(--color-white) !important;
+  }
+  .text-\[var\(--color-primary\)\] {
+    color: var(--color-primary);
   }
   .text-amber-100 {
     color: var(--color-amber-100);

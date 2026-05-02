@@ -64,88 +64,92 @@ export const ConfigureAudioInputProvider: React.FC<
   );
 
   return (
-    <div className="border-b border-gray-200 dark:border-gray-800">
-      <div className="flex flex-col gap-6 max-w-4xl  px-6 py-8">
-        <SpeechToTextProvider
-          onChangeProvider={onChangeAudioInputProvider}
-          onChangeParameter={onChangeAudioInputParameter}
-          provider={audioInputConfig.provider}
-          parameters={audioInputConfig.parameters}
-        />
-        {audioInputConfig.provider && (
-          <>
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
-            >
-              <ChevronDown
-                size={16}
-                className={cn(
-                  'transition-transform duration-200',
-                  showAdvanced && 'rotate-180',
-                )}
-              />
-              {showAdvanced ? 'Hide' : 'Show'} advanced settings
-            </button>
+    <div className="flex flex-col gap-6 max-w-4xl p-6">
+      <SpeechToTextProvider
+        onChangeProvider={onChangeAudioInputProvider}
+        onChangeParameter={onChangeAudioInputParameter}
+        provider={audioInputConfig.provider}
+        parameters={audioInputConfig.parameters}
+      />
+      {audioInputConfig.provider && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+          >
+            <ChevronDown
+              size={16}
+              className={cn(
+                'transition-transform duration-200',
+                showAdvanced && 'rotate-180',
+              )}
+            />
+            {showAdvanced ? 'Hide' : 'Show'} advanced settings
+          </button>
 
-            {showAdvanced && (
-              <div className="flex flex-col gap-6 pt-6 border-t border-gray-200 dark:border-gray-800">
-                <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">Voice Activity Detection</p>
-                <VADProvider
-                  provider={getParamValue(
-                    'microphone.vad.provider',
-                    'silero_vad',
-                  )}
-                  onChangeProvider={v =>
-                    onChangeAudioInputParameter(
-                      GetDefaultVADConfig(v, audioInputConfig.parameters),
-                    )
-                  }
-                  parameters={audioInputConfig.parameters}
-                  onChangeParameter={onChangeAudioInputParameter}
-                />
-                <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">Background Noise</p>
-                <NoiseCancellationProvider
-                  noiseCancellationProvider={getParamValue(
-                    'microphone.denoising.provider',
-                    'rn_noise',
-                  )}
-                  parameters={audioInputConfig.parameters}
-                  onChangeParameter={onChangeAudioInputParameter}
-                  onChangeNoiseCancellationProvider={v =>
-                    onChangeAudioInputParameter(
-                      GetDefaultNoiseCancellationConfig(
-                        v,
-                        audioInputConfig.parameters,
+          {showAdvanced && (
+            <div className="flex flex-col gap-6 pt-6 border-t border-gray-200 dark:border-gray-800">
+              <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">
+                Voice Activity Detection
+              </p>
+              <VADProvider
+                provider={getParamValue(
+                  'microphone.vad.provider',
+                  'silero_vad',
+                )}
+                onChangeProvider={v =>
+                  onChangeAudioInputParameter(
+                    GetDefaultVADConfig(v, audioInputConfig.parameters),
+                  )
+                }
+                parameters={audioInputConfig.parameters}
+                onChangeParameter={onChangeAudioInputParameter}
+              />
+              <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">
+                Background Noise
+              </p>
+              <NoiseCancellationProvider
+                noiseCancellationProvider={getParamValue(
+                  'microphone.denoising.provider',
+                  'rn_noise',
+                )}
+                parameters={audioInputConfig.parameters}
+                onChangeParameter={onChangeAudioInputParameter}
+                onChangeNoiseCancellationProvider={v =>
+                  onChangeAudioInputParameter(
+                    GetDefaultNoiseCancellationConfig(
+                      v,
+                      audioInputConfig.parameters,
+                    ),
+                  )
+                }
+              />
+              <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">
+                End of Speech
+              </p>
+              <EndOfSpeechProvider
+                provider={getParamValue(
+                  'microphone.eos.provider',
+                  'pipecat_smart_turn_eos',
+                )}
+                onChangeProvider={provider =>
+                  onChangeAudioInputParameter(
+                    GetDefaultEOSConfig(
+                      provider,
+                      audioInputConfig.parameters.filter(
+                        p => !p.getKey().startsWith('microphone.eos.'),
                       ),
-                    )
-                  }
-                />
-                <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400">End of Speech</p>
-                <EndOfSpeechProvider
-                  provider={getParamValue(
-                    'microphone.eos.provider',
-                    'pipecat_smart_turn_eos',
-                  )}
-                  onChangeProvider={provider =>
-                    onChangeAudioInputParameter(
-                      GetDefaultEOSConfig(
-                        provider,
-                        audioInputConfig.parameters.filter(
-                          p => !p.getKey().startsWith('microphone.eos.'),
-                        ),
-                      ),
-                    )
-                  }
-                  parameters={audioInputConfig.parameters}
-                  onChangeParameter={onChangeAudioInputParameter}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>
+                    ),
+                  )
+                }
+                parameters={audioInputConfig.parameters}
+                onChangeParameter={onChangeAudioInputParameter}
+              />
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };

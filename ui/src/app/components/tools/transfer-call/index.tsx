@@ -116,12 +116,13 @@ export const ConfigureTransferCall: FC<ConfigureToolProps> = ({
                   </Tooltip>
                 </span>
               }
-              value={getParamValue('tool.ringtone') || 'ringtone_us'}
+              value={getParamValue('tool.ringtone') || 'default'}
               onChange={e => updateParameter('tool.ringtone', e.target.value)}
             >
-              <SelectItem value="ringtone_in" text="ringtone_in" />
-              <SelectItem value="ringtone_uk" text="ringtone_uk" />
-              <SelectItem value="ringtone_us" text="ringtone_us" />
+              <SelectItem value="default" text="default" />
+              <SelectItem value="dial-and-ring" text="dial-and-ring" />
+              <SelectItem value="ring-ring" text="ring-ring" />
+              <SelectItem value="transfer-music" text="transfer-music" />
             </Select>
               <Slider
               id="transfer-delay"

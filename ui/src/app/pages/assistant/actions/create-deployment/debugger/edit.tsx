@@ -36,9 +36,12 @@ import { connectionConfig } from '@/configs';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
 import { Tabs } from '@/app/components/carbon/tabs';
 import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
-import { ButtonSet, Checkbox } from '@carbon/react';
-import { CornerBorderOverlay } from '@/app/components/base/corner-border';
-import { Notification } from '@/app/components/carbon/notification';
+import { ButtonSet, CheckboxGroup } from '@carbon/react';
+import { InputCheckbox } from '@/app/components/carbon/form/input-checkbox';
+import {
+  ActionNotification,
+  Notification,
+} from '@/app/components/carbon/notification';
 
 const EDIT_TABS = [
   {
@@ -65,7 +68,9 @@ export function EditAssistantDebuggerDeploymentPage() {
   return (
     <>
       <Helmet title="Edit debugger deployment" />
-      {assistantId && <EditAssistantDebuggerDeployment assistantId={assistantId} />}
+      {assistantId && (
+        <EditAssistantDebuggerDeployment assistantId={assistantId} />
+      )}
     </>
   );
 }
@@ -190,7 +195,11 @@ const EditAssistantDebuggerDeployment: FC<{ assistantId: string }> = ({
       .map(c => c.getId());
 
   const activeIndex = useMemo(
-    () => Math.max(EDIT_TABS.findIndex(tab => tab.code === activeTab), 0),
+    () =>
+      Math.max(
+        EDIT_TABS.findIndex(tab => tab.code === activeTab),
+        0,
+      ),
     [activeTab],
   );
 
@@ -330,7 +339,7 @@ const EditAssistantDebuggerDeployment: FC<{ assistantId: string }> = ({
           />
         </div>
 
-        <div className="flex-1 min-h-0 overflow-auto py-6">
+        <div className="flex-1 min-h-0 overflow-auto">
           {activeTab === 'experience' && (
             <div className="w-full">
               <ConfigureExperience
@@ -341,27 +350,24 @@ const EditAssistantDebuggerDeployment: FC<{ assistantId: string }> = ({
           )}
           {activeTab === 'voice-input' && (
             <div>
-              <div className="px-6 pt-6 pb-4">
-                <button
-                  type="button"
-                  onClick={() => setVoiceInputEnable(!voiceInputEnable)}
-                  className="relative group w-full text-left p-4 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950/50 hover:bg-gray-50 dark:hover:bg-gray-900/60 transition-colors"
+              <div className="px-6 pt-6">
+                <CheckboxGroup
+                  legendText="Voice input"
+                  warn
+                  warnText={
+                    voiceInputEnable
+                      ? 'Assistant can now receive user input via audio and text.'
+                      : 'Assistant will now receive user input via text only.'
+                  }
                 >
-                  <CornerBorderOverlay className={voiceInputEnable ? 'opacity-100' : undefined} />
-                  <div onClick={e => e.stopPropagation()}>
-                    <Checkbox
-                      id="voice-input-toggle-edit"
-                      labelText="Enable voice input (Speech-to-Text)"
-                      checked={voiceInputEnable}
-                      onChange={(_, { checked }) => setVoiceInputEnable(checked)}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-                    {voiceInputEnable
-                      ? 'Voice input is currently enabled.'
-                      : 'Voice input is disabled. This deployment will not transcribe user speech.'}
-                  </p>
-                </button>
+                  <InputCheckbox
+                    checked={voiceInputEnable}
+                    onChange={e => setVoiceInputEnable(e.target.checked)}
+                    id="voice-input-toggle-edit"
+                  >
+                    Enable
+                  </InputCheckbox>
+                </CheckboxGroup>
               </div>
               {voiceInputEnable && (
                 <ConfigureAudioInputProvider
@@ -373,27 +379,24 @@ const EditAssistantDebuggerDeployment: FC<{ assistantId: string }> = ({
           )}
           {activeTab === 'voice-output' && (
             <div>
-              <div className="px-6 pt-6 pb-4">
-                <button
-                  type="button"
-                  onClick={() => setVoiceOutputEnable(!voiceOutputEnable)}
-                  className="relative group w-full text-left p-4 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950/50 hover:bg-gray-50 dark:hover:bg-gray-900/60 transition-colors"
+              <div className="px-6 pt-6">
+                <CheckboxGroup
+                  legendText="Voice output"
+                  warn
+                  warnText={
+                    voiceOutputEnable
+                      ? 'Assistant responses will now be delivered via audio and text.'
+                      : 'Assistant responses will now be delivered via text.'
+                  }
                 >
-                  <CornerBorderOverlay className={voiceOutputEnable ? 'opacity-100' : undefined} />
-                  <div onClick={e => e.stopPropagation()}>
-                    <Checkbox
-                      id="voice-output-toggle-edit"
-                      labelText="Enable voice output (Text-to-Speech)"
-                      checked={voiceOutputEnable}
-                      onChange={(_, { checked }) => setVoiceOutputEnable(checked)}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-                    {voiceOutputEnable
-                      ? 'Voice output is currently enabled.'
-                      : 'Voice output is disabled. Assistant responses will be text only.'}
-                  </p>
-                </button>
+                  <InputCheckbox
+                    checked={voiceOutputEnable}
+                    onChange={e => setVoiceOutputEnable(e.target.checked)}
+                    id="voice-output-toggle-edit"
+                  >
+                    Enable
+                  </InputCheckbox>
+                </CheckboxGroup>
               </div>
               {voiceOutputEnable && (
                 <ConfigureAudioOutputProvider
@@ -413,7 +416,9 @@ const EditAssistantDebuggerDeployment: FC<{ assistantId: string }> = ({
             <SecondaryButton
               size="lg"
               className="w-full h-full"
-              onClick={() => showDialog(() => goToDeploymentAssistant(assistantId))}
+              onClick={() =>
+                showDialog(() => goToDeploymentAssistant(assistantId))
+              }
             >
               Cancel
             </SecondaryButton>

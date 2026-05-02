@@ -97,6 +97,14 @@ export const DeploymentConfigureAssistantTelemetryPage = lazyLoad(
   },
 );
 
+export const DeploymentConfigureAssistantAuthenticationPage = lazyLoad(
+  () => import('./actions/configure-assistant-authentication'),
+  module => module.ConfigureAssistantAuthenticationPage,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
 export const DeploymentCreateAssistantTelemetryPage = lazyLoad(
   () => import('./actions/configure-assistant-telemetry'),
   module => module.CreateAssistantTelemetryPage,

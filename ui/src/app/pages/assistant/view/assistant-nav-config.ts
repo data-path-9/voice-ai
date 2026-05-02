@@ -114,6 +114,12 @@ export const assistantNavSections: AssistantNavSection[] = [
         ],
       },
       {
+        key: 'authentication',
+        label: 'Authentication',
+        icon: Settings,
+        path: 'configure-authentication',
+      },
+      {
         key: 'telemetry',
         label: 'Telemetry',
         icon: Activity,
