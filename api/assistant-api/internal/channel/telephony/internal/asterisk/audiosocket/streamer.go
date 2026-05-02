@@ -9,6 +9,7 @@ package internal_asterisk_audiosocket
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -73,7 +74,6 @@ func NewStreamer(
 		writer = bufio.NewWriter(conn)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	as := &Streamer{
 		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
 			logger, cc, vaultCred,
@@ -82,10 +82,9 @@ func NewStreamer(
 		reader:         reader,
 		writer:         writer,
 		audioProcessor: audioProcessor,
-		ctx:            ctx,
-		cancel:         cancel,
 		initialUUID:    cc.ContextID,
 	}
+	as.ctx, as.cancel = context.WithCancel(as.Ctx)
 
 	audioProcessor.SetOutputChunkCallback(as.sendAudioChunk)
 	as.mediaSession = internal_telephony_media.NewMediaSession(as.ctx, logger, audioProcessor, nil)
@@ -95,6 +94,12 @@ func NewStreamer(
 		})
 	})
 	as.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
+		if event != nil {
+			if event.Data == nil {
+				event.Data = map[string]string{}
+			}
+			event.Data["provider"] = "asterisk_as"
+		}
 		as.Input(event)
 	})
 	as.mediaSession.Start()
@@ -157,6 +162,7 @@ func (as *Streamer) runFrameReader() {
 			if msg := as.Disconnect(disconnectType); msg != nil {
 				as.Input(msg)
 			}
+			as.Cancel()
 			return
 		}
 		switch frame.Type {
@@ -179,11 +185,13 @@ func (as *Streamer) runFrameReader() {
 			if msg := as.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				as.Input(msg)
 			}
+			as.Cancel()
 			return
 		case FrameTypeError:
 			if msg := as.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_UNSPECIFIED); msg != nil {
 				as.Input(msg)
 			}
+			as.Cancel()
 			return
 		}
 	}
@@ -243,6 +251,8 @@ func (as *Streamer) Send(response internal_type.Stream) error {
 				Result: map[string]string{"status": "failed", "reason": "transfer not supported for AudioSocket", "next_action": "end_call"},
 			})
 		}
+	default:
+		as.Logger.Warnw("AudioSocket Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
 	}
 
 	return nil

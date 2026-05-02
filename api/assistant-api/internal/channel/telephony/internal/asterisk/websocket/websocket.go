@@ -78,6 +78,12 @@ func NewAsteriskWebsocketStreamer(
 		})
 	})
 	aws.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
+		if event != nil {
+			if event.Data == nil {
+				event.Data = map[string]string{}
+			}
+			event.Data["provider"] = "asterisk_ws"
+		}
 		aws.Input(event)
 	})
 
@@ -105,6 +111,7 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 			if msg := aws.Disconnect(disconnectTypeFromReadError(err)); msg != nil {
 				aws.Input(msg)
 			}
+			aws.Cancel()
 			return
 		}
 		switch messageType {
@@ -142,10 +149,10 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 				})
 			case "MEDIA_STOP":
 				aws.Logger.Info("Asterisk media stopped")
-				aws.stopAudioProcessing()
 				if msg := aws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 					aws.Input(msg)
 				}
+				aws.Cancel()
 				return
 			case "MEDIA_XON":
 				aws.audioProcessor.SetXON()
@@ -174,6 +181,7 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 			if msg := aws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				aws.Input(msg)
 			}
+			aws.Cancel()
 			return
 		default:
 			aws.Logger.Warn("Received unsupported WebSocket message type", "type", messageType)
