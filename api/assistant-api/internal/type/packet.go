@@ -252,6 +252,26 @@ func (f InjectMessagePacket) ContextId() string { return f.ContextID }
 func (f InjectMessagePacket) Content() string   { return f.Text }
 func (f InjectMessagePacket) Role() string      { return "rapida" }
 
+// RunAnalysisPacket triggers analysis execution for the current conversation context.
+// Conditions are optional and keyed by analysis name.
+type RunAnalysisPacket struct {
+	ContextID  string
+	Event      string
+	Conditions map[string]string
+}
+
+func (f RunAnalysisPacket) ContextId() string { return f.ContextID }
+
+// RunWebhookPacket triggers webhook execution for the current conversation context.
+// Conditions are optional and keyed by webhook id (string form).
+type RunWebhookPacket struct {
+	ContextID  string
+	Event      string
+	Conditions map[string]string
+}
+
+func (f RunWebhookPacket) ContextId() string { return f.ContextID }
+
 // StartIdleTimeoutPacket explicitly (re)starts the idle timeout timer.
 // Routed on outputCh so producers can order it relative to InjectMessagePacket
 // and TTS output packets that share the same channel.

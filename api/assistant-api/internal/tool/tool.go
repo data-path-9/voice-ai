@@ -30,7 +30,6 @@ type toolExecutor struct {
 	tools                  map[string]internal_tool.ToolCaller
 	availableToolFunctions []*protos.FunctionDefinition
 	mcpClients             []*internal_tool_mcp.Client
-	conditionMatcher       *internal_condition.Matcher
 }
 
 type toolRegistration struct {
@@ -44,7 +43,6 @@ func NewToolExecutor(logger commons.Logger) ToolExecutor {
 		mcpClients:             make([]*internal_tool_mcp.Client, 0),
 		tools:                  make(map[string]internal_tool.ToolCaller),
 		availableToolFunctions: make([]*protos.FunctionDefinition, 0),
-		conditionMatcher:       internal_condition.NewMatcher(),
 	}
 }
 
@@ -89,18 +87,10 @@ func (executor *toolExecutor) filterToolsByCondition(
 	tools []*internal_assistant_entity.AssistantTool,
 	communication internal_type.Communication,
 ) []*internal_assistant_entity.AssistantTool {
-	if executor.conditionMatcher == nil {
-		executor.conditionMatcher = internal_condition.NewMatcher()
-	}
 	filtered := make([]*internal_assistant_entity.AssistantTool, 0, len(tools))
 	var direction string
 	if conv := communication.Conversation(); conv != nil {
 		direction = conv.Direction.String()
-	}
-	conditionCtx := internal_condition.Context{
-		Source:    string(communication.GetSource()),
-		Mode:      communication.GetMode().String(),
-		Direction: direction,
 	}
 	for _, tool := range tools {
 		opts := tool.GetOptions()
@@ -110,7 +100,17 @@ func (executor *toolExecutor) filterToolsByCondition(
 			continue
 		}
 
-		allowed, evalErr := executor.conditionMatcher.Evaluate(rawCondition, conditionCtx)
+		parsed, evalErr := internal_condition.Parse(rawCondition)
+		if evalErr != nil {
+			executor.logger.Warnf("invalid tool.condition for tool %s, excluding tool: %v", tool.Name, evalErr)
+			continue
+		}
+
+		allowed, evalErr := parsed.Run(
+			internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeSource, Value: communication.GetSource().Get()},
+			internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeMode, Value: communication.GetMode().String()},
+			internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeDirection, Value: direction},
+		)
 		if evalErr != nil {
 			executor.logger.Warnf("invalid tool.condition for tool %s, excluding tool: %v", tool.Name, evalErr)
 			continue
@@ -147,12 +147,10 @@ func (executor *toolExecutor) buildMCPToolRegistrations(
 		return nil, err
 	}
 	executor.mcpClients = append(executor.mcpClients, client)
-
 	definitions, err := client.ListTools(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	registrations := make([]toolRegistration, 0, len(definitions))
 	for i, def := range definitions {
 		caller := internal_tool_mcp.NewMCPToolCaller(executor.logger, client, tool.Id+uint64(i), def.Name, def)
