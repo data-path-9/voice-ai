@@ -1,11 +1,77 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ConfigureAssistantAuthenticationPage } from '../index';
+import {
+  CreateAssistantAuthentication,
+  DisableAssistantAuthentication,
+  GetAssistantAuthentication,
+} from '@rapidaai/react';
+
+jest.mock('@rapidaai/react', () => {
+  class CreateAssistantAuthenticationRequest {
+    setAssistantid(_: string) {}
+    setStatus(_: string) {}
+    setFailbehavior(_: string) {}
+    setTimeoutms(_: string) {}
+    setOptionsList(_: unknown[]) {}
+  }
+  class GetAssistantAuthenticationRequest {
+    setAssistantid(_: string) {}
+  }
+  class DisableAssistantAuthenticationRequest {
+    setAssistantid(_: string) {}
+  }
+  class ConnectionConfig {
+    constructor(_: unknown) {}
+  }
+  class Metadata {
+    key = '';
+    value = '';
+    setKey(v: string) {
+      this.key = v;
+    }
+    setValue(v: string) {
+      this.value = v;
+    }
+    getKey() {
+      return this.key;
+    }
+    getValue() {
+      return this.value;
+    }
+  }
+  return {
+    ConnectionConfig,
+    CreateAssistantAuthenticationRequest,
+    GetAssistantAuthenticationRequest,
+    DisableAssistantAuthenticationRequest,
+    Metadata,
+    CreateAssistantAuthentication: jest.fn(),
+    DisableAssistantAuthentication: jest.fn(),
+    GetAssistantAuthentication: jest.fn(),
+  };
+});
+
+jest.mock('react-hot-toast/headless', () => ({
+  __esModule: true,
+  default: {
+    success: jest.fn(),
+    error: jest.fn(),
+  },
+}));
 
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
   useParams: () => ({ assistantId: 'assistant-1' }),
+}));
+
+jest.mock('@/hooks/use-credential', () => ({
+  useCurrentCredential: () => ({
+    authId: 'auth-1',
+    token: 'token-1',
+    projectId: 'project-1',
+  }),
 }));
 
 jest.mock('@/hooks/use-global-navigator', () => ({
@@ -36,6 +102,10 @@ jest.mock('@/app/components/conditions/source-condition-rule', () => ({
 
 jest.mock('@/app/components/external-api/api-header', () => ({
   APiStringHeader: () => <div>headers</div>,
+}));
+
+jest.mock('@/app/components/carbon/notification', () => ({
+  Notification: ({ subtitle }: any) => <div>{subtitle}</div>,
 }));
 
 jest.mock('@/app/components/carbon/form/input-checkbox', () => ({
@@ -103,8 +173,43 @@ jest.mock('@carbon/react', () => ({
 }));
 
 describe('ConfigureAssistantAuthenticationPage', () => {
-  it('supports add and edit for authentication parameter mapping', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (GetAssistantAuthentication as jest.Mock).mockResolvedValue({
+      getSuccess: () => false,
+    });
+    (CreateAssistantAuthentication as jest.Mock).mockResolvedValue({
+      getSuccess: () => true,
+      getData: () => ({}),
+    });
+    (DisableAssistantAuthentication as jest.Mock).mockResolvedValue({
+      getSuccess: () => true,
+      getData: () => ({}),
+    });
+  });
+
+  it('keeps save enabled and validates on click', async () => {
     render(<ConfigureAssistantAuthenticationPage />);
+    await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByLabelText('Enable Session Authentication'));
+
+    const saveButton = screen.getByRole('button', {
+      name: 'Save authentication',
+    });
+    expect(saveButton).not.toBeDisabled();
+
+    fireEvent.click(saveButton);
+
+    expect(
+      screen.getByText('Please provide a server URL for authentication.'),
+    ).toBeInTheDocument();
+    expect(CreateAssistantAuthentication).not.toHaveBeenCalled();
+  });
+
+  it('supports add and edit for authentication parameter mapping', async () => {
+    render(<ConfigureAssistantAuthenticationPage />);
+    await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
 
     fireEvent.click(screen.getByLabelText('Enable Session Authentication'));
     fireEvent.change(screen.getByTestId('assistant-auth-endpoint'), {
@@ -118,5 +223,31 @@ describe('ConfigureAssistantAuthenticationPage', () => {
 
     expect(screen.getByText('Mapping (3)')).toBeInTheDocument();
     expect(screen.getByTestId('param-val-2')).toHaveValue('assistantPrompt');
+  });
+
+  it('creates authentication when enabled and valid', async () => {
+    render(<ConfigureAssistantAuthenticationPage />);
+    await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByLabelText('Enable Session Authentication'));
+    fireEvent.change(screen.getByTestId('assistant-auth-endpoint'), {
+      target: { value: 'https://auth.example.com/resolve' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save authentication' }));
+
+    await waitFor(() =>
+      expect(CreateAssistantAuthentication).toHaveBeenCalledTimes(1),
+    );
+  });
+
+  it('disables authentication when toggled off and saved', async () => {
+    render(<ConfigureAssistantAuthenticationPage />);
+    await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save authentication' }));
+
+    await waitFor(() =>
+      expect(DisableAssistantAuthentication).toHaveBeenCalledTimes(1),
+    );
   });
 });
