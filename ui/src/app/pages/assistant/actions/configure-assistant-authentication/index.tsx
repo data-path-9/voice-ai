@@ -42,6 +42,7 @@ import {
 type AuthProvider = 'api';
 type HttpMethod = 'POST' | 'GET';
 type FailBehavior = 'block' | 'none';
+type LoadState = 'loading' | 'ready' | 'error';
 const AUTH_OPTION_PROVIDER = 'auth.provider';
 const AUTH_OPTION_METHOD = 'auth.method';
 const AUTH_OPTION_ENDPOINT = 'auth.endpoint';
@@ -88,6 +89,7 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
   );
   const [errorMessage, setErrorMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [loadState, setLoadState] = useState<LoadState>('loading');
   const [sourceConditions, setSourceConditions] = useState([
     {
       key: 'source',
@@ -106,9 +108,22 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
       'x-project-id': projectId,
     })
       .then(response => {
-        if (!response?.getSuccess()) return;
+        if (!response?.getSuccess()) {
+          setLoadState('error');
+          setErrorMessage(
+            response?.getError?.()?.getHumanmessage?.() ||
+              'Unable to load assistant authentication. Please try again.',
+          );
+          return;
+        }
         const data = response.getData();
-        if (!data) return;
+        if (!data) {
+          setLoadState('error');
+          setErrorMessage(
+            'Unable to load assistant authentication. Please try again.',
+          );
+          return;
+        }
 
         const status = (data.getStatus() || '').toLowerCase();
         setEnabled(status === 'active');
@@ -166,8 +181,10 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
             ]);
           }
         }
+        setLoadState('ready');
       })
       .catch(() => {
+        setLoadState('error');
         setErrorMessage(
           'Unable to load assistant authentication. Please try again.',
         );
@@ -260,6 +277,7 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
   };
 
   const onSubmit = () => {
+    if (loadState !== 'ready') return;
     if (!validateConfigure()) return;
     setIsSaving(true);
 
@@ -292,7 +310,7 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
 
     const request = new CreateAssistantAuthenticationRequest();
     request.setAssistantid(assistantId);
-    request.setStatus('active');
+    request.setStatus('ACTIVE');
     request.setFailbehavior(failBehavior);
     request.setTimeoutms(String(timeout));
 
@@ -368,6 +386,7 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
               <InputCheckbox
                 id="assistant-auth-enabled"
                 checked={enabled}
+                disabled={isSaving || loadState !== 'ready'}
                 onChange={e => {
                   setEnabled(e.target.checked);
                   setErrorMessage('');
@@ -509,7 +528,12 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
             >
               Cancel
             </SecondaryButton>
-            <PrimaryButton size="lg" onClick={onSubmit} isLoading={isSaving}>
+            <PrimaryButton
+              size="lg"
+              onClick={onSubmit}
+              isLoading={isSaving}
+              disabled={loadState !== 'ready'}
+            >
               Save authentication
             </PrimaryButton>
           </ButtonSet>

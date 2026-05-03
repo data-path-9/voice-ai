@@ -30,9 +30,8 @@ func (assistantApi *assistantGrpcApi) DisableAssistantAuthentication(
 		req.GetAssistantId(),
 	)
 	if err != nil {
-		return exceptions.BadRequestError[protos.GetAssistantAuthenticationResponse](
-			"Unable to disable assistant authentication.",
-		)
+		assistantApi.logger.Errorf("error while disabling authentication %s", err.Error())
+		return exceptions.BadRequestError[protos.GetAssistantAuthenticationResponse]("Unable to disable assistant authentication.")
 	}
 
 	out := &protos.AssistantAuthentication{}

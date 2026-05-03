@@ -388,6 +388,13 @@ jest.mock('@/app/components/tools/common', () => ({
   ),
 }));
 
+jest.mock('@/app/components/carbon/overflow-menu', () => ({
+  OverflowMenu: ({ children }: any) => <div>{children}</div>,
+  OverflowMenuItem: ({ itemText, onClick }: any) => (
+    <button onClick={onClick}>{itemText}</button>
+  ),
+}));
+
 jest.mock('@/app/components/helmet', () => ({ Helmet: () => null }));
 jest.mock('@/app/components/blocks/page-header-block', () => ({
   PageHeaderBlock: ({ children }: any) => <div>{children}</div>,

@@ -30,6 +30,9 @@ type AssistantServiceClient interface {
 	GetAllAssistantProvider(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.GetAllAssistantProviderResponse_AssistantProvider, error)
 	UpdateAssistantVersion(c context.Context, auth types.SimplePrinciple, iRequest *protos.UpdateAssistantVersionRequest) (*protos.GetAssistantResponse, error)
 	CreateAssistantProvider(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.CreateAssistantProviderRequest) (*protos.GetAssistantProviderResponse, error)
+	CreateAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.CreateAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error)
+	GetAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.GetAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error)
+	DisableAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.DisableAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error)
 
 	//
 	GetAllMessage(c context.Context, auth types.SimplePrinciple,
@@ -60,6 +63,16 @@ type AssistantServiceClient interface {
 	GetAssistantWhatsappDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantWhatsappDeploymentResponse, error)
 	GetAssistantWebpluginDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantWebpluginDeploymentResponse, error)
 	GetAssistantDebuggerDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantDebuggerDeploymentResponse, error)
+	GetAllAssistantApiDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantApiDeployment, error)
+	GetAllAssistantPhoneDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantPhoneDeployment, error)
+	GetAllAssistantWhatsappDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantWhatsappDeployment, error)
+	GetAllAssistantWebpluginDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantWebpluginDeployment, error)
+	GetAllAssistantDebuggerDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantDebuggerDeployment, error)
+	DisableAssistantApiDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantApiDeploymentResponse, error)
+	DisableAssistantPhoneDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantPhoneDeploymentResponse, error)
+	DisableAssistantWhatsappDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantWhatsappDeploymentResponse, error)
+	DisableAssistantWebpluginDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantWebpluginDeploymentResponse, error)
+	DisableAssistantDebuggerDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantDebuggerDeploymentResponse, error)
 
 	//
 	GetAssistantWebhookLog(ctx context.Context, auth types.SimplePrinciple, req *protos.GetAssistantWebhookLogRequest) (*protos.GetAssistantWebhookLogResponse, error)
@@ -228,6 +241,42 @@ func (client *assistantServiceClient) CreateAssistantProvider(c context.Context,
 		client.logger.Errorf("error while calling to CreateAssistantProvider %v", err)
 		return nil, err
 	}
+	return res, nil
+}
+
+func (client *assistantServiceClient) CreateAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.CreateAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error) {
+	start := time.Now()
+	res, err := client.assistantClient.CreateAssistantAuthentication(client.WithAuth(c, auth), iRequest)
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantAuthentication", time.Since(start))
+		client.logger.Errorf("error while calling CreateAssistantAuthentication %v", err)
+		return nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantAuthentication", time.Since(start))
+	return res, nil
+}
+
+func (client *assistantServiceClient) GetAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.GetAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error) {
+	start := time.Now()
+	res, err := client.assistantClient.GetAssistantAuthentication(client.WithAuth(c, auth), iRequest)
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantAuthentication", time.Since(start))
+		client.logger.Errorf("error while calling GetAssistantAuthentication %v", err)
+		return nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantAuthentication", time.Since(start))
+	return res, nil
+}
+
+func (client *assistantServiceClient) DisableAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.DisableAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error) {
+	start := time.Now()
+	res, err := client.assistantClient.DisableAssistantAuthentication(client.WithAuth(c, auth), iRequest)
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantClient.DisableAssistantAuthentication", time.Since(start))
+		client.logger.Errorf("error while calling DisableAssistantAuthentication %v", err)
+		return nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantClient.DisableAssistantAuthentication", time.Since(start))
 	return res, nil
 }
 
@@ -457,6 +506,146 @@ func (client *assistantServiceClient) GetAssistantDebuggerDeployment(c context.C
 		return nil, err
 	}
 	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAssistantDebuggerDeployment", time.Since(start))
+	return res, nil
+}
+
+func (client *assistantServiceClient) GetAllAssistantApiDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantApiDeployment, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.GetAllAssistantApiDeployment(client.WithAuth(c, auth), &protos.GetAllAssistantDeploymentRequest{
+		AssistantId: assistantId,
+		Paginate:    paginate,
+		Criterias:   criteria,
+	})
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantApiDeployment", time.Since(start))
+		client.logger.Errorf("error while calling GetAllAssistantApiDeployment %v", err)
+		return nil, nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantApiDeployment", time.Since(start))
+	return res.GetPaginated(), res.GetData(), nil
+}
+
+func (client *assistantServiceClient) GetAllAssistantPhoneDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantPhoneDeployment, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.GetAllAssistantPhoneDeployment(client.WithAuth(c, auth), &protos.GetAllAssistantDeploymentRequest{
+		AssistantId: assistantId,
+		Paginate:    paginate,
+		Criterias:   criteria,
+	})
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantPhoneDeployment", time.Since(start))
+		client.logger.Errorf("error while calling GetAllAssistantPhoneDeployment %v", err)
+		return nil, nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantPhoneDeployment", time.Since(start))
+	return res.GetPaginated(), res.GetData(), nil
+}
+
+func (client *assistantServiceClient) GetAllAssistantWhatsappDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantWhatsappDeployment, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.GetAllAssistantWhatsappDeployment(client.WithAuth(c, auth), &protos.GetAllAssistantDeploymentRequest{
+		AssistantId: assistantId,
+		Paginate:    paginate,
+		Criterias:   criteria,
+	})
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantWhatsappDeployment", time.Since(start))
+		client.logger.Errorf("error while calling GetAllAssistantWhatsappDeployment %v", err)
+		return nil, nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantWhatsappDeployment", time.Since(start))
+	return res.GetPaginated(), res.GetData(), nil
+}
+
+func (client *assistantServiceClient) GetAllAssistantWebpluginDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantWebpluginDeployment, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.GetAllAssistantWebpluginDeployment(client.WithAuth(c, auth), &protos.GetAllAssistantDeploymentRequest{
+		AssistantId: assistantId,
+		Paginate:    paginate,
+		Criterias:   criteria,
+	})
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantWebpluginDeployment", time.Since(start))
+		client.logger.Errorf("error while calling GetAllAssistantWebpluginDeployment %v", err)
+		return nil, nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantWebpluginDeployment", time.Since(start))
+	return res.GetPaginated(), res.GetData(), nil
+}
+
+func (client *assistantServiceClient) GetAllAssistantDebuggerDeployment(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantDebuggerDeployment, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.GetAllAssistantDebuggerDeployment(client.WithAuth(c, auth), &protos.GetAllAssistantDeploymentRequest{
+		AssistantId: assistantId,
+		Paginate:    paginate,
+		Criterias:   criteria,
+	})
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantDebuggerDeployment", time.Since(start))
+		client.logger.Errorf("error while calling GetAllAssistantDebuggerDeployment %v", err)
+		return nil, nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.GetAllAssistantDebuggerDeployment", time.Since(start))
+	return res.GetPaginated(), res.GetData(), nil
+}
+
+func (client *assistantServiceClient) DisableAssistantApiDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantApiDeploymentResponse, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.DisableAssistantApiDeployment(client.WithAuth(c, auth), assistantRequest)
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantApiDeployment", time.Since(start))
+		client.logger.Errorf("error while calling DisableAssistantApiDeployment %v", err)
+		return nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantApiDeployment", time.Since(start))
+	return res, nil
+}
+
+func (client *assistantServiceClient) DisableAssistantPhoneDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantPhoneDeploymentResponse, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.DisableAssistantPhoneDeployment(client.WithAuth(c, auth), assistantRequest)
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantPhoneDeployment", time.Since(start))
+		client.logger.Errorf("error while calling DisableAssistantPhoneDeployment %v", err)
+		return nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantPhoneDeployment", time.Since(start))
+	return res, nil
+}
+
+func (client *assistantServiceClient) DisableAssistantWhatsappDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantWhatsappDeploymentResponse, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.DisableAssistantWhatsappDeployment(client.WithAuth(c, auth), assistantRequest)
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantWhatsappDeployment", time.Since(start))
+		client.logger.Errorf("error while calling DisableAssistantWhatsappDeployment %v", err)
+		return nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantWhatsappDeployment", time.Since(start))
+	return res, nil
+}
+
+func (client *assistantServiceClient) DisableAssistantWebpluginDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantWebpluginDeploymentResponse, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.DisableAssistantWebpluginDeployment(client.WithAuth(c, auth), assistantRequest)
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantWebpluginDeployment", time.Since(start))
+		client.logger.Errorf("error while calling DisableAssistantWebpluginDeployment %v", err)
+		return nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantWebpluginDeployment", time.Since(start))
+	return res, nil
+}
+
+func (client *assistantServiceClient) DisableAssistantDebuggerDeployment(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.GetAssistantDeploymentRequest) (*protos.GetAssistantDebuggerDeploymentResponse, error) {
+	start := time.Now()
+	res, err := client.assistantDeploymentClient.DisableAssistantDebuggerDeployment(client.WithAuth(c, auth), assistantRequest)
+	if err != nil {
+		client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantDebuggerDeployment", time.Since(start))
+		client.logger.Errorf("error while calling DisableAssistantDebuggerDeployment %v", err)
+		return nil, err
+	}
+	client.logger.Benchmark("Benchmarking: assistantDeploymentClient.DisableAssistantDebuggerDeployment", time.Since(start))
 	return res, nil
 }
 

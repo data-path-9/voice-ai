@@ -26,7 +26,12 @@ import {
   Assistant,
   AssistantDefinition,
   ConnectionConfig,
+  DisableAssistantApiDeployment,
+  DisableAssistantDebuggerDeployment,
+  DisableAssistantPhoneDeployment,
+  DisableAssistantWebpluginDeployment,
   GetAssistant,
+  GetAssistantDeploymentRequest,
   GetAssistantRequest,
 } from '@rapidaai/react';
 import toast from 'react-hot-toast/headless';
@@ -37,7 +42,16 @@ import { AssistantPhoneCallDeploymentDialog } from '@/app/components/base/modal/
 import { AssistantDebugDeploymentDialog } from '@/app/components/base/modal/assistant-debug-deployment-modal';
 import { AssistantWebWidgetlDeploymentDialog } from '@/app/components/base/modal/assistant-web-widget-deployment-modal';
 import { AssistantApiDeploymentDialog } from '@/app/components/base/modal/assistant-api-deployment-modal';
+import {
+  AssistantDeploymentType,
+  AssistantDeploymentVersionsModal,
+} from '@/app/components/base/modal/assistant-deployment-versions-modal';
 import SourceIndicator from '@/app/components/indicators/source';
+import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
+import {
+  OverflowMenu,
+  OverflowMenuItem,
+} from '@/app/components/carbon/overflow-menu';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -73,6 +87,12 @@ export const ConfigureAssistantDeploymentPage = () => {
   const [isApiExpanded, setIsApiExpanded] = useState(false);
   const [isPhoneExpanded, setIsPhoneExpanded] = useState(false);
   const [isWidgetExpanded, setIsWidgetExpanded] = useState(false);
+  const [isVersionsOpen, setIsVersionsOpen] = useState(false);
+  const [versionType, setVersionType] = useState<AssistantDeploymentType | null>(
+    null,
+  );
+  const [openActionMenuType, setOpenActionMenuType] =
+    useState<DeploymentType | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedVersion, setCopiedVersion] = useState<string | null>(null);
   const [selectedDeploymentType, setSelectedDeploymentType] =
@@ -132,13 +152,64 @@ export const ConfigureAssistantDeploymentPage = () => {
     source: string;
     name: string;
     version: string;
+    status: string;
     sttProvider: string;
     ttsProvider: string;
     updated: string;
     onEdit: () => void;
     onDetails: () => void;
     onPreview?: () => void;
+    onDisable: () => void;
   }> = [];
+
+  const disableDeployment = useCallback(
+    async (type: DeploymentType) => {
+      if (!assistantId) return;
+      const request = new GetAssistantDeploymentRequest();
+      request.setAssistantid(assistantId);
+
+      const auth = ConnectionConfig.WithDebugger({
+        authorization: token,
+        userId: authId,
+        projectId,
+      });
+
+      const disableByType = {
+        api: DisableAssistantApiDeployment,
+        debugger: DisableAssistantDebuggerDeployment,
+        phone: DisableAssistantPhoneDeployment,
+        web: DisableAssistantWebpluginDeployment,
+      } as const;
+
+      const labelByType = {
+        api: 'API',
+        debugger: 'Debugger',
+        phone: 'Phone Call',
+        web: 'Web Widget',
+      } as const;
+
+      try {
+        const response = await disableByType[type](
+          connectionConfig,
+          request,
+          auth,
+        );
+        if (response?.getSuccess()) {
+          toast.success(`${labelByType[type]} deployment disabled.`);
+          setSelectedDeploymentType(null);
+          get(assistantId);
+          return;
+        }
+        toast.error(
+          response?.getError?.()?.getHumanmessage?.() ||
+            `Unable to disable ${labelByType[type]} deployment.`,
+        );
+      } catch {
+        toast.error(`Unable to disable ${labelByType[type]} deployment.`);
+      }
+    },
+    [assistantId, token, authId, projectId, get],
+  );
 
   if (assistant?.hasDebuggerdeployment()) {
     const deployment = assistant.getDebuggerdeployment()!;
@@ -147,6 +218,7 @@ export const ConfigureAssistantDeploymentPage = () => {
       source: 'debugger',
       name: 'Debugger',
       version: deployment.getId() ? `vrsn_${deployment.getId()}` : '—',
+      status: getDeploymentStatus(deployment),
       sttProvider: deployment.getInputaudio()?.getAudioprovider() || '—',
       ttsProvider: deployment.getOutputaudio()?.getAudioprovider() || '—',
       updated: deployment.getCreateddate()
@@ -159,6 +231,7 @@ export const ConfigureAssistantDeploymentPage = () => {
         ),
       onDetails: () => setIsExpanded(true),
       onPreview: () => navi.goToAssistantPreview(assistantId!),
+      onDisable: () => void disableDeployment('debugger'),
     });
   }
 
@@ -169,6 +242,7 @@ export const ConfigureAssistantDeploymentPage = () => {
       source: 'sdk',
       name: 'SDK / API',
       version: deployment.getId() ? `vrsn_${deployment.getId()}` : '—',
+      status: getDeploymentStatus(deployment),
       sttProvider: deployment.getInputaudio()?.getAudioprovider() || '—',
       ttsProvider: deployment.getOutputaudio()?.getAudioprovider() || '—',
       updated: deployment.getCreateddate()
@@ -177,6 +251,7 @@ export const ConfigureAssistantDeploymentPage = () => {
       onEdit: () =>
         navi.goToEditApi(assistantId!, String(deployment.getId() || 'latest')),
       onDetails: () => setIsApiExpanded(true),
+      onDisable: () => void disableDeployment('api'),
     });
   }
 
@@ -187,6 +262,7 @@ export const ConfigureAssistantDeploymentPage = () => {
       source: 'phone-call',
       name: 'Phone Call',
       version: deployment.getId() ? `vrsn_${deployment.getId()}` : '—',
+      status: getDeploymentStatus(deployment),
       sttProvider: deployment.getInputaudio()?.getAudioprovider() || '—',
       ttsProvider: deployment.getOutputaudio()?.getAudioprovider() || '—',
       updated: deployment.getCreateddate()
@@ -196,6 +272,7 @@ export const ConfigureAssistantDeploymentPage = () => {
         navi.goToEditCall(assistantId!, String(deployment.getId() || 'latest')),
       onDetails: () => setIsPhoneExpanded(true),
       onPreview: () => navi.goToAssistantPreviewCall(assistantId!),
+      onDisable: () => void disableDeployment('phone'),
     });
   }
 
@@ -206,6 +283,7 @@ export const ConfigureAssistantDeploymentPage = () => {
       source: 'web-plugin',
       name: 'Web Widget',
       version: deployment.getId() ? `vrsn_${deployment.getId()}` : '—',
+      status: getDeploymentStatus(deployment),
       sttProvider: deployment.getInputaudio()?.getAudioprovider() || '—',
       ttsProvider: deployment.getOutputaudio()?.getAudioprovider() || '—',
       updated: deployment.getCreateddate()
@@ -214,6 +292,7 @@ export const ConfigureAssistantDeploymentPage = () => {
       onEdit: () =>
         navi.goToEditWeb(assistantId!, String(deployment.getId() || 'latest')),
       onDetails: () => setIsWidgetExpanded(true),
+      onDisable: () => void disableDeployment('web'),
     });
   }
 
@@ -263,6 +342,7 @@ export const ConfigureAssistantDeploymentPage = () => {
         [
           row.name,
           row.version,
+          row.status,
           row.sttProvider,
           row.ttsProvider,
           row.updated,
@@ -306,6 +386,17 @@ export const ConfigureAssistantDeploymentPage = () => {
           modalOpen={isApiExpanded}
           setModalOpen={setIsApiExpanded}
           deployment={assistant.getApideployment()!}
+        />
+      )}
+      {assistantId && (
+        <AssistantDeploymentVersionsModal
+          modalOpen={isVersionsOpen}
+          setModalOpen={setIsVersionsOpen}
+          assistantId={assistantId}
+          deploymentType={versionType}
+          authId={authId}
+          token={token}
+          projectId={projectId}
         />
       )}
       <Helmet title="Assistant deployment" />
@@ -373,6 +464,7 @@ export const ConfigureAssistantDeploymentPage = () => {
                     <TableHeader className="!w-12" />
                     <TableHeader>Channel</TableHeader>
                     <TableHeader>Version</TableHeader>
+                    <TableHeader>Status</TableHeader>
                     <TableHeader>STT Provider</TableHeader>
                     <TableHeader>TTS Provider</TableHeader>
                     <TableHeader>Updated</TableHeader>
@@ -434,6 +526,9 @@ export const ConfigureAssistantDeploymentPage = () => {
                         )}
                       </TableCell>
                       <TableCell>
+                        <CarbonStatusIndicator state={row.status} />
+                      </TableCell>
+                      <TableCell>
                         <AudioProviderTag
                           provider={row.sttProvider}
                           icon={<Microphone size={14} />}
@@ -445,7 +540,9 @@ export const ConfigureAssistantDeploymentPage = () => {
                           icon={<VolumeUp size={14} />}
                         />
                       </TableCell>
-                      <TableCell>{row.updated}</TableCell>
+                      <TableCell className="!text-xs whitespace-nowrap">
+                        {row.updated}
+                      </TableCell>
                       <TableCell onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-0">
                           <IconOnlyButton
@@ -471,6 +568,32 @@ export const ConfigureAssistantDeploymentPage = () => {
                               onClick={row.onPreview}
                             />
                           )}
+                          <OverflowMenu
+                            size="md"
+                            flipped
+                            iconDescription="Deployment actions"
+                            open={openActionMenuType === row.type}
+                            onOpen={() => setOpenActionMenuType(row.type)}
+                            onClose={() => setOpenActionMenuType(null)}
+                          >
+                            <OverflowMenuItem
+                              itemText="View all versions"
+                              onClick={() => {
+                                setOpenActionMenuType(null);
+                                setVersionType(row.type);
+                                setIsVersionsOpen(true);
+                              }}
+                            />
+                            <OverflowMenuItem
+                              itemText="Disable deployment"
+                              isDelete
+                              hasDivider
+                              onClick={() => {
+                                setOpenActionMenuType(null);
+                                row.onDisable();
+                              }}
+                            />
+                          </OverflowMenu>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -512,6 +635,15 @@ const providerLabels: Record<string, string> = {
   cartesia: 'Cartesia',
   elevenlabs: 'ElevenLabs',
 };
+
+function getDeploymentStatus(
+  deployment: { getStatus?: () => string } | null | undefined,
+) {
+  if (!deployment || typeof deployment.getStatus !== 'function') {
+    return 'unknown';
+  }
+  return deployment.getStatus() || 'unknown';
+}
 
 function AudioProviderTag({
   provider,

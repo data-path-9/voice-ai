@@ -34,6 +34,7 @@ func (assistantApi *assistantGrpcApi) CreateAssistantAuthentication(
 		req.GetOptions(),
 	)
 	if err != nil {
+		assistantApi.logger.Errorf("error while creating assistant authentication %s", err.Error())
 		return exceptions.BadRequestError[protos.GetAssistantAuthenticationResponse](
 			"Unable to create assistant authentication.",
 		)

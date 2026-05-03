@@ -7,6 +7,7 @@ package internal_assistant_service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
@@ -56,6 +57,10 @@ func (s *assistantAuthenticationService) Get(
 		}).
 		First(&out)
 	if tx.Error != nil {
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			s.logger.Benchmark("AssistantAuthenticationService.Get", time.Since(start))
+			return nil, nil
+		}
 		s.logger.Benchmark("AssistantAuthenticationService.Get", time.Since(start))
 		return nil, tx.Error
 	}
