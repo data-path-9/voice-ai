@@ -189,7 +189,6 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 			})
 		},
 		OnCompleteSession: func(ctx context.Context, contextID string) {
-			// Context already claimed at connect time (ResolveCallSessionByContext).
 			// No state transition needed — CLAIMED is the terminal state.
 			logger.Debugf("session completed: contextId=%s", contextID)
 		},

@@ -70,14 +70,6 @@ func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.S
 		observer = d.onCreateObserver(ctx, setup, v.Auth)
 	}
 
-	var hooks *obs.ConversationHooks
-	if d.onCreateHooks != nil {
-		hooks = d.onCreateHooks(ctx, v.Auth, v.AssistantID, setup.ConversationID)
-		if hooks != nil {
-			hooks.OnBegin(ctx)
-		}
-	}
-
 	if observer != nil {
 		codec := ""
 		sampleRate := ""
@@ -120,9 +112,6 @@ func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.S
 				})
 				observer.EmitMetric(ctx, obs.CallStatusMetric(status, reason))
 				observer.Shutdown(ctx)
-			}
-			if hooks != nil {
-				hooks.OnEnd(ctx)
 			}
 			if d.onCallEnd != nil {
 				d.onCallEnd(v.ID)

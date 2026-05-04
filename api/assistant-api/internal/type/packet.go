@@ -10,7 +10,10 @@ import (
 	"fmt"
 	"time"
 
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	"github.com/rapidaai/pkg/types"
+	type_enums "github.com/rapidaai/pkg/types/enums"
+	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
 
@@ -57,6 +60,11 @@ type ErrorPacket interface {
 	IsRecoverable() bool
 	Err() error
 	ErrMessage() string
+}
+
+type MessageEntry struct {
+	Role    string
+	Content string
 }
 
 // =============================================================================
@@ -253,21 +261,24 @@ func (f InjectMessagePacket) Content() string   { return f.Text }
 func (f InjectMessagePacket) Role() string      { return "rapida" }
 
 // RunAnalysisPacket triggers analysis execution for the current conversation context.
-// Conditions are optional and keyed by analysis name.
 type RunAnalysisPacket struct {
-	ContextID  string
-	Event      string
-	Conditions map[string]string
+	ContextID      string
+	Assistant      *internal_assistant_entity.Assistant
+	Analysis       *internal_assistant_entity.AssistantAnalysis
+	Arguments      map[string]interface{}
+	TriggerWebhook bool
+	ConversationID uint64
+	Auth           types.SimplePrinciple
 }
 
 func (f RunAnalysisPacket) ContextId() string { return f.ContextID }
 
 // RunWebhookPacket triggers webhook execution for the current conversation context.
-// Conditions are optional and keyed by webhook id (string form).
 type RunWebhookPacket struct {
-	ContextID  string
-	Event      string
-	Conditions map[string]string
+	ContextID string
+	Event     utils.AssistantWebhookEvent
+	Webhook   *internal_assistant_entity.AssistantWebhook
+	Arguments map[string]interface{}
 }
 
 func (f RunWebhookPacket) ContextId() string { return f.ContextID }
@@ -519,18 +530,18 @@ func (f RecordAssistantAudioPacket) ContextId() string { return f.ContextID }
 // Persistence
 // =============================================================================
 
-// SaveMessagePacket persists a conversation message to the database and appends
+// MessageCreatePacket persists a conversation message to the database and appends
 // it to the in-memory history. It implements MessagePacket so it can be passed
 // directly to onCreateMessage.
-type SaveMessagePacket struct {
+type MessageCreatePacket struct {
 	ContextID   string
 	MessageRole string
 	Text        string
 }
 
-func (f SaveMessagePacket) ContextId() string { return f.ContextID }
-func (f SaveMessagePacket) Role() string      { return f.MessageRole }
-func (f SaveMessagePacket) Content() string   { return f.Text }
+func (f MessageCreatePacket) ContextId() string { return f.ContextID }
+func (f MessageCreatePacket) Role() string      { return f.MessageRole }
+func (f MessageCreatePacket) Content() string   { return f.Text }
 
 // ToolLogCreatePacket persists a tool call start to the database.
 type ToolLogCreatePacket struct {
@@ -550,6 +561,23 @@ type ToolLogUpdatePacket struct {
 }
 
 func (f ToolLogUpdatePacket) ContextId() string { return f.ContextID }
+
+// WebhookLogCreatePacket persists webhook execution log to the database.
+type WebhookLogCreatePacket struct {
+	ContextID       string
+	WebhookID       uint64
+	HTTPURL         string
+	HTTPMethod      string
+	Event           string
+	ResponseStatus  int64
+	TimeTaken       int64
+	RetryCount      uint32
+	Status          type_enums.RecordState
+	RequestPayload  []byte
+	ResponsePayload []byte
+}
+
+func (f WebhookLogCreatePacket) ContextId() string { return f.ContextID }
 
 // =============================================================================
 // Metrics & Metadata

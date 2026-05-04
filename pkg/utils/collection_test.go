@@ -80,6 +80,38 @@ func TestMergeMaps(t *testing.T) {
 	}
 }
 
+func TestCloneMap(t *testing.T) {
+	t.Run("nil map returns empty writable map", func(t *testing.T) {
+		var src map[string]interface{}
+		cloned := CloneMap(src)
+		if cloned == nil {
+			t.Fatalf("expected non-nil map")
+		}
+		if len(cloned) != 0 {
+			t.Fatalf("expected empty map, got %d", len(cloned))
+		}
+		cloned["k"] = "v"
+		if _, ok := src["k"]; ok {
+			t.Fatalf("source map should not be mutated")
+		}
+	})
+
+	t.Run("clone copies entries and is independent", func(t *testing.T) {
+		src := map[string]int{"a": 1, "b": 2}
+		cloned := CloneMap(src)
+		if len(cloned) != len(src) {
+			t.Fatalf("expected len %d, got %d", len(src), len(cloned))
+		}
+		if cloned["a"] != 1 || cloned["b"] != 2 {
+			t.Fatalf("unexpected cloned values: %#v", cloned)
+		}
+		cloned["a"] = 10
+		if src["a"] != 1 {
+			t.Fatalf("source map mutated: %#v", src)
+		}
+	})
+}
+
 func TestGetCaseInsensitiveKeyValue(t *testing.T) {
 	cfg := map[string]string{
 		"KEY1": "value1",

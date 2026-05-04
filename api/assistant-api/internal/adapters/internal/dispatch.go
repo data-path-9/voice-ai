@@ -78,9 +78,12 @@ func (r *genericRequestor) OnPacket(ctx context.Context, pkts ...internal_type.P
 		// Low — recording, metrics, persistence, events
 		case internal_type.RecordUserAudioPacket,
 			internal_type.RecordAssistantAudioPacket,
-			internal_type.SaveMessagePacket,
+			internal_type.MessageCreatePacket,
 			internal_type.ToolLogCreatePacket,
 			internal_type.ToolLogUpdatePacket,
+			internal_type.WebhookLogCreatePacket,
+			internal_type.RunAnalysisPacket,
+			internal_type.RunWebhookPacket,
 			internal_type.ConversationMetricPacket,
 			internal_type.ConversationMetadataPacket,
 			internal_type.AssistantMessageMetricPacket,
@@ -278,7 +281,7 @@ func (r *genericRequestor) dispatch(ctx context.Context, p internal_type.Packet)
 		r.handleTTSAudio(ctx, vl)
 	case internal_type.TextToSpeechEndPacket:
 		r.handleTTSEnd(ctx, vl)
-	case internal_type.SaveMessagePacket:
+	case internal_type.MessageCreatePacket:
 		r.handleSaveMessage(ctx, vl)
 	case internal_type.ConversationMetricPacket:
 		r.handleConversationMetric(ctx, vl)
@@ -296,6 +299,12 @@ func (r *genericRequestor) dispatch(ctx context.Context, p internal_type.Packet)
 		r.handleToolLogCreate(ctx, vl)
 	case internal_type.ToolLogUpdatePacket:
 		r.handleToolLogUpdate(ctx, vl)
+	case internal_type.WebhookLogCreatePacket:
+		r.handleWebhookLogCreate(ctx, vl)
+	case internal_type.RunAnalysisPacket:
+		r.handleRunAnalysisPacket(ctx, vl)
+	case internal_type.RunWebhookPacket:
+		r.handleRunWebhookPacket(ctx, vl)
 	case internal_type.LLMToolCallPacket:
 		r.handleToolCall(ctx, vl)
 	case internal_type.LLMToolResultPacket:
@@ -492,7 +501,7 @@ func (talking *genericRequestor) handleUserInput(ctx context.Context, vl interna
 		return
 	}
 	talking.OnPacket(ctx,
-		internal_type.SaveMessagePacket{ContextID: contextID, MessageRole: "user", Text: vl.Text},
+		internal_type.MessageCreatePacket{ContextID: contextID, MessageRole: "user", Text: vl.Text},
 		internal_type.UserMessageMetadataPacket{ContextID: contextID, Metadata: []*protos.Metadata{
 			{
 				Key:   "language",
@@ -665,7 +674,7 @@ func (talking *genericRequestor) handleLLMDone(ctx context.Context, vl internal_
 		talking.logger.Errorf("messaging transition error: %v", err)
 	}
 	talking.OnPacket(ctx,
-		internal_type.SaveMessagePacket{ContextID: vl.ContextID, MessageRole: "assistant", Text: vl.Text},
+		internal_type.MessageCreatePacket{ContextID: vl.ContextID, MessageRole: "assistant", Text: vl.Text},
 		internal_type.AssistantMessageMetricPacket{
 			ContextID: vl.ContextID,
 			Metrics:   []*protos.Metric{{Name: "assistant_turn", Value: type_enums.CONVERSATION_COMPLETE.String(), Description: fmt.Sprintf("LLM response completed")}},
@@ -783,7 +792,7 @@ func (talking *genericRequestor) handleInjectMessagePacket(ctx context.Context, 
 	if talking.outputNormalizer != nil {
 		// Normalizer path: save/metrics/transition here since handleLLMDone is bypassed.
 		talking.OnPacket(ctx,
-			internal_type.SaveMessagePacket{ContextID: contextID, MessageRole: "assistant", Text: vl.Text},
+			internal_type.MessageCreatePacket{ContextID: contextID, MessageRole: "assistant", Text: vl.Text},
 			internal_type.AssistantMessageMetricPacket{
 				ContextID: contextID,
 				Metrics:   []*protos.Metric{{Name: "assistant_turn", Value: type_enums.CONVERSATION_COMPLETE.String(), Description: "Injected message completed"}},
@@ -936,7 +945,7 @@ func (talking *genericRequestor) handleTTSEnd(ctx context.Context, vl internal_t
 // Persistence handlers
 // =============================================================================
 
-func (talking *genericRequestor) handleSaveMessage(ctx context.Context, vl internal_type.SaveMessagePacket) {
+func (talking *genericRequestor) handleSaveMessage(ctx context.Context, vl internal_type.MessageCreatePacket) {
 	if err := talking.onAddMessage(ctx, vl); err != nil {
 		talking.logger.Errorf("Error in onAddMessage: %v", err)
 	}
@@ -956,6 +965,12 @@ func (talking *genericRequestor) handleConversationMetric(ctx context.Context, v
 
 func (talking *genericRequestor) handleConversationMetadata(ctx context.Context, vl internal_type.ConversationMetadataPacket) {
 	if len(vl.Metadata) > 0 {
+		for _, item := range vl.Metadata {
+			if item == nil {
+				continue
+			}
+			talking.metadata[item.Key] = item.Value
+		}
 		if err := talking.onAddMetadata(ctx, vl.Metadata...); err != nil {
 			talking.logger.Errorf("Error in onAddMetadata: %v", err)
 		}
@@ -1147,6 +1162,24 @@ func (talking *genericRequestor) handleToolLogCreate(ctx context.Context, vl int
 func (talking *genericRequestor) handleToolLogUpdate(ctx context.Context, vl internal_type.ToolLogUpdatePacket) {
 	if err := talking.UpdateToolLog(ctx, vl.ToolID, type_enums.RECORD_COMPLETE, vl.Response); err != nil {
 		talking.logger.Errorf("error logging tool call result: %v", err)
+	}
+}
+
+func (talking *genericRequestor) handleWebhookLogCreate(ctx context.Context, vl internal_type.WebhookLogCreatePacket) {
+	if err := talking.CreateWebhookLog(
+		ctx,
+		vl.WebhookID,
+		vl.HTTPURL,
+		vl.HTTPMethod,
+		vl.Event,
+		vl.ResponseStatus,
+		vl.TimeTaken,
+		vl.RetryCount,
+		vl.Status,
+		vl.RequestPayload,
+		vl.ResponsePayload,
+	); err != nil {
+		talking.logger.Errorf("error logging webhook execution: %v", err)
 	}
 }
 

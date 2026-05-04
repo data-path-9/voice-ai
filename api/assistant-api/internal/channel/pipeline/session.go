@@ -65,15 +65,6 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 		observer = d.onCreateObserver(ctx, contextID, auth, cc.AssistantID, cc.ConversationID)
 	}
 
-	// --- Create hooks ---
-	var hooks *obs.ConversationHooks
-	if d.onCreateHooks != nil {
-		hooks = d.onCreateHooks(ctx, auth, cc.AssistantID, cc.ConversationID)
-		if hooks != nil {
-			hooks.OnBegin(ctx)
-		}
-	}
-
 	if observer != nil {
 		clientPhone := cc.CallerNumber
 		assistantPhone := cc.FromNumber
@@ -116,11 +107,7 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 		}
 	}()
 
-	// --- Cleanup: hooks, observer, complete ---
-	if hooks != nil {
-		hooks.OnEnd(ctx)
-	}
-
+	// --- Cleanup: observer, complete ---
 	if observer != nil {
 		observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
 			obs.DataType:      obs.EventCallEnded,

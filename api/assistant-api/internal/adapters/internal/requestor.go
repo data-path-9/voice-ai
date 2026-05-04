@@ -20,6 +20,7 @@ import (
 
 	internal_agent_embeddings "github.com/rapidaai/api/assistant-api/internal/agent/embedding"
 	internal_agent_rerankers "github.com/rapidaai/api/assistant-api/internal/agent/reranker"
+	internal_analysis "github.com/rapidaai/api/assistant-api/internal/analysis"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_knowledge_gorm "github.com/rapidaai/api/assistant-api/internal/entity/knowledges"
@@ -31,6 +32,7 @@ import (
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
 	internal_knowledge_service "github.com/rapidaai/api/assistant-api/internal/services/knowledge"
+	internal_webhook "github.com/rapidaai/api/assistant-api/internal/webhook"
 	endpoint_client "github.com/rapidaai/pkg/clients/endpoint"
 	integration_client "github.com/rapidaai/pkg/clients/integration"
 	web_client "github.com/rapidaai/pkg/clients/web"
@@ -105,7 +107,9 @@ type genericRequestor struct {
 
 	// observe — shared observability infrastructure (DB + exporters)
 	observer *observe.ConversationObserver
-	hooks    *observe.ConversationHooks
+
+	analysisExecutor internal_analysis.Executor
+	webhookExecutor  internal_webhook.Executor
 
 	// integration client
 	integrationClient integration_client.IntegrationServiceClient
@@ -190,7 +194,7 @@ func NewGenericRequestor(
 		deploymentClient:  endpoint_client.NewDeploymentServiceClientGRPC(&config.AppConfig, logger, redis),
 		vaultClient:       web_client.NewVaultClientGRPC(&config.AppConfig, logger, redis),
 
-		// observer and hooks are initialized after session creation in initializeCollectors
+		// observer and hook executors are initialized after session creation in initializeCollectors
 
 		contextID:         uuid.NewString(),
 		interactionState:  Unknown,
@@ -507,49 +511,41 @@ func (r *genericRequestor) initializeCollectors(ctx context.Context) {
 		Metrics: observe.NewMetricCollector(r.logger, meta, metricExporters...),
 	})
 
-	// Initialize hooks for webhook/analysis execution
-	r.hooks = observe.NewConversationHooks(&observe.ConversationHooksConfig{
-		Logger:   r.logger,
-		Snapshot: r.buildSnapshot(),
-		InvokeEndpoint: func(ctx context.Context, auth types.SimplePrinciple, endpointID uint64, endpointVersion string, arguments map[string]interface{}) (*protos.InvokeResponse, error) {
-			return r.invokeEndpoint(ctx, &protos.EndpointDefinition{
-				EndpointId: endpointID,
-				Version:    endpointVersion,
-			}, arguments, nil, nil)
-		},
-		CreateLog: func(ctx context.Context, webhookID uint64, url, method, event string, statusCode, timeTaken int64, retryCount uint32, status type_enums.RecordState, request, response []byte) error {
-			return r.CreateWebhookLog(ctx, webhookID, url, method, event, statusCode, timeTaken, retryCount, status, request, response)
-		},
-		SetMetadata: func(ctx context.Context, auth types.SimplePrinciple, metadata map[string]interface{}) error {
-			r.onSetMetadata(ctx, auth, metadata)
-			return nil
-		},
-	})
+	// Initialize executors for webhook/analysis execution.
+	r.analysisExecutor = internal_analysis.NewExecutor(r.logger)
+	r.analysisExecutor.Init(ctx, r)
+	r.webhookExecutor = internal_webhook.NewExecutor(r.logger)
+	r.webhookExecutor.Init(ctx, r)
 }
 
-// buildSnapshot creates a ConversationSnapshot from the current requestor state.
-// Used to feed ConversationHooks with conversation data for webhook/analysis execution.
-func (r *genericRequestor) buildSnapshot() *observe.ConversationSnapshot {
-	histories := make([]observe.MessageEntry, 0, len(r.histories))
+func (r *genericRequestor) packetHistories() []internal_type.MessageEntry {
+	histories := make([]internal_type.MessageEntry, 0, len(r.histories))
 	for _, m := range r.histories {
-		histories = append(histories, observe.MessageEntry{Role: m.Role(), Content: m.Content()})
+		histories = append(histories, internal_type.MessageEntry{Role: m.Role(), Content: m.Content()})
 	}
-	return &observe.ConversationSnapshot{
-		Assistant:    r.assistant,
-		Conversation: &observe.ConversationRef{ID: r.assistantConversation.Id},
-		Histories:    histories,
-		Metadata:     r.GetMetadata(),
-		Arguments:    r.GetArgs(),
-		Options:      r.GetOptions(),
-		Auth:         r.auth,
+	return histories
+}
+
+func (r *genericRequestor) newRunAnalysisPacket(contextID string) internal_type.RunAnalysisPacket {
+	return internal_type.RunAnalysisPacket{
+		ContextID:      contextID,
+		Assistant:      r.assistant,
+		ConversationID: r.assistantConversation.Id,
+		Auth:           r.auth,
 	}
 }
 
 // shutdownCollectors waits for in-flight exports and shuts down all exporters.
-func (r *genericRequestor) shutdownCollectors(_ context.Context) {
+func (r *genericRequestor) shutdownCollectors(ctx context.Context) {
 	if r.observer != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), collectorWriteTimeout)
 		defer cancel()
 		r.observer.Shutdown(shutdownCtx)
+	}
+	if r.analysisExecutor != nil {
+		r.analysisExecutor.Close(ctx)
+	}
+	if r.webhookExecutor != nil {
+		r.webhookExecutor.Close(ctx)
 	}
 }

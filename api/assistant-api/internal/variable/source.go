@@ -38,8 +38,7 @@ type HistoryEntry struct {
 	Content string
 }
 
-// Source is the data provider behind every variable lookup. Adapters wrap a
-// live Communication or a frozen ConversationSnapshot.
+// Source is the data provider behind every variable lookup.
 type Source interface {
 	Assistant() *AssistantInfo
 	Conversation() *ConversationInfo

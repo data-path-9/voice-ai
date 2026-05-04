@@ -339,7 +339,7 @@ func TestOnPacket_RoutesToCorrectChannel(t *testing.T) {
 		// Low
 		{"RecordUserAudioPacket", internal_type.RecordUserAudioPacket{ContextID: "c"}, "low"},
 		{"RecordAssistantAudioPacket", internal_type.RecordAssistantAudioPacket{ContextID: "c"}, "low"},
-		{"SaveMessagePacket", internal_type.SaveMessagePacket{ContextID: "c"}, "low"},
+		{"MessageCreatePacket", internal_type.MessageCreatePacket{ContextID: "c"}, "low"},
 		{"ConversationEventPacket", internal_type.ConversationEventPacket{ContextID: "c"}, "low"},
 		{"LLMToolCallPacket", internal_type.LLMToolCallPacket{ContextID: "c"}, "output"},
 		{"LLMToolResultPacket", internal_type.LLMToolResultPacket{ContextID: "c"}, "input"},
@@ -704,9 +704,9 @@ func TestHandleLLMDone_EmitsAggregateAndPersistence(t *testing.T) {
 	require.True(t, ok, "expected TTSDonePacket in outputCh")
 	assert.Equal(t, "Done response", agg.Text)
 
-	// SaveMessagePacket in lowCh
-	save, ok := drainPacket[internal_type.SaveMessagePacket](r.lowCh, time.Second)
-	require.True(t, ok, "expected SaveMessagePacket in lowCh")
+	// MessageCreatePacket in lowCh
+	save, ok := drainPacket[internal_type.MessageCreatePacket](r.lowCh, time.Second)
+	require.True(t, ok, "expected MessageCreatePacket in lowCh")
 	assert.Equal(t, "ctx-1", save.ContextID)
 	assert.Equal(t, "assistant", save.MessageRole)
 	assert.Equal(t, "Done response", save.Text)
@@ -901,9 +901,9 @@ func TestHandleNormalizedText_EnqueuesExecuteLLMWithNormalizedPacket(t *testing.
 		Language:  rapida_types.LookupLanguage("fr"),
 	})
 
-	// SaveMessagePacket in lowCh
-	save, ok := drainPacket[internal_type.SaveMessagePacket](r.lowCh, time.Second)
-	require.True(t, ok, "expected SaveMessagePacket in lowCh")
+	// MessageCreatePacket in lowCh
+	save, ok := drainPacket[internal_type.MessageCreatePacket](r.lowCh, time.Second)
+	require.True(t, ok, "expected MessageCreatePacket in lowCh")
 	assert.Equal(t, "ctx-1", save.ContextID)
 	assert.Equal(t, "bonjour", save.Text)
 
@@ -1259,8 +1259,8 @@ func TestE2E_TextInput_FullPipeline(t *testing.T) {
 	// === Verify: normalizer was called ===
 	assert.GreaterOrEqual(t, atomic.LoadInt64(&norm.normalizeCnt), int64(1), "normalizer should be called at least once")
 
-	// === Verify: SaveMessagePacket was persisted (for both user + assistant) ===
-	// The handlers emit SaveMessagePacket to lowCh — just verify the state machine
+	// === Verify: MessageCreatePacket was persisted (for both user + assistant) ===
+	// The handlers emit MessageCreatePacket to lowCh — just verify the state machine
 	// completed without deadlock. The dispatchers consumed everything.
 	t.Log("E2E text pipeline completed without deadlock")
 }

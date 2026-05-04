@@ -7,59 +7,84 @@ package adapter_internal
 
 import (
 	"context"
+	"slices"
+	"strings"
 
-	endpoint_client_builders "github.com/rapidaai/pkg/clients/endpoint/builders"
-	"github.com/rapidaai/protos"
+	internal_condition "github.com/rapidaai/api/assistant-api/internal/condition"
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+	"github.com/rapidaai/api/assistant-api/internal/variable"
+	"github.com/rapidaai/pkg/utils"
 )
 
 // OnBeginConversation fires webhooks subscribed to ConversationBegin.
-// Delegates to the shared ConversationHooks infrastructure.
+// Delegates to packet dispatcher infrastructure.
 func (md *genericRequestor) OnBeginConversation(ctx context.Context) error {
-	if md.hooks != nil {
-		md.hooks.OnBegin(ctx)
-	}
-	return nil
+	return md.onWebhookEvent(ctx, md.GetID(), utils.ConversationBegin)
 }
 
 // OnResumeConversation fires webhooks subscribed to ConversationResume.
 func (md *genericRequestor) OnResumeConversation(ctx context.Context) error {
-	if md.hooks != nil {
-		md.hooks.OnResume(ctx)
-	}
-	return nil
+	return md.onWebhookEvent(ctx, md.GetID(), utils.ConversationResume)
 }
 
 // OnErrorConversation fires webhooks subscribed to ConversationFailed.
 func (md *genericRequestor) OnErrorConversation(ctx context.Context) error {
-	if md.hooks != nil {
-		md.hooks.OnError(ctx)
-	}
-	return nil
+	return md.onWebhookEvent(ctx, md.GetID(), utils.ConversationFailed)
 }
 
-// OnEndConversation runs analyses then fires webhooks for ConversationCompleted.
-// Refreshes the snapshot before execution so analysis/webhooks see the latest
-// conversation state (messages, metadata accumulated during the call).
+// OnEndConversation runs analysis first and then webhook (completed event) via packets.
 func (md *genericRequestor) OnEndConversation(ctx context.Context) error {
-	if md.hooks != nil {
-		// Refresh snapshot with current state (histories, metadata may have changed during call)
-		md.hooks.RefreshSnapshot(md.buildSnapshot())
-		md.hooks.OnEnd(ctx)
+	return md.onWebhookEvent(ctx, md.GetID(), utils.ConversationCompleted)
+}
+
+func (r *genericRequestor) onWebhookEvent(ctx context.Context, contextID string, event utils.AssistantWebhookEvent) error {
+	source := variable.NewCommunicationSource(r)
+	registry := variable.NewDefaultRegistry().With("event", &variable.EventNamespace{})
+	for _, webhook := range r.assistant.AssistantWebhooks {
+		if !slices.Contains(webhook.AssistantEvents, event.Get()) {
+			continue
+		}
+		if !r.isWebhookAllowed(webhook, r.Conversation().Direction.String()) {
+			continue
+		}
+		if err := r.OnPacket(ctx, internal_type.RunWebhookPacket{
+			ContextID: contextID,
+			Event:     event,
+			Webhook:   webhook,
+			Arguments: registry.Apply(webhook.GetBody(), source, variable.ResolveContext{Event: event.Get()}),
+		}); err != nil {
+			r.logger.Warnw("failed to enqueue webhook packet", "webhookID", webhook.Id, "event", event.Get(), "error", err)
+		}
 	}
+
 	return nil
 }
 
-// invokeEndpoint calls a configured endpoint via the deployment client.
-func (ae *genericRequestor) invokeEndpoint(ctx context.Context, endpointDef *protos.EndpointDefinition, arguments, metadata, opts map[string]interface{}) (*protos.InvokeResponse, error) {
-	inputBuilder := endpoint_client_builders.NewInputInvokeBuilder(ae.logger)
-	return ae.DeploymentCaller().Invoke(
-		ctx,
-		ae.Auth(),
-		inputBuilder.Invoke(
-			endpointDef,
-			inputBuilder.Arguments(arguments, nil),
-			inputBuilder.Metadata(metadata, nil),
-			inputBuilder.Options(opts, nil),
-		),
+func (r *genericRequestor) isWebhookAllowed(
+	webhook *internal_assistant_entity.AssistantWebhook,
+	direction string,
+) bool {
+	if webhook == nil {
+		return false
+	}
+	rawCondition := strings.TrimSpace(webhook.HttpHeaders["webhook.condition"])
+	if rawCondition == "" {
+		return true
+	}
+	parsed, parseErr := internal_condition.Parse(rawCondition)
+	if parseErr != nil {
+		r.logger.Warnf("invalid webhook.condition for webhook %d, excluding webhook: %v", webhook.Id, parseErr)
+		return false
+	}
+	allowed, evalErr := parsed.Run(
+		internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeSource, Value: r.GetSource().Get()},
+		internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeMode, Value: r.GetMode().String()},
+		internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeDirection, Value: direction},
 	)
+	if evalErr != nil {
+		r.logger.Warnf("invalid webhook.condition for webhook %d, excluding webhook: %v", webhook.Id, evalErr)
+		return false
+	}
+	return allowed
 }
