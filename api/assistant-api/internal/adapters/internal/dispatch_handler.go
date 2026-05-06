@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_audio_recorder "github.com/rapidaai/api/assistant-api/internal/audio/recorder"
 	internal_condition "github.com/rapidaai/api/assistant-api/internal/condition"
@@ -34,6 +35,10 @@ type requestorDispatchHandler struct {
 }
 
 func (h requestorDispatchHandler) HandleUserText(ctx context.Context, vl internal_type.UserTextReceivedPacket) {
+	if !h.r.canAcceptInput() {
+		h.r.logger.Tracef(ctx, "dropping user text: session not ready, state=%s", h.r.getSessionState().String())
+		return
+	}
 	h.HandleInterruptionDetected(ctx, internal_type.InterruptionDetectedPacket{
 		ContextID: h.r.GetID(),
 		Source:    internal_type.InterruptionSourceWord,
@@ -46,6 +51,10 @@ func (h requestorDispatchHandler) HandleUserText(ctx context.Context, vl interna
 }
 
 func (h requestorDispatchHandler) HandleUserAudio(ctx context.Context, vl internal_type.UserAudioReceivedPacket) {
+	if !h.r.canAcceptInput() {
+		h.r.logger.Tracef(ctx, "dropping user audio: session not ready, state=%s", h.r.getSessionState().String())
+		return
+	}
 	if h.r.denoiser != nil && !vl.NoiseReduced {
 		h.r.OnPacket(ctx, internal_type.DenoiseAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio})
 		return
@@ -317,6 +326,9 @@ func (h requestorDispatchHandler) HandleLLMResponseDone(ctx context.Context, p i
 func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_type.ErrorPacket) {
 	switch errPkt := p.(type) {
 	case internal_type.InitializationFailedPacket:
+		if err := h.r.transitionSession(adapter_lifecycle.EventInitializationFailed); err != nil {
+			h.r.logger.Tracef(ctx, "session lifecycle init-failed transition ignored: %v", err)
+		}
 		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
 			ContextID: p.ContextId(),
 			Name:      "session",
@@ -370,6 +382,15 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 				Time:      time.Now(),
 			})
 	case internal_type.ModeSwitchErrorPacket:
+		if errPkt.IsRecoverable() {
+			if err := h.r.transitionSession(adapter_lifecycle.EventSwitchFailedRecoverable); err != nil {
+				h.r.logger.Tracef(ctx, "session lifecycle switch-failed(recoverable) transition ignored: %v", err)
+			}
+		} else {
+			if err := h.r.transitionSession(adapter_lifecycle.EventSwitchFailedFatal); err != nil {
+				h.r.logger.Tracef(ctx, "session lifecycle switch-failed(fatal) transition ignored: %v", err)
+			}
+		}
 		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
 			ContextID: p.ContextId(),
 			Name:      observe.ComponentSession,
@@ -398,8 +419,12 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 			})
 		return
 	}
+	var conversationId uint64
+	if h.r.Conversation() != nil {
+		conversationId = h.r.Conversation().Id
+	}
 	_ = h.r.Notify(ctx, &protos.ConversationError{
-		AssistantConversationId: h.r.Conversation().Id,
+		AssistantConversationId: conversationId,
 		Message:                 p.ErrMessage(),
 	})
 }
@@ -822,7 +847,7 @@ func (h requestorDispatchHandler) HandleInitializeAssistant(ctx context.Context,
 }
 func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Context, vl internal_type.InitializeConversationPacket) {
 	if conversationID := vl.Config.GetAssistantConversationId(); conversationID > 0 {
-		conversation, err := h.r.ResumeConversation(ctx, h.r.assistant, vl.Config)
+		err := h.r.ResumeConversation(ctx, h.r.assistant, vl.Config)
 		if err != nil {
 			h.r.logger.Errorf("failed to resume conversation: %+v", err)
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -842,9 +867,9 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 			},
 			Time: time.Now(),
 		})
-		h.r.notifyConfiguration(ctx, vl.Config, conversation)
+
 	} else {
-		conversation, err := h.r.BeginConversation(ctx, h.r.assistant, type_enums.DIRECTION_INBOUND, vl.Config)
+		err := h.r.BeginConversation(ctx, h.r.assistant, type_enums.DIRECTION_INBOUND, vl.Config)
 		if err != nil {
 			h.r.logger.Errorf("failed to begin conversation: %+v", err)
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -864,7 +889,6 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 			},
 			Time: time.Now(),
 		})
-		h.r.notifyConfiguration(ctx, vl.Config, conversation)
 	}
 	h.r.OnPacket(ctx, internal_type.InitializeSessionRuntimePacket{ContextID: vl.ContextID, Config: vl.Config})
 }
@@ -872,7 +896,6 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 	config := p.Config
 
 	utils.Go(ctx, func() { h.r.initializeCollectors(ctx) })
-
 	utils.Go(ctx, func() {
 		rc, err := internal_audio_recorder.GetRecorder(h.r.logger)
 		if err != nil {
@@ -909,7 +932,6 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 	})
 
 	utils.Go(ctx, func() { h.r.storeClientInformation(ctx) })
-
 	h.r.OnPacket(ctx, internal_type.InitializeAuthenticationPacket{ContextID: p.ContextID, Config: config})
 }
 func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Context, p internal_type.InitializeAuthenticationPacket) {
@@ -1045,6 +1067,7 @@ func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, 
 	}
 	h.r.OnPacket(ctx, internal_type.InitializationCompletedPacket{
 		ContextID: p.ContextID,
+		Config:    p.Config,
 		Event:     event,
 	})
 }
@@ -1056,6 +1079,24 @@ func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context,
 			h.r.OnPacket(ctx, internal_type.ModeSwitchCompletedPacket{ContextID: p.ContextID, StreamMode: p.StreamMode})
 			return
 		}
+		if !h.r.canSwitchSession() {
+			h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+				ContextID:  p.ContextID,
+				StreamMode: p.StreamMode,
+				Type:       internal_type.ModeSwitchErrorTypePreconditionNotReady,
+				Error:      errors.New("mode switch requested while session is not ready"),
+			})
+			return
+		}
+		if err := h.r.transitionSession(adapter_lifecycle.EventSwitchRequested); err != nil {
+			h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+				ContextID:  p.ContextID,
+				StreamMode: p.StreamMode,
+				Type:       internal_type.ModeSwitchErrorTypePreconditionNotReady,
+				Error:      err,
+			})
+			return
+		}
 		h.r.OnPacket(ctx, internal_type.ModeSwitchInitializeSpeechToTextPacket{
 			ContextID:  p.ContextID,
 			StreamMode: p.StreamMode,
@@ -1063,6 +1104,24 @@ func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context,
 	case protos.StreamMode_STREAM_MODE_TEXT:
 		if h.r.GetMode().Text() {
 			h.r.OnPacket(ctx, internal_type.ModeSwitchCompletedPacket{ContextID: p.ContextID, StreamMode: p.StreamMode})
+			return
+		}
+		if !h.r.canSwitchSession() {
+			h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+				ContextID:  p.ContextID,
+				StreamMode: p.StreamMode,
+				Type:       internal_type.ModeSwitchErrorTypePreconditionNotReady,
+				Error:      errors.New("mode switch requested while session is not ready"),
+			})
+			return
+		}
+		if err := h.r.transitionSession(adapter_lifecycle.EventSwitchRequested); err != nil {
+			h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+				ContextID:  p.ContextID,
+				StreamMode: p.StreamMode,
+				Type:       internal_type.ModeSwitchErrorTypePreconditionNotReady,
+				Error:      err,
+			})
 			return
 		}
 		h.r.OnPacket(ctx, internal_type.ModeSwitchFinalizeEndOfSpeechPacket{
@@ -1247,6 +1306,15 @@ func (h requestorDispatchHandler) HandleModeSwitchCompleted(ctx context.Context,
 		})
 		return
 	}
+	if err := h.r.transitionSession(adapter_lifecycle.EventSwitchCompleted); err != nil {
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID:  p.ContextID,
+			StreamMode: p.StreamMode,
+			Type:       internal_type.ModeSwitchErrorTypeUnknown,
+			Error:      err,
+		})
+		return
+	}
 
 	_ = h.r.Notify(ctx, &protos.ConversationConfiguration{
 		StreamMode: p.StreamMode,
@@ -1254,6 +1322,11 @@ func (h requestorDispatchHandler) HandleModeSwitchCompleted(ctx context.Context,
 }
 
 func (h requestorDispatchHandler) HandleInitializationCompleted(ctx context.Context, p internal_type.InitializationCompletedPacket) {
+	if err := h.r.transitionSession(adapter_lifecycle.EventInitializationCompleted); err != nil {
+		h.r.logger.Tracef(ctx, "session lifecycle init-completed transition ignored: %v", err)
+	}
+
+	h.r.notifyConfiguration(ctx, p.Config, h.r.assistantConversation)
 	h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
 		ContextID: p.ContextID,
 		Name:      observe.ComponentSession,
@@ -1265,8 +1338,12 @@ func (h requestorDispatchHandler) HandleInitializationCompleted(ctx context.Cont
 		Time: time.Now(),
 	})
 
-	// Start runtime dispatchers only after bootstrap init is fully complete.
-	h.r.startPostInitializationDispatchers(ctx)
+	streamMode := protos.StreamMode_STREAM_MODE_TEXT
+	if h.r.GetMode().Audio() {
+		streamMode = protos.StreamMode_STREAM_MODE_AUDIO
+	}
+	h.r.OnStartDispatchers(ctx)
+	h.r.streamer.NotifyMode(streamMode)
 	h.r.OnPacket(ctx, internal_type.WebhookStartPacket{
 		ContextID: p.ContextID,
 		Event:     p.Event,
@@ -1355,6 +1432,9 @@ func (h requestorDispatchHandler) HandleFinalizeAssistant(ctx context.Context, p
 	h.r.OnPacket(ctx, internal_type.FinalizationCompletedPacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizationCompleted(ctx context.Context, p internal_type.FinalizationCompletedPacket) {
+	if err := h.r.transitionSession(adapter_lifecycle.EventDisconnectCompleted); err != nil {
+		h.r.logger.Tracef(ctx, "session lifecycle disconnect-completed transition ignored: %v", err)
+	}
 	if h.r.disconnectDone != nil {
 		close(h.r.disconnectDone)
 	}

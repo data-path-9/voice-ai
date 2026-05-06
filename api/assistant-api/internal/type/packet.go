@@ -382,6 +382,7 @@ func (f InitializeBehaviorPacket) ContextId() string { return f.ContextID }
 type InitializationCompletedPacket struct {
 	ContextID string
 	Event     utils.AssistantWebhookEvent
+	Config    *protos.ConversationInitialization
 }
 
 func (f InitializationCompletedPacket) ContextId() string { return f.ContextID }
@@ -445,6 +446,7 @@ type ModeSwitchErrorType string
 
 const (
 	ModeSwitchErrorTypeUnknown                          ModeSwitchErrorType = "unknown"
+	ModeSwitchErrorTypePreconditionNotReady             ModeSwitchErrorType = "precondition_not_ready"
 	ModeSwitchErrorTypeUnsupportedMode                  ModeSwitchErrorType = "unsupported_mode"
 	ModeSwitchErrorTypeInitializeSpeechToText           ModeSwitchErrorType = "initialize_stt"
 	ModeSwitchErrorTypeInitializeTextToSpeech           ModeSwitchErrorType = "initialize_tts"
@@ -465,7 +467,9 @@ type ModeSwitchErrorPacket struct {
 
 func (f ModeSwitchErrorPacket) ContextId() string { return f.ContextID }
 func (f ModeSwitchErrorPacket) IsRecoverable() bool {
-	return f.Type == ModeSwitchErrorTypeUnsupportedMode
+	return f.Type == ModeSwitchErrorTypeUnknown ||
+		f.Type == ModeSwitchErrorTypePreconditionNotReady ||
+		f.Type == ModeSwitchErrorTypeUnsupportedMode
 }
 func (f ModeSwitchErrorPacket) Err() error { return f.Error }
 func (f ModeSwitchErrorPacket) ErrMessage() string {

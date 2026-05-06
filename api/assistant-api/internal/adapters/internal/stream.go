@@ -10,11 +10,17 @@ import (
 	"fmt"
 	"time"
 
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	observe "github.com/rapidaai/api/assistant-api/internal/observe"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/protos"
+)
+
+const (
+	dbWriteTimeout        = 5 * time.Second
+	collectorWriteTimeout = 10 * time.Second
 )
 
 // =============================================================================
@@ -34,69 +40,60 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 		if err != nil {
 			if t.Conversation() != nil {
 				t.emitCallCompletion(totalTime)
-				t.Disconnect(context.Background())
+				t.OnDisconnect(context.Background())
 			}
 			return nil
 		}
-		if t.handleStreamInput(t.streamer.Context(), auth, totalTime, req) {
-			return nil
+		switch payload := req.(type) {
+		case *protos.ConversationInitialization:
+			_ = t.OnConnect(t.streamer.Context(), auth, payload)
+		case *protos.ConversationConfiguration:
+			t.OnStreamModeSwitch(t.streamer.Context(), payload)
+		case *protos.ConversationUserMessage:
+			t.OnStreamUserMessage(t.streamer.Context(), payload)
+		case *protos.ConversationToolCallResult:
+			t.OnPacket(t.streamer.Context(), internal_type.LLMToolResultPacket{
+				ToolID:    payload.GetToolId(),
+				Name:      payload.GetName(),
+				ContextID: payload.GetId(),
+				Action:    payload.GetAction(),
+				Result:    payload.GetResult(),
+			})
+		case *protos.ConversationBridgeUserAudio:
+			t.OnPacket(t.streamer.Context(), internal_type.RecordUserAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
+		case *protos.ConversationBridgeOperatorAudio:
+			t.OnPacket(t.streamer.Context(), internal_type.RecordAssistantAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
+		case *protos.ConversationMetadata:
+			t.OnPacket(t.streamer.Context(), internal_type.ConversationMetadataPacket{
+				ContextID: payload.GetAssistantConversationId(),
+				Metadata:  payload.GetMetadata(),
+			})
+		case *protos.ConversationMetric:
+			t.OnPacket(t.streamer.Context(), internal_type.ConversationMetricPacket{
+				ContextID: payload.GetAssistantConversationId(),
+				Metrics:   payload.GetMetrics(),
+			})
+		case *protos.ConversationEvent:
+			eventTime := time.Now()
+			if payload.Time != nil {
+				eventTime = payload.Time.AsTime()
+			}
+			t.OnPacket(t.streamer.Context(), internal_type.ConversationEventPacket{
+				Name: payload.Name,
+				Data: payload.Data,
+				Time: eventTime,
+			})
+		case *protos.ConversationDisconnection:
+			if t.Conversation() == nil {
+				return nil
+			}
+			t.OnStreamDisconnection(totalTime, payload)
 		}
+
 	}
 }
 
-func (t *genericRequestor) handleStreamInput(ctx context.Context, auth types.SimplePrinciple, totalTime time.Time, req internal_type.Stream) bool {
-	switch payload := req.(type) {
-	case *protos.ConversationInitialization:
-		_ = t.Connect(ctx, auth, payload)
-		t.streamer.NotifyMode(payload.GetStreamMode())
-	case *protos.ConversationConfiguration:
-		t.handleStreamModeSwitch(ctx, payload)
-	case *protos.ConversationUserMessage:
-		t.handleStreamUserMessage(ctx, payload)
-	case *protos.ConversationToolCallResult:
-		t.OnPacket(ctx, internal_type.LLMToolResultPacket{
-			ToolID:    payload.GetToolId(),
-			Name:      payload.GetName(),
-			ContextID: payload.GetId(),
-			Action:    payload.GetAction(),
-			Result:    payload.GetResult(),
-		})
-	case *protos.ConversationBridgeUserAudio:
-		t.OnPacket(ctx, internal_type.RecordUserAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
-	case *protos.ConversationBridgeOperatorAudio:
-		t.OnPacket(ctx, internal_type.RecordAssistantAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
-	case *protos.ConversationMetadata:
-		t.OnPacket(ctx, internal_type.ConversationMetadataPacket{
-			ContextID: payload.GetAssistantConversationId(),
-			Metadata:  payload.GetMetadata(),
-		})
-	case *protos.ConversationMetric:
-		t.OnPacket(ctx, internal_type.ConversationMetricPacket{
-			ContextID: payload.GetAssistantConversationId(),
-			Metrics:   payload.GetMetrics(),
-		})
-	case *protos.ConversationEvent:
-		eventTime := time.Now()
-		if payload.Time != nil {
-			eventTime = payload.Time.AsTime()
-		}
-		t.OnPacket(ctx, internal_type.ConversationEventPacket{
-			Name: payload.Name,
-			Data: payload.Data,
-			Time: eventTime,
-		})
-	case *protos.ConversationDisconnection:
-		if t.Conversation() == nil {
-			return true
-		}
-		t.handleStreamDisconnection(totalTime, payload)
-		return true
-	}
-
-	return false
-}
-
-func (t *genericRequestor) handleStreamModeSwitch(ctx context.Context, payload *protos.ConversationConfiguration) {
+func (t *genericRequestor) OnStreamModeSwitch(ctx context.Context, payload *protos.ConversationConfiguration) {
 	t.OnPacket(ctx, internal_type.ModeSwitchRequestedPacket{
 		ContextID:   t.GetID(),
 		StreamMode:  payload.GetStreamMode(),
@@ -104,9 +101,10 @@ func (t *genericRequestor) handleStreamModeSwitch(ctx context.Context, payload *
 	})
 }
 
-func (t *genericRequestor) handleStreamUserMessage(ctx context.Context, payload *protos.ConversationUserMessage) {
+func (t *genericRequestor) OnStreamUserMessage(ctx context.Context, payload *protos.ConversationUserMessage) {
 	switch msg := payload.GetMessage().(type) {
 	case *protos.ConversationUserMessage_Audio:
+		t.logger.Debugf("testing => receiving audio")
 		t.OnPacket(ctx, internal_type.UserAudioReceivedPacket{ContextID: t.GetID(), Audio: msg.Audio})
 	case *protos.ConversationUserMessage_Text:
 		t.OnPacket(ctx, internal_type.UserTextReceivedPacket{ContextID: t.GetID(), Text: msg.Text})
@@ -115,7 +113,7 @@ func (t *genericRequestor) handleStreamUserMessage(ctx context.Context, payload 
 	}
 }
 
-func (t *genericRequestor) handleStreamDisconnection(totalTime time.Time, payload *protos.ConversationDisconnection) {
+func (t *genericRequestor) OnStreamDisconnection(totalTime time.Time, payload *protos.ConversationDisconnection) {
 	ctx := context.Background()
 	t.OnPacket(ctx,
 		internal_type.ConversationEventPacket{
@@ -132,7 +130,7 @@ func (t *genericRequestor) handleStreamDisconnection(totalTime time.Time, payloa
 			}},
 		})
 	t.emitCallCompletion(totalTime)
-	t.Disconnect(ctx)
+	t.OnDisconnect(ctx)
 }
 
 // emitCallCompletion persists final metrics and events when the talk loop exits.
@@ -180,4 +178,63 @@ func (t *genericRequestor) Notify(ctx context.Context, actionDatas ...internal_t
 		t.streamer.Send(actionData)
 	}
 	return nil
+}
+
+// =============================================================================
+// Session Lifecycle
+// =============================================================================
+
+// Connect starts bootstrap/background dispatchers and enqueues the init chain.
+// Runtime dispatchers (critical/ingress/egress) are started after
+// InitializationCompleted. Connect always returns nil because initialization
+// runs asynchronously on the bootstrap dispatcher goroutine.
+// The gRPC stream is already open by the time Connect is called; any init errors
+// are delivered to the client via InitializationFailedPacket → ConversationError
+// proto on the stream, not via this return value.
+func (r *genericRequestor) OnConnect(ctx context.Context, auth types.SimplePrinciple, config *protos.ConversationInitialization) error {
+	if err := r.transitionSession(adapter_lifecycle.EventConnectRequested); err != nil {
+		r.logger.Tracef(ctx, "connect ignored due to session lifecycle transition: %v", err)
+		return nil
+	}
+	r.SetAuth(auth)
+	r.bootstrapStart.Do(func() {
+		go r.runBootstrapDispatcher(ctx)
+	})
+	r.backgroundStart.Do(func() {
+		go r.runLowDispatcher(r.workerCtx)
+	})
+	r.OnPacket(ctx,
+		internal_type.ConversationEventPacket{
+			ContextID: r.GetID(),
+			Name:      observe.ComponentSession,
+			Data:      map[string]string{observe.DataType: observe.EventInitializing, observe.DataMode: config.GetStreamMode().String()},
+			Time:      time.Now(),
+		}, internal_type.InitializeAssistantPacket{
+			ContextID: r.GetID(),
+			Config:    config,
+		})
+	return nil
+}
+
+// Disconnect enqueues the disconnect chain and blocks until complete.
+// The disconnectDone channel is created fresh here and closed exactly once by
+// handleFinalizationCompleted — the terminal step of the disconnect chain.
+// Disconnect is called at most once per session (guarded by the gRPC stream
+// lifecycle), so there is no risk of double-close.
+func (r *genericRequestor) OnDisconnect(ctx context.Context) {
+	if err := r.transitionSession(adapter_lifecycle.EventDisconnectRequested); err != nil {
+		r.logger.Tracef(ctx, "disconnect ignored due to session lifecycle transition: %v", err)
+		return
+	}
+	startTime := time.Now()
+	done := make(chan struct{}, 1)
+	r.disconnectDone = done
+	r.OnPacket(ctx, internal_type.FinalizeBehaviorPacket{ContextID: r.GetID()})
+	select {
+	case <-done:
+	case <-time.After(collectorWriteTimeout):
+		r.logger.Warnf("disconnect timed out after %v", collectorWriteTimeout)
+	}
+	r.workerCancel()
+	r.logger.Benchmark("session.Disconnect", time.Since(startTime))
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	adapter_channel "github.com/rapidaai/api/assistant-api/internal/adapters/channel"
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
@@ -62,7 +63,9 @@ func (s *streamTestStreamer) NotifyMode(mode protos.StreamMode) {
 func TestTalk_RecvErrorBeforeInitialization_ReturnsNil(t *testing.T) {
 	streamer := &streamTestStreamer{recvErr: io.EOF}
 	r := &genericRequestor{
-		streamer: streamer,
+		streamer:         streamer,
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
 	}
 
 	err := r.Talk(context.Background(), nil)
@@ -103,7 +106,9 @@ func TestTalk_BuffersPacketsBeforeInitialization(t *testing.T) {
 	}
 
 	r := &genericRequestor{
-		streamer: streamer,
+		streamer:         streamer,
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
 		// Before initialization completes, packets should be buffered in channels.
 		channels: func() *adapter_channel.RequestorChannels {
 			ch := adapter_channel.NewRequestorChannels()
@@ -123,7 +128,9 @@ func TestTalk_BuffersPacketsBeforeInitialization(t *testing.T) {
 func TestNotify_ForwardsAllActionData(t *testing.T) {
 	streamer := &streamTestStreamer{}
 	r := &genericRequestor{
-		streamer: streamer,
+		streamer:         streamer,
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
 	}
 
 	a := &protos.ConversationEvent{Name: "alpha"}

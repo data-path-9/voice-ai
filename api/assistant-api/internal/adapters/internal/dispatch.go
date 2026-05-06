@@ -38,6 +38,14 @@ func (r *genericRequestor) OnPacket(ctx context.Context, pkts ...internal_type.P
 	return nil
 }
 
+func (r *genericRequestor) OnStartDispatchers(ctx context.Context) {
+	r.dispatchStartOnce.Do(func() {
+		go r.runCriticalDispatcher(ctx)
+		go r.runInputDispatcher(ctx)
+		go r.runOutputDispatcher(ctx)
+	})
+}
+
 // =============================================================================
 // Dispatchers — one goroutine per priority channel
 // =============================================================================
@@ -69,14 +77,6 @@ func (r *genericRequestor) runOutputDispatcher(ctx context.Context) {
 func (r *genericRequestor) runLowDispatcher(ctx context.Context) {
 	r.channels.RunBackground(ctx, func(e adapter_channel.Envelope) {
 		r.dispatch(e.Ctx, e.Pkt)
-	})
-}
-
-func (r *genericRequestor) startPostInitializationDispatchers(ctx context.Context) {
-	r.dispatchStartOnce.Do(func() {
-		go r.runCriticalDispatcher(ctx)
-		go r.runInputDispatcher(ctx)
-		go r.runOutputDispatcher(ctx)
 	})
 }
 

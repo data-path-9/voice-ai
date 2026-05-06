@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rapidaai/api/assistant-api/config"
 	adapter_channel "github.com/rapidaai/api/assistant-api/internal/adapters/channel"
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	"github.com/rapidaai/protos"
 
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -51,33 +51,15 @@ import (
 // InteractionState — conversation turn state machine
 // =============================================================================
 
-// InteractionState tracks the current LLM/TTS generation turn state.
-type InteractionState int
+type InteractionState = adapter_lifecycle.MessageState
 
 const (
-	Unknown       InteractionState = 1
-	Interrupt     InteractionState = 6
-	Interrupted   InteractionState = 7
-	LLMGenerating InteractionState = 8
-	LLMGenerated  InteractionState = 5
+	Unknown       = adapter_lifecycle.Unknown
+	Interrupt     = adapter_lifecycle.Interrupt
+	Interrupted   = adapter_lifecycle.Interrupted
+	LLMGenerating = adapter_lifecycle.LLMGenerating
+	LLMGenerated  = adapter_lifecycle.LLMGenerated
 )
-
-func (s InteractionState) String() string {
-	switch s {
-	case Unknown:
-		return "Unknown"
-	case LLMGenerated:
-		return "LLMGenerated"
-	case Interrupt:
-		return "Interrupt"
-	case Interrupted:
-		return "Interrupted"
-	case LLMGenerating:
-		return "LLMGenerating"
-	default:
-		return "InvalidState"
-	}
-}
 
 type genericRequestor struct {
 	logger   commons.Logger
@@ -103,24 +85,21 @@ type genericRequestor struct {
 	// observe — shared observability infrastructure (DB + exporters)
 	observer *observe.ConversationObserver
 
-	analysisExecutor       internal_analysis.Executor
-	webhookExecutor        internal_webhook.Executor
-	authenticationExecutor internal_authentication.Executor
-
 	// integration client
-	integrationClient integration_client.IntegrationServiceClient
 	vaultClient       web_client.VaultClient
+	integrationClient integration_client.IntegrationServiceClient
 	deploymentClient  endpoint_client.DeploymentServiceClient
 
-	// interaction state — inline replacement for the former Messaging wrapper
-	msgMu             sync.RWMutex
-	contextID         string
-	interactionState  InteractionState
-	msgMode           type_enums.MessageMode
+	// interaction/session lifecycle owners.
+	messageLifecycle  adapter_lifecycle.MessageLifecycle
+	sessionLifecycle  adapter_lifecycle.SessionLifecycle
 	dispatchStartOnce sync.Once
+	bootstrapStart    sync.Once
+	backgroundStart   sync.Once
 
 	// listening
 	speechToTextTransformer internal_type.SpeechToTextTransformer
+	textToSpeechTransformer internal_type.TextToSpeechTransformer
 
 	// audio intelligence
 	endOfSpeech internal_type.EndOfSpeech
@@ -131,12 +110,13 @@ type genericRequestor struct {
 	inputNormalizer  internal_type.PacketNormalizer
 	outputNormalizer internal_type.PacketNormalizer
 
-	textToSpeechTransformer internal_type.TextToSpeechTransformer
-
 	recorder internal_type.Recorder
 
 	// executor
-	assistantExecutor internal_llm.AssistantExecutor
+	assistantExecutor      internal_llm.AssistantExecutor
+	analysisExecutor       internal_analysis.Executor
+	webhookExecutor        internal_webhook.Executor
+	authenticationExecutor internal_authentication.Executor
 
 	// states
 	assistant             *internal_assistant_entity.Assistant
@@ -198,13 +178,16 @@ func NewGenericRequestor(
 
 		// observer and hook executors are initialized after session creation in initializeCollectors
 
-		contextID:              uuid.NewString(),
-		interactionState:       Unknown,
-		msgMode:                type_enums.TextMode,
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
+
 		assistantExecutor:      internal_llm.NewAssistantExecutor(logger),
+		analysisExecutor:       internal_analysis.NewExecutor(logger),
+		webhookExecutor:        internal_webhook.NewExecutor(logger),
 		authenticationExecutor: internal_authentication.NewExecutor(logger),
-		inputNormalizer:        internal_input_normalizer.NewInputNormalizer(logger),
-		outputNormalizer:       internal_output_normalizer.NewOutputNormalizer(logger),
+
+		inputNormalizer:  internal_input_normalizer.NewInputNormalizer(logger),
+		outputNormalizer: internal_output_normalizer.NewOutputNormalizer(logger),
 
 		//
 		histories:    make([]internal_type.MessagePacket, 0),
@@ -232,12 +215,12 @@ func (gr *genericRequestor) GetAssistantConversation(ctx context.Context, auth t
 	)
 }
 
-func (talking *genericRequestor) BeginConversation(ctx context.Context, assistant *internal_assistant_entity.Assistant, direction type_enums.ConversationDirection, config *protos.ConversationInitialization) (*internal_conversation_entity.AssistantConversation, error) {
+func (talking *genericRequestor) BeginConversation(ctx context.Context, assistant *internal_assistant_entity.Assistant, direction type_enums.ConversationDirection, config *protos.ConversationInitialization) error {
 	talking.assistant = assistant
 
 	conversation, err := talking.conversationService.CreateConversation(ctx, talking.Auth(), talking.identifier(config), assistant.Id, assistant.AssistantProviderId, direction, talking.GetSource())
 	if err != nil {
-		return conversation, err
+		return err
 	}
 
 	if arguments, err := utils.AnyMapToInterfaceMap(config.GetArgs()); err == nil {
@@ -259,19 +242,19 @@ func (talking *genericRequestor) BeginConversation(ctx context.Context, assistan
 		})
 	}
 	talking.assistantConversation = conversation
-	return conversation, err
+	return err
 }
 
-func (talking *genericRequestor) ResumeConversation(ctx context.Context, assistant *internal_assistant_entity.Assistant, config *protos.ConversationInitialization) (*internal_conversation_entity.AssistantConversation, error) {
+func (talking *genericRequestor) ResumeConversation(ctx context.Context, assistant *internal_assistant_entity.Assistant, config *protos.ConversationInitialization) error {
 	talking.assistant = assistant
 	conversation, err := talking.GetAssistantConversation(ctx, talking.Auth(), assistant.Id, config.GetAssistantConversationId())
 	if err != nil {
 		talking.logger.Errorf("failed to get assistant conversation: %+v", err)
-		return nil, err
+		return err
 	}
 	if conversation == nil {
 		talking.logger.Errorf("conversation not found: %d", config.GetAssistantConversationId())
-		return nil, fmt.Errorf("conversation not found: %d", config.GetAssistantConversationId())
+		return fmt.Errorf("conversation not found: %d", config.GetAssistantConversationId())
 	}
 	talking.assistantConversation = conversation
 	talking.args = conversation.GetArguments()
@@ -283,7 +266,7 @@ func (talking *genericRequestor) ResumeConversation(ctx context.Context, assista
 			talking.conversationService.ApplyConversationMetadata(ctx, talking.Auth(), assistant.Id, conversation.Id, types.NewMetadataList(extra))
 		})
 	}
-	return conversation, nil
+	return nil
 }
 
 func (talking *genericRequestor) IntegrationCaller() integration_client.IntegrationServiceClient {
@@ -332,21 +315,17 @@ func (gr *genericRequestor) CreateConversationRecording(ctx context.Context, use
 // GetID returns the current interaction context UUID.
 // Rotates to a new UUID each time an Interrupted transition fires.
 func (r *genericRequestor) GetID() string {
-	r.msgMu.RLock()
-	defer r.msgMu.RUnlock()
-	return r.contextID
+	return r.messageLifecycle.ContextID()
 }
 
 // GetMode returns the current stream mode (text or audio).
 func (r *genericRequestor) GetMode() type_enums.MessageMode {
-	return r.msgMode
+	return r.messageLifecycle.Mode()
 }
 
 // SwitchMode sets the stream mode.
 func (r *genericRequestor) SwitchMode(mm type_enums.MessageMode) {
-	r.msgMu.Lock()
-	defer r.msgMu.Unlock()
-	r.msgMode = mm
+	r.messageLifecycle.SetMode(mm)
 }
 
 // Transition advances the interaction state machine.
@@ -366,28 +345,17 @@ func (r *genericRequestor) SwitchMode(mm type_enums.MessageMode) {
 //     Interrupted → Interrupted             (already interrupted)
 //     Interrupt   → Interrupt               (already soft-interrupted)
 func (r *genericRequestor) Transition(newState InteractionState) error {
-	r.msgMu.Lock()
-	defer r.msgMu.Unlock()
-	switch newState {
-	case Unknown:
-		return fmt.Errorf("Transition: cannot transition to Unknown state")
-	case Interrupt:
-		if r.interactionState == Interrupted || r.interactionState == Interrupt {
-			return fmt.Errorf("Transition: cannot soft-interrupt from state %s", r.interactionState)
+	oldCtxID := r.GetID()
+	if err := r.messageLifecycle.Transition(newState); err != nil {
+		return err
+	}
+
+	if newState == Interrupted {
+		nCtxID := r.GetID()
+		if oldCtxID == nCtxID {
+			return nil
 		}
-		if r.interactionState == Unknown {
-			return fmt.Errorf("Transition: nothing active to soft-interrupt in state %s", r.interactionState)
-		}
-	case Interrupted:
-		if r.interactionState == Interrupted {
-			return fmt.Errorf("Transition: already interrupted")
-		}
-		oldCtxID := r.contextID // read directly — we already hold msgMu
-		nCtxID := uuid.NewString()
-		r.contextID = nCtxID
-		// Emit turn-change event asynchronously to avoid holding msgMu while
-		// enqueuing into a dispatcher channel (which could stall if the channel
-		// is near capacity and the consumer goroutine is also waiting on msgMu).
+
 		utils.Go(context.Background(), func() {
 			r.OnPacket(context.Background(), internal_type.TurnChangePacket{
 				ContextID:         nCtxID,
@@ -398,8 +366,39 @@ func (r *genericRequestor) Transition(newState InteractionState) error {
 			})
 		})
 	}
-	r.interactionState = newState
 	return nil
+}
+
+func (r *genericRequestor) getSessionState() adapter_lifecycle.SessionState {
+	return r.sessionLifecycle.Current()
+}
+
+func (r *genericRequestor) transitionSession(event adapter_lifecycle.SessionEvent) error {
+	return r.sessionLifecycle.Transition(event)
+}
+
+func (r *genericRequestor) canAcceptInput() bool {
+	return r.getSessionState() == adapter_lifecycle.StateReady
+}
+
+func (r *genericRequestor) canSwitchSession() bool {
+	return r.sessionLifecycle.CanBe(adapter_lifecycle.EventSwitchRequested)
+}
+
+func (r *genericRequestor) getInteractionState() InteractionState {
+	return r.messageLifecycle.Current()
+}
+
+func (r *genericRequestor) setInteractionStateForTest(state InteractionState) {
+	r.messageLifecycle = adapter_lifecycle.NewMessageLifecycleWithState(state, r.GetID(), r.GetMode(), nil)
+}
+
+func (r *genericRequestor) setContextIDForTest(contextID string) {
+	r.messageLifecycle.SetContextID(contextID)
+}
+
+func (r *genericRequestor) setModeForTest(mode type_enums.MessageMode) {
+	r.messageLifecycle.SetMode(mode)
 }
 
 // initializeCollectors builds EventCollector and MetricCollector from the
@@ -507,10 +506,10 @@ func (r *genericRequestor) initializeCollectors(ctx context.Context) {
 	})
 
 	// Initialize executors for webhook/analysis execution.
-	r.analysisExecutor = internal_analysis.NewExecutor(r.logger)
+
 	r.analysisExecutor.Init(ctx, r)
-	r.webhookExecutor = internal_webhook.NewExecutor(r.logger)
 	r.webhookExecutor.Init(ctx, r)
+
 }
 
 // shutdownCollectors waits for in-flight exports and shuts down all exporters.

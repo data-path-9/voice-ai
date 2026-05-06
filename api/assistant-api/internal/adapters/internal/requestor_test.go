@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	assistant_config "github.com/rapidaai/api/assistant-api/config"
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_telemetry_entity "github.com/rapidaai/api/assistant-api/internal/entity/telemetry"
@@ -37,8 +38,10 @@ func requestorForTelemetryTest(t *testing.T, providers []*internal_telemetry_ent
 	orgID := uint64(22)
 
 	return &genericRequestor{
-		logger: requestorTelemetryTestLogger(t),
-		config: &assistant_config.AssistantConfig{},
+		logger:           requestorTelemetryTestLogger(t),
+		config:           &assistant_config.AssistantConfig{},
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
 		auth: &types.ServiceScope{
 			ProjectId:      &projectID,
 			OrganizationId: &orgID,

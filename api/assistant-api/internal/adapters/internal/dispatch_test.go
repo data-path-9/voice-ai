@@ -10,6 +10,7 @@ import (
 	"time"
 
 	adapter_channel "github.com/rapidaai/api/assistant-api/internal/adapters/channel"
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_message_gorm "github.com/rapidaai/api/assistant-api/internal/entity/messages"
@@ -33,12 +34,27 @@ import (
 
 type dispatchTestStreamer struct {
 	ctx context.Context
+	mu  sync.Mutex
+
+	modes []protos.StreamMode
 }
 
 func (s *dispatchTestStreamer) Context() context.Context            { return s.ctx }
 func (s *dispatchTestStreamer) Recv() (internal_type.Stream, error) { return nil, io.EOF }
 func (s *dispatchTestStreamer) Send(internal_type.Stream) error     { return nil }
-func (s *dispatchTestStreamer) NotifyMode(protos.StreamMode)        {}
+func (s *dispatchTestStreamer) NotifyMode(mode protos.StreamMode) {
+	s.mu.Lock()
+	s.modes = append(s.modes, mode)
+	s.mu.Unlock()
+}
+
+func (s *dispatchTestStreamer) getModes() []protos.StreamMode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := make([]protos.StreamMode, len(s.modes))
+	copy(cp, s.modes)
+	return cp
+}
 
 // executorStub captures packets sent to Execute.
 type executorStub struct {
@@ -254,11 +270,11 @@ func newTestRequestor(t *testing.T, ctx context.Context) *genericRequestor {
 	t.Helper()
 	logger := dispatchTestLogger(t)
 	channels := adapter_channel.NewRequestorChannels()
-	return &genericRequestor{
+	r := &genericRequestor{
 		logger:                logger,
 		streamer:              &dispatchTestStreamer{ctx: ctx},
-		contextID:             "ctx-1",
-		interactionState:      Unknown,
+		messageLifecycle:      adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle:      adapter_lifecycle.NewSessionLifecycleWithState(adapter_lifecycle.StateReady),
 		assistant:             &internal_assistant_entity.Assistant{},
 		assistantConversation: &internal_conversation_entity.AssistantConversation{Audited: gorm_model.Audited{Id: 1}},
 		conversationService:   &noopConversationService{},
@@ -267,6 +283,9 @@ func newTestRequestor(t *testing.T, ctx context.Context) *genericRequestor {
 		channels:              channels,
 		// observer is nil in tests — handlers nil-check before use
 	}
+	r.setContextIDForTest("ctx-1")
+	r.setModeForTest(type_enums.TextMode)
+	return r
 }
 
 // drainPacket reads from a channel until a packet of the desired type appears or timeout.
@@ -289,6 +308,50 @@ func drainPacket[T internal_type.Packet](ch chan adapter_channel.Envelope, timeo
 func channelHasPacketType[T internal_type.Packet](ch chan adapter_channel.Envelope, timeout time.Duration) bool {
 	_, ok := drainPacket[T](ch, timeout)
 	return ok
+}
+
+func TestHandleInitializationCompleted_NotifyModeFromInitializedState(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name         string
+		mode         type_enums.MessageMode
+		expectedMode protos.StreamMode
+	}{
+		{
+			name:         "text_mode",
+			mode:         type_enums.TextMode,
+			expectedMode: protos.StreamMode_STREAM_MODE_TEXT,
+		},
+		{
+			name:         "audio_mode",
+			mode:         type_enums.AudioMode,
+			expectedMode: protos.StreamMode_STREAM_MODE_AUDIO,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			r := newTestRequestor(t, ctx)
+			r.setModeForTest(tc.mode)
+			h := requestorDispatchHandler{r: r}
+
+			h.HandleInitializationCompleted(ctx, internal_type.InitializationCompletedPacket{
+				ContextID: r.GetID(),
+				Event:     utils.ConversationBegin,
+			})
+
+			streamer, ok := r.streamer.(*dispatchTestStreamer)
+			require.True(t, ok)
+			require.Equal(t, []protos.StreamMode{tc.expectedMode}, streamer.getModes())
+		})
+	}
 }
 
 // =============================================================================
@@ -401,7 +464,7 @@ func TestOnPacket_RoutesToCorrectChannel(t *testing.T) {
 func TestTransition_Interrupted_DoesNotDeadlock(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.interactionState = LLMGenerating
+	r.setInteractionStateForTest(LLMGenerating)
 
 	done := make(chan struct{})
 	go func() {
@@ -412,10 +475,8 @@ func TestTransition_Interrupted_DoesNotDeadlock(t *testing.T) {
 	select {
 	case <-done:
 		// Transition completed, verify state changed.
-		r.msgMu.RLock()
-		assert.Equal(t, Interrupted, r.interactionState)
-		assert.NotEqual(t, "ctx-1", r.contextID, "contextID should rotate on Interrupted transition")
-		r.msgMu.RUnlock()
+		assert.Equal(t, Interrupted, r.getInteractionState())
+		assert.NotEqual(t, "ctx-1", r.GetID(), "contextID should rotate on Interrupted transition")
 	case <-time.After(2 * time.Second):
 		t.Fatal("Transition(Interrupted) deadlocked")
 	}
@@ -424,7 +485,7 @@ func TestTransition_Interrupted_DoesNotDeadlock(t *testing.T) {
 func TestTransition_Unknown_CannotSoftInterrupt(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.interactionState = Unknown
+	r.setInteractionStateForTest(Unknown)
 
 	// Unknown -> Interrupt (soft-interrupt) is blocked because there is nothing active.
 	err := r.Transition(Interrupt)
@@ -438,23 +499,17 @@ func TestTransition_ValidSequence_UnknownToLLMGenerating(t *testing.T) {
 
 	err := r.Transition(LLMGenerating)
 	require.NoError(t, err)
-
-	r.msgMu.RLock()
-	assert.Equal(t, LLMGenerating, r.interactionState)
-	r.msgMu.RUnlock()
+	assert.Equal(t, LLMGenerating, r.getInteractionState())
 }
 
 func TestTransition_LLMGeneratingToLLMGenerated(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.interactionState = LLMGenerating
+	r.setInteractionStateForTest(LLMGenerating)
 
 	err := r.Transition(LLMGenerated)
 	require.NoError(t, err)
-
-	r.msgMu.RLock()
-	assert.Equal(t, LLMGenerated, r.interactionState)
-	r.msgMu.RUnlock()
+	assert.Equal(t, LLMGenerated, r.getInteractionState())
 }
 
 // =============================================================================
@@ -467,7 +522,7 @@ func TestHandleUserText_WithActiveState_DoesNotDeadlock(t *testing.T) {
 	defer cancel()
 
 	r := newTestRequestor(t, ctx)
-	r.interactionState = LLMGenerating
+	r.setInteractionStateForTest(LLMGenerating)
 
 	go r.runCriticalDispatcher(ctx)
 	go r.runInputDispatcher(ctx)
@@ -499,7 +554,7 @@ func TestHandleUserText_UnknownState_SkipsInterruption(t *testing.T) {
 	defer cancel()
 
 	r := newTestRequestor(t, ctx)
-	r.interactionState = Unknown
+	r.setInteractionStateForTest(Unknown)
 
 	go r.runCriticalDispatcher(ctx)
 	go r.runInputDispatcher(ctx)
@@ -678,7 +733,7 @@ func TestHandleLLMDelta_EmitsTTSTextPacket(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
 	// Set state so Transition(LLMGenerating) succeeds.
-	r.interactionState = Interrupted
+	r.setInteractionStateForTest(Interrupted)
 
 	requestorDispatchHandler{r: r}.HandleLLMResponseDelta(context.Background(), internal_type.LLMResponseDeltaPacket{
 		ContextID: "ctx-1",
@@ -698,7 +753,7 @@ func TestHandleLLMDelta_EmitsTTSTextPacket(t *testing.T) {
 func TestHandleLLMDone_EmitsAggregateAndPersistence(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.interactionState = LLMGenerating
+	r.setInteractionStateForTest(LLMGenerating)
 	r.assistantConversation = &internal_conversation_entity.AssistantConversation{Audited: gorm_model.Audited{Id: 1}}
 
 	requestorDispatchHandler{r: r}.HandleLLMResponseDone(context.Background(), internal_type.LLMResponseDonePacket{
@@ -736,8 +791,8 @@ func TestHandleLLMDone_EmitsAggregateAndPersistence(t *testing.T) {
 func TestHandleLLMDelta_StaleContext_Discarded(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.contextID = "ctx-current"
-	r.interactionState = LLMGenerating
+	r.setContextIDForTest("ctx-current")
+	r.setInteractionStateForTest(LLMGenerating)
 
 	requestorDispatchHandler{r: r}.HandleLLMResponseDelta(context.Background(), internal_type.LLMResponseDeltaPacket{
 		ContextID: "ctx-old",
@@ -764,8 +819,8 @@ func TestHandleLLMDelta_StaleContext_Discarded(t *testing.T) {
 func TestHandleLLMDone_StaleContext_Discarded(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.contextID = "ctx-current"
-	r.interactionState = LLMGenerating
+	r.setContextIDForTest("ctx-current")
+	r.setInteractionStateForTest(LLMGenerating)
 
 	requestorDispatchHandler{r: r}.HandleLLMResponseDone(context.Background(), internal_type.LLMResponseDonePacket{
 		ContextID: "ctx-old",
@@ -847,7 +902,7 @@ func TestConcurrent_UserAudioAndInterruption_NoDeadlock(t *testing.T) {
 	r := newTestRequestor(t, ctx)
 	r.speechToTextTransformer = &sttStub{}
 	r.endOfSpeech = &eosStub{}
-	r.interactionState = LLMGenerating
+	r.setInteractionStateForTest(LLMGenerating)
 
 	go r.runCriticalDispatcher(ctx)
 	go r.runInputDispatcher(ctx)
@@ -919,7 +974,7 @@ func TestHandleNormalizedText_EnqueuesExecuteLLMWithNormalizedPacket(t *testing.
 func TestHandleNormalizedText_UsesUnknownLanguageFallback(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.contextID = "ctx-unknown"
+	r.setContextIDForTest("ctx-unknown")
 	r.assistantConversation = &internal_conversation_entity.AssistantConversation{Audited: gorm_model.Audited{Id: 1}}
 
 	requestorDispatchHandler{r: r}.HandleUserInput(context.Background(), internal_type.UserInputPacket{
@@ -1004,7 +1059,7 @@ func TestHandleUserAudio_WithDenoiser_STTNotCalledBeforeDenoise(t *testing.T) {
 func TestHandleLLMError_EmitsMetricAndTransitions(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.interactionState = LLMGenerating
+	r.setInteractionStateForTest(LLMGenerating)
 	r.assistantConversation = &internal_conversation_entity.AssistantConversation{Audited: gorm_model.Audited{Id: 1}}
 
 	requestorDispatchHandler{r: r}.HandleError(context.Background(), internal_type.LLMErrorPacket{
@@ -1016,10 +1071,7 @@ func TestHandleLLMError_EmitsMetricAndTransitions(t *testing.T) {
 	require.True(t, ok, "expected UserMessageMetricPacket for LLM error")
 	require.NotEmpty(t, metric.Metrics)
 	assert.Equal(t, "llm_error", metric.Metrics[0].Name)
-
-	r.msgMu.RLock()
-	assert.Equal(t, LLMGenerated, r.interactionState)
-	r.msgMu.RUnlock()
+	assert.Equal(t, LLMGenerated, r.getInteractionState())
 }
 
 // =============================================================================
@@ -1029,7 +1081,7 @@ func TestHandleLLMError_EmitsMetricAndTransitions(t *testing.T) {
 func TestTransition_AlreadyInterrupted_Errors(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.interactionState = Interrupted
+	r.setInteractionStateForTest(Interrupted)
 
 	err := r.Transition(Interrupted)
 	require.Error(t, err, "double-interrupt should be blocked")
@@ -1038,7 +1090,7 @@ func TestTransition_AlreadyInterrupted_Errors(t *testing.T) {
 func TestTransition_CannotTransitionToUnknown(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.interactionState = LLMGenerated
+	r.setInteractionStateForTest(LLMGenerated)
 
 	err := r.Transition(Unknown)
 	require.Error(t, err)
@@ -1047,7 +1099,7 @@ func TestTransition_CannotTransitionToUnknown(t *testing.T) {
 func TestTransition_Interrupted_RotatesContextID(t *testing.T) {
 	t.Parallel()
 	r := newTestRequestor(t, context.Background())
-	r.interactionState = LLMGenerating
+	r.setInteractionStateForTest(LLMGenerating)
 	oldID := r.GetID()
 
 	err := r.Transition(Interrupted)
@@ -1258,9 +1310,7 @@ func TestE2E_TextInput_FullPipeline(t *testing.T) {
 
 	// === Verify: state ended at LLMGenerated ===
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "state should be LLMGenerated after full pipeline")
 
 	// === Verify: normalizer was called ===
@@ -1372,9 +1422,7 @@ func TestE2E_AudioInput_FullPipeline(t *testing.T) {
 
 	// === Verify: state ended at LLMGenerated ===
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "state should be LLMGenerated after full audio pipeline")
 
 	// === Verify: normalizer was called ===
@@ -1411,8 +1459,8 @@ func TestRegression_WordInterruptDuringEOSPipeline_ContextMismatch(t *testing.T)
 	r := newTestRequestor(t, ctx)
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
-	r.contextID = "old-ctx"
-	r.interactionState = LLMGenerated // assistant was speaking
+	r.setContextIDForTest("old-ctx")
+	r.setInteractionStateForTest(LLMGenerated) // assistant was speaking
 
 	// Wire normalizer callback
 	norm.onPacket = func(ctx context.Context, pkts ...internal_type.Packet) error {
@@ -1479,9 +1527,7 @@ func TestRegression_WordInterruptDuringEOSPipeline_ContextMismatch(t *testing.T)
 	// If the fix works, the delta's context matches GetID() and is NOT discarded.
 	// We verify by checking the state reached LLMGenerated (meaning delta+done were processed).
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond,
 		"state should reach LLMGenerated — proves LLM responses were NOT discarded")
 
@@ -1821,7 +1867,7 @@ func TestBug_TTSStateful_IdleMessageDroppedByStaleConnection(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ttsCtx, pkts...)
@@ -1842,9 +1888,7 @@ func TestBug_TTSStateful_IdleMessageDroppedByStaleConnection(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "welcome should complete")
 
 	require.Eventually(t, func() bool {
@@ -1865,9 +1909,7 @@ func TestBug_TTSStateful_IdleMessageDroppedByStaleConnection(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "idle message should complete")
 
 	// Wait for all async processing
@@ -1928,7 +1970,7 @@ func TestScenario_S1_WelcomeAndDoubleIdleTimeout(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode // enable TTS path
+	r.setModeForTest(type_enums.AudioMode) // enable TTS path
 
 	// Wire TTS callback to OnPacket
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
@@ -1945,7 +1987,7 @@ func TestScenario_S1_WelcomeAndDoubleIdleTimeout(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	initialCtx := r.GetID()
-	t.Logf("initial context: %s, state: %s", initialCtx, r.interactionState.String())
+	t.Logf("initial context: %s, state: %s", initialCtx, r.getInteractionState().String())
 
 	// === Step 1: Welcome message ===
 	err := r.OnPacket(ctx, internal_type.InjectMessagePacket{
@@ -1956,13 +1998,11 @@ func TestScenario_S1_WelcomeAndDoubleIdleTimeout(t *testing.T) {
 
 	// Wait for welcome to be fully processed
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "state should reach LLMGenerated after welcome")
 
 	welcomeCtx := r.GetID()
-	t.Logf("after welcome: context=%s, state=%s", welcomeCtx, r.interactionState.String())
+	t.Logf("after welcome: context=%s, state=%s", welcomeCtx, r.getInteractionState().String())
 
 	// Verify text output for welcome
 	require.Eventually(t, func() bool {
@@ -2003,15 +2043,11 @@ func TestScenario_S1_WelcomeAndDoubleIdleTimeout(t *testing.T) {
 
 	// Wait for idle timeout message to be fully processed
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "state should reach LLMGenerated after first idle timeout")
 
 	idleCtx1 := r.GetID()
-	r.msgMu.RLock()
-	t.Logf("after idle1 processed: state=%s, context=%s", r.interactionState.String(), idleCtx1)
-	r.msgMu.RUnlock()
+	t.Logf("after idle1 processed: state=%s, context=%s", r.getInteractionState().String(), idleCtx1)
 	t.Logf("after idle timeout 1: context=%s (was %s)", idleCtx1, welcomeCtx)
 
 	// Verify text output for idle timeout
@@ -2050,9 +2086,7 @@ func TestScenario_S1_WelcomeAndDoubleIdleTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "state should reach LLMGenerated after second idle timeout")
 
 	idleCtx2 := r.GetID()
@@ -2113,7 +2147,7 @@ func TestScenario_S2_WelcomeUserSpeaksAssistantRespondsThenIdleTimeout(t *testin
 	r.speechToTextTransformer = stt
 	r.endOfSpeech = eos
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	// Wire callbacks
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
@@ -2139,9 +2173,7 @@ func TestScenario_S2_WelcomeUserSpeaksAssistantRespondsThenIdleTimeout(t *testin
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "welcome should complete")
 
 	require.Eventually(t, func() bool {
@@ -2175,9 +2207,7 @@ func TestScenario_S2_WelcomeUserSpeaksAssistantRespondsThenIdleTimeout(t *testin
 
 	// Wait for LLM response to complete (executor emits delta+done)
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "LLM response should complete")
 
 	// Verify executor received the user's text
@@ -2221,9 +2251,7 @@ func TestScenario_S2_WelcomeUserSpeaksAssistantRespondsThenIdleTimeout(t *testin
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "idle timeout should complete")
 
 	// Verify text
@@ -2266,9 +2294,7 @@ func (p templateParserStub) Parse(u string, _ map[string]interface{}) string { r
 func waitForIdleReady(t *testing.T, r *genericRequestor, msg string) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, msg)
 	time.Sleep(50 * time.Millisecond) // let startIdleTimeoutTimer complete
 }
@@ -2319,7 +2345,7 @@ func TestBug_IdleTimeoutCount_ResetByInterruption(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ttsCtx, pkts...)
@@ -2342,9 +2368,7 @@ func TestBug_IdleTimeoutCount_ResetByInterruption(t *testing.T) {
 
 		// Wait for the inject message to be fully processed
 		require.Eventually(t, func() bool {
-			r.msgMu.RLock()
-			defer r.msgMu.RUnlock()
-			return r.interactionState == LLMGenerated
+			return r.getInteractionState() == LLMGenerated
 		}, 3*time.Second, 20*time.Millisecond, "idle timeout %d should complete (state → LLMGenerated)", i)
 
 		// Allow dispatchers to process all side effects
@@ -2410,7 +2434,7 @@ func TestBug_IdleMessage_NoAudioDelivered(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ttsCtx, pkts...)
@@ -2431,9 +2455,7 @@ func TestBug_IdleMessage_NoAudioDelivered(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "welcome should reach LLMGenerated")
 
 	require.Eventually(t, func() bool {
@@ -2462,9 +2484,7 @@ func TestBug_IdleMessage_NoAudioDelivered(t *testing.T) {
 
 	// Wait for the idle message to complete
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "idle message should reach LLMGenerated")
 
 	// Verify idle message TEXT was sent
@@ -2528,7 +2548,7 @@ func TestScenario_WelcomeThenIdleTimeoutsUntilDisconnect(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ttsCtx, pkts...)
@@ -2549,9 +2569,7 @@ func TestScenario_WelcomeThenIdleTimeoutsUntilDisconnect(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "welcome should complete")
 
 	require.Eventually(t, func() bool {
@@ -2582,9 +2600,7 @@ func TestScenario_WelcomeThenIdleTimeoutsUntilDisconnect(t *testing.T) {
 
 		// Wait for the inject message to be fully processed
 		require.Eventually(t, func() bool {
-			r.msgMu.RLock()
-			defer r.msgMu.RUnlock()
-			return r.interactionState == LLMGenerated
+			return r.getInteractionState() == LLMGenerated
 		}, 3*time.Second, 20*time.Millisecond, "idle timeout %d should complete", i)
 
 		// Allow dispatchers to drain
@@ -2700,7 +2716,7 @@ func TestBug_TTSRace_InterruptCancelsIdleMessageAudio(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ttsCtx, pkts...)
@@ -2721,9 +2737,7 @@ func TestBug_TTSRace_InterruptCancelsIdleMessageAudio(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "welcome should complete")
 
 	require.Eventually(t, func() bool {
@@ -2742,9 +2756,7 @@ func TestBug_TTSRace_InterruptCancelsIdleMessageAudio(t *testing.T) {
 
 	// Wait for the idle message to complete
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "idle message should reach LLMGenerated")
 
 	// Wait for all async processing
@@ -2809,7 +2821,7 @@ func TestBug_TTSRace_MultipleIdleTimeouts_AllShouldProduceAudio(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ttsCtx, pkts...)
@@ -2828,9 +2840,7 @@ func TestBug_TTSRace_MultipleIdleTimeouts_AllShouldProduceAudio(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond)
 	time.Sleep(100 * time.Millisecond)
 
@@ -2845,9 +2855,7 @@ func TestBug_TTSRace_MultipleIdleTimeouts_AllShouldProduceAudio(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Eventually(t, func() bool {
-			r.msgMu.RLock()
-			defer r.msgMu.RUnlock()
-			return r.interactionState == LLMGenerated
+			return r.getInteractionState() == LLMGenerated
 		}, 3*time.Second, 20*time.Millisecond, "idle timeout %d should complete", i)
 
 		time.Sleep(200 * time.Millisecond)
@@ -2903,7 +2911,7 @@ func TestDeadlock_OnIdleTimeout_ConcurrentWithDispatchers(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ttsCtx, pkts...)
@@ -2922,9 +2930,7 @@ func TestDeadlock_OnIdleTimeout_ConcurrentWithDispatchers(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond)
 
 	// Fire 10 rapid idle timeouts in sequence (in production, onIdleTimeout
@@ -2981,7 +2987,7 @@ func TestDeadlock_IdleTimeoutWhileUserSpeaks(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ttsCtx, pkts...)
@@ -3067,7 +3073,7 @@ func TestDeadlock_SlowExecutor_DoesNotBlockSystem(t *testing.T) {
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
 	r.textToSpeechTransformer = tts
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	tts.onPacket = func(ttsCtx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ttsCtx, pkts...)
@@ -3086,9 +3092,7 @@ func TestDeadlock_SlowExecutor_DoesNotBlockSystem(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "welcome should complete even with slow executor")
 
 	// Now fire idle timeout — the critical dispatcher will be blocked for 100ms
@@ -3108,9 +3112,7 @@ func TestDeadlock_SlowExecutor_DoesNotBlockSystem(t *testing.T) {
 
 	// Verify idle message completes despite slow executor
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond, "idle message should complete despite slow executor")
 
 	t.Log("slow executor test passed — no deadlock")
@@ -3139,7 +3141,7 @@ func TestDeadlock_CriticalChannel_SelfEnqueue(t *testing.T) {
 	r.streamer = &capturingStreamer{ctx: ctx}
 	r.assistantExecutor = executor
 	r.inputNormalizer = norm
-	r.msgMode = type_enums.AudioMode
+	r.setModeForTest(type_enums.AudioMode)
 
 	norm.onPacket = func(ctx context.Context, pkts ...internal_type.Packet) error {
 		return r.OnPacket(ctx, pkts...)
@@ -3156,9 +3158,7 @@ func TestDeadlock_CriticalChannel_SelfEnqueue(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		r.msgMu.RLock()
-		defer r.msgMu.RUnlock()
-		return r.interactionState == LLMGenerated
+		return r.getInteractionState() == LLMGenerated
 	}, 3*time.Second, 20*time.Millisecond)
 
 	// Pre-fill criticalCh with many packets to create backpressure.

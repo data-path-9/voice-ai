@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_telemetry_entity "github.com/rapidaai/api/assistant-api/internal/entity/telemetry"
 	"github.com/stretchr/testify/assert"
@@ -11,7 +12,10 @@ import (
 )
 
 func TestGetTelemetryProvider_AssistantNotInitialized(t *testing.T) {
-	gr := &genericRequestor{}
+	gr := &genericRequestor{
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
+	}
 
 	providers, err := gr.GetTelemetryProvider(context.Background())
 	require.Error(t, err)
@@ -20,7 +24,9 @@ func TestGetTelemetryProvider_AssistantNotInitialized(t *testing.T) {
 
 func TestGetTelemetryProvider_NoProvidersConfigured(t *testing.T) {
 	gr := &genericRequestor{
-		assistant: &internal_assistant_entity.Assistant{},
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
+		assistant:        &internal_assistant_entity.Assistant{},
 	}
 
 	providers, err := gr.GetTelemetryProvider(context.Background())
@@ -34,6 +40,8 @@ func TestGetTelemetryProvider_ReturnsConfiguredProviders(t *testing.T) {
 		{ProviderType: "logging", Enabled: true},
 	}
 	gr := &genericRequestor{
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
 		assistant: &internal_assistant_entity.Assistant{
 			AssistantTelemetryProviders: expected,
 		},
