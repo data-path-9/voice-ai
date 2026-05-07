@@ -4,7 +4,7 @@ import { useRapidaStore } from '@/hooks';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast/headless';
-import { toHumanReadableRelativeTime } from '@/utils/date';
+import { toHumanReadableDateTime, toHumanReadableRelativeTime } from '@/utils/date';
 import { TableSection } from '@/app/components/sections/table-section';
 import { Pagination } from '@/app/components/carbon/pagination';
 import IconIndicator from '@carbon/react/es/components/IconIndicator';
@@ -150,7 +150,6 @@ export function Version(props: {
         >
           <TableBatchAction
             renderIcon={Rocket}
-            kind="ghost"
             onClick={() => {
               if (selectedVersionId) {
                 deployRevision(selectedVersionId);
@@ -213,25 +212,26 @@ export function Version(props: {
                     disabled={isDeployed}
                   />
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   {epm.getDescription() || 'Initial endpoint version'}
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   <VersionId id={epm.getId()} />
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   {isDeployed ? (
                     <IconIndicator kind="succeeded" label="In use" size={16} />
                   ) : (
                     <IconIndicator kind="incomplete" label="Available" size={16} />
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   {epm.getCreateduser()?.getName() || ''}
                 </TableCell>
-                <TableCell>
-                  {epm.getCreateddate() &&
-                    toHumanReadableRelativeTime(epm.getCreateddate()!)}
+                 <TableCell className="text-sm whitespace-nowrap">
+                    {epm.getCreateddate()
+                    ? toHumanReadableDateTime(epm.getCreateddate()!)
+                    : '—'}
                 </TableCell>
               </TableRow>
             );

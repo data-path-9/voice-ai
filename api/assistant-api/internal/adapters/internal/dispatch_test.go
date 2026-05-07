@@ -34,27 +34,12 @@ import (
 
 type dispatchTestStreamer struct {
 	ctx context.Context
-	mu  sync.Mutex
-
-	modes []protos.StreamMode
 }
 
 func (s *dispatchTestStreamer) Context() context.Context            { return s.ctx }
 func (s *dispatchTestStreamer) Recv() (internal_type.Stream, error) { return nil, io.EOF }
 func (s *dispatchTestStreamer) Send(internal_type.Stream) error     { return nil }
-func (s *dispatchTestStreamer) NotifyMode(mode protos.StreamMode) {
-	s.mu.Lock()
-	s.modes = append(s.modes, mode)
-	s.mu.Unlock()
-}
-
-func (s *dispatchTestStreamer) getModes() []protos.StreamMode {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cp := make([]protos.StreamMode, len(s.modes))
-	copy(cp, s.modes)
-	return cp
-}
+func (s *dispatchTestStreamer) NotifyMode(protos.StreamMode)        {}
 
 // executorStub captures packets sent to Execute.
 type executorStub struct {
@@ -308,50 +293,6 @@ func drainPacket[T internal_type.Packet](ch chan adapter_channel.Envelope, timeo
 func channelHasPacketType[T internal_type.Packet](ch chan adapter_channel.Envelope, timeout time.Duration) bool {
 	_, ok := drainPacket[T](ch, timeout)
 	return ok
-}
-
-func TestHandleInitializationCompleted_NotifyModeFromInitializedState(t *testing.T) {
-	t.Parallel()
-
-	testCases := []struct {
-		name         string
-		mode         type_enums.MessageMode
-		expectedMode protos.StreamMode
-	}{
-		{
-			name:         "text_mode",
-			mode:         type_enums.TextMode,
-			expectedMode: protos.StreamMode_STREAM_MODE_TEXT,
-		},
-		{
-			name:         "audio_mode",
-			mode:         type_enums.AudioMode,
-			expectedMode: protos.StreamMode_STREAM_MODE_AUDIO,
-		},
-	}
-
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			r := newTestRequestor(t, ctx)
-			r.setModeForTest(tc.mode)
-			h := requestorDispatchHandler{r: r}
-
-			h.HandleInitializationCompleted(ctx, internal_type.InitializationCompletedPacket{
-				ContextID: r.GetID(),
-				Event:     utils.ConversationBegin,
-			})
-
-			streamer, ok := r.streamer.(*dispatchTestStreamer)
-			require.True(t, ok)
-			require.Equal(t, []protos.StreamMode{tc.expectedMode}, streamer.getModes())
-		})
-	}
 }
 
 // =============================================================================

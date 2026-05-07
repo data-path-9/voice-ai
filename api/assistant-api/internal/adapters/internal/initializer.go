@@ -7,7 +7,6 @@ package adapter_internal
 
 import (
 	"context"
-	"fmt"
 
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_denoiser "github.com/rapidaai/api/assistant-api/internal/denoiser"
@@ -16,7 +15,6 @@ import (
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	internal_vad "github.com/rapidaai/api/assistant-api/internal/vad"
 	"github.com/rapidaai/pkg/utils"
-	"github.com/rapidaai/protos"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -194,25 +192,11 @@ func (spk *genericRequestor) initializeTextToSpeech(ctx context.Context) error {
 	return eGroup.Wait()
 }
 
-func (listening *genericRequestor) initializeInputNormalizer(ctx context.Context, cfg *protos.ConversationInitialization) error {
-	if err := listening.inputNormalizer.Initialize(ctx, listening, cfg); err != nil {
-		return fmt.Errorf("input normalizer init: %w", err)
-	}
-	return nil
-}
-
 func (spk *genericRequestor) disconnectInputNormalizer(ctx context.Context) {
 	if spk.inputNormalizer != nil {
 		spk.inputNormalizer.Close(ctx)
 		spk.inputNormalizer = nil
 	}
-}
-
-func (listening *genericRequestor) initializeOutputNormalizer(ctx context.Context, cfg *protos.ConversationInitialization) error {
-	if err := listening.outputNormalizer.Initialize(ctx, listening, cfg); err != nil {
-		return fmt.Errorf("output normalizer init: %w", err)
-	}
-	return nil
 }
 
 func (spk *genericRequestor) disconnectOutputNormalizer(ctx context.Context) {

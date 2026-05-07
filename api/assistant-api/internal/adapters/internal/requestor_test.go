@@ -136,3 +136,24 @@ func TestInitializeCollectors_UnknownProvider_SkipsToNoopCollectors(t *testing.T
 	assert.True(t, strings.Contains(fmt.Sprintf("%T", r.observer.EventCollectors()), "noopEventCollector"))
 	assert.True(t, strings.Contains(fmt.Sprintf("%T", r.observer.MetricCollectors()), "noopMetricCollector"))
 }
+
+// TestInitializeTelemetry_ChannelHandoffIsRaceFree asserts the synchronization
+// pattern used in production: telemetry runs in a goroutine, then sends a
+// packet (channel send) that another goroutine receives before reading
+// r.observer. Channel send/receive establishes happens-before, so reads from
+// the receiver's goroutine observe the fully-published observer.
+//
+// Run with -race; must pass.
+func TestInitializeTelemetry_ChannelHandoffIsRaceFree(t *testing.T) {
+	r := requestorForTelemetryTest(t, nil)
+	handoff := make(chan struct{}, 1)
+
+	go func() {
+		r.initializeCollectors(context.Background())
+		handoff <- struct{}{}
+	}()
+
+	<-handoff
+	require.NotNil(t, r.observer)
+	_ = r.observer.EventCollectors()
+}

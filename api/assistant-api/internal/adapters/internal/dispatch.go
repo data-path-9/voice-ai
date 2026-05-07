@@ -11,6 +11,7 @@ import (
 	adapter_channel "github.com/rapidaai/api/assistant-api/internal/adapters/channel"
 	adapter_router "github.com/rapidaai/api/assistant-api/internal/adapters/router"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+	"github.com/rapidaai/pkg/utils"
 )
 
 // =============================================================================
@@ -29,6 +30,8 @@ func (r *genericRequestor) OnPacket(ctx context.Context, pkts ...internal_type.P
 			r.channels.OnIngress(adapter_channel.Envelope{Ctx: ctx, Pkt: p})
 		case adapter_router.RouteEgress:
 			r.channels.OnEgress(adapter_channel.Envelope{Ctx: ctx, Pkt: p})
+		case adapter_router.RouteData:
+			r.channels.OnData(adapter_channel.Envelope{Ctx: ctx, Pkt: p})
 		case adapter_router.RouteBackground:
 			r.channels.OnBackground(adapter_channel.Envelope{Ctx: ctx, Pkt: p})
 		default:
@@ -36,14 +39,6 @@ func (r *genericRequestor) OnPacket(ctx context.Context, pkts ...internal_type.P
 		}
 	}
 	return nil
-}
-
-func (r *genericRequestor) OnStartDispatchers(ctx context.Context) {
-	r.dispatchStartOnce.Do(func() {
-		go r.runCriticalDispatcher(ctx)
-		go r.runInputDispatcher(ctx)
-		go r.runOutputDispatcher(ctx)
-	})
 }
 
 // =============================================================================
@@ -74,6 +69,12 @@ func (r *genericRequestor) runOutputDispatcher(ctx context.Context) {
 	})
 }
 
+func (r *genericRequestor) runDataDispatcher(ctx context.Context) {
+	r.channels.RunData(ctx, func(e adapter_channel.Envelope) {
+		r.dispatch(e.Ctx, e.Pkt)
+	})
+}
+
 func (r *genericRequestor) runLowDispatcher(ctx context.Context) {
 	r.channels.RunBackground(ctx, func(e adapter_channel.Envelope) {
 		r.dispatch(e.Ctx, e.Pkt)
@@ -86,7 +87,16 @@ func (r *genericRequestor) runLowDispatcher(ctx context.Context) {
 
 func (r *genericRequestor) dispatch(ctx context.Context, p internal_type.Packet) {
 	defer r.benchmarkDispatch(p)()
-	if err := adapter_router.DispatchPacket(ctx, p, requestorDispatchHandler{r: r}); err != nil {
-		r.logger.Warnf("unknown packet type received in dispatcher %T: %v", p, err)
+	switch p.(type) {
+	case internal_type.AsyncPacket:
+		utils.Go(ctx, func() {
+			if err := adapter_router.DispatchPacket(ctx, p, requestorDispatchHandler{r: r}); err != nil {
+				r.logger.Warnf("unknown packet type received in dispatcher %T: %v", p, err)
+			}
+		})
+	default:
+		if err := adapter_router.DispatchPacket(ctx, p, requestorDispatchHandler{r: r}); err != nil {
+			r.logger.Warnf("unknown packet type received in dispatcher %T: %v", p, err)
+		}
 	}
 }

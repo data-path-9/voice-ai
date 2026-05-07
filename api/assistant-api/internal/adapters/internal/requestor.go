@@ -20,8 +20,6 @@ import (
 
 	internal_agent_embeddings "github.com/rapidaai/api/assistant-api/internal/agent/embedding"
 	internal_agent_rerankers "github.com/rapidaai/api/assistant-api/internal/agent/reranker"
-	internal_analysis "github.com/rapidaai/api/assistant-api/internal/analysis"
-	internal_authentication "github.com/rapidaai/api/assistant-api/internal/authentication"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_knowledge_gorm "github.com/rapidaai/api/assistant-api/internal/entity/knowledges"
@@ -33,7 +31,6 @@ import (
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
 	internal_knowledge_service "github.com/rapidaai/api/assistant-api/internal/services/knowledge"
-	internal_webhook "github.com/rapidaai/api/assistant-api/internal/webhook"
 	endpoint_client "github.com/rapidaai/pkg/clients/endpoint"
 	integration_client "github.com/rapidaai/pkg/clients/integration"
 	web_client "github.com/rapidaai/pkg/clients/web"
@@ -91,11 +88,10 @@ type genericRequestor struct {
 	deploymentClient  endpoint_client.DeploymentServiceClient
 
 	// interaction/session lifecycle owners.
-	messageLifecycle  adapter_lifecycle.MessageLifecycle
-	sessionLifecycle  adapter_lifecycle.SessionLifecycle
-	dispatchStartOnce sync.Once
-	bootstrapStart    sync.Once
-	backgroundStart   sync.Once
+	messageLifecycle adapter_lifecycle.MessageLifecycle
+	sessionLifecycle adapter_lifecycle.SessionLifecycle
+	lowStart         sync.Once
+	inputStart       sync.Once
 
 	// listening
 	speechToTextTransformer internal_type.SpeechToTextTransformer
@@ -114,9 +110,9 @@ type genericRequestor struct {
 
 	// executor
 	assistantExecutor      internal_llm.AssistantExecutor
-	analysisExecutor       internal_analysis.Executor
-	webhookExecutor        internal_webhook.Executor
-	authenticationExecutor internal_authentication.Executor
+	analysisExecutor       internal_type.AnalysisExecutor
+	webhookExecutor        internal_type.WebhookExecutor
+	authenticationExecutor internal_type.AuthenticationExecutor
 
 	// states
 	assistant             *internal_assistant_entity.Assistant
@@ -133,11 +129,11 @@ type genericRequestor struct {
 	idleTimeoutCount    uint64
 	maxSessionTimer     *time.Timer
 
-	// workerCtx outlives the stream context so the low dispatcher can
-	// process completion packets (analysis, webhooks) after disconnect.
-	workerCtx      context.Context
-	workerCancel   context.CancelFunc
-	disconnectDone chan struct{}
+	// sessionCtx is the adapter-owned lifecycle context. Outlives the gRPC stream.
+	// cancelSession is invoked exactly once, by HandleFinalizationCompleted, after
+	// the disconnect chain has fully drained. No other call site should invoke it.
+	sessionCtx    context.Context
+	cancelSession context.CancelFunc
 
 	// channel registry with semantic names.
 	channels adapter_channel.RequestorChannelBus
@@ -150,9 +146,9 @@ func NewGenericRequestor(
 	postgres connectors.PostgresConnector, opensearch connectors.OpenSearchConnector,
 	redis connectors.RedisConnector, storage storages.Storage, streamer internal_type.Streamer,
 ) *genericRequestor {
-	workerCtx, workerCancel := context.WithCancel(context.Background())
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
 
-	return &genericRequestor{
+	gr := &genericRequestor{
 		logger:   logger,
 		config:   config,
 		source:   source,
@@ -181,23 +177,27 @@ func NewGenericRequestor(
 		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
 		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
 
-		assistantExecutor:      internal_llm.NewAssistantExecutor(logger),
-		analysisExecutor:       internal_analysis.NewExecutor(logger),
-		webhookExecutor:        internal_webhook.NewExecutor(logger),
-		authenticationExecutor: internal_authentication.NewExecutor(logger),
+		assistantExecutor: internal_llm.NewAssistantExecutor(logger),
 
 		inputNormalizer:  internal_input_normalizer.NewInputNormalizer(logger),
 		outputNormalizer: internal_output_normalizer.NewOutputNormalizer(logger),
 
 		//
-		histories:    make([]internal_type.MessagePacket, 0),
-		metadata:     make(map[string]interface{}),
-		args:         make(map[string]interface{}),
-		options:      make(map[string]interface{}),
-		workerCtx:    workerCtx,
-		workerCancel: workerCancel,
-		channels:     adapter_channel.NewRequestorChannels(),
+		histories:     make([]internal_type.MessagePacket, 0),
+		metadata:      make(map[string]interface{}),
+		args:          make(map[string]interface{}),
+		options:       make(map[string]interface{}),
+		sessionCtx:    sessionCtx,
+		cancelSession: cancelSession,
+		channels:      adapter_channel.NewRequestorChannels(),
 	}
+
+	go gr.runBootstrapDispatcher(sessionCtx)
+	go gr.runCriticalDispatcher(sessionCtx)
+	go gr.runOutputDispatcher(sessionCtx)
+	go gr.runDataDispatcher(sessionCtx)
+
+	return gr
 }
 
 // GetSource implements internal_adapter_requests.Messaging.
@@ -223,25 +223,17 @@ func (talking *genericRequestor) BeginConversation(ctx context.Context, assistan
 		return err
 	}
 
+	talking.assistantConversation = conversation
+
 	if arguments, err := utils.AnyMapToInterfaceMap(config.GetArgs()); err == nil {
-		talking.args = arguments
-		utils.Go(ctx, func() {
-			talking.conversationService.ApplyConversationArgument(ctx, talking.Auth(), assistant.Id, conversation.Id, arguments)
-		})
+		talking.applyArguments(arguments)
 	}
 	if options, err := utils.AnyMapToInterfaceMap(config.GetOptions()); err == nil {
-		talking.options = options
-		utils.Go(ctx, func() {
-			talking.conversationService.ApplyConversationOption(ctx, talking.Auth(), assistant.Id, conversation.Id, options)
-		})
+		talking.applyOptions(options)
 	}
 	if metadata, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil {
-		talking.metadata = metadata
-		utils.Go(ctx, func() {
-			talking.conversationService.ApplyConversationMetadata(ctx, talking.Auth(), assistant.Id, conversation.Id, types.NewMetadataList(metadata))
-		})
+		talking.applyMetadata(metadata)
 	}
-	talking.assistantConversation = conversation
 	return err
 }
 
@@ -260,11 +252,8 @@ func (talking *genericRequestor) ResumeConversation(ctx context.Context, assista
 	talking.args = conversation.GetArguments()
 	talking.options = conversation.GetOptions()
 	talking.metadata = conversation.GetMetadatas()
-	if extra, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil && len(extra) > 0 {
-		talking.metadata = utils.MergeMaps(talking.metadata, extra)
-		utils.Go(ctx, func() {
-			talking.conversationService.ApplyConversationMetadata(ctx, talking.Auth(), assistant.Id, conversation.Id, types.NewMetadataList(extra))
-		})
+	if extra, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil {
+		talking.applyMetadata(extra)
 	}
 	return nil
 }
@@ -298,7 +287,7 @@ func (dm *genericRequestor) GetHistories() []internal_type.MessagePacket {
 	return dm.histories
 }
 
-func (gr *genericRequestor) CreateConversationRecording(ctx context.Context, user, assistant []byte) error {
+func (gr *genericRequestor) CreateConversationRecording(_ context.Context, user, assistant []byte) error {
 	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 	defer cancel()
 	if _, err := gr.conversationService.CreateConversationRecording(dbCtx, gr.auth, gr.assistant.Id, gr.assistantConversation.Id, user, assistant); err != nil {
@@ -371,10 +360,6 @@ func (r *genericRequestor) Transition(newState InteractionState) error {
 
 func (r *genericRequestor) getSessionState() adapter_lifecycle.SessionState {
 	return r.sessionLifecycle.Current()
-}
-
-func (r *genericRequestor) transitionSession(event adapter_lifecycle.SessionEvent) error {
-	return r.sessionLifecycle.Transition(event)
 }
 
 func (r *genericRequestor) canAcceptInput() bool {
@@ -505,11 +490,6 @@ func (r *genericRequestor) initializeCollectors(ctx context.Context) {
 		Metrics: observe.NewMetricCollector(r.logger, meta, metricExporters...),
 	})
 
-	// Initialize executors for webhook/analysis execution.
-
-	r.analysisExecutor.Init(ctx, r)
-	r.webhookExecutor.Init(ctx, r)
-
 }
 
 // shutdownCollectors waits for in-flight exports and shuts down all exporters.
@@ -520,9 +500,13 @@ func (r *genericRequestor) shutdownCollectors(ctx context.Context) {
 		r.observer.Shutdown(shutdownCtx)
 	}
 	if r.analysisExecutor != nil {
-		r.analysisExecutor.Close(ctx)
+		if err := r.analysisExecutor.Close(ctx); err != nil {
+			r.logger.Errorf("close analysis executor: %v", err)
+		}
 	}
 	if r.webhookExecutor != nil {
-		r.webhookExecutor.Close(ctx)
+		if err := r.webhookExecutor.Close(ctx); err != nil {
+			r.logger.Errorf("close webhook executor: %v", err)
+		}
 	}
 }

@@ -60,13 +60,15 @@ type DispatchHandler interface {
 	HandleInitializeAuthentication(context.Context, internal_type.InitializeAuthenticationPacket)
 	HandleExecuteSessionAuthentication(context.Context, internal_type.ExecuteSessionAuthenticationPacket)
 	HandleSessionAuthenticationSucceeded(context.Context, internal_type.SessionAuthenticationSucceededPacket)
-	HandleSessionAuthenticationFailed(context.Context, internal_type.SessionAuthenticationFailedPacket)
 	HandleInitializeSpeechToText(context.Context, internal_type.InitializeSpeechToTextPacket)
 	HandleInitializeTextToSpeech(context.Context, internal_type.InitializeTextToSpeechPacket)
 	HandleInitializeVoiceActivityDetection(context.Context, internal_type.InitializeVoiceActivityDetectionPacket)
 	HandleInitializeEndOfSpeech(context.Context, internal_type.InitializeEndOfSpeechPacket)
 	HandleInitializeBehavior(context.Context, internal_type.InitializeBehaviorPacket)
 	HandleInitializationCompleted(context.Context, internal_type.InitializationCompletedPacket)
+	HandleInitializeTelemetry(context.Context, internal_type.InitializeTelemetryPacket)
+	HandleInitializeOutboundDispatcher(context.Context, internal_type.InitializeOutboundDispatcherPacket)
+	HandleInitializeInboundDispatcher(context.Context, internal_type.InitializeInboundDispatcherPacket)
 	HandleModeSwitchRequested(context.Context, internal_type.ModeSwitchRequestedPacket)
 	HandleModeSwitchCompleted(context.Context, internal_type.ModeSwitchCompletedPacket)
 	HandleModeSwitchInitializeSpeechToText(context.Context, internal_type.ModeSwitchInitializeSpeechToTextPacket)
@@ -191,8 +193,6 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleExecuteSessionAuthentication(ctx, vl)
 	case internal_type.SessionAuthenticationSucceededPacket:
 		handler.HandleSessionAuthenticationSucceeded(ctx, vl)
-	case internal_type.SessionAuthenticationFailedPacket:
-		handler.HandleSessionAuthenticationFailed(ctx, vl)
 	case internal_type.InitializeSpeechToTextPacket:
 		handler.HandleInitializeSpeechToText(ctx, vl)
 	case internal_type.InitializeTextToSpeechPacket:
@@ -205,6 +205,12 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleInitializeBehavior(ctx, vl)
 	case internal_type.InitializationCompletedPacket:
 		handler.HandleInitializationCompleted(ctx, vl)
+	case internal_type.InitializeTelemetryPacket:
+		handler.HandleInitializeTelemetry(ctx, vl)
+	case internal_type.InitializeOutboundDispatcherPacket:
+		handler.HandleInitializeOutboundDispatcher(ctx, vl)
+	case internal_type.InitializeInboundDispatcherPacket:
+		handler.HandleInitializeInboundDispatcher(ctx, vl)
 	case internal_type.ModeSwitchRequestedPacket:
 		handler.HandleModeSwitchRequested(ctx, vl)
 	case internal_type.ModeSwitchCompletedPacket:

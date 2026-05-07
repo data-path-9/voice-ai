@@ -22,6 +22,7 @@ type ChannelWriter interface {
 	OnBootstrap(Envelope)
 	OnIngress(Envelope)
 	OnEgress(Envelope)
+	OnData(Envelope)
 	OnBackground(Envelope)
 }
 
@@ -30,6 +31,7 @@ type ChannelReader interface {
 	BootstrapChannel() chan Envelope
 	IngressChannel() chan Envelope
 	EgressChannel() chan Envelope
+	DataChannel() chan Envelope
 	BackgroundChannel() chan Envelope
 }
 
@@ -38,6 +40,7 @@ type ChannelFlusher interface {
 	FlushBootstrap() int
 	FlushIngress() int
 	FlushEgress() int
+	FlushData() int
 	FlushBackground() int
 	FlushAll() int
 }
@@ -47,6 +50,7 @@ type ChannelRunner interface {
 	RunBootstrap(context.Context, func(Envelope))
 	RunIngress(context.Context, func(Envelope))
 	RunEgress(context.Context, func(Envelope))
+	RunData(context.Context, func(Envelope))
 	RunBackground(context.Context, func(Envelope))
 }
 
@@ -76,8 +80,13 @@ type RequestorChannels struct {
 	// LLM deltas/done, TTS text/audio/end, and output error/control events.
 	egressCh chan Envelope
 
-	// backgroundCh is for non-urgent/background lifecycle work:
-	// persistence, metrics, metadata, events, analysis/webhook completion, disconnect flow.
+	// dataCh carries DB writes, recording, and lifecycle orchestration that does
+	// not require the observer. Drained by the data dispatcher started at
+	// NewGenericRequestor and runs for the entire session.
+	dataCh chan Envelope
+
+	// backgroundCh is for observer-touching telemetry (events, metrics).
+	// Drained by the dispatcher started after telemetry init completes.
 	backgroundCh chan Envelope
 }
 
@@ -87,6 +96,7 @@ func NewRequestorChannels() *RequestorChannels {
 		bootstrapCh:    make(chan Envelope, 512),
 		ingressCh:      make(chan Envelope, 4096),
 		egressCh:       make(chan Envelope, 2048),
+		dataCh:         make(chan Envelope, 2048),
 		backgroundCh:   make(chan Envelope, 2048),
 	}
 }
@@ -95,6 +105,7 @@ func (c *RequestorChannels) ControlChannel() chan Envelope    { return c.control
 func (c *RequestorChannels) BootstrapChannel() chan Envelope  { return c.bootstrapCh }
 func (c *RequestorChannels) IngressChannel() chan Envelope    { return c.ingressCh }
 func (c *RequestorChannels) EgressChannel() chan Envelope     { return c.egressCh }
+func (c *RequestorChannels) DataChannel() chan Envelope       { return c.dataCh }
 func (c *RequestorChannels) BackgroundChannel() chan Envelope { return c.backgroundCh }
 
 // OnControl routes an envelope to the control channel.
@@ -117,6 +128,11 @@ func (c *RequestorChannels) OnIngress(e Envelope) {
 // OnEgress routes an envelope to the egress channel.
 func (c *RequestorChannels) OnEgress(e Envelope) {
 	c.egressCh <- e
+}
+
+// OnData routes an envelope to the data channel (DB writes, recording, lifecycle).
+func (c *RequestorChannels) OnData(e Envelope) {
+	c.dataCh <- e
 }
 
 // OnBackground routes an envelope to the background channel.
@@ -149,6 +165,10 @@ func (c *RequestorChannels) RunIngress(ctx context.Context, onEnvelope func(Enve
 
 func (c *RequestorChannels) RunEgress(ctx context.Context, onEnvelope func(Envelope)) {
 	run(ctx, c.egressCh, onEnvelope)
+}
+
+func (c *RequestorChannels) RunData(ctx context.Context, onEnvelope func(Envelope)) {
+	run(ctx, c.dataCh, onEnvelope)
 }
 
 func (c *RequestorChannels) RunBackground(ctx context.Context, onEnvelope func(Envelope)) {
@@ -187,6 +207,11 @@ func (c *RequestorChannels) FlushEgress() int {
 	return flushChannel(c.egressCh)
 }
 
+// FlushData drains queued data packets and returns dropped count.
+func (c *RequestorChannels) FlushData() int {
+	return flushChannel(c.dataCh)
+}
+
 // FlushBackground drains queued background packets and returns dropped count.
 func (c *RequestorChannels) FlushBackground() int {
 	return flushChannel(c.backgroundCh)
@@ -198,5 +223,6 @@ func (c *RequestorChannels) FlushAll() int {
 		c.FlushBootstrap() +
 		c.FlushIngress() +
 		c.FlushEgress() +
+		c.FlushData() +
 		c.FlushBackground()
 }

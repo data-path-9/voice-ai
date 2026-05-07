@@ -17,6 +17,7 @@ const (
 	RouteBootstrap
 	RouteIngress
 	RouteEgress
+	RouteData
 	RouteBackground
 )
 
@@ -47,6 +48,9 @@ func Classify(p internal_type.Packet) Route {
 		internal_type.InitializeBehaviorPacket,
 		internal_type.InitializationCompletedPacket,
 		internal_type.InitializationFailedPacket,
+		internal_type.InitializeTelemetryPacket,
+		internal_type.InitializeOutboundDispatcherPacket,
+		internal_type.InitializeInboundDispatcherPacket,
 		internal_type.ModeSwitchRequestedPacket,
 		internal_type.ModeSwitchCompletedPacket,
 		internal_type.ModeSwitchInitializeSpeechToTextPacket,
@@ -87,10 +91,14 @@ func Classify(p internal_type.Packet) Route {
 		internal_type.LLMToolCallPacket:
 		return RouteEgress
 
-	// Low — recording, metrics, persistence, events, completion
+	// Data — DB writes, recording, lifecycle orchestration. No observer dependency,
+	// dispatcher starts at NewGenericRequestor.
 	case internal_type.RecordUserAudioPacket,
 		internal_type.RecordAssistantAudioPacket,
 		internal_type.MessageCreatePacket,
+		internal_type.ConversationMetadataPacket,
+		internal_type.UserMessageMetadataPacket,
+		internal_type.AssistantMessageMetadataPacket,
 		internal_type.ToolLogCreatePacket,
 		internal_type.ToolLogUpdatePacket,
 		internal_type.WebhookLogCreatePacket,
@@ -104,19 +112,19 @@ func Classify(p internal_type.Packet) Route {
 		internal_type.FinalizeConversationPacket,
 		internal_type.FinalizeAssistantPacket,
 		internal_type.FinalizationCompletedPacket,
+		internal_type.AnalysisStartPacket,
 		internal_type.ExecuteAnalysisPacket,
 		internal_type.AnalysisDonePacket,
-		internal_type.ExecuteWebhookPacket,
-		internal_type.AnalysisStartPacket,
 		internal_type.WebhookStartPacket,
-		internal_type.WebhookDonePacket,
+		internal_type.ExecuteWebhookPacket,
+		internal_type.WebhookDonePacket:
+		return RouteData
+
+	// Background — observer-touching telemetry. Dispatcher starts after telemetry init.
+	case internal_type.ConversationEventPacket,
 		internal_type.ConversationMetricPacket,
-		internal_type.ConversationMetadataPacket,
-		internal_type.AssistantMessageMetricPacket,
 		internal_type.UserMessageMetricPacket,
-		internal_type.UserMessageMetadataPacket,
-		internal_type.AssistantMessageMetadataPacket,
-		internal_type.ConversationEventPacket:
+		internal_type.AssistantMessageMetricPacket:
 		return RouteBackground
 	default:
 		return RouteBackground

@@ -173,7 +173,12 @@ func (tc *genericRequestor) GetMetadata() map[string]interface{} {
 	return tc.metadata
 }
 
-func (tc *genericRequestor) onSetMetadata(_ context.Context, auth types.SimplePrinciple, mt map[string]interface{}) {
+// applyMetadata merges metadata into in-memory state and persists asynchronously.
+// Called from BeginConversation, ResumeConversation, and HandleSessionAuthenticationSucceeded.
+func (tc *genericRequestor) applyMetadata(mt map[string]interface{}) {
+	if len(mt) == 0 {
+		return
+	}
 	modified := make(map[string]interface{})
 	for k, v := range mt {
 		vl, ok := tc.metadata[k]
@@ -183,16 +188,52 @@ func (tc *genericRequestor) onSetMetadata(_ context.Context, auth types.SimplePr
 		tc.metadata[k] = v
 		modified[k] = v
 	}
+	if len(modified) == 0 {
+		return
+	}
 	utils.Go(context.Background(), func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
 		start := time.Now()
 		tc.conversationService.ApplyConversationMetadata(
 			dbCtx,
-			auth, tc.assistant.Id, tc.assistantConversation.Id, types.NewMetadataList(modified))
-		tc.logger.Benchmark("genericRequestor.SetMetadata", time.Since(start))
+			tc.auth, tc.assistant.Id, tc.assistantConversation.Id, types.NewMetadataList(modified))
+		tc.logger.Benchmark("genericRequestor.applyMetadata", time.Since(start))
 	})
+}
 
+// applyArguments merges arguments into in-memory state and persists asynchronously.
+func (tc *genericRequestor) applyArguments(args map[string]interface{}) {
+	if len(args) == 0 {
+		return
+	}
+	tc.args = utils.MergeMaps(tc.args, args)
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		if _, err := tc.conversationService.ApplyConversationArgument(
+			dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, args,
+		); err != nil {
+			tc.logger.Errorf("apply arguments: %v", err)
+		}
+	})
+}
+
+// applyOptions merges options into in-memory state and persists asynchronously.
+func (tc *genericRequestor) applyOptions(opts map[string]interface{}) {
+	if len(opts) == 0 {
+		return
+	}
+	tc.options = utils.MergeMaps(tc.options, opts)
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		if _, err := tc.conversationService.ApplyConversationOption(
+			dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, opts,
+		); err != nil {
+			tc.logger.Errorf("apply options: %v", err)
+		}
+	})
 }
 
 func (tc *genericRequestor) onAddMetadata(_ context.Context, metadata ...*protos.Metadata) error {

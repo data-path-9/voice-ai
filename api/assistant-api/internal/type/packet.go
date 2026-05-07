@@ -387,6 +387,34 @@ type InitializationCompletedPacket struct {
 
 func (f InitializationCompletedPacket) ContextId() string { return f.ContextID }
 
+// AsyncPacket marks a packet whose handler runs in its own goroutine.
+type AsyncPacket interface {
+	Packet
+	IsAsync() bool
+}
+
+// InitializeTelemetryPacket initializes the conversation observer (collectors, exporters).
+type InitializeTelemetryPacket struct {
+	ContextID string
+}
+
+func (p InitializeTelemetryPacket) ContextId() string { return p.ContextID }
+func (p InitializeTelemetryPacket) IsAsync() bool     { return true }
+
+// InitializeOutboundDispatcherPacket starts control, egress, and background dispatchers.
+type InitializeOutboundDispatcherPacket struct {
+	ContextID string
+}
+
+func (p InitializeOutboundDispatcherPacket) ContextId() string { return p.ContextID }
+
+// InitializeInboundDispatcherPacket starts the ingress dispatcher.
+type InitializeInboundDispatcherPacket struct {
+	ContextID string
+}
+
+func (p InitializeInboundDispatcherPacket) ContextId() string { return p.ContextID }
+
 // InitializationStage identifies which initialization phase failed.
 type InitializationStage string
 
@@ -400,6 +428,10 @@ const (
 	InitializationStageVoiceActivity       InitializationStage = "vad"
 	InitializationStageEndOfSpeech         InitializationStage = "eos"
 	InitializationStageBehavior            InitializationStage = "behavior"
+	InitializationStageAnalysis            InitializationStage = "analysis"
+	InitializationStageWebhook             InitializationStage = "webhook"
+	InitializationStageInputNormalizer     InitializationStage = "input_normalizer"
+	InitializationStageOutputNormalizer    InitializationStage = "output_normalizer"
 	InitializationStageInitializationFinal InitializationStage = "initialization_completed"
 )
 

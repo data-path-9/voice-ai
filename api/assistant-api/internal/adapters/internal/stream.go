@@ -15,12 +15,15 @@ import (
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
+	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
 
 const (
 	dbWriteTimeout        = 5 * time.Second
 	collectorWriteTimeout = 10 * time.Second
+	connectDeadline       = 30 * time.Second
+	disconnectDeadline    = 30 * time.Second
 )
 
 // =============================================================================
@@ -38,10 +41,8 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 	for {
 		req, err := t.streamer.Recv()
 		if err != nil {
-			if t.Conversation() != nil {
-				t.emitCallCompletion(totalTime)
-				t.OnDisconnect(context.Background())
-			}
+			t.OnCallCompletion(totalTime)
+			t.OnDisconnect(context.Background())
 			return nil
 		}
 		switch payload := req.(type) {
@@ -128,38 +129,37 @@ func (t *genericRequestor) OnStreamDisconnection(totalTime time.Time, payload *p
 				Value: payload.GetType().String(),
 			}},
 		})
-	t.emitCallCompletion(totalTime)
+	t.OnCallCompletion(totalTime)
 	t.OnDisconnect(ctx)
 }
 
-// emitCallCompletion persists final metrics and events when the talk loop exits.
-// Written directly with a background context because the dispatcher goroutine's
-// context is already cancelled when Recv() returns an error.
-func (t *genericRequestor) emitCallCompletion(startTime time.Time) {
+// OnCallCompletion emits final metrics + an EventCompleted event when the talk
+// loop exits. Persistence and telemetry collection happen in the existing
+// background-channel handlers, so this function only enqueues packets.
+func (t *genericRequestor) OnCallCompletion(startTime time.Time) {
+	conv := t.Conversation()
+	if conv == nil {
+		return
+	}
 	duration := time.Since(startTime)
-	completionMetrics := []*protos.Metric{
-		{
-			Name:        type_enums.CONVERSATION_STATUS.String(),
-			Value:       type_enums.CONVERSATION_COMPLETE.String(),
-			Description: "Status of current conversation",
+	t.OnPacket(context.Background(),
+		internal_type.ConversationMetricPacket{
+			ContextID: conv.Id,
+			Metrics: []*protos.Metric{
+				{
+					Name:        type_enums.CONVERSATION_STATUS.String(),
+					Value:       type_enums.CONVERSATION_COMPLETE.String(),
+					Description: "Status of current conversation",
+				},
+				{
+					Name:        type_enums.CONVERSATION_DURATION.String(),
+					Value:       fmt.Sprintf("%d", duration),
+					Description: "Conversation duration from first message to end",
+				},
+			},
 		},
-		{
-			Name:        type_enums.CONVERSATION_DURATION.String(),
-			Value:       fmt.Sprintf("%d", duration),
-			Description: "Conversation duration from first message to end",
-		},
-	}
-	if err := t.onAddMetrics(context.Background(), completionMetrics...); err != nil {
-		t.logger.Errorf("talk: failed to persist completion metrics: %v", err)
-	}
-	if t.observer != nil {
-		t.observer.MetricCollectors().Collect(context.Background(), observe.ConversationMetricRecord{
-			ConversationID: fmt.Sprintf("%d", t.Conversation().Id),
-			Metrics:        completionMetrics,
-			Time:           time.Now(),
-		})
-		t.observer.EventCollectors().Collect(context.Background(), observe.EventRecord{
-			MessageID: t.GetID(),
+		internal_type.ConversationEventPacket{
+			ContextID: t.GetID(),
 			Name:      observe.ComponentSession,
 			Data: map[string]string{
 				observe.DataType:     observe.EventCompleted,
@@ -167,8 +167,8 @@ func (t *genericRequestor) emitCallCompletion(startTime time.Time) {
 				observe.DataMessages: fmt.Sprintf("%d", len(t.GetHistories())),
 			},
 			Time: time.Now(),
-		})
-	}
+		},
+	)
 }
 
 // Notify sends notifications to websocket for various events.
@@ -191,48 +191,47 @@ func (t *genericRequestor) Notify(ctx context.Context, actionDatas ...internal_t
 // are delivered to the client via InitializationFailedPacket → ConversationError
 // proto on the stream, not via this return value.
 func (r *genericRequestor) OnConnect(ctx context.Context, auth types.SimplePrinciple, config *protos.ConversationInitialization) {
-	if err := r.transitionSession(adapter_lifecycle.EventConnectRequested); err != nil {
+	if err := r.sessionLifecycle.Transition(adapter_lifecycle.EventConnectRequested); err != nil {
 		r.logger.Tracef(ctx, "connect ignored due to session lifecycle transition: %v", err)
 		return
 	}
 	r.SetAuth(auth)
-	r.bootstrapStart.Do(func() {
-		go r.runBootstrapDispatcher(ctx)
+	utils.WithDeadline(r.sessionCtx, connectDeadline, func() {
+		if r.sessionLifecycle.Current() != adapter_lifecycle.StateInitializing {
+			return
+		}
+		r.logger.Warnf("connect deadline %v exceeded, force-cancelling session", connectDeadline)
+		r.Notify(r.sessionCtx,
+			&protos.ConversationError{Message: "initialization timeout"},
+			&protos.ConversationDisconnection{Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR},
+		)
+		r.cancelSession()
+	}, func(connectCtx context.Context) {
+		r.OnPacket(connectCtx,
+			internal_type.ConversationEventPacket{
+				ContextID: r.GetID(),
+				Name:      observe.ComponentSession,
+				Data:      map[string]string{observe.DataType: observe.EventInitializing, observe.DataMode: config.GetStreamMode().String()},
+				Time:      time.Now(),
+			}, internal_type.InitializeAssistantPacket{
+				ContextID: r.GetID(),
+				Config:    config,
+			})
 	})
-	r.backgroundStart.Do(func() {
-		go r.runLowDispatcher(r.workerCtx)
-	})
-	r.OnPacket(ctx,
-		internal_type.ConversationEventPacket{
-			ContextID: r.GetID(),
-			Name:      observe.ComponentSession,
-			Data:      map[string]string{observe.DataType: observe.EventInitializing, observe.DataMode: config.GetStreamMode().String()},
-			Time:      time.Now(),
-		}, internal_type.InitializeAssistantPacket{
-			ContextID: r.GetID(),
-			Config:    config,
-		})
 }
 
-// Disconnect enqueues the disconnect chain and blocks until complete.
-// The disconnectDone channel is created fresh here and closed exactly once by
-// handleFinalizationCompleted — the terminal step of the disconnect chain.
-// Disconnect is called at most once per session (guarded by the gRPC stream
-// lifecycle), so there is no risk of double-close.
+// OnDisconnect enqueues the disconnect chain. sessionCtx is cancelled either by
+// HandleFinalizationCompleted (normal completion) or by the watchdog if the
+// chain exceeds disconnectDeadline.
 func (r *genericRequestor) OnDisconnect(ctx context.Context) {
-	if err := r.transitionSession(adapter_lifecycle.EventDisconnectRequested); err != nil {
+	if err := r.sessionLifecycle.Transition(adapter_lifecycle.EventDisconnectRequested); err != nil {
 		r.logger.Tracef(ctx, "disconnect ignored due to session lifecycle transition: %v", err)
 		return
 	}
-	startTime := time.Now()
-	done := make(chan struct{}, 1)
-	r.disconnectDone = done
-	r.OnPacket(ctx, internal_type.FinalizeBehaviorPacket{ContextID: r.GetID()})
-	select {
-	case <-done:
-	case <-time.After(collectorWriteTimeout):
-		r.logger.Warnf("disconnect timed out after %v", collectorWriteTimeout)
-	}
-	r.workerCancel()
-	r.logger.Benchmark("session.Disconnect", time.Since(startTime))
+	utils.WithDeadline(r.sessionCtx, disconnectDeadline, func() {
+		r.logger.Warnf("disconnect deadline %v exceeded, force-cancelling session", disconnectDeadline)
+		r.cancelSession()
+	}, func(disconnectCtx context.Context) {
+		r.OnPacket(disconnectCtx, internal_type.FinalizeBehaviorPacket{ContextID: r.GetID()})
+	})
 }

@@ -15,14 +15,17 @@ import (
 	"time"
 
 	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
+	internal_analysis "github.com/rapidaai/api/assistant-api/internal/analysis"
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_audio_recorder "github.com/rapidaai/api/assistant-api/internal/audio/recorder"
+	internal_authentication "github.com/rapidaai/api/assistant-api/internal/authentication"
 	internal_condition "github.com/rapidaai/api/assistant-api/internal/condition"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	observe "github.com/rapidaai/api/assistant-api/internal/observe"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/api/assistant-api/internal/variable"
 	internal_namespace "github.com/rapidaai/api/assistant-api/internal/variable/namespace"
+	internal_webhook "github.com/rapidaai/api/assistant-api/internal/webhook"
 	pkg_types "github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/pkg/utils"
@@ -326,15 +329,19 @@ func (h requestorDispatchHandler) HandleLLMResponseDone(ctx context.Context, p i
 func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_type.ErrorPacket) {
 	switch errPkt := p.(type) {
 	case internal_type.InitializationFailedPacket:
-		if err := h.r.transitionSession(adapter_lifecycle.EventInitializationFailed); err != nil {
+		if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventInitializationFailed); err != nil {
 			h.r.logger.Tracef(ctx, "session lifecycle init-failed transition ignored: %v", err)
 		}
-		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
-			ContextID: p.ContextId(),
-			Name:      "session",
-			Data:      map[string]string{"type": "error", "message": p.ErrMessage()},
-			Time:      time.Now(),
-		})
+		h.r.OnPacket(ctx,
+			internal_type.InitializeOutboundDispatcherPacket{ContextID: p.ContextId()},
+			internal_type.ConversationEventPacket{
+				ContextID: p.ContextId(),
+				Name:      "session",
+				Data:      map[string]string{"type": "error", "message": p.ErrMessage()},
+				Time:      time.Now(),
+			},
+		)
+
 	case internal_type.LLMErrorPacket:
 		h.r.OnPacket(ctx,
 			internal_type.UserMessageMetricPacket{
@@ -383,11 +390,11 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 			})
 	case internal_type.ModeSwitchErrorPacket:
 		if errPkt.IsRecoverable() {
-			if err := h.r.transitionSession(adapter_lifecycle.EventSwitchFailedRecoverable); err != nil {
+			if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventSwitchFailedRecoverable); err != nil {
 				h.r.logger.Tracef(ctx, "session lifecycle switch-failed(recoverable) transition ignored: %v", err)
 			}
 		} else {
-			if err := h.r.transitionSession(adapter_lifecycle.EventSwitchFailedFatal); err != nil {
+			if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventSwitchFailedFatal); err != nil {
 				h.r.logger.Tracef(ctx, "session lifecycle switch-failed(fatal) transition ignored: %v", err)
 			}
 		}
@@ -415,18 +422,21 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 				Message:                 p.ErrMessage(),
 			},
 			&protos.ConversationDisconnection{
-				Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_UNSPECIFIED,
+				Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR,
 			})
 		return
 	}
-	var conversationId uint64
 	if h.r.Conversation() != nil {
-		conversationId = h.r.Conversation().Id
+		_ = h.r.Notify(ctx, &protos.ConversationError{
+			AssistantConversationId: h.r.Conversation().Id,
+			Message:                 p.ErrMessage(),
+		})
+		return
 	}
 	_ = h.r.Notify(ctx, &protos.ConversationError{
-		AssistantConversationId: conversationId,
-		Message:                 p.ErrMessage(),
+		Message: p.ErrMessage(),
 	})
+
 }
 func (h requestorDispatchHandler) HandleInjectMessage(ctx context.Context, p internal_type.InjectMessagePacket) {
 	if err := h.r.Transition(LLMGenerating); err != nil {
@@ -842,7 +852,16 @@ func (h requestorDispatchHandler) HandleInitializeAssistant(ctx context.Context,
 		return
 	}
 	h.r.assistant = assistant
-	h.r.authenticationExecutor.Init(ctx, h.r)
+	authExec, err := internal_authentication.NewExecutor(h.r.logger, ctx, h.r, h.r)
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageAuthentication,
+			Error:     err,
+		})
+		return
+	}
+	h.r.authenticationExecutor = authExec
 	h.r.OnPacket(ctx, internal_type.InitializeConversationPacket{ContextID: p.ContextID, Config: p.Config})
 }
 func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Context, vl internal_type.InitializeConversationPacket) {
@@ -893,15 +912,11 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 	h.r.OnPacket(ctx, internal_type.InitializeSessionRuntimePacket{ContextID: vl.ContextID, Config: vl.Config})
 }
 func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Context, p internal_type.InitializeSessionRuntimePacket) {
-	config := p.Config
+	h.r.OnPacket(ctx, internal_type.InitializeTelemetryPacket{ContextID: p.ContextID})
 
-	utils.Go(ctx, func() { h.r.initializeCollectors(ctx) })
-	utils.Go(ctx, func() {
-		rc, err := internal_audio_recorder.GetRecorder(h.r.logger)
-		if err != nil {
-			h.r.logger.Tracef(ctx, "failed to initialize audio recorder: %+v", err)
-			return
-		}
+	if rc, err := internal_audio_recorder.GetRecorder(h.r.logger); err != nil {
+		h.r.logger.Tracef(ctx, "failed to initialize audio recorder: %+v", err)
+	} else {
 		h.r.recorder = rc
 		h.r.recorder.Start()
 		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
@@ -909,30 +924,69 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 			Data: map[string]string{observe.DataType: observe.EventRecordingStarted},
 			Time: time.Now(),
 		})
-	})
-
-	if err := h.r.initializeInputNormalizer(ctx, config); err != nil {
-		h.r.logger.Tracef(ctx, "failed to initialize input normalizer: %+v", err)
-	}
-	if err := h.r.initializeOutputNormalizer(ctx, config); err != nil {
-		h.r.logger.Errorf("failed to initialize output normalizer: %v", err)
 	}
 
-	utils.Go(ctx, func() {
-		metrics := []*protos.Metric{{
-			Name:        type_enums.CONVERSATION_STATUS.String(),
-			Value:       type_enums.CONVERSATION_IN_PROGRESS.String(),
-			Description: "Conversation is currently in progress",
-		}}
-		h.r.onAddMetrics(ctx, metrics...)
-		h.r.OnPacket(ctx, internal_type.ConversationMetricPacket{
-			ContextID: h.r.Conversation().Id,
-			Metrics:   metrics,
+	analysisExec, err := internal_analysis.NewExecutor(h.r.logger, ctx, h.r, h.r)
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageAnalysis,
+			Error:     err,
 		})
-	})
+		return
+	}
+	h.r.analysisExecutor = analysisExec
 
-	utils.Go(ctx, func() { h.r.storeClientInformation(ctx) })
-	h.r.OnPacket(ctx, internal_type.InitializeAuthenticationPacket{ContextID: p.ContextID, Config: config})
+	webhookExec, err := internal_webhook.NewExecutor(h.r.logger, ctx, h.r, h.r)
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageWebhook,
+			Error:     err,
+		})
+		return
+	}
+	h.r.webhookExecutor = webhookExec
+
+	if err := h.r.inputNormalizer.Initialize(ctx, h.r, p.Config); err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageInputNormalizer,
+			Error:     err,
+		})
+		return
+	}
+
+	if err := h.r.outputNormalizer.Initialize(ctx, h.r, p.Config); err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageOutputNormalizer,
+			Error:     err,
+		})
+		return
+	}
+
+	h.r.OnPacket(ctx,
+		internal_type.ConversationMetricPacket{
+			ContextID: h.r.Conversation().Id,
+			Metrics: []*protos.Metric{{
+				Name:        type_enums.CONVERSATION_STATUS.String(),
+				Value:       type_enums.CONVERSATION_IN_PROGRESS.String(),
+				Description: "Conversation is currently in progress",
+			}},
+		},
+		internal_type.InitializeAuthenticationPacket{
+			ContextID: p.ContextID,
+			Config:    p.Config,
+		},
+	)
+
+	if v := h.r.extractClientInformation(ctx); v != nil {
+		h.r.OnPacket(ctx, internal_type.ConversationMetadataPacket{
+			ContextID: h.r.Conversation().Id,
+			Metadata:  v,
+		})
+	}
 }
 func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Context, p internal_type.InitializeAuthenticationPacket) {
 	if h.r.assistant.AssistantAuthentication == nil {
@@ -943,41 +997,36 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 		})
 		return
 	}
-
+	source := variable.NewCommunicationSource(h.r)
+	registry := internal_namespace.NewDefaultRegistry()
 	h.r.OnPacket(ctx, internal_type.ExecuteSessionAuthenticationPacket{
 		ContextID:      p.ContextID,
 		Authentication: h.r.assistant.AssistantAuthentication,
-		Arguments:      h.r.buildAuthBody(),
+		Arguments:      registry.Expand(source, variable.ResolveContext{}),
 		Initialization: p.Config,
 	})
 }
 func (h requestorDispatchHandler) HandleExecuteSessionAuthentication(ctx context.Context, p internal_type.ExecuteSessionAuthenticationPacket) {
-	h.r.authenticationExecutor.Execute(ctx, p)
+	if h.r.authenticationExecutor == nil {
+		h.r.logger.Errorf("authentication executor not initialized")
+		return
+	}
+	if err := h.r.authenticationExecutor.Execute(ctx, p); err != nil {
+		h.r.logger.Errorf("authentication executor execute failed: %v", err)
+	}
 }
 func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx context.Context, p internal_type.SessionAuthenticationSucceededPacket) {
 	if p.Authenticated {
-		if p.Arguments != nil {
-			h.r.args = utils.MergeMaps(h.r.args, p.Arguments)
-		}
-		if p.Metadata != nil {
-			h.r.metadata = utils.MergeMaps(h.r.metadata, p.Metadata)
-		}
-		if p.Options != nil {
-			h.r.options = utils.MergeMaps(h.r.options, p.Options)
-		}
+		h.r.applyArguments(p.Arguments)
+		h.r.applyMetadata(p.Metadata)
+		h.r.applyOptions(p.Options)
 	}
 	h.r.OnPacket(ctx, internal_type.InitializeSpeechToTextPacket{
 		ContextID: p.ContextID,
 		Config:    p.Initialization,
 	})
 }
-func (h requestorDispatchHandler) HandleSessionAuthenticationFailed(ctx context.Context, p internal_type.SessionAuthenticationFailedPacket) {
-	h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
-		ContextID: p.ContextID,
-		Stage:     internal_type.InitializationStageAuthentication,
-		Error:     p.Error,
-	})
-}
+
 func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Context, p internal_type.InitializeSpeechToTextPacket) {
 	config := p.Config
 	if err := h.r.assistantExecutor.Initialize(ctx, h.r, config); err != nil {
@@ -1088,7 +1137,7 @@ func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context,
 			})
 			return
 		}
-		if err := h.r.transitionSession(adapter_lifecycle.EventSwitchRequested); err != nil {
+		if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventSwitchRequested); err != nil {
 			h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 				ContextID:  p.ContextID,
 				StreamMode: p.StreamMode,
@@ -1115,7 +1164,7 @@ func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context,
 			})
 			return
 		}
-		if err := h.r.transitionSession(adapter_lifecycle.EventSwitchRequested); err != nil {
+		if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventSwitchRequested); err != nil {
 			h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 				ContextID:  p.ContextID,
 				StreamMode: p.StreamMode,
@@ -1306,7 +1355,7 @@ func (h requestorDispatchHandler) HandleModeSwitchCompleted(ctx context.Context,
 		})
 		return
 	}
-	if err := h.r.transitionSession(adapter_lifecycle.EventSwitchCompleted); err != nil {
+	if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventSwitchCompleted); err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID:  p.ContextID,
 			StreamMode: p.StreamMode,
@@ -1322,11 +1371,11 @@ func (h requestorDispatchHandler) HandleModeSwitchCompleted(ctx context.Context,
 }
 
 func (h requestorDispatchHandler) HandleInitializationCompleted(ctx context.Context, p internal_type.InitializationCompletedPacket) {
-	if err := h.r.transitionSession(adapter_lifecycle.EventInitializationCompleted); err != nil {
+	if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventInitializationCompleted); err != nil {
 		h.r.logger.Tracef(ctx, "session lifecycle init-completed transition ignored: %v", err)
 	}
 	h.r.notifyConfiguration(ctx, p.Config, h.r.assistantConversation)
-	h.r.OnStartDispatchers(ctx)
+	h.r.OnPacket(ctx, internal_type.InitializeInboundDispatcherPacket{ContextID: p.ContextID})
 	h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
 		ContextID: p.ContextID,
 		Name:      observe.ComponentSession,
@@ -1342,6 +1391,24 @@ func (h requestorDispatchHandler) HandleInitializationCompleted(ctx context.Cont
 	})
 
 }
+
+func (h requestorDispatchHandler) HandleInitializeTelemetry(ctx context.Context, p internal_type.InitializeTelemetryPacket) {
+	defer h.r.OnPacket(ctx, internal_type.InitializeOutboundDispatcherPacket{ContextID: p.ContextID})
+	h.r.initializeCollectors(ctx)
+}
+
+func (h requestorDispatchHandler) HandleInitializeOutboundDispatcher(ctx context.Context, p internal_type.InitializeOutboundDispatcherPacket) {
+	h.r.lowStart.Do(func() {
+		go h.r.runLowDispatcher(h.r.sessionCtx)
+	})
+}
+
+func (h requestorDispatchHandler) HandleInitializeInboundDispatcher(ctx context.Context, p internal_type.InitializeInboundDispatcherPacket) {
+	h.r.inputStart.Do(func() {
+		go h.r.runInputDispatcher(h.r.sessionCtx)
+	})
+}
+
 func (h requestorDispatchHandler) HandleFinalizeBehavior(ctx context.Context, p internal_type.FinalizeBehaviorPacket) {
 	if h.r.idleTimeoutTimer != nil {
 		h.r.idleTimeoutTimer.Stop()
@@ -1425,13 +1492,12 @@ func (h requestorDispatchHandler) HandleFinalizeAssistant(ctx context.Context, p
 	h.r.OnPacket(ctx, internal_type.FinalizationCompletedPacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizationCompleted(ctx context.Context, p internal_type.FinalizationCompletedPacket) {
-	if err := h.r.transitionSession(adapter_lifecycle.EventDisconnectCompleted); err != nil {
+	if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventDisconnectCompleted); err != nil {
 		h.r.logger.Tracef(ctx, "session lifecycle disconnect-completed transition ignored: %v", err)
 	}
-	if h.r.disconnectDone != nil {
-		close(h.r.disconnectDone)
-	}
+	h.r.cancelSession()
 }
+
 func (h requestorDispatchHandler) HandleAnalysisStart(ctx context.Context, p internal_type.AnalysisStartPacket) {
 	source := variable.NewCommunicationSource(h.r)
 	registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
@@ -1454,6 +1520,7 @@ func (h requestorDispatchHandler) HandleAnalysisStart(ctx context.Context, p int
 		Done:      p.Done,
 	})
 }
+
 func (h requestorDispatchHandler) HandleExecuteAnalysis(ctx context.Context, p internal_type.ExecuteAnalysisPacket) {
 	if h.r.analysisExecutor == nil {
 		return
@@ -1462,6 +1529,7 @@ func (h requestorDispatchHandler) HandleExecuteAnalysis(ctx context.Context, p i
 		h.r.logger.Warnw("analysis execution failed", "name", p.Analysis.GetName(), "error", err)
 	}
 }
+
 func (h requestorDispatchHandler) HandleAnalysisDone(ctx context.Context, p internal_type.AnalysisDonePacket) {
 	h.r.OnPacket(ctx, internal_type.WebhookStartPacket{
 		ContextID: p.ContextID,
@@ -1469,6 +1537,7 @@ func (h requestorDispatchHandler) HandleAnalysisDone(ctx context.Context, p inte
 		Done:      p.Done,
 	})
 }
+
 func (h requestorDispatchHandler) HandleWebhookStart(ctx context.Context, p internal_type.WebhookStartPacket) {
 	source := variable.NewCommunicationSource(h.r)
 	registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
@@ -1529,12 +1598,6 @@ func (h requestorDispatchHandler) callInputNormalizer(ctx context.Context, vl in
 	return nil
 }
 
-func (r *genericRequestor) buildAuthBody() map[string]interface{} {
-	source := variable.NewCommunicationSource(r)
-	registry := internal_namespace.NewDefaultRegistry()
-	return registry.Expand(source, variable.ResolveContext{})
-}
-
 func (r *genericRequestor) notifyConfiguration(ctx context.Context, config *protos.ConversationInitialization, conversation *internal_conversation_entity.AssistantConversation) {
 	options := config.GetOptions()
 	mergedOptions := map[string]interface{}{}
@@ -1574,35 +1637,41 @@ func (r *genericRequestor) notifyConfiguration(ctx context.Context, config *prot
 	}
 }
 
-func (r *genericRequestor) storeClientInformation(ctx context.Context) {
+func (r *genericRequestor) extractClientInformation(ctx context.Context) []*protos.Metadata {
+	var metadata []*protos.Metadata
 	clientInfo := pkg_types.GetClientInfoFromGrpcContext(ctx)
 	if clientInfo == nil {
-		return
+		return nil
 	}
-	flat := map[string]interface{}{}
+
 	if clientInfo.Timezone != "" {
-		flat["client.timezone"] = clientInfo.Timezone
+		metadata = append(metadata, &protos.Metadata{Key: "client.timezone", Value: clientInfo.Timezone})
 	}
 	if clientInfo.Platform != "" {
-		flat["client.platform"] = clientInfo.Platform
+		metadata = append(metadata, &protos.Metadata{Key: "client.platform", Value: clientInfo.Platform})
 	}
 	if clientInfo.Language != "" {
-		flat["client.language"] = clientInfo.Language
+		metadata = append(metadata, &protos.Metadata{Key: "client.language", Value: clientInfo.Language})
 	}
 	if clientInfo.UserAgent != "" {
-		flat["client.user_agent"] = clientInfo.UserAgent
+		metadata = append(metadata, &protos.Metadata{Key: "client.user_agent", Value: clientInfo.UserAgent})
 	}
 	if clientInfo.Referrer != "" {
-		flat["client.referrer"] = clientInfo.Referrer
+		metadata = append(metadata, &protos.Metadata{Key: "client.referrer", Value: clientInfo.Referrer})
 	}
 	if clientInfo.ConnectionType != "" {
-		flat["client.connection_type"] = clientInfo.ConnectionType
+		metadata = append(metadata, &protos.Metadata{Key: "client.connection_type", Value: clientInfo.ConnectionType})
 	}
 	if clientInfo.Latitude != 0 || clientInfo.Longitude != 0 {
-		flat["client.latitude"] = fmt.Sprintf("%f", clientInfo.Latitude)
-		flat["client.longitude"] = fmt.Sprintf("%f", clientInfo.Longitude)
+		metadata = append(metadata,
+			&protos.Metadata{Key: "client.latitude", Value: fmt.Sprintf("%f", clientInfo.Latitude)},
+			&protos.Metadata{Key: "client.longitude", Value: fmt.Sprintf("%f", clientInfo.Longitude)},
+		)
 	}
-	r.onSetMetadata(ctx, r.Auth(), flat)
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }
 
 // RunError fires ConversationFailed webhooks with a nil Done channel, making
