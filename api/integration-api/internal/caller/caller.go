@@ -9,6 +9,7 @@ import (
 	internal_anthropic_callers "github.com/rapidaai/api/integration-api/internal/caller/anthropic"
 	internal_azure_callers "github.com/rapidaai/api/integration-api/internal/caller/azure"
 	internal_cohere_callers "github.com/rapidaai/api/integration-api/internal/caller/cohere"
+	internal_custom_llm_callers "github.com/rapidaai/api/integration-api/internal/caller/custom_llm"
 	internal_gemini_callers "github.com/rapidaai/api/integration-api/internal/caller/gemini"
 	internal_huggingface_callers "github.com/rapidaai/api/integration-api/internal/caller/huggingface"
 	internal_mistral_callers "github.com/rapidaai/api/integration-api/internal/caller/mistral"
@@ -24,22 +25,25 @@ import (
 type IntegrationProvider string
 
 const (
-	OPENAI      IntegrationProvider = "openai"
-	ANTHROPIC   IntegrationProvider = "anthropic"
-	GEMINI      IntegrationProvider = "gemini"
-	VERTEXAI    IntegrationProvider = "vertexai"
-	AZURE       IntegrationProvider = "azure-foundry"
-	COHERE      IntegrationProvider = "cohere"
-	MISTRAL     IntegrationProvider = "mistral"
-	REPLICATE   IntegrationProvider = "replicate"
-	HUGGINGFACE IntegrationProvider = "huggingface"
-	VOYAGEAI    IntegrationProvider = "voyageai"
+	OPENAI     IntegrationProvider = "openai"
+	CUSTOM_LLM IntegrationProvider = "custom-llm"
+	ANTHROPIC         IntegrationProvider = "anthropic"
+	GEMINI            IntegrationProvider = "gemini"
+	VERTEXAI          IntegrationProvider = "vertexai"
+	AZURE             IntegrationProvider = "azure-foundry"
+	COHERE            IntegrationProvider = "cohere"
+	MISTRAL           IntegrationProvider = "mistral"
+	REPLICATE         IntegrationProvider = "replicate"
+	HUGGINGFACE       IntegrationProvider = "huggingface"
+	VOYAGEAI          IntegrationProvider = "voyageai"
 )
 
 func GetLargeLanguageCaller(logger commons.Logger, provider string, credential *protos.Credential) (internal_types.LargeLanguageCaller, error) {
 	switch IntegrationProvider(provider) {
 	case OPENAI:
 		return internal_openai_callers.NewLargeLanguageCaller(logger, credential), nil
+	case CUSTOM_LLM:
+		return internal_custom_llm_callers.NewLargeLanguageCaller(logger, credential), nil
 	case ANTHROPIC:
 		return internal_anthropic_callers.NewLargeLanguageCaller(logger, credential), nil
 	case GEMINI:
@@ -99,6 +103,8 @@ func GetVerifier(logger commons.Logger, provider string, credential *protos.Cred
 	switch IntegrationProvider(provider) {
 	case OPENAI:
 		return internal_openai_callers.NewVerifyCredentialCaller(logger, credential), nil
+	case CUSTOM_LLM:
+		return internal_custom_llm_callers.NewVerifyCredentialCaller(logger, credential), nil
 	case ANTHROPIC:
 		return internal_anthropic_callers.NewVerifyCredentialCaller(logger, credential), nil
 	case GEMINI:
