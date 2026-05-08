@@ -32,7 +32,7 @@ func TestModel_ToolResultResolved_TriggersFollowUp(t *testing.T) {
 	err := e.Execute(context.Background(), comm, internal_type.LLMToolResultPacket{ContextID: "ctx-tool", ToolID: "t1", Name: "weather", Result: map[string]string{"ok": "1"}})
 	require.NoError(t, err)
 	require.Len(t, stream.sendCalls, 1)
-	require.Equal(t, "ctx-tool", stream.sendCalls[0].GetRequestId())
+	require.Equal(t, "ctx-tool", stream.sendCalls[0].GetChat().GetRequestId())
 
 	snap := e.history.Snapshot()
 	require.Len(t, snap, 2)
@@ -57,9 +57,8 @@ func TestModel_Flow_UserToLLM_Stream_Tool_Done(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stream.sendCalls, 1)
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-flow-2",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{
@@ -68,9 +67,8 @@ func TestModel_Flow_UserToLLM_Stream_Tool_Done(t *testing.T) {
 		},
 	})
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId:    "ctx-flow-2",
-		Success:      true,
 		FinishReason: "tool_calls",
 		Data: &protos.Message{
 			Role: "assistant",
@@ -98,11 +96,10 @@ func TestModel_Flow_UserToLLM_Stream_Tool_Done(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, stream.sendCalls, 2)
-	require.Equal(t, "ctx-flow-2", stream.sendCalls[1].GetRequestId())
+	require.Equal(t, "ctx-flow-2", stream.sendCalls[1].GetChat().GetRequestId())
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-flow-2",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{
@@ -139,11 +136,10 @@ func TestModel_Flow_ToolResultToLLM_Stream_Done(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, stream.sendCalls, 1)
-	require.Equal(t, "ctx-flow-3", stream.sendCalls[0].GetRequestId())
+	require.Equal(t, "ctx-flow-3", stream.sendCalls[0].GetChat().GetRequestId())
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-flow-3",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{
@@ -152,9 +148,8 @@ func TestModel_Flow_ToolResultToLLM_Stream_Done(t *testing.T) {
 		},
 	})
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-flow-3",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{
@@ -189,7 +184,7 @@ func TestModel_MultiTool_OutOfOrderResults_FollowUpOnce(t *testing.T) {
 		ContextID: "ctx-tools", ToolID: "t3", Name: "fn3", Result: map[string]string{"ok": "1"},
 	}))
 	require.Len(t, stream.sendCalls, 1)
-	require.Equal(t, "ctx-tools", stream.sendCalls[0].GetRequestId())
+	require.Equal(t, "ctx-tools", stream.sendCalls[0].GetChat().GetRequestId())
 }
 
 func TestModel_ToolResult_DuplicateID_SecondIgnored(t *testing.T) {
@@ -277,9 +272,8 @@ func TestModel_ContextSwitch_OldToolResultIgnored_NewUserContinues(t *testing.T)
 	require.Len(t, stream.sendCalls, 1)
 
 	// LLM responds with tool calls for ctx-1 (opens pending tool block).
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId:    "ctx-1",
-		Success:      true,
 		FinishReason: "tool_calls",
 		Data: &protos.Message{
 			Role: "assistant",
@@ -301,7 +295,7 @@ func TestModel_ContextSwitch_OldToolResultIgnored_NewUserContinues(t *testing.T)
 		ContextID: "ctx-2", Text: "second request",
 	}))
 	require.Len(t, stream.sendCalls, 2)
-	require.Equal(t, "ctx-2", stream.sendCalls[1].GetRequestId())
+	require.Equal(t, "ctx-2", stream.sendCalls[1].GetChat().GetRequestId())
 
 	// Late tool result for ctx-1 should be ignored for execution.
 	require.NoError(t, e.Execute(context.Background(), comm, internal_type.LLMToolResultPacket{
@@ -318,9 +312,8 @@ func TestModel_ContextSwitch_OldToolResultIgnored_NewUserContinues(t *testing.T)
 	require.Equal(t, "ctx-1", lastEvent.Data["pending_context"])
 
 	// Confirm ctx-2 can still complete normally (not stuck).
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-2",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{

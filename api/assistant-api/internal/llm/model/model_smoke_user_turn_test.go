@@ -17,7 +17,7 @@ func TestModel_ExecuteUserTurn_SendsChatAndAppendsUser(t *testing.T) {
 	err := e.Execute(context.Background(), comm, internal_type.UserInputPacket{ContextID: "ctx-1", Text: "hello"})
 	require.NoError(t, err)
 	require.Len(t, stream.sendCalls, 1)
-	msgs := stream.sendCalls[0].GetConversations()
+	msgs := stream.sendCalls[0].GetChat().GetConversations()
 	require.NotEmpty(t, msgs)
 	require.Equal(t, "user", msgs[len(msgs)-1].GetRole())
 	require.Equal(t, "hello", msgs[len(msgs)-1].GetUser().GetContent())
@@ -61,7 +61,7 @@ func TestModel_InjectThenUser_RequestContainsInjectedHistory(t *testing.T) {
 	require.NoError(t, e.Execute(context.Background(), comm, internal_type.UserInputPacket{ContextID: "ctx-2", Text: "user text"}))
 
 	require.Len(t, stream.sendCalls, 1)
-	convs := stream.sendCalls[0].GetConversations()
+	convs := stream.sendCalls[0].GetChat().GetConversations()
 	require.GreaterOrEqual(t, len(convs), 2)
 	require.Equal(t, "assistant", convs[len(convs)-2].GetRole())
 	require.Equal(t, "hello inject", convs[len(convs)-2].GetAssistant().GetContents()[0])
@@ -76,9 +76,8 @@ func TestModel_UserUser_LateFirstResponseDropped(t *testing.T) {
 	require.NoError(t, e.Execute(context.Background(), comm, internal_type.UserInputPacket{ContextID: "ctx-2", Text: "second"}))
 	require.Len(t, stream.sendCalls, 2)
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-1",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{
@@ -88,9 +87,8 @@ func TestModel_UserUser_LateFirstResponseDropped(t *testing.T) {
 		Metrics: []*protos.Metric{{Name: "token_count", Value: "2"}},
 	})
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-2",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{

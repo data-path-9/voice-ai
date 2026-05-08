@@ -24,9 +24,8 @@ func TestModel_MultiTurn_ContextSwitchWithLateToolResult_NoStuck(t *testing.T) {
 	}))
 	require.Len(t, stream.sendCalls, 1)
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId:    "ctx-1",
-		Success:      true,
 		FinishReason: "tool_calls",
 		Data: &protos.Message{
 			Role: "assistant",
@@ -53,9 +52,8 @@ func TestModel_MultiTurn_ContextSwitchWithLateToolResult_NoStuck(t *testing.T) {
 	}))
 	require.Len(t, stream.sendCalls, 2)
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-2",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{
@@ -91,9 +89,8 @@ func TestModel_MultiTurn_ConcurrentUserAndResponse_NoLock(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < n; i++ {
-			e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+			e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 				RequestId: fmt.Sprintf("u-%d", i),
-				Success:   true,
 				Data: &protos.Message{
 					Role: "assistant",
 					Message: &protos.Message_Assistant{

@@ -101,6 +101,10 @@ func (s *dispatchHandlerStub) HandleInitializeVoiceActivityDetection(context.Con
 }
 func (s *dispatchHandlerStub) HandleInitializeEndOfSpeech(context.Context, internal_type.InitializeEndOfSpeechPacket) {
 }
+func (s *dispatchHandlerStub) HandleInitializeDenoise(context.Context, internal_type.InitializeDenoisePacket) {
+}
+func (s *dispatchHandlerStub) HandleInitializeAssistantExecutorPacket(context.Context, internal_type.InitializeAssistantExecutorPacket) {
+}
 func (s *dispatchHandlerStub) HandleInitializeBehavior(context.Context, internal_type.InitializeBehaviorPacket) {
 }
 func (s *dispatchHandlerStub) HandleInitializationCompleted(context.Context, internal_type.InitializationCompletedPacket) {

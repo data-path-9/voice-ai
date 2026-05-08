@@ -23,18 +23,18 @@ import (
 
 type testStream struct {
 	mu        sync.Mutex
-	sendCalls []*protos.ChatRequest
+	sendCalls []*protos.StreamChatRequest
 	sendErr   error
 	closeSent bool
 }
 
-func (m *testStream) Send(req *protos.ChatRequest) error {
+func (m *testStream) Send(req *protos.StreamChatRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sendCalls = append(m.sendCalls, req)
 	return m.sendErr
 }
-func (m *testStream) Recv() (*protos.ChatResponse, error) { return nil, io.EOF }
+func (m *testStream) Recv() (*protos.StreamChatResponse, error) { return nil, io.EOF }
 func (m *testStream) CloseSend() error {
 	m.mu.Lock()
 	m.closeSent = true

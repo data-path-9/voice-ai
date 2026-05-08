@@ -45,6 +45,7 @@ func Classify(p internal_type.Packet) Route {
 		internal_type.InitializeTextToSpeechPacket,
 		internal_type.InitializeVoiceActivityDetectionPacket,
 		internal_type.InitializeEndOfSpeechPacket,
+		internal_type.InitializeDenoisePacket,
 		internal_type.InitializeBehaviorPacket,
 		internal_type.InitializationCompletedPacket,
 		internal_type.InitializationFailedPacket,

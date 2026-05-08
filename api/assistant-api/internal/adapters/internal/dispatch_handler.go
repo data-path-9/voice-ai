@@ -20,10 +20,14 @@ import (
 	internal_audio_recorder "github.com/rapidaai/api/assistant-api/internal/audio/recorder"
 	internal_authentication "github.com/rapidaai/api/assistant-api/internal/authentication"
 	internal_condition "github.com/rapidaai/api/assistant-api/internal/condition"
-	internal_llm "github.com/rapidaai/api/assistant-api/internal/llm"
+	internal_denoiser "github.com/rapidaai/api/assistant-api/internal/denoiser"
+	internal_end_of_speech "github.com/rapidaai/api/assistant-api/internal/end_of_speech"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
+	internal_llm "github.com/rapidaai/api/assistant-api/internal/llm"
 	observe "github.com/rapidaai/api/assistant-api/internal/observe"
+	internal_transformer "github.com/rapidaai/api/assistant-api/internal/transformer"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+	internal_vad "github.com/rapidaai/api/assistant-api/internal/vad"
 	"github.com/rapidaai/api/assistant-api/internal/variable"
 	internal_namespace "github.com/rapidaai/api/assistant-api/internal/variable/namespace"
 	internal_webhook "github.com/rapidaai/api/assistant-api/internal/webhook"
@@ -853,16 +857,6 @@ func (h requestorDispatchHandler) HandleInitializeAssistant(ctx context.Context,
 		return
 	}
 	h.r.assistant = assistant
-	authExec, err := internal_authentication.NewExecutor(h.r.logger, ctx, h.r, h.r)
-	if err != nil {
-		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
-			ContextID: p.ContextID,
-			Stage:     internal_type.InitializationStageAuthentication,
-			Error:     err,
-		})
-		return
-	}
-	h.r.authenticationExecutor = authExec
 	h.r.OnPacket(ctx, internal_type.InitializeConversationPacket{ContextID: p.ContextID, Config: p.Config})
 }
 func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Context, vl internal_type.InitializeConversationPacket) {
@@ -910,11 +904,11 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 			Time: time.Now(),
 		})
 	}
-	h.r.OnPacket(ctx, internal_type.InitializeSessionRuntimePacket{ContextID: vl.ContextID, Config: vl.Config})
+	h.r.OnPacket(ctx,
+		internal_type.InitializeSessionRuntimePacket{ContextID: vl.ContextID, Config: vl.Config},
+		internal_type.InitializeTelemetryPacket{ContextID: vl.ContextID})
 }
 func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Context, p internal_type.InitializeSessionRuntimePacket) {
-	h.r.OnPacket(ctx, internal_type.InitializeTelemetryPacket{ContextID: p.ContextID})
-
 	if rc, err := internal_audio_recorder.GetRecorder(h.r.logger); err != nil {
 		h.r.logger.Tracef(ctx, "failed to initialize audio recorder: %+v", err)
 	} else {
@@ -926,7 +920,6 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 			Time: time.Now(),
 		})
 	}
-
 	analysisExec, err := internal_analysis.NewExecutor(h.r.logger, ctx, h.r, h.r)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -948,6 +941,17 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		return
 	}
 	h.r.webhookExecutor = webhookExec
+
+	authExec, err := internal_authentication.NewExecutor(h.r.logger, ctx, h.r, h.r)
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageAuthentication,
+			Error:     err,
+		})
+		return
+	}
+	h.r.authenticationExecutor = authExec
 
 	if err := h.r.inputNormalizer.Initialize(ctx, h.r, p.Config); err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -1008,10 +1012,6 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 	})
 }
 func (h requestorDispatchHandler) HandleExecuteSessionAuthentication(ctx context.Context, p internal_type.ExecuteSessionAuthenticationPacket) {
-	if h.r.authenticationExecutor == nil {
-		h.r.logger.Errorf("authentication executor not initialized")
-		return
-	}
 	if err := h.r.authenticationExecutor.Execute(ctx, p); err != nil {
 		h.r.logger.Errorf("authentication executor execute failed: %v", err)
 	}
@@ -1022,15 +1022,44 @@ func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx conte
 		h.r.applyMetadata(p.Metadata)
 		h.r.applyOptions(p.Options)
 	}
-	h.r.OnPacket(ctx, internal_type.InitializeSpeechToTextPacket{
+
+	switch p.Initialization.StreamMode {
+	case protos.StreamMode_STREAM_MODE_TEXT:
+		h.r.SwitchMode(type_enums.TextMode)
+	case protos.StreamMode_STREAM_MODE_AUDIO:
+		h.r.OnPacket(ctx,
+			internal_type.InitializeSpeechToTextPacket{
+				ContextID: p.ContextID,
+				Config:    p.Initialization,
+			},
+			internal_type.InitializeTextToSpeechPacket{
+				ContextID: p.ContextID,
+				Config:    p.Initialization,
+			},
+			internal_type.InitializeVoiceActivityDetectionPacket{
+				ContextID: p.ContextID,
+				Config:    p.Initialization,
+			},
+			internal_type.InitializeEndOfSpeechPacket{
+				ContextID: p.ContextID,
+				Config:    p.Initialization,
+			},
+			internal_type.InitializeDenoisePacket{
+				ContextID: p.ContextID,
+				Config:    p.Initialization,
+			},
+		)
+		h.r.SwitchMode(type_enums.AudioMode)
+	}
+	h.r.OnPacket(ctx, internal_type.InitializeAssistantExecutorPacket{
 		ContextID: p.ContextID,
 		Config:    p.Initialization,
 	})
+
 }
 
-func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Context, p internal_type.InitializeSpeechToTextPacket) {
-	config := p.Config
-	assistantExec, err := internal_llm.NewExecutor(h.r.logger, ctx, h.r, config)
+func (h requestorDispatchHandler) HandleInitializeAssistantExecutorPacket(ctx context.Context, p internal_type.InitializeAssistantExecutorPacket) {
+	assistantExec, err := internal_llm.NewExecutor(h.r.logger, ctx, h.r, p.Config)
 	if err != nil {
 		h.r.logger.Tracef(ctx, "failed to initialize executor: %+v", err)
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -1041,48 +1070,155 @@ func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Conte
 		return
 	}
 	h.r.assistantExecutor = assistantExec
+}
 
-	switch config.StreamMode {
-	case protos.StreamMode_STREAM_MODE_TEXT:
-		h.r.SwitchMode(type_enums.TextMode)
-	case protos.StreamMode_STREAM_MODE_AUDIO:
-		if err := h.r.initializeSpeechToText(ctx); err != nil {
-			h.r.logger.Errorf("failed to initialize speech-to-text: %v", err)
-			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
-				ContextID: p.ContextID,
-				Stage:     internal_type.InitializationStageSpeechToText,
-				Error:     err,
-			})
-			return
-		}
-		if err := h.r.initializeDenoiser(ctx); err != nil {
-			h.r.logger.Errorf("failed to initialize denoiser: %v", err)
-		}
+func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Context, p internal_type.InitializeSpeechToTextPacket) {
+	cfg, err := h.r.GetSpeechToTextTransformer()
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageSpeechToText,
+			Error:     err,
+		})
+		return
 	}
+	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
+	credentialId, err := options.GetUint64("rapida.credential_id")
+	if err != nil {
+		h.r.logger.Errorf("unable to find credential from options %+v", err)
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageSpeechToText,
+			Error:     err,
+		})
+		return
+	}
+	credential, err := h.r.VaultCaller().GetCredential(ctx, h.r.Auth(), credentialId)
+	if err != nil {
+		h.r.logger.Errorf("Api call to find credential failed %+v", err)
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageSpeechToText,
+			Error:     err,
+		})
+		return
+	}
+	atransformer, err := internal_transformer.GetSpeechToTextTransformer(
+		ctx,
+		h.r.logger,
+		cfg.AudioProvider,
+		credential,
+		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
+		options)
+	if err != nil {
+		h.r.logger.Errorf("unable to create input audio transformer with error %v", err)
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageSpeechToText,
+			Error:     err,
+		})
+		return
+	}
+	if err := atransformer.Initialize(); err != nil {
+		h.r.logger.Errorf("unable to initialize transformer %v", err)
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageSpeechToText,
+			Error:     err,
+		})
+		return
+	}
+	h.r.speechToTextTransformer = atransformer
+}
 
-	h.r.OnPacket(ctx, internal_type.InitializeTextToSpeechPacket{ContextID: p.ContextID, Config: config})
+func (h requestorDispatchHandler) HandleInitializeDenoise(ctx context.Context, p internal_type.InitializeDenoisePacket) {
+	cfg, err := h.r.GetSpeechToTextTransformer()
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageDenoise,
+			Error:     err,
+		})
+		return
+	}
+	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
+	denoise, err := internal_denoiser.GetDenoiser(
+		ctx, h.r.logger, internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
+		h.r.OnPacket,
+		options)
+	if err != nil {
+		h.r.logger.Errorf("error while initializing denoiser %+v", err)
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageDenoise,
+			Error:     err,
+		})
+		return
+	}
+	h.r.denoiser = denoise
 }
 func (h requestorDispatchHandler) HandleInitializeTextToSpeech(ctx context.Context, p internal_type.InitializeTextToSpeechPacket) {
-	config := p.Config
-	if config.StreamMode == protos.StreamMode_STREAM_MODE_AUDIO {
-		if err := h.r.initializeTextToSpeech(ctx); err != nil {
-			h.r.logger.Errorf("failed to initialize text-to-speech: %v", err)
-			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
-				ContextID: p.ContextID,
-				Stage:     internal_type.InitializationStageTextToSpeech,
-				Error:     err,
-			})
-			return
-		}
-		h.r.SwitchMode(type_enums.AudioMode)
+	outputTransformer, err := h.r.GetTextToSpeechTransformer()
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageTextToSpeech,
+			Error:     err,
+		})
+		return
 	}
-	h.r.OnPacket(ctx, internal_type.InitializeVoiceActivityDetectionPacket{ContextID: p.ContextID, Config: config})
+	speakerOpts := utils.MergeMaps(outputTransformer.GetOptions())
+	credentialId, err := speakerOpts.GetUint64("rapida.credential_id")
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageTextToSpeech,
+			Error:     err,
+		})
+		return
+	}
+	credential, err := h.r.VaultCaller().GetCredential(ctx, h.r.Auth(), credentialId)
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageTextToSpeech,
+			Error:     err,
+		})
+		return
+	}
+	// Use the session ctx (not errgroup's ectx) so the transformer's stream
+	// lifecycle is tied to the session, not the short-lived errgroup.
+	atransformer, err := internal_transformer.GetTextToSpeechTransformer(
+		ctx, h.r.logger,
+		outputTransformer.GetName(),
+		credential,
+		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
+		speakerOpts)
+	if err != nil {
+		h.r.logger.Errorf("tts: unable to create transformer %v", err)
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageTextToSpeech,
+			Error:     err,
+		})
+		return
+	}
+	if err := atransformer.Initialize(); err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageTextToSpeech,
+			Error:     err,
+		})
+		return
+	}
+	h.r.textToSpeechTransformer = atransformer
+	h.r.SwitchMode(type_enums.AudioMode)
 }
 func (h requestorDispatchHandler) HandleInitializeVoiceActivityDetection(ctx context.Context, p internal_type.InitializeVoiceActivityDetectionPacket) {
 	config := p.Config
 	if config.StreamMode == protos.StreamMode_STREAM_MODE_AUDIO {
-		if err := h.r.initializeVAD(ctx); err != nil {
-			h.r.logger.Errorf("failed to initialize voice activity detection: %v", err)
+		cfg, err := h.r.GetSpeechToTextTransformer()
+		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,
 				Stage:     internal_type.InitializationStageVoiceActivity,
@@ -1090,22 +1226,43 @@ func (h requestorDispatchHandler) HandleInitializeVoiceActivityDetection(ctx con
 			})
 			return
 		}
-	}
-	h.r.OnPacket(ctx, internal_type.InitializeEndOfSpeechPacket{ContextID: p.ContextID, Config: config})
-}
-func (h requestorDispatchHandler) HandleInitializeEndOfSpeech(ctx context.Context, p internal_type.InitializeEndOfSpeechPacket) {
-	config := p.Config
-	if config.StreamMode == protos.StreamMode_STREAM_MODE_AUDIO {
-		if err := h.r.initializeEndOfSpeech(ctx); err != nil {
-			h.r.logger.Errorf("failed to initialize end of speech: %v", err)
+
+		options := utils.MergeMaps(h.r.options, cfg.GetOptions())
+		vad, err := internal_vad.GetVAD(ctx, h.r.logger, h.r.OnPacket, options)
+		if err != nil {
+			h.r.logger.Errorf("error while initializing vad %+v", err)
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,
-				Stage:     internal_type.InitializationStageEndOfSpeech,
+				Stage:     internal_type.InitializationStageVoiceActivity,
 				Error:     err,
 			})
 			return
 		}
+		h.r.vad = vad
 	}
+
+}
+func (h requestorDispatchHandler) HandleInitializeEndOfSpeech(ctx context.Context, p internal_type.InitializeEndOfSpeechPacket) {
+	config := p.Config
+	cfg, err := h.r.GetSpeechToTextTransformer()
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageEndOfSpeech,
+			Error:     err,
+		})
+		return
+	}
+	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
+	endOfSpeech, err := internal_end_of_speech.GetEndOfSpeech(ctx,
+		h.r.logger,
+		h.r.OnPacket,
+		options)
+	if err != nil {
+		h.r.logger.Warnf("unable to initialize text analyzer %+v", err)
+		return
+	}
+	h.r.endOfSpeech = endOfSpeech
 	h.r.OnPacket(ctx, internal_type.InitializeBehaviorPacket{ContextID: p.ContextID, Config: config})
 }
 func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, p internal_type.InitializeBehaviorPacket) {
@@ -1150,9 +1307,16 @@ func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context,
 		// Kick off the serial init chain. Each handler emits the next packet
 		// on success; any failure emits a non-recoverable ModeSwitchErrorPacket
 		// which routes through HandleError → OnDisconnect.
-		h.r.OnPacket(ctx, internal_type.ModeSwitchInitializeSpeechToTextPacket{
-			ContextID: p.ContextID, StreamMode: p.StreamMode,
-		})
+		h.r.OnPacket(ctx,
+			internal_type.ModeSwitchInitializeSpeechToTextPacket{
+				ContextID: p.ContextID, StreamMode: p.StreamMode,
+			},
+			internal_type.ModeSwitchInitializeVoiceActivityDetectionPacket{ContextID: p.ContextID, StreamMode: p.StreamMode},
+			internal_type.ModeSwitchInitializeEndOfSpeechPacket{ContextID: p.ContextID, StreamMode: p.StreamMode},
+			internal_type.ModeSwitchInitializeDenoisePacket{ContextID: p.ContextID, StreamMode: p.StreamMode},
+			internal_type.ModeSwitchInitializeTextToSpeechPacket{ContextID: p.ContextID, StreamMode: p.StreamMode},
+			internal_type.ModeSwitchCompletedPacket{ContextID: p.ContextID, StreamMode: p.StreamMode},
+		)
 	case protos.StreamMode_STREAM_MODE_TEXT:
 		if h.r.GetMode().Text() {
 			h.r.Notify(ctx, &protos.ConversationConfiguration{StreamMode: p.StreamMode})
@@ -1200,66 +1364,190 @@ func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context,
 	}
 }
 
-
 // Init chain — sequential. Each handler runs sync on the bootstrap goroutine,
 // and on success emits the next packet in the chain. On failure: emits
 // ModeSwitchErrorPacket (non-recoverable) which routes through HandleError →
 // OnDisconnect, tearing down the session.
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeSpeechToText(ctx context.Context, p internal_type.ModeSwitchInitializeSpeechToTextPacket) {
-	if err := h.r.initializeSpeechToText(ctx); err != nil {
+	cfg, err := h.r.GetSpeechToTextTransformer()
+	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
-			ContextID: p.ContextID, StreamMode: p.StreamMode,
-			Type: internal_type.ModeSwitchErrorTypeInitializeSpeechToText, Error: err,
+			ContextID: p.ContextID,
+			Type:      internal_type.ModeSwitchErrorTypeInitializeSpeechToText,
+			Error:     err,
 		})
 		return
 	}
-	h.r.OnPacket(ctx, internal_type.ModeSwitchInitializeTextToSpeechPacket{ContextID: p.ContextID, StreamMode: p.StreamMode})
+	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
+	credentialId, err := options.GetUint64("rapida.credential_id")
+	if err != nil {
+		h.r.logger.Errorf("unable to find credential from options %+v", err)
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID: p.ContextID,
+			Type:      internal_type.ModeSwitchErrorTypeInitializeSpeechToText,
+			Error:     err,
+		})
+		return
+	}
+	credential, err := h.r.VaultCaller().GetCredential(ctx, h.r.Auth(), credentialId)
+	if err != nil {
+		h.r.logger.Errorf("Api call to find credential failed %+v", err)
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID: p.ContextID,
+			Type:      internal_type.ModeSwitchErrorTypeInitializeSpeechToText,
+			Error:     err,
+		})
+		return
+	}
+	atransformer, err := internal_transformer.GetSpeechToTextTransformer(
+		ctx,
+		h.r.logger,
+		cfg.AudioProvider,
+		credential,
+		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
+		options)
+	if err != nil {
+		h.r.logger.Errorf("unable to create input audio transformer with error %v", err)
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID: p.ContextID,
+			Type:      internal_type.ModeSwitchErrorTypeInitializeSpeechToText,
+			Error:     err,
+		})
+		return
+	}
+	if err := atransformer.Initialize(); err != nil {
+		h.r.logger.Errorf("unable to initialize transformer %v", err)
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID: p.ContextID,
+			Type:      internal_type.ModeSwitchErrorTypeInitializeSpeechToText,
+			Error:     err,
+		})
+		return
+	}
+	h.r.speechToTextTransformer = atransformer
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeTextToSpeech(ctx context.Context, p internal_type.ModeSwitchInitializeTextToSpeechPacket) {
-	if err := h.r.initializeTextToSpeech(ctx); err != nil {
+	outputTransformer, err := h.r.GetTextToSpeechTransformer()
+	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID, StreamMode: p.StreamMode,
 			Type: internal_type.ModeSwitchErrorTypeInitializeTextToSpeech, Error: err,
 		})
 		return
 	}
-	h.r.OnPacket(ctx, internal_type.ModeSwitchInitializeVoiceActivityDetectionPacket{ContextID: p.ContextID, StreamMode: p.StreamMode})
-}
-
-func (h requestorDispatchHandler) HandleModeSwitchInitializeVoiceActivityDetection(ctx context.Context, p internal_type.ModeSwitchInitializeVoiceActivityDetectionPacket) {
-	if err := h.r.initializeVAD(ctx); err != nil {
+	speakerOpts := utils.MergeMaps(outputTransformer.GetOptions())
+	credentialId, err := speakerOpts.GetUint64("rapida.credential_id")
+	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID, StreamMode: p.StreamMode,
-			Type: internal_type.ModeSwitchErrorTypeInitializeVoiceActivityDetection, Error: err,
+			Type: internal_type.ModeSwitchErrorTypeInitializeTextToSpeech, Error: err,
 		})
 		return
 	}
-	h.r.OnPacket(ctx, internal_type.ModeSwitchInitializeDenoisePacket{ContextID: p.ContextID, StreamMode: p.StreamMode})
+	credential, err := h.r.VaultCaller().GetCredential(ctx, h.r.Auth(), credentialId)
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID: p.ContextID, StreamMode: p.StreamMode,
+			Type: internal_type.ModeSwitchErrorTypeInitializeTextToSpeech, Error: err,
+		})
+		return
+	}
+	// Use the session ctx (not errgroup's ectx) so the transformer's stream
+	// lifecycle is tied to the session, not the short-lived errgroup.
+	atransformer, err := internal_transformer.GetTextToSpeechTransformer(
+		ctx, h.r.logger,
+		outputTransformer.GetName(),
+		credential,
+		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
+		speakerOpts)
+	if err != nil {
+		h.r.logger.Errorf("tts: unable to create transformer %v", err)
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID: p.ContextID, StreamMode: p.StreamMode,
+			Type: internal_type.ModeSwitchErrorTypeInitializeTextToSpeech, Error: err,
+		})
+		return
+	}
+	if err := atransformer.Initialize(); err != nil {
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID: p.ContextID, StreamMode: p.StreamMode,
+			Type: internal_type.ModeSwitchErrorTypeInitializeTextToSpeech, Error: err,
+		})
+		return
+	}
+	h.r.textToSpeechTransformer = atransformer
+}
+
+func (h requestorDispatchHandler) HandleModeSwitchInitializeVoiceActivityDetection(ctx context.Context, p internal_type.ModeSwitchInitializeVoiceActivityDetectionPacket) {
+	cfg, err := h.r.GetSpeechToTextTransformer()
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageVoiceActivity,
+			Error:     err,
+		})
+		return
+	}
+	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
+	vad, err := internal_vad.GetVAD(ctx, h.r.logger, h.r.OnPacket, options)
+	if err != nil {
+		h.r.logger.Errorf("error while initializing vad %+v", err)
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageVoiceActivity,
+			Error:     err,
+		})
+	}
+	h.r.vad = vad
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeDenoise(ctx context.Context, p internal_type.ModeSwitchInitializeDenoisePacket) {
-	if err := h.r.initializeDenoiser(ctx); err != nil {
+	cfg, err := h.r.GetSpeechToTextTransformer()
+	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID, StreamMode: p.StreamMode,
 			Type: internal_type.ModeSwitchErrorTypeInitializeDenoise, Error: err,
 		})
 		return
 	}
-	h.r.OnPacket(ctx, internal_type.ModeSwitchInitializeEndOfSpeechPacket{ContextID: p.ContextID, StreamMode: p.StreamMode})
-}
 
-func (h requestorDispatchHandler) HandleModeSwitchInitializeEndOfSpeech(ctx context.Context, p internal_type.ModeSwitchInitializeEndOfSpeechPacket) {
-	if err := h.r.initializeEndOfSpeech(ctx); err != nil {
+	options := utils.MergeMaps(h.r.args, cfg.GetOptions())
+	denoise, err := internal_denoiser.GetDenoiser(ctx, h.r.logger, internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
+		func(pctx context.Context, pkt ...internal_type.Packet) error { return h.r.OnPacket(pctx, pkt...) },
+		options)
+	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID, StreamMode: p.StreamMode,
-			Type: internal_type.ModeSwitchErrorTypeInitializeEndOfSpeech, Error: err,
+			Type: internal_type.ModeSwitchErrorTypeInitializeDenoise, Error: err,
 		})
 		return
 	}
-	// Terminal step in the init chain — emit Completed.
-	h.r.OnPacket(ctx, internal_type.ModeSwitchCompletedPacket{ContextID: p.ContextID, StreamMode: p.StreamMode})
+	h.r.denoiser = denoise
+}
+
+func (h requestorDispatchHandler) HandleModeSwitchInitializeEndOfSpeech(ctx context.Context, p internal_type.ModeSwitchInitializeEndOfSpeechPacket) {
+	cfg, err := h.r.GetSpeechToTextTransformer()
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageEndOfSpeech,
+			Error:     err,
+		})
+		return
+	}
+	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
+	endOfSpeech, err := internal_end_of_speech.GetEndOfSpeech(ctx,
+		h.r.logger,
+		h.r.OnPacket,
+		options)
+	if err != nil {
+		h.r.logger.Warnf("unable to initialize text analyzer %+v", err)
+		return
+	}
+	h.r.endOfSpeech = endOfSpeech
+
 }
 
 // Finalize handlers — fire-and-forget. Each runs in its own goroutine
@@ -1267,32 +1555,47 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeEndOfSpeech(ctx cont
 // time these run. Errors are logged only — no client-facing error packet.
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeSpeechToText(ctx context.Context, p internal_type.ModeSwitchFinalizeSpeechToTextPacket) {
-	if err := h.r.disconnectSpeechToText(ctx); err != nil {
-		h.r.logger.Warnf("mode-switch finalize speech-to-text: %v", err)
+	if h.r.speechToTextTransformer != nil {
+		if err := h.r.speechToTextTransformer.Close(ctx); err != nil {
+			h.r.logger.Warnf("mode-switch finalize speech-to-text: %v", err)
+		}
+		h.r.speechToTextTransformer = nil
 	}
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeTextToSpeech(ctx context.Context, p internal_type.ModeSwitchFinalizeTextToSpeechPacket) {
-	if err := h.r.disconnectTextToSpeech(ctx); err != nil {
-		h.r.logger.Warnf("mode-switch finalize text-to-speech: %v", err)
+	if h.r.textToSpeechTransformer != nil {
+		if err := h.r.textToSpeechTransformer.Close(ctx); err != nil {
+			h.r.logger.Warnf("mode-switch finalize text-to-speech: %v", err)
+		}
+		h.r.textToSpeechTransformer = nil
 	}
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeVoiceActivityDetection(ctx context.Context, p internal_type.ModeSwitchFinalizeVoiceActivityDetectionPacket) {
-	if err := h.r.disconnectVAD(ctx); err != nil {
-		h.r.logger.Warnf("mode-switch finalize voice activity detection: %v", err)
+	if h.r.vad != nil {
+		if err := h.r.vad.Close(); err != nil {
+			h.r.logger.Warnf("mode-switch finalize voice activity detection: %v", err)
+		}
+		h.r.vad = nil
 	}
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeEndOfSpeech(ctx context.Context, p internal_type.ModeSwitchFinalizeEndOfSpeechPacket) {
-	if err := h.r.disconnectEndOfSpeech(ctx); err != nil {
-		h.r.logger.Warnf("mode-switch finalize end of speech: %v", err)
+
+	if h.r.endOfSpeech != nil {
+		if err := h.r.endOfSpeech.Close(); err != nil {
+			h.r.logger.Warnf("cancel end of speech with error %v", err)
+		}
 	}
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeDenoise(ctx context.Context, p internal_type.ModeSwitchFinalizeDenoisePacket) {
-	if err := h.r.disconnectDenoiser(ctx); err != nil {
-		h.r.logger.Warnf("mode-switch finalize denoiser: %v", err)
+	if h.r.denoiser != nil {
+		if err := h.r.denoiser.Close(); err != nil {
+			h.r.logger.Warnf("mode-switch finalize denoiser: %v", err)
+		}
+		h.r.denoiser = nil
 	}
 }
 
@@ -1382,8 +1685,10 @@ func (h requestorDispatchHandler) HandleFinalizeBehavior(ctx context.Context, p 
 	h.r.OnPacket(ctx, internal_type.FinalizeEndOfSpeechPacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizeEndOfSpeech(ctx context.Context, p internal_type.FinalizeEndOfSpeechPacket) {
-	if err := h.r.disconnectEndOfSpeech(ctx); err != nil {
-		h.r.logger.Tracef(ctx, "failed to close end of speech: %+v", err)
+	if h.r.endOfSpeech != nil {
+		if err := h.r.endOfSpeech.Close(); err != nil {
+			h.r.logger.Tracef(ctx, "failed to close end of speech: %+v", err)
+		}
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizeVoiceActivityDetectionPacket{ContextID: p.ContextID})
 }
@@ -1397,14 +1702,20 @@ func (h requestorDispatchHandler) HandleFinalizeVoiceActivityDetection(ctx conte
 	h.r.OnPacket(ctx, internal_type.FinalizeTextToSpeechPacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizeTextToSpeech(ctx context.Context, p internal_type.FinalizeTextToSpeechPacket) {
-	if err := h.r.disconnectTextToSpeech(ctx); err != nil {
-		h.r.logger.Tracef(ctx, "failed to close output transformer: %+v", err)
+	if h.r.textToSpeechTransformer != nil {
+		if err := h.r.textToSpeechTransformer.Close(ctx); err != nil {
+			h.r.logger.Errorf("cancel all output transformer with error %v", err)
+		}
+		h.r.textToSpeechTransformer = nil
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizeSpeechToTextPacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizeSpeechToText(ctx context.Context, p internal_type.FinalizeSpeechToTextPacket) {
-	if err := h.r.disconnectSpeechToText(ctx); err != nil {
-		h.r.logger.Tracef(ctx, "failed to close input transformer: %+v", err)
+	if h.r.speechToTextTransformer != nil {
+		if err := h.r.speechToTextTransformer.Close(ctx); err != nil {
+			h.r.logger.Warnf("mode-switch finalize speech-to-text: %v", err)
+		}
+		h.r.speechToTextTransformer = nil
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizeAuthenticationPacket{ContextID: p.ContextID})
 }
@@ -1412,9 +1723,19 @@ func (h requestorDispatchHandler) HandleFinalizeAuthentication(ctx context.Conte
 	h.r.OnPacket(ctx, internal_type.FinalizeSessionRuntimePacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Context, p internal_type.FinalizeSessionRuntimePacket) {
-	h.r.disconnectOutputNormalizer(ctx)
-	h.r.disconnectInputNormalizer(ctx)
 
+	if h.r.outputNormalizer != nil {
+		h.r.outputNormalizer.Close(ctx)
+		h.r.outputNormalizer = nil
+	}
+
+	//
+	if h.r.inputNormalizer != nil {
+		h.r.inputNormalizer.Close(ctx)
+		h.r.inputNormalizer = nil
+	}
+
+	//
 	if h.r.recorder != nil {
 		utils.Go(ctx, func() {
 			userAudio, systemAudio, err := h.r.recorder.Persist()
@@ -1449,8 +1770,10 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 	h.r.OnPacket(ctx, internal_type.FinalizeAssistantPacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizeAssistant(ctx context.Context, p internal_type.FinalizeAssistantPacket) {
-	if err := h.r.assistantExecutor.Close(ctx); err != nil {
-		h.r.logger.Errorf("failed to close assistant executor: %v", err)
+	if h.r.assistantExecutor != nil {
+		if err := h.r.assistantExecutor.Close(ctx); err != nil {
+			h.r.logger.Errorf("failed to close assistant executor: %v", err)
+		}
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizationCompletedPacket{ContextID: p.ContextID})
 }

@@ -64,6 +64,8 @@ type DispatchHandler interface {
 	HandleInitializeTextToSpeech(context.Context, internal_type.InitializeTextToSpeechPacket)
 	HandleInitializeVoiceActivityDetection(context.Context, internal_type.InitializeVoiceActivityDetectionPacket)
 	HandleInitializeEndOfSpeech(context.Context, internal_type.InitializeEndOfSpeechPacket)
+	HandleInitializeDenoise(context.Context, internal_type.InitializeDenoisePacket)
+	HandleInitializeAssistantExecutorPacket(context.Context, internal_type.InitializeAssistantExecutorPacket)
 	HandleInitializeBehavior(context.Context, internal_type.InitializeBehaviorPacket)
 	HandleInitializationCompleted(context.Context, internal_type.InitializationCompletedPacket)
 	HandleInitializeTelemetry(context.Context, internal_type.InitializeTelemetryPacket)

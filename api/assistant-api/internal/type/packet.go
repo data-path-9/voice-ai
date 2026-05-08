@@ -346,6 +346,14 @@ type InitializeSpeechToTextPacket struct {
 
 func (f InitializeSpeechToTextPacket) ContextId() string { return f.ContextID }
 
+type InitializeAssistantExecutorPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeAssistantExecutorPacket) ContextId() string { return f.ContextID }
+func (f InitializeAssistantExecutorPacket) IsAsync() bool     { return true }
+
 // InitializeTextToSpeechPacket initializes text-to-speech.
 type InitializeTextToSpeechPacket struct {
 	ContextID string
@@ -360,6 +368,7 @@ type InitializeVoiceActivityDetectionPacket struct {
 	Config    *protos.ConversationInitialization
 }
 
+func (f InitializeVoiceActivityDetectionPacket) IsAsync() bool     { return true }
 func (f InitializeVoiceActivityDetectionPacket) ContextId() string { return f.ContextID }
 
 // InitializeEndOfSpeechPacket initializes end-of-speech detection.
@@ -368,7 +377,17 @@ type InitializeEndOfSpeechPacket struct {
 	Config    *protos.ConversationInitialization
 }
 
+func (f InitializeEndOfSpeechPacket) IsAsync() bool     { return true }
 func (f InitializeEndOfSpeechPacket) ContextId() string { return f.ContextID }
+
+// InitializeDenoisePacket initializes the denoiser for text->audio switch.
+type InitializeDenoisePacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeDenoisePacket) IsAsync() bool     { return true }
+func (f InitializeDenoisePacket) ContextId() string { return f.ContextID }
 
 // InitializeBehaviorPacket sets up greeting, idle timeout, max session.
 type InitializeBehaviorPacket struct {
@@ -426,6 +445,7 @@ const (
 	InitializationStageSpeechToText        InitializationStage = "stt"
 	InitializationStageTextToSpeech        InitializationStage = "tts"
 	InitializationStageVoiceActivity       InitializationStage = "vad"
+	InitializationStageDenoise             InitializationStage = "denoise"
 	InitializationStageEndOfSpeech         InitializationStage = "eos"
 	InitializationStageBehavior            InitializationStage = "behavior"
 	InitializationStageAnalysis            InitializationStage = "analysis"
@@ -523,6 +543,7 @@ type ModeSwitchInitializeSpeechToTextPacket struct {
 }
 
 func (f ModeSwitchInitializeSpeechToTextPacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchInitializeSpeechToTextPacket) IsAsync() bool     { return true }
 
 // ModeSwitchInitializeTextToSpeechPacket initializes TTS for text->audio switch.
 type ModeSwitchInitializeTextToSpeechPacket struct {
@@ -539,6 +560,7 @@ type ModeSwitchInitializeVoiceActivityDetectionPacket struct {
 }
 
 func (f ModeSwitchInitializeVoiceActivityDetectionPacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchInitializeVoiceActivityDetectionPacket) IsAsync() bool     { return true }
 
 // ModeSwitchInitializeEndOfSpeechPacket initializes EOS for text->audio switch.
 type ModeSwitchInitializeEndOfSpeechPacket struct {
@@ -555,6 +577,7 @@ type ModeSwitchInitializeDenoisePacket struct {
 }
 
 func (f ModeSwitchInitializeDenoisePacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchInitializeDenoisePacket) IsAsync() bool     { return true }
 
 // ModeSwitchFinalizeSpeechToTextPacket finalizes STT for audio->text switch.
 // Async — runs in its own goroutine. Fire-and-forget; the client has already

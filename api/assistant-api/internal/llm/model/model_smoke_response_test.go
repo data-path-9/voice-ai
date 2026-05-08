@@ -15,9 +15,8 @@ func TestModel_ResponsePipeline_DropsStaleResponse(t *testing.T) {
 	e, comm, stream, _ := newModelTestEnv(t)
 	require.Nil(t, e.currentPacket)
 
-	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatResponse{
+	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatStreamResponse{
 		RequestId: "ctx-1",
-		Success:   true,
 		Data:      &protos.Message{Role: "assistant", Message: &protos.Message_Assistant{Assistant: &protos.AssistantMessage{Contents: []string{"ignored"}}}},
 	}})
 
@@ -29,9 +28,8 @@ func TestModel_ResponsePipeline_Error_EmitsLLMErrorAndEvent(t *testing.T) {
 	e, comm, _, _ := newModelTestEnv(t)
 	e.currentPacket = &internal_type.UserInputPacket{ContextID: "ctx-1"}
 
-	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatResponse{
+	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatStreamResponse{
 		RequestId: "ctx-1",
-		Success:   false,
 		Error:     &protos.Error{ErrorMessage: "provider down"},
 	}})
 
@@ -48,9 +46,8 @@ func TestModel_ResponsePipeline_Chunk_EmitsDeltaEvenWhenEmpty(t *testing.T) {
 	e, comm, _, _ := newModelTestEnv(t)
 	e.currentPacket = &internal_type.UserInputPacket{ContextID: "ctx-1"}
 
-	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatResponse{
+	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatStreamResponse{
 		RequestId: "ctx-1",
-		Success:   true,
 		Data:      &protos.Message{Role: "assistant", Message: &protos.Message_Assistant{Assistant: &protos.AssistantMessage{Contents: []string{""}}}},
 	}})
 
@@ -64,9 +61,8 @@ func TestModel_ResponsePipeline_DoneWithToolCalls_ExecutesToolsAndOpensBlock(t *
 	e, comm, _, toolExec := newModelTestEnv(t)
 	e.currentPacket = &internal_type.UserInputPacket{ContextID: "ctx-1"}
 
-	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatResponse{
+	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatStreamResponse{
 		RequestId:    "ctx-1",
-		Success:      true,
 		FinishReason: "tool_calls",
 		Metrics:      []*protos.Metric{{Name: "token_count", Value: "3"}},
 		Data:         testToolAssistantMessage("t1", "t2"),
@@ -86,9 +82,8 @@ func TestModel_ResponsePipeline_DoneWithoutToolCalls_AppendsAssistant(t *testing
 	e, comm, _, toolExec := newModelTestEnv(t)
 	e.currentPacket = &internal_type.UserInputPacket{ContextID: "ctx-1"}
 
-	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatResponse{
+	e.Run(context.Background(), comm, ResponsePipeline{Response: &protos.ChatStreamResponse{
 		RequestId:    "ctx-1",
-		Success:      true,
 		FinishReason: "stop",
 		Metrics:      []*protos.Metric{{Name: "token_count", Value: "3"}},
 		Data:         &protos.Message{Role: "assistant", Message: &protos.Message_Assistant{Assistant: &protos.AssistantMessage{Contents: []string{"final"}}}},
@@ -108,9 +103,8 @@ func TestModel_Flow_UserToLLM_Stream_Done(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stream.sendCalls, 1)
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-flow-1",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{
@@ -119,9 +113,8 @@ func TestModel_Flow_UserToLLM_Stream_Done(t *testing.T) {
 		},
 	})
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-flow-1",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{
@@ -148,9 +141,8 @@ func TestModel_Interrupt_LateResponseStillEmittedForPersistence(t *testing.T) {
 
 	require.NoError(t, e.Execute(context.Background(), comm, internal_type.LLMInterruptPacket{ContextID: "ctx-int"}))
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-int",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{

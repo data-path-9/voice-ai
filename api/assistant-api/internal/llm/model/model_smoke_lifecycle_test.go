@@ -109,9 +109,8 @@ func TestModel_Close_ThenLatePackets_NoCrash(t *testing.T) {
 
 	require.NoError(t, e.Close(context.Background()))
 
-	e.handleResponse(context.Background(), comm, &protos.ChatResponse{
+	e.handleResponse(context.Background(), comm, &protos.ChatStreamResponse{
 		RequestId: "ctx-close2",
-		Success:   true,
 		Data: &protos.Message{
 			Role: "assistant",
 			Message: &protos.Message_Assistant{
@@ -131,8 +130,8 @@ type listenErrorStream struct {
 	recvErr error
 }
 
-func (m *listenErrorStream) Send(*protos.ChatRequest) error { return nil }
-func (m *listenErrorStream) Recv() (*protos.ChatResponse, error) {
+func (m *listenErrorStream) Send(*protos.StreamChatRequest) error { return nil }
+func (m *listenErrorStream) Recv() (*protos.StreamChatResponse, error) {
 	if m.recvErr != nil {
 		err := m.recvErr
 		m.recvErr = nil
