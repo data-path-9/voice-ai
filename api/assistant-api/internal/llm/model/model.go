@@ -35,7 +35,7 @@ type modelAssistantExecutor struct {
 	providerCredential *protos.VaultCredential
 	inputBuilder       integration_client_builders.InputChatBuilder
 	history            *ConversationHistory
-	stream             grpc.BidiStreamingClient[protos.ChatRequest, protos.ChatResponse]
+	stream             grpc.BidiStreamingClient[protos.StreamChatRequest, protos.StreamChatResponse]
 
 	mu            sync.RWMutex
 	currentPacket *internal_type.UserInputPacket
@@ -91,6 +91,16 @@ func (e *modelAssistantExecutor) Initialize(ctx context.Context, communication i
 	if err != nil {
 		return fmt.Errorf("failed to open stream: %w", err)
 	}
+	if err := stream.Send(&protos.StreamChatRequest{
+		Request: &protos.StreamChatRequest_Configuration{
+			Configuration: &protos.StreamChatConfiguration{
+				Credential:   &protos.Credential{Id: e.providerCredential.GetId(), Value: e.providerCredential.GetValue()},
+				ProviderName: strings.ToLower(communication.Assistant().AssistantProviderModel.ModelProviderName),
+			},
+		},
+	}); err != nil {
+		return err
+	}
 	e.stream = stream
 	e.ctx, e.ctxCancel = context.WithCancel(ctx)
 	utils.Go(e.ctx, func() { e.listen(e.ctx, communication) })
@@ -108,13 +118,19 @@ func (e *modelAssistantExecutor) Close(ctx context.Context) error {
 		e.ctxCancel()
 	}
 	e.mu.Lock()
-	if e.stream != nil {
-		e.stream.CloseSend()
-		e.stream = nil
-	}
 	e.currentPacket = nil
+	stream := e.stream
+	e.stream = nil
 	e.mu.Unlock()
 	e.history.Reset()
+	if stream != nil {
+		_ = stream.Send(&protos.StreamChatRequest{
+			Request: &protos.StreamChatRequest_Close{
+				Close: &protos.StreamChatClose{Reason: "session ended"},
+			},
+		})
+		_ = stream.CloseSend()
+	}
 	if e.toolExecutor != nil {
 		if err := e.toolExecutor.Close(ctx); err != nil {
 			e.logger.Errorf("error closing tool executor: %v", err)
@@ -251,13 +267,13 @@ func (e *modelAssistantExecutor) handleInterruption() {
 	e.history.SupersedePending()
 }
 
-func (e *modelAssistantExecutor) handleResponse(ctx context.Context, communication internal_type.Communication, resp *protos.ChatResponse) {
+func (e *modelAssistantExecutor) handleResponse(ctx context.Context, communication internal_type.Communication, resp *protos.ChatStreamResponse) {
 	if e.isStaleResponse(resp.GetRequestId()) {
 		return
 	}
 	contextID := resp.GetRequestId()
 
-	if !resp.GetSuccess() && resp.GetError() != nil {
+	if resp.GetError() != nil {
 		errMsg := resp.GetError().GetErrorMessage()
 		communication.OnPacket(ctx,
 			internal_type.LLMErrorPacket{ContextID: contextID, Error: errors.New(errMsg)},
@@ -293,7 +309,7 @@ func (e *modelAssistantExecutor) handleToolFollowUp(ctx context.Context, communi
 		return
 	}
 	promptArgs := e.buildBasePromptArgs(communication)
-	if err := stream.Send(e.buildChatRequest(communication, contextID, promptArgs, snapshot...)); err != nil {
+	if err := stream.Send(&protos.StreamChatRequest{Request: &protos.StreamChatRequest_Chat{Chat: e.chatStreamRequest(communication, contextID, promptArgs, snapshot...)}}); err != nil {
 		e.logger.Errorf("tool follow-up send failed: %v", err)
 	}
 }
@@ -314,7 +330,9 @@ func (e *modelAssistantExecutor) sendChat(
 	if stream == nil {
 		return fmt.Errorf("stream not connected")
 	}
-	return stream.Send(e.buildChatRequest(communication, contextID, promptArgs, messages...))
+	return stream.Send(&protos.StreamChatRequest{
+		Request: &protos.StreamChatRequest_Chat{Chat: e.chatStreamRequest(communication, contextID, promptArgs, messages...)},
+	})
 }
 
 func (e *modelAssistantExecutor) listen(ctx context.Context, communication internal_type.Communication) {
@@ -337,7 +355,22 @@ func (e *modelAssistantExecutor) listen(ctx context.Context, communication inter
 			})
 			return
 		}
-		e.Run(ctx, communication, ResponsePipeline{Response: resp})
+		switch v := resp.GetResponse().(type) {
+		case *protos.StreamChatResponse_Chat:
+			e.Run(ctx, communication, ResponsePipeline{Response: v.Chat})
+		case *protos.StreamChatResponse_Close:
+			communication.OnPacket(ctx, internal_type.LLMToolCallPacket{
+				ContextID: e.currentContextID(),
+				Name:      "end_conversation",
+				Action:    protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION,
+				Arguments: map[string]string{"reason": v.Close.GetReason()},
+			})
+			return
+		case *protos.StreamChatResponse_Configuration:
+			// Late configuration response (we already handled it in Connect). Ignore.
+		default:
+			e.logger.Warnf("unknown stream response variant: %T", v)
+		}
 	}
 }
 
@@ -453,13 +486,13 @@ func (e *modelAssistantExecutor) buildBasePromptArgs(communication internal_type
 // Chat request builder
 // =============================================================================
 
-func (e *modelAssistantExecutor) buildChatRequest(communication internal_type.Communication, contextID string, promptArgs map[string]interface{}, messages ...*protos.Message) *protos.ChatRequest {
+func (e *modelAssistantExecutor) chatStreamRequest(communication internal_type.Communication, contextID string, promptArgs map[string]interface{}, messages ...*protos.Message) *protos.ChatStreamRequest {
 	assistant := communication.Assistant()
 	template := assistant.AssistantProviderModel.Template.GetTextChatCompleteTemplate()
 	defaultArgs := parsers.CanonicalizePromptArguments(e.inputBuilder.PromptArguments(template.Variables))
 	runtimeArgs := parsers.CanonicalizePromptArguments(promptArgs)
 	systemMessages := e.inputBuilder.Message(template.Prompt, utils.MergeMaps(defaultArgs, runtimeArgs))
-	req := e.inputBuilder.Chat(
+	src := e.inputBuilder.Chat(
 		contextID,
 		&protos.Credential{Id: e.providerCredential.GetId(), Value: e.providerCredential.GetValue()},
 		e.inputBuilder.Options(utils.MergeMaps(assistant.AssistantProviderModel.GetOptions(), communication.GetOptions()), nil),
@@ -471,8 +504,14 @@ func (e *modelAssistantExecutor) buildChatRequest(communication internal_type.Co
 		},
 		append(systemMessages, messages...)...,
 	)
-	req.ProviderName = strings.ToLower(assistant.AssistantProviderModel.ModelProviderName)
-	return req
+	return &protos.ChatStreamRequest{
+		RequestId:       src.GetRequestId(),
+		ProviderName:    strings.ToLower(assistant.AssistantProviderModel.ModelProviderName),
+		Conversations:   src.GetConversations(),
+		AdditionalData:  src.GetAdditionalData(),
+		ModelParameters: src.GetModelParameters(),
+		ToolDefinitions: src.GetToolDefinitions(),
+	}
 }
 
 // =============================================================================

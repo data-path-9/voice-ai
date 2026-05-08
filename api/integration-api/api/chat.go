@@ -258,11 +258,11 @@ func (iApi *integrationApi) Chat(
 }
 
 // StreamChatBidirectionalUnified handles bidirectional streaming chat for the unified provider service.
-// Unlike StreamChatBidirectional, the provider is resolved dynamically from each request's additionalData.
+// The first frame must be configuration; all later chat frames reuse the same caller/client.
 func (iApi *integrationApi) StreamChatBidirectionalUnified(
 	context context.Context,
 	logger commons.Logger,
-	stream grpc.BidiStreamingServer[protos.ChatRequest, protos.ChatResponse],
+	stream grpc.BidiStreamingServer[protos.StreamChatRequest, protos.StreamChatResponse],
 ) error {
 	iAuth, isAuthenticated := types.GetSimplePrincipleGRPC(context)
 	if !isAuthenticated || !iAuth.HasProject() {
@@ -271,10 +271,13 @@ func (iApi *integrationApi) StreamChatBidirectionalUnified(
 	}
 
 	iApi.logger.Infof("Bidirectional stream chat opened for unified provider")
-	cachedCallers := make(map[string]internal_callers.LargeLanguageCaller)
+	initialized := false
+
+	var credential *protos.Credential
+	var llmCaller internal_callers.LargeLanguageCaller
 
 	for {
-		irRequest, err := stream.Recv()
+		req, err := stream.Recv()
 		if err == io.EOF {
 			iApi.logger.Infof("Client closed bidirectional stream for unified provider")
 			return nil
@@ -284,132 +287,207 @@ func (iApi *integrationApi) StreamChatBidirectionalUnified(
 			return status.Errorf(codes.Internal, "Error receiving chat request from stream: %v", err)
 		}
 
-		if irRequest == nil {
+		if req == nil {
 			iApi.logger.Warnf("Received nil request from bidirectional stream")
 			continue
 		}
 
-		providerName := strings.ToLower(irRequest.GetProviderName())
-		if providerName == "" {
-			stream.Send(&protos.ChatResponse{
-				Success:   false,
-				Code:      400,
-				RequestId: irRequest.GetRequestId(),
-				Error: &protos.Error{
-					ErrorCode:    400,
-					ErrorMessage: "providerName is required",
-					HumanMessage: "providerName is required",
-				},
-			})
-			continue
-		}
-
-		cacheKey := buildStreamCallerCacheKey(providerName, irRequest.GetCredential())
-		llmCaller, ok := cachedCallers[cacheKey]
-		if !ok {
-			llmCaller, err = internal_caller_factory.GetLargeLanguageCaller(logger, providerName, irRequest.GetCredential())
-			if err != nil {
-				stream.Send(&protos.ChatResponse{
-					Success:   false,
-					Code:      400,
-					RequestId: irRequest.GetRequestId(),
-					Error: &protos.Error{
-						ErrorCode:    400,
-						ErrorMessage: err.Error(),
-						HumanMessage: err.Error(),
+		switch payload := req.GetRequest().(type) {
+		case *protos.StreamChatRequest_Configuration:
+			if payload.Configuration.GetCredential() == nil {
+				_ = stream.Send(&protos.StreamChatResponse{
+					Response: &protos.StreamChatResponse_Configuration{
+						Configuration: &protos.StreamChatConfigured{
+							ProviderName: payload.Configuration.GetProviderName(),
+							Success:      false,
+							Error: &protos.Error{
+								ErrorCode:    400,
+								ErrorMessage: "credential is required",
+								HumanMessage: "credential is required",
+							},
+						},
 					},
 				})
 				continue
 			}
-			cachedCallers[cacheKey] = llmCaller
-		}
 
-		uuID := iApi.RequestId()
-		if irRequest.AdditionalData == nil {
-			irRequest.AdditionalData = map[string]string{}
-		}
-
-		tag := strings.ToLower(providerName)
-		irRequest.AdditionalData["provider_name"] = tag
-		model, ok := irRequest.ModelParameters["model.name"]
-		if ok {
-			mdl, err := utils.AnyToString(model)
-			if err == nil {
-				irRequest.AdditionalData["model_name"] = mdl
-			}
-		}
-
-		modelID, ok := irRequest.ModelParameters["model.id"]
-		if ok {
-			mdlID, err := utils.AnyToString(modelID)
-			if err == nil {
-				irRequest.AdditionalData["model_id"] = mdlID
-			}
-		}
-
-		source, ok := utils.GetClientSource(context)
-		if ok {
-			irRequest.AdditionalData["source"] = source.Get()
-		}
-
-		clientEnv, ok := utils.GetClientEnvironment(context)
-		if ok {
-			irRequest.AdditionalData["env"] = clientEnv.Get()
-		}
-
-		clientRegion, ok := utils.GetClientRegion(context)
-		if ok {
-			irRequest.AdditionalData["region"] = clientRegion.Get()
-		}
-
-		err = llmCaller.StreamChatCompletion(
-			stream.Context(),
-			irRequest.GetConversations(),
-			internal_callers.NewChatOptions(
-				uuID,
-				irRequest,
-				iApi.PreHook(stream.Context(), iAuth, irRequest, uuID, tag),
-				iApi.PostHook(stream.Context(), iAuth, irRequest, uuID, tag),
-			),
-			func(rID string, content *protos.Message) error {
-				return stream.Send(&protos.ChatResponse{
-					Success:   true,
-					RequestId: rID,
-					Data:      content,
-				})
-			},
-			func(rID string, content *protos.Message, mtx []*protos.Metric) error {
-				return stream.Send(&protos.ChatResponse{
-					Success:   true,
-					RequestId: rID,
-					Metrics:   mtx,
-					Data:      content,
-				})
-			},
-			func(rID string, err error) {
-				stream.Send(&protos.ChatResponse{
-					Success:   false,
-					Code:      400,
-					RequestId: rID,
-					Error: &protos.Error{
-						ErrorCode:    uint64(400),
-						ErrorMessage: err.Error(),
-						HumanMessage: err.Error(),
+			llmCaller, err = internal_caller_factory.GetLargeLanguageCaller(logger, payload.Configuration.GetProviderName(), payload.Configuration.GetCredential())
+			if err != nil {
+				_ = stream.Send(&protos.StreamChatResponse{
+					Response: &protos.StreamChatResponse_Configuration{
+						Configuration: &protos.StreamChatConfigured{
+							ProviderName: payload.Configuration.GetProviderName(),
+							Success:      false,
+							Error: &protos.Error{
+								ErrorCode:    400,
+								ErrorMessage: err.Error(),
+								HumanMessage: err.Error(),
+							},
+						},
 					},
 				})
-			},
-		)
+				continue
+			}
 
-		if err != nil {
-			iApi.logger.Warnf("Error processing chat request in bidirectional stream: %v", err)
-			stream.Send(&protos.ChatResponse{
-				Success:   false,
-				Code:      500,
-				RequestId: irRequest.GetRequestId(),
-				Error: &protos.Error{
-					ErrorCode:    500,
-					ErrorMessage: err.Error(),
-					HumanMessage: "Internal server error processing your request",
+			initialized = true
+			_ = stream.Send(&protos.StreamChatResponse{
+				Response: &protos.StreamChatResponse_Configuration{
+					Configuration: &protos.StreamChatConfigured{
+						ProviderName: payload.Configuration.GetProviderName(),
+						Success:      true,
+					},
+				},
+			})
+		case *protos.StreamChatRequest_Chat:
+			if !initialized {
+				_ = stream.Send(&protos.StreamChatResponse{
+					Response: &protos.StreamChatResponse_Chat{
+						Chat: &protos.ChatStreamResponse{
+							RequestId: payload.Chat.GetRequestId(),
+							Error: &protos.Error{
+								ErrorCode:    412,
+								ErrorMessage: "stream is not configured; send configuration first",
+								HumanMessage: "stream is not configured; send configuration first",
+							},
+						},
+					},
+				})
+				continue
+			}
+
+			irRequest := &protos.ChatRequest{
+				Credential:      credential,
+				RequestId:       payload.Chat.GetRequestId(),
+				Conversations:   payload.Chat.GetConversations(),
+				AdditionalData:  payload.Chat.GetAdditionalData(),
+				ModelParameters: payload.Chat.GetModelParameters(),
+				ToolDefinitions: payload.Chat.GetToolDefinitions(),
+				ProviderName:    payload.Chat.GetProviderName(),
+			}
+
+			uuID := iApi.RequestId()
+			if irRequest.AdditionalData == nil {
+				irRequest.AdditionalData = map[string]string{}
+			}
+
+			tag := strings.ToLower(payload.Chat.GetProviderName())
+			irRequest.AdditionalData["provider_name"] = tag
+			model, ok := irRequest.ModelParameters["model.name"]
+			if ok {
+				mdl, err := utils.AnyToString(model)
+				if err == nil {
+					irRequest.AdditionalData["model_name"] = mdl
+				}
+			}
+
+			modelID, ok := irRequest.ModelParameters["model.id"]
+			if ok {
+				mdlID, err := utils.AnyToString(modelID)
+				if err == nil {
+					irRequest.AdditionalData["model_id"] = mdlID
+				}
+			}
+
+			source, ok := utils.GetClientSource(context)
+			if ok {
+				irRequest.AdditionalData["source"] = source.Get()
+			}
+
+			clientEnv, ok := utils.GetClientEnvironment(context)
+			if ok {
+				irRequest.AdditionalData["env"] = clientEnv.Get()
+			}
+
+			clientRegion, ok := utils.GetClientRegion(context)
+			if ok {
+				irRequest.AdditionalData["region"] = clientRegion.Get()
+			}
+
+			err = llmCaller.StreamChatCompletion(
+				stream.Context(),
+				irRequest.GetConversations(),
+				internal_callers.NewChatOptions(
+					uuID,
+					irRequest,
+					iApi.PreHook(stream.Context(), iAuth, irRequest, uuID, tag),
+					iApi.PostHook(stream.Context(), iAuth, irRequest, uuID, tag),
+				),
+				func(rID string, content *protos.Message) error {
+					return stream.Send(&protos.StreamChatResponse{
+						Response: &protos.StreamChatResponse_Chat{
+							Chat: &protos.ChatStreamResponse{
+								RequestId: rID,
+								Data:      content,
+							},
+						},
+					})
+				},
+				func(rID string, content *protos.Message, mtx []*protos.Metric) error {
+					return stream.Send(&protos.StreamChatResponse{
+						Response: &protos.StreamChatResponse_Chat{
+							Chat: &protos.ChatStreamResponse{
+								RequestId: rID,
+								Data:      content,
+								Metrics:   mtx,
+							},
+						},
+					})
+				},
+				func(rID string, err error) {
+					_ = stream.Send(&protos.StreamChatResponse{
+						Response: &protos.StreamChatResponse_Chat{
+							Chat: &protos.ChatStreamResponse{
+								RequestId: rID,
+								Error: &protos.Error{
+									ErrorCode:    400,
+									ErrorMessage: err.Error(),
+									HumanMessage: err.Error(),
+								},
+							},
+						},
+					})
+				},
+			)
+
+			if err != nil {
+				iApi.logger.Warnf("Error processing chat request in bidirectional stream: %v", err)
+				_ = stream.Send(&protos.StreamChatResponse{
+					Response: &protos.StreamChatResponse_Chat{
+						Chat: &protos.ChatStreamResponse{
+							RequestId: payload.Chat.GetRequestId(),
+							Error: &protos.Error{
+								ErrorCode:    500,
+								ErrorMessage: err.Error(),
+								HumanMessage: "Internal server error processing your request",
+							},
+						},
+					},
+				})
+			}
+		case *protos.StreamChatRequest_Close:
+			closeMsg := payload.Close
+			reason := ""
+			if closeMsg != nil {
+				reason = closeMsg.GetReason()
+			}
+			_ = stream.Send(&protos.StreamChatResponse{
+				Response: &protos.StreamChatResponse_Close{
+					Close: &protos.StreamChatClose{
+						Reason: reason,
+					},
+				},
+			})
+			return nil
+		default:
+			_ = stream.Send(&protos.StreamChatResponse{
+				Response: &protos.StreamChatResponse_Chat{
+					Chat: &protos.ChatStreamResponse{
+						Error: &protos.Error{
+							ErrorCode:    400,
+							ErrorMessage: "invalid stream request; expected configuration, chat, or close",
+							HumanMessage: "invalid stream request; expected configuration, chat, or close",
+						},
+					},
 				},
 			})
 		}

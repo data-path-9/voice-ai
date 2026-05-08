@@ -238,6 +238,94 @@ class ChatRequest(_message.Message):
     providerName: str
     def __init__(self, credential: _Optional[_Union[Credential, _Mapping]] = ..., requestId: _Optional[str] = ..., conversations: _Optional[_Iterable[_Union[_common_pb2.Message, _Mapping]]] = ..., additionalData: _Optional[_Mapping[str, str]] = ..., modelParameters: _Optional[_Mapping[str, _any_pb2.Any]] = ..., toolDefinitions: _Optional[_Iterable[_Union[ToolDefinition, _Mapping]]] = ..., providerName: _Optional[str] = ...) -> None: ...
 
+class StreamChatConfiguration(_message.Message):
+    __slots__ = ("credential", "providerName")
+    CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
+    PROVIDERNAME_FIELD_NUMBER: _ClassVar[int]
+    credential: Credential
+    providerName: str
+    def __init__(self, credential: _Optional[_Union[Credential, _Mapping]] = ..., providerName: _Optional[str] = ...) -> None: ...
+
+class StreamChatConfigured(_message.Message):
+    __slots__ = ("providerName", "success", "error")
+    PROVIDERNAME_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    providerName: str
+    success: bool
+    error: _common_pb2.Error
+    def __init__(self, providerName: _Optional[str] = ..., success: bool = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ...) -> None: ...
+
+class ChatStreamRequest(_message.Message):
+    __slots__ = ("requestId", "providerName", "conversations", "additionalData", "modelParameters", "toolDefinitions")
+    class AdditionalDataEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    class ModelParametersEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: _any_pb2.Any
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[_any_pb2.Any, _Mapping]] = ...) -> None: ...
+    REQUESTID_FIELD_NUMBER: _ClassVar[int]
+    PROVIDERNAME_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATIONS_FIELD_NUMBER: _ClassVar[int]
+    ADDITIONALDATA_FIELD_NUMBER: _ClassVar[int]
+    MODELPARAMETERS_FIELD_NUMBER: _ClassVar[int]
+    TOOLDEFINITIONS_FIELD_NUMBER: _ClassVar[int]
+    requestId: str
+    providerName: str
+    conversations: _containers.RepeatedCompositeFieldContainer[_common_pb2.Message]
+    additionalData: _containers.ScalarMap[str, str]
+    modelParameters: _containers.MessageMap[str, _any_pb2.Any]
+    toolDefinitions: _containers.RepeatedCompositeFieldContainer[ToolDefinition]
+    def __init__(self, requestId: _Optional[str] = ..., providerName: _Optional[str] = ..., conversations: _Optional[_Iterable[_Union[_common_pb2.Message, _Mapping]]] = ..., additionalData: _Optional[_Mapping[str, str]] = ..., modelParameters: _Optional[_Mapping[str, _any_pb2.Any]] = ..., toolDefinitions: _Optional[_Iterable[_Union[ToolDefinition, _Mapping]]] = ...) -> None: ...
+
+class ChatStreamResponse(_message.Message):
+    __slots__ = ("requestId", "data", "error", "metrics", "finishReason")
+    REQUESTID_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    METRICS_FIELD_NUMBER: _ClassVar[int]
+    FINISHREASON_FIELD_NUMBER: _ClassVar[int]
+    requestId: str
+    data: _common_pb2.Message
+    error: _common_pb2.Error
+    metrics: _containers.RepeatedCompositeFieldContainer[_common_pb2.Metric]
+    finishReason: str
+    def __init__(self, requestId: _Optional[str] = ..., data: _Optional[_Union[_common_pb2.Message, _Mapping]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ..., metrics: _Optional[_Iterable[_Union[_common_pb2.Metric, _Mapping]]] = ..., finishReason: _Optional[str] = ...) -> None: ...
+
+class StreamChatClose(_message.Message):
+    __slots__ = ("reason",)
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    reason: str
+    def __init__(self, reason: _Optional[str] = ...) -> None: ...
+
+class StreamChatRequest(_message.Message):
+    __slots__ = ("configuration", "chat", "close")
+    CONFIGURATION_FIELD_NUMBER: _ClassVar[int]
+    CHAT_FIELD_NUMBER: _ClassVar[int]
+    CLOSE_FIELD_NUMBER: _ClassVar[int]
+    configuration: StreamChatConfiguration
+    chat: ChatStreamRequest
+    close: StreamChatClose
+    def __init__(self, configuration: _Optional[_Union[StreamChatConfiguration, _Mapping]] = ..., chat: _Optional[_Union[ChatStreamRequest, _Mapping]] = ..., close: _Optional[_Union[StreamChatClose, _Mapping]] = ...) -> None: ...
+
+class StreamChatResponse(_message.Message):
+    __slots__ = ("configuration", "chat", "close")
+    CONFIGURATION_FIELD_NUMBER: _ClassVar[int]
+    CHAT_FIELD_NUMBER: _ClassVar[int]
+    CLOSE_FIELD_NUMBER: _ClassVar[int]
+    configuration: StreamChatConfigured
+    chat: ChatStreamResponse
+    close: StreamChatClose
+    def __init__(self, configuration: _Optional[_Union[StreamChatConfigured, _Mapping]] = ..., chat: _Optional[_Union[ChatStreamResponse, _Mapping]] = ..., close: _Optional[_Union[StreamChatClose, _Mapping]] = ...) -> None: ...
+
 class VerifyCredentialRequest(_message.Message):
     __slots__ = ("credential", "providerName")
     CREDENTIAL_FIELD_NUMBER: _ClassVar[int]
