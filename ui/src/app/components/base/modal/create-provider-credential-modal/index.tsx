@@ -21,7 +21,12 @@ import {
   TertiaryButton,
 } from '@/app/components/carbon/button';
 import { Stack, TextInput, TextArea } from '@/app/components/carbon/form';
-import { Dropdown, Button } from '@carbon/react';
+import {
+  Dropdown,
+  Button,
+  Select as CarbonSelect,
+  SelectItem,
+} from '@carbon/react';
 import { Add, TrashCan } from '@carbon/icons-react';
 import { connectionConfig } from '@/configs';
 import { useProviderContext } from '@/context/provider-context';
@@ -192,6 +197,25 @@ export function CreateProviderCredentialDialog(
                   value={config[x.name] || ''}
                   onChange={value => handleConfigChange(x.name, value)}
                 />
+              ) : x.type === 'select' ? (
+                <CarbonSelect
+                  key={idx}
+                  id={`config-${x.name}`}
+                  labelText={x.label}
+                  value={config[x.name] || ''}
+                  onChange={e =>
+                    handleConfigChange(x.name, (e.target as HTMLSelectElement).value)
+                  }
+                >
+                  <SelectItem value="" text={`Select ${x.label.toLowerCase()}`} />
+                  {(x.choices ?? []).map(c => (
+                    <SelectItem
+                      key={c.value}
+                      value={c.value}
+                      text={c.label}
+                    />
+                  ))}
+                </CarbonSelect>
               ) : (
                 <TextInput
                   key={idx}
