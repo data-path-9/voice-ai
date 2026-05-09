@@ -197,7 +197,14 @@ function validateParamValue(
     case 'json': {
       if (!value) return undefined;
       try {
-        JSON.parse(value);
+        const parsed = JSON.parse(value);
+        if (
+          provider === 'custom-llm' &&
+          param.key === 'model.parameters' &&
+          (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object')
+        ) {
+          return defaultError;
+        }
         return undefined;
       } catch {
         return defaultError;

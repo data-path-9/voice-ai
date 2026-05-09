@@ -192,6 +192,19 @@ describe('resolveCategoryParameters', () => {
     expect(resolved.find(p => p.key === 'model.temperature')).toBeDefined();
   });
 
+  it('enables free-form model selection for openrouter', () => {
+    const config = loadProviderConfig('openrouter');
+    expect(config?.text).toBeDefined();
+
+    const modelSelector = config?.text?.parameters.find(
+      p => p.key === 'model.id',
+    );
+    expect(modelSelector).toBeDefined();
+    expect(modelSelector?.customValue).toBe(true);
+    expect(modelSelector?.strict).toBe(false);
+    expect(modelSelector?.data).toBe('text-models.json');
+  });
+
   it('uses reasoning-style params for gpt-5.5 without sampling controls', () => {
     const config = loadProviderConfig('openai');
     expect(config?.text).toBeDefined();

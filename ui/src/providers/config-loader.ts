@@ -108,6 +108,7 @@ const TEXT_CUSTOM_MODEL_PROVIDERS = new Set([
   'azure-foundry',
   'vertexai',
   'custom-llm',
+  'openrouter',
 ]);
 
 function warnProviderLoadFailure(

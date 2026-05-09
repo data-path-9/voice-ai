@@ -551,6 +551,9 @@
   .col-span-3 {
     grid-column: span 3 / span 3;
   }
+  .col-span-full {
+    grid-column: 1 / -1;
+  }
   .row-span-2 {
     grid-row: span 2 / span 2;
   }
@@ -3723,6 +3726,9 @@
   .rounded-none\! {
     border-radius: 0 !important;
   }
+  .rounded-sm {
+    border-radius: var(--radius-sm);
+  }
   .rounded-xl {
     border-radius: var(--radius-xl);
   }
@@ -3847,6 +3853,9 @@
   }
   .\!border-gray-200 {
     border-color: var(--color-gray-200) !important;
+  }
+  .border-\[var\(--cds-border-subtle\)\] {
+    border-color: var(--cds-border-subtle);
   }
   .border-black {
     border-color: var(--color-black);

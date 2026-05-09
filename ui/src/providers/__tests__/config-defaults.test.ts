@@ -517,6 +517,41 @@ describe('validateFromConfig', () => {
     ).toBeDefined();
   });
 
+  it('validates custom-llm model.parameters as JSON object', () => {
+    const customLLMConfig: ProviderConfig = {
+      text: {
+        parameters: [
+          {
+            key: 'model.parameters',
+            label: 'Model Parameters',
+            type: 'json',
+            required: false,
+          },
+        ],
+      },
+    };
+
+    const cred = createMetadata('rapida.credential_id', 'valid-cred');
+    const validObject = createMetadata(
+      'model.parameters',
+      '{"temperature":0.7}',
+    );
+    expect(
+      validateFromConfig(customLLMConfig, 'text', 'custom-llm', [
+        cred,
+        validObject,
+      ]),
+    ).toBeUndefined();
+
+    const invalidArray = createMetadata('model.parameters', '[1,2,3]');
+    expect(
+      validateFromConfig(customLLMConfig, 'text', 'custom-llm', [
+        cred,
+        invalidArray,
+      ]),
+    ).toBeDefined();
+  });
+
   it('validates select choices', () => {
     const cred = createMetadata('rapida.credential_id', 'valid-cred');
     const validChoice = createMetadata('model.reasoning_effort', 'medium');

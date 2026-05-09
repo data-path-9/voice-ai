@@ -326,41 +326,6 @@
         "website": "https://openai.com"
     },
     {
-        "code": "custom-llm",
-        "name": "Custom LLM",
-        "description": "Connect to any LLM server. Choose an API compatibility (OpenAI-compatible, Anthropic-compatible, or custom), provide a base URL and optional headers. Useful for self-hosted runtimes such as vLLM, Ollama, LM Studio, or Text Generation Inference.",
-        "image": "https://rapida-assets-01.s3.ap-south-1.amazonaws.com/providers/1987967168452493312.svg",
-        "featureList": [
-            "text",
-            "external"
-        ],
-        "configurations": [
-            {
-                "name": "apiCompatibility",
-                "type": "select",
-                "label": "API Compatibility",
-                "choices": [
-                    { "label": "OpenAI-compatible", "value": "openai" },
-                    { "label": "Anthropic-compatible", "value": "anthropic" },
-                    { "label": "Custom", "value": "custom" }
-                ]
-            },
-            {
-                "name": "baseUrl",
-                "type": "string",
-                "label": "Base URL"
-            },
-            {
-                "name": "headers",
-                "type": "key_value",
-                "label": "Headers",
-                "required": false
-            }
-        ],
-        "humanname": "Custom LLM",
-        "website": "https://platform.openai.com/docs/api-reference/chat"
-    },
-    {
         "code": "mistral",
         "name": "Mistral",
         "description": "Mistral specializes in creating fast, secure, open-source large language models (LLMs).",
@@ -467,6 +432,42 @@
             }
         ],
         "website": "https://cloud.google.com/vertex-ai"
+    },
+    {
+        "code": "openrouter",
+        "name": "OpenRouter",
+        "description": "Unified API gateway to access models from multiple LLM providers.",
+        "image": "https://openrouter.ai/favicon.ico",
+        "featureList": [
+            "text",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "key",
+                "type": "string",
+                "label": "API Key"
+            }
+        ],
+        "website": "https://openrouter.ai"
+    },
+    {
+        "code": "xai",
+        "name": "xAI",
+        "description": "xAI Grok models with large context windows and fast reasoning variants.",
+        "image": "https://x.ai/favicon.ico",
+        "featureList": [
+            "text",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "key",
+                "type": "string",
+                "label": "API Key"
+            }
+        ],
+        "website": "https://x.ai"
     },
     {
         "code": "deepgram",
@@ -797,5 +798,57 @@
                 "label": "Instrumentation Key / API Key"
             }
         ]
+    },
+    {
+        "code": "custom-llm",
+        "name": "Custom LLM",
+        "description": "Connect to any LLM server. Choose an API compatibility (OpenAI-compatible, Anthropic-compatible, or custom), provide a base URL and optional headers. Useful for self-hosted runtimes such as vLLM, Ollama, LM Studio, or Text Generation Inference.",
+        "image": "https://rapida-assets-01.s3.ap-south-1.amazonaws.com/providers/1987967168452493312.svg",
+        "featureList": [
+            "text",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "apiCompatibility",
+                "type": "select",
+                "label": "API Compatibility",
+                "choices": [
+                    {
+                        "label": "OpenAI Chat Completions (/v1/chat/completions)",
+                        "value": "openai_chat_completions"
+                    },
+                    {
+                        "label": "OpenAI Responses (/v1/responses)",
+                        "value": "openai_responses"
+                    },
+                    {
+                        "label": "Anthropic Messages (/v1/messages)",
+                        "value": "anthropic_messages"
+                    },
+                    {
+                        "label": "Google Gemini (generateContent)",
+                        "value": "gemini_generate_content"
+                    },
+                    {
+                        "label": "OpenAI Compatible (Ollama / vLLM)",
+                        "value": "openai_compatible"
+                    }
+                ]
+            },
+            {
+                "name": "baseUrl",
+                "type": "string",
+                "label": "Base URL"
+            },
+            {
+                "name": "headers",
+                "type": "key_value",
+                "label": "Headers",
+                "required": false
+            }
+        ],
+        "humanname": "Custom LLM",
+        "website": "https://platform.openai.com/docs/api-reference/chat"
     }
 ]
