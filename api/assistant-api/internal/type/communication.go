@@ -76,4 +76,7 @@ type Communication interface {
 		filter map[string]interface{},
 		kc *KnowledgeRetrieveOption,
 	) ([]KnowledgeContextResult, error)
+
+	// IsConditionAllowed checks if a condition is allowed based on the provided options and key
+	IsConditionAllowed(opts utils.Option, key string) bool
 }

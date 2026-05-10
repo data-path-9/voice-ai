@@ -18,6 +18,7 @@ import (
 type Executor[P Packet] interface {
 	Name() string
 	Options() utils.Option
+	Arguments() (map[string]string, error)
 	Execute(ctx context.Context, packet P) error
 	Close(ctx context.Context) error
 }

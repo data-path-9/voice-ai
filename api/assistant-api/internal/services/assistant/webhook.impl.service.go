@@ -326,15 +326,8 @@ func (s *assistantWebhookService) createOptions(
 	if len(options) == 0 {
 		return []*internal_assistant_entity.AssistantWebhookOption{}, nil
 	}
-
 	out := make([]*internal_assistant_entity.AssistantWebhookOption, 0, len(options))
 	for _, opt := range options {
-		if opt == nil {
-			continue
-		}
-		if opt.GetKey() == "" || opt.GetKey() == internal_assistant_entity.WebhookOptionAssistantEventsKey {
-			continue
-		}
 		out = append(out, &internal_assistant_entity.AssistantWebhookOption{
 			AssistantWebhookId: webhookId,
 			Metadata: gorm_models.Metadata{

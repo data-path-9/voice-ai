@@ -15,7 +15,6 @@ import (
 func TestApply_DefaultNamespaces(t *testing.T) {
 	src := newFixtureSource()
 	r := namespace.NewDefaultRegistry()
-
 	mapping := map[string]string{
 		"assistant.id":          "agent_id",
 		"conversation.id":       "conv_id",
@@ -28,7 +27,6 @@ func TestApply_DefaultNamespaces(t *testing.T) {
 	}
 
 	out := r.Apply(mapping, src, variable.ResolveContext{})
-
 	want := map[string]any{
 		"agent_id": "42",
 		"conv_id":  "100",

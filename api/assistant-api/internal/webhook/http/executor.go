@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
@@ -20,6 +21,17 @@ import (
 	"github.com/rapidaai/pkg/commons"
 	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/pkg/utils"
+)
+
+const (
+	WebhookOptionAssistantEventsKey  = "assistant_events"
+	WebhookOptionHTTPMethodKey       = "http_method"
+	WebhookOptionHTTPURLKey          = "http_url"
+	WebhookOptionHTTPHeadersKey      = "http_headers"
+	WebhookOptionHTTPBodyKey         = "http_body"
+	WebhookOptionRetryStatusCodesKey = "retry_status_codes"
+	WebhookOptionMaxRetryCountKey    = "max_retry_count"
+	WebhookOptionTimeoutSecondsKey   = "timeout_seconds"
 )
 
 type runtimeExecutor struct {
@@ -48,125 +60,210 @@ func (e *runtimeExecutor) Options() utils.Option {
 	return e.webhook.GetOptions()
 }
 
+func (e *runtimeExecutor) Arguments() (map[string]string, error) {
+	return e.Options().GetStringMap(WebhookOptionHTTPBodyKey)
+}
+
+func (aa *runtimeExecutor) GetHeaders() map[string]string {
+	opts, err := aa.Options().GetStringMap(WebhookOptionHTTPHeadersKey)
+	if err != nil {
+		return map[string]string{}
+	}
+	return opts
+}
+
+func (aa *runtimeExecutor) GetBody() map[string]string {
+	opts, err := aa.Options().GetStringMap(WebhookOptionHTTPBodyKey)
+	if err != nil {
+		return map[string]string{}
+	}
+	return opts
+}
+
+func (aa *runtimeExecutor) GetMethod() string {
+	raw, err := aa.Options().GetString(WebhookOptionHTTPMethodKey)
+	if err != nil {
+		return "POST"
+	}
+	return raw
+}
+
+func (aa *runtimeExecutor) GetUrl() string {
+	raw, err := aa.Options().GetString(WebhookOptionHTTPURLKey)
+	if err != nil {
+		return ""
+	}
+	return raw
+}
+
+func (aa *runtimeExecutor) GetRetryStatusCode() []string {
+	return aa.getStringSliceOption(WebhookOptionRetryStatusCodesKey)
+}
+
+func (aa *runtimeExecutor) GetMaxRetryCount() uint32 {
+	raw, err := aa.Options().GetUint32(WebhookOptionMaxRetryCountKey)
+	if err != nil {
+		return 0
+	}
+	return raw
+}
+
+func (aa *runtimeExecutor) GetTimeoutSecond() uint32 {
+	raw, err := aa.Options().GetUint32(WebhookOptionTimeoutSecondsKey)
+	if err != nil {
+		return 0
+	}
+	return raw
+}
+
+func (aa *runtimeExecutor) getStringSliceOption(key string) []string {
+	raw, err := aa.Options().GetString(key)
+	if err != nil {
+		return []string{}
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return []string{}
+	}
+
+	parsed := []string{}
+	if json.Unmarshal([]byte(trimmed), &parsed) == nil {
+		return parsed
+	}
+
+	if strings.Contains(trimmed, ",") {
+		out := []string{}
+		for _, item := range strings.Split(trimmed, ",") {
+			part := strings.TrimSpace(item)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+		return out
+	}
+
+	return []string{trimmed}
+}
+
 // Execute runs webhook dispatch for packet event.
 func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.ExecuteWebhookPacket) error {
 	// method := strings.ToUpper()
-	client := rest.NewRestClientWithConfig(e.webhook.GetUrl(), e.webhook.GetHeaders(), e.webhook.GetTimeoutSecond())
+	client := rest.NewRestClientWithConfig(e.GetUrl(), e.GetHeaders(), e.GetTimeoutSecond())
 	startTime := time.Now()
-	requestPayload := e.createRequestPayload(e.webhook.GetUrl(), e.webhook.GetMethod(), e.webhook.GetHeaders(), e.webhook.GetTimeoutSecond()*1000, packet.Arguments)
-	for retryCount := uint32(0); retryCount <= e.webhook.GetMaxRetryCount(); retryCount++ {
-		switch e.webhook.GetMethod() {
+	requestPayload := e.createRequestPayload(e.GetUrl(), e.GetMethod(), e.GetHeaders(), e.GetTimeoutSecond()*1000, packet.Arguments)
+	for retryCount := uint32(0); retryCount <= e.GetMaxRetryCount(); retryCount++ {
+		switch e.GetMethod() {
 		case "POST":
-			response, err := client.Post(ctx, "", packet.Arguments, e.webhook.GetHeaders())
+			response, err := client.Post(ctx, "", packet.Arguments, e.GetHeaders())
 			if err != nil {
-				e.logger.Warnw("Webhook execution failed", "url", e.webhook.GetUrl(), "error", err)
+				e.logger.Warnw("Webhook execution failed", "url", e.GetUrl(), "error", err)
 				errorMessage := err.Error()
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, 0, &errorMessage, requestPayload, nil)
-				if retryCount < e.webhook.GetMaxRetryCount() {
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, 0, &errorMessage, requestPayload, nil)
+				if retryCount < e.GetMaxRetryCount() {
 					time.Sleep(2 * time.Second)
 				}
 				continue
 			}
 			responsePayload, _ := response.ToJSON()
-			isRetryable := slices.Contains(e.webhook.GetRetryStatusCode(), strconv.Itoa(response.StatusCode))
+			isRetryable := slices.Contains(e.GetRetryStatusCode(), strconv.Itoa(response.StatusCode))
 			if isRetryable {
 				errorMessage := fmt.Sprintf("webhook: retryable status %d", response.StatusCode)
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
-				if retryCount < e.webhook.GetMaxRetryCount() {
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
+				if retryCount < e.GetMaxRetryCount() {
 					time.Sleep(2 * time.Second)
 				}
 				continue
 			}
 			if response.StatusCode < 200 || response.StatusCode >= 300 {
 				errorMessage := fmt.Sprintf("webhook: endpoint returned status %d", response.StatusCode)
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
 				return nil
 			}
-			e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, responsePayload)
+			e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, responsePayload)
 			return nil
 		case "PUT":
-			response, err := client.Put(ctx, "", packet.Arguments, e.webhook.GetHeaders())
+			response, err := client.Put(ctx, "", packet.Arguments, e.GetHeaders())
 			if err != nil {
-				e.logger.Warnw("Webhook execution failed", "url", e.webhook.GetUrl(), "error", err)
+				e.logger.Warnw("Webhook execution failed", "url", e.GetUrl(), "error", err)
 				errorMessage := err.Error()
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, 0, &errorMessage, requestPayload, nil)
-				if retryCount < e.webhook.GetMaxRetryCount() {
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, 0, &errorMessage, requestPayload, nil)
+				if retryCount < e.GetMaxRetryCount() {
 					time.Sleep(2 * time.Second)
 				}
 				continue
 			}
 			responsePayload, _ := response.ToJSON()
-			isRetryable := slices.Contains(e.webhook.GetRetryStatusCode(), strconv.Itoa(response.StatusCode))
+			isRetryable := slices.Contains(e.GetRetryStatusCode(), strconv.Itoa(response.StatusCode))
 			if isRetryable {
 				errorMessage := fmt.Sprintf("webhook: retryable status %d", response.StatusCode)
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
-				if retryCount < e.webhook.GetMaxRetryCount() {
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
+				if retryCount < e.GetMaxRetryCount() {
 					time.Sleep(2 * time.Second)
 				}
 				continue
 			}
 			if response.StatusCode < 200 || response.StatusCode >= 300 {
 				errorMessage := fmt.Sprintf("webhook: endpoint returned status %d", response.StatusCode)
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
 				return nil
 			}
-			e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, responsePayload)
+			e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, responsePayload)
 			return nil
 		case "PATCH":
-			response, err := client.Patch(ctx, "", packet.Arguments, e.webhook.GetHeaders())
+			response, err := client.Patch(ctx, "", packet.Arguments, e.GetHeaders())
 			if err != nil {
-				e.logger.Warnw("Webhook execution failed", "url", e.webhook.GetUrl(), "error", err)
+				e.logger.Warnw("Webhook execution failed", "url", e.GetUrl(), "error", err)
 				errorMessage := err.Error()
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, 0, &errorMessage, requestPayload, nil)
-				if retryCount < e.webhook.GetMaxRetryCount() {
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, 0, &errorMessage, requestPayload, nil)
+				if retryCount < e.GetMaxRetryCount() {
 					time.Sleep(2 * time.Second)
 				}
 				continue
 			}
 			responsePayload, _ := response.ToJSON()
-			isRetryable := slices.Contains(e.webhook.GetRetryStatusCode(), strconv.Itoa(response.StatusCode))
+			isRetryable := slices.Contains(e.GetRetryStatusCode(), strconv.Itoa(response.StatusCode))
 			if isRetryable {
 				errorMessage := fmt.Sprintf("webhook: retryable status %d", response.StatusCode)
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
-				if retryCount < e.webhook.GetMaxRetryCount() {
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
+				if retryCount < e.GetMaxRetryCount() {
 					time.Sleep(2 * time.Second)
 				}
 				continue
 			}
 			if response.StatusCode < 200 || response.StatusCode >= 300 {
 				errorMessage := fmt.Sprintf("webhook: endpoint returned status %d", response.StatusCode)
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
 				return nil
 			}
-			e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, responsePayload)
+			e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, responsePayload)
 			return nil
 		default:
-			response, err := client.Get(ctx, "", packet.Arguments, e.webhook.GetHeaders())
+			response, err := client.Get(ctx, "", packet.Arguments, e.GetHeaders())
 			if err != nil {
-				e.logger.Warnw("Webhook execution failed", "url", e.webhook.GetUrl(), "error", err)
+				e.logger.Warnw("Webhook execution failed", "url", e.GetUrl(), "error", err)
 				errorMessage := err.Error()
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, 0, &errorMessage, requestPayload, nil)
-				if retryCount < e.webhook.GetMaxRetryCount() {
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, 0, &errorMessage, requestPayload, nil)
+				if retryCount < e.GetMaxRetryCount() {
 					time.Sleep(2 * time.Second)
 				}
 				continue
 			}
 			responsePayload, _ := response.ToJSON()
-			isRetryable := slices.Contains(e.webhook.GetRetryStatusCode(), strconv.Itoa(response.StatusCode))
+			isRetryable := slices.Contains(e.GetRetryStatusCode(), strconv.Itoa(response.StatusCode))
 			if isRetryable {
 				errorMessage := fmt.Sprintf("webhook: retryable status %d", response.StatusCode)
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
-				if retryCount < e.webhook.GetMaxRetryCount() {
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
+				if retryCount < e.GetMaxRetryCount() {
 					time.Sleep(2 * time.Second)
 				}
 				continue
 			}
 			if response.StatusCode < 200 || response.StatusCode >= 300 {
 				errorMessage := fmt.Sprintf("webhook: endpoint returned status %d", response.StatusCode)
-				e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
+				e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_FAILED, int64(response.StatusCode), &errorMessage, requestPayload, responsePayload)
 				return nil
 			}
-			e.onCreateLog(ctx, packet, e.webhook.GetMethod(), startTime, retryCount, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, responsePayload)
+			e.onCreateLog(ctx, packet, e.GetMethod(), startTime, retryCount, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, responsePayload)
 			return nil
 		}
 	}
@@ -207,7 +304,7 @@ func (e *runtimeExecutor) onCreateLog(
 		Source:          "webhook",
 		SourceRefID:     sourceRefID,
 		SourceEvent:     packet.Event.Get(),
-		HTTPURL:         e.webhook.GetUrl(),
+		HTTPURL:         e.GetUrl(),
 		HTTPMethod:      method,
 		ResponseStatus:  responseStatus,
 		TimeTaken:       int64(time.Since(startTime)),

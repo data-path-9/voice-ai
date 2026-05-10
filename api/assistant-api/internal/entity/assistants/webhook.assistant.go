@@ -6,23 +6,9 @@
 package internal_assistant_entity
 
 import (
-	"encoding/json"
-	"strings"
-
 	gorm_model "github.com/rapidaai/pkg/models/gorm"
 	gorm_types "github.com/rapidaai/pkg/models/gorm/types"
 	"github.com/rapidaai/pkg/utils"
-)
-
-const (
-	WebhookOptionAssistantEventsKey  = "assistant_events"
-	WebhookOptionHTTPMethodKey       = "http_method"
-	WebhookOptionHTTPURLKey          = "http_url"
-	WebhookOptionHTTPHeadersKey      = "http_headers"
-	WebhookOptionHTTPBodyKey         = "http_body"
-	WebhookOptionRetryStatusCodesKey = "retry_status_codes"
-	WebhookOptionMaxRetryCountKey    = "max_retry_count"
-	WebhookOptionTimeoutSecondsKey   = "timeout_seconds"
 )
 
 type AssistantWebhook struct {
@@ -66,85 +52,4 @@ func (aa *AssistantWebhook) GetAssistantEvents() []string {
 		return []string{}
 	}
 	return []string(aa.AssistantEvents)
-}
-
-func (aa *AssistantWebhook) GetHeaders() map[string]string {
-	opts, err := aa.GetOptions().GetStringMap(WebhookOptionHTTPHeadersKey)
-	if err != nil {
-		return map[string]string{}
-	}
-	return opts
-}
-
-func (aa *AssistantWebhook) GetBody() map[string]string {
-	opts, err := aa.GetOptions().GetStringMap(WebhookOptionHTTPBodyKey)
-	if err != nil {
-		return map[string]string{}
-	}
-	return opts
-}
-
-func (aa *AssistantWebhook) GetMethod() string {
-	raw, err := aa.GetOptions().GetString(WebhookOptionHTTPMethodKey)
-	if err != nil {
-		return "POST"
-	}
-	return raw
-}
-
-func (aa *AssistantWebhook) GetUrl() string {
-	raw, err := aa.GetOptions().GetString(WebhookOptionHTTPURLKey)
-	if err != nil {
-		return ""
-	}
-	return raw
-}
-
-func (aa *AssistantWebhook) GetRetryStatusCode() []string {
-	return aa.getStringSliceOption(WebhookOptionRetryStatusCodesKey)
-}
-
-func (aa *AssistantWebhook) GetMaxRetryCount() uint32 {
-	raw, err := aa.GetOptions().GetUint32(WebhookOptionMaxRetryCountKey)
-	if err != nil {
-		return 0
-	}
-	return raw
-}
-
-func (aa *AssistantWebhook) GetTimeoutSecond() uint32 {
-	raw, err := aa.GetOptions().GetUint32(WebhookOptionTimeoutSecondsKey)
-	if err != nil {
-		return 0
-	}
-	return raw
-}
-
-func (aa *AssistantWebhook) getStringSliceOption(key string) []string {
-	raw, err := aa.GetOptions().GetString(key)
-	if err != nil {
-		return []string{}
-	}
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return []string{}
-	}
-
-	parsed := []string{}
-	if json.Unmarshal([]byte(trimmed), &parsed) == nil {
-		return parsed
-	}
-
-	if strings.Contains(trimmed, ",") {
-		out := []string{}
-		for _, item := range strings.Split(trimmed, ",") {
-			part := strings.TrimSpace(item)
-			if part != "" {
-				out = append(out, part)
-			}
-		}
-		return out
-	}
-
-	return []string{trimmed}
 }

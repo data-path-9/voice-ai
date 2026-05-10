@@ -25,6 +25,7 @@ const (
 	OptionHTTPURLKey     = "http_url"
 	OptionHTTPMethodKey  = "http_method"
 	OptionHTTPHeadersKey = "http_headers"
+	OptionHTTPBodyKey    = "http_body"
 
 	FailBehaviorBlock = "block"
 	FailBehaviorAllow = "allow"
@@ -59,6 +60,10 @@ func (e *runtimeExecutor) Name() string {
 
 func (e *runtimeExecutor) Options() utils.Option {
 	return e.authenticator.GetOptions()
+}
+
+func (e *runtimeExecutor) Arguments() (map[string]string, error) {
+	return e.authenticator.GetOptions().GetStringMap(OptionHTTPBodyKey)
 }
 
 // Execute runs authentication against the configured endpoint and emits packetized outcome.
@@ -115,10 +120,9 @@ func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.Exec
 		})
 		return nil
 	}
-	responsePayload, _ := response.ToJSON()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		errMsg := fmt.Sprintf("authentication: endpoint returned status %d", response.StatusCode)
-		e.onCreateLog(ctx, packet.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_FAILED, int64(response.StatusCode), &errMsg, requestPayload, responsePayload)
+		e.onCreateLog(ctx, packet.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_FAILED, int64(response.StatusCode), &errMsg, requestPayload, response.Body)
 
 		if auth.FailBehavior == FailBehaviorAllow {
 			e.logger.Warnw("authentication returned non-2xx, allowing due to fail_behavior=allow",
@@ -137,7 +141,7 @@ func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.Exec
 		})
 		return nil
 	}
-	e.onCreateLog(ctx, packet.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, responsePayload)
+	e.onCreateLog(ctx, packet.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, response.Body)
 	result := &Result{Authenticated: true}
 	if parsed, err := response.ToMap(); err == nil {
 		if args, ok := parsed["args"].(map[string]interface{}); ok {

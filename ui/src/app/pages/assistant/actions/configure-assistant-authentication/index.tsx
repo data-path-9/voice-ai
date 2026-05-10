@@ -38,6 +38,7 @@ import {
 import { connectionConfig } from '@/configs';
 import { SourceConditionRule } from '@/app/components/conditions/source-condition-rule';
 import {
+    AssistantAuthentication,
   CreateAssistantAuthentication,
   CreateAssistantAuthenticationRequest,
   DisableAssistantAuthentication,
@@ -46,17 +47,13 @@ import {
   GetAssistantAuthenticationRequest,
   Metadata,
 } from '@rapidaai/react';
-import { Renew, Add } from '@carbon/icons-react';
+import { Renew, Add, Edit, TrashCan } from '@carbon/icons-react';
 import { EmptyState } from '@/app/components/carbon/empty-state';
 import { IconOnlyButton } from '@/app/components/carbon/button';
 import { SectionLoader } from '@/app/components/loader/section-loader';
 import { TableSection } from '@/app/components/sections/table-section';
 import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
 import { toHumanReadableDateTime } from '@/utils/date';
-import {
-  OverflowMenu,
-  OverflowMenuItem,
-} from '@/app/components/carbon/overflow-menu';
 
 type HttpMethod = 'POST' | 'GET';
 type FailBehavior = 'block' | 'do_nothing';
@@ -126,13 +123,6 @@ const toOptionMap = (options: Metadata[] = []) =>
 
 const getStatus = (data: any) => (data?.getStatus?.() || '').toLowerCase();
 
-const getDateLabel = (data: any) => {
-  const updated = data?.getUpdateddate?.();
-  const created = data?.getCreateddate?.();
-  const ts = updated || created;
-  return ts ? toHumanReadableDateTime(ts) : '-';
-};
-
 export function ConfigureAssistantAuthenticationPage() {
   const { assistantId } = useParams();
   return (
@@ -172,8 +162,7 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
 
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
-  const [authentication, setAuthentication] = useState<any | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [authentication, setAuthentication] = useState<AssistantAuthentication | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -300,9 +289,9 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
                 <TableHeader>Provider Type</TableHeader>
                 <TableHeader>Method</TableHeader>
                 <TableHeader>URL</TableHeader>
+                <TableHeader>Actions</TableHeader>
                 <TableHeader>Status</TableHeader>
                 <TableHeader>Date</TableHeader>
-                <TableHeader>Actions</TableHeader>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -314,46 +303,39 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
                 <TableCell className="text-sm max-w-[360px] truncate">
                   {optionMap[AUTH_OPTION_ENDPOINT] || '-'}
                 </TableCell>
+                <TableCell
+                  className="text-sm whitespace-nowrap"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-0">
+                    <IconOnlyButton
+                      kind="ghost"
+                      size="md"
+                      renderIcon={Edit}
+                      iconDescription="Configure authentication"
+                      onClick={() =>
+                        navigator.goTo(
+                          `/deployment/assistant/${assistantId}/configure-authentication/edit`,
+                        )
+                      }
+                    />
+                    <IconOnlyButton
+                      size="md"
+                      kind='ghost'
+                      renderIcon={TrashCan}
+                      iconDescription="Disable authentication"
+                      disabled={getStatus(authentication) !== 'active'}
+                      onClick={() => showDialog(onDisable)}
+                    />
+                  </div>
+                </TableCell>
                 <TableCell className="text-sm whitespace-nowrap">
                   <CarbonStatusIndicator
                     state={authentication.getStatus() || 'INACTIVE'}
                   />
                 </TableCell>
                 <TableCell className="text-[13px] whitespace-nowrap">
-                  {getDateLabel(authentication)}
-                </TableCell>
-                <TableCell
-                  className="text-sm whitespace-nowrap"
-                  onClick={e => e.stopPropagation()}
-                >
-                  <OverflowMenu
-                    size="md"
-                    flipped
-                    iconDescription="Authentication actions"
-                    open={menuOpen}
-                    onOpen={() => setMenuOpen(true)}
-                    onClose={() => setMenuOpen(false)}
-                  >
-                    <OverflowMenuItem
-                      itemText="Configure"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        navigator.goTo(
-                          `/deployment/assistant/${assistantId}/configure-authentication/edit`,
-                        );
-                      }}
-                    />
-                    <OverflowMenuItem
-                      itemText="Disable"
-                      isDelete
-                      hasDivider
-                      disabled={getStatus(authentication) !== 'active'}
-                      onClick={() => {
-                        setMenuOpen(false);
-                        showDialog(onDisable);
-                      }}
-                    />
-                  </OverflowMenu>
+                  {authentication.getCreateddate()  && toHumanReadableDateTime(authentication.getCreateddate()!)}
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -363,12 +345,7 @@ const ConfigureAssistantAuthentication: FC<{ assistantId: string }> = ({
             icon={Add}
             title="No authentication configured"
             subtitle="Create authentication to verify sessions before initialization."
-            actionButtonText="Create authentication"
-            onActionButtonClick={() =>
-              navigator.goTo(
-                `/deployment/assistant/${assistantId}/configure-authentication/create`,
-              )
-            }
+           
           />
         )}
       </TableSection>

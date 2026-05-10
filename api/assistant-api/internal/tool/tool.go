@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"sync"
 
-	internal_condition "github.com/rapidaai/api/assistant-api/internal/condition"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_tool "github.com/rapidaai/api/assistant-api/internal/tool/internal"
 	internal_tool_local "github.com/rapidaai/api/assistant-api/internal/tool/internal/local"
@@ -88,34 +87,8 @@ func (executor *toolExecutor) filterToolsByCondition(
 	communication internal_type.Communication,
 ) []*internal_assistant_entity.AssistantTool {
 	filtered := make([]*internal_assistant_entity.AssistantTool, 0, len(tools))
-	var direction string
-	if conv := communication.Conversation(); conv != nil {
-		direction = conv.Direction.String()
-	}
 	for _, tool := range tools {
-		opts := tool.GetOptions()
-		rawCondition, err := opts.GetString("tool.condition")
-		if err != nil || rawCondition == "" {
-			filtered = append(filtered, tool)
-			continue
-		}
-
-		parsed, evalErr := internal_condition.Parse(rawCondition)
-		if evalErr != nil {
-			executor.logger.Warnf("invalid tool.condition for tool %s, excluding tool: %v", tool.Name, evalErr)
-			continue
-		}
-
-		allowed, evalErr := parsed.Run(
-			internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeSource, Value: communication.GetSource().Get()},
-			internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeMode, Value: communication.GetMode().String()},
-			internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeDirection, Value: direction},
-		)
-		if evalErr != nil {
-			executor.logger.Warnf("invalid tool.condition for tool %s, excluding tool: %v", tool.Name, evalErr)
-			continue
-		}
-		if allowed {
+		if communication.IsConditionAllowed(tool.GetOptions(), "tool.condition") {
 			filtered = append(filtered, tool)
 		}
 	}

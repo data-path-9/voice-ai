@@ -940,7 +940,7 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		})
 	}
 	for _, analysis := range h.r.assistant.AssistantAnalyses {
-		if !h.r.isConditionAllowed(analysis.GetOptions(), "analysis.condition") {
+		if !h.r.IsConditionAllowed(analysis.GetOptions(), "analysis.condition") {
 			continue
 		}
 		exec, err := internal_analysis.NewExecutor(h.r.logger, ctx, analysis, h.r, h.r)
@@ -956,7 +956,7 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 	}
 
 	for _, webhook := range h.r.assistant.AssistantWebhooks {
-		if !h.r.isConditionAllowed(webhook.GetOptions(), "webhook.condition") {
+		if !h.r.IsConditionAllowed(webhook.GetOptions(), "webhook.condition") {
 			continue
 		}
 		exec, err := internal_webhook.NewExecutor(h.r.logger, ctx, webhook, h.r, h.r)
@@ -971,14 +971,8 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		h.r.assistantWebhooks = append(h.r.assistantWebhooks, exec)
 	}
 
-	if h.r.assistant.AssistantAuthentication != nil && h.r.isConditionAllowed(h.r.assistant.AssistantAuthentication.GetOptions(), "authentication.condition") {
-		authExec, err := internal_authentication.NewExecutor(
-			h.r.logger,
-			ctx,
-			h.r.assistant.AssistantAuthentication,
-			h.r,
-			h.r,
-		)
+	if h.r.assistant.AssistantAuthentication != nil && h.r.IsConditionAllowed(h.r.assistant.AssistantAuthentication.GetOptions(), "authentication.condition") {
+		authExec, err := internal_authentication.NewExecutor(h.r.logger, ctx, h.r.assistant.AssistantAuthentication, h.r, h.r)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,
@@ -1041,9 +1035,15 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 	}
 	source := variable.NewCommunicationSource(h.r)
 	registry := internal_namespace.NewDefaultRegistry()
+
+	args, err := h.r.authenticationExecutor.Arguments()
+	if err != nil {
+		h.r.logger.Errorf("failed to get authentication arguments: %v", err)
+		return
+	}
 	h.r.OnPacket(ctx, internal_type.ExecuteSessionAuthenticationPacket{
 		ContextID:      p.ContextID,
-		Arguments:      registry.Expand(source, variable.ResolveContext{}),
+		Arguments:      registry.Apply(args, source, variable.ResolveContext{}),
 		Initialization: p.Config,
 	})
 }
@@ -1850,7 +1850,12 @@ func (h requestorDispatchHandler) HandleExecuteAnalysis(ctx context.Context, p i
 	source := variable.NewCommunicationSource(h.r)
 	registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
 	for _, initializedAnalysis := range h.r.assistantAnalyses {
-		p.Arguments = registry.Apply(initializedAnalysis.Options().ToStringMap(), source, variable.ResolveContext{Event: utils.ConversationCompleted.Get()})
+		arguments, err := initializedAnalysis.Arguments()
+		if err != nil {
+			h.r.logger.Warnw("failed to get analysis arguments", "name", initializedAnalysis.Name(), "error", err)
+			continue
+		}
+		p.Arguments = registry.Apply(arguments, source, variable.ResolveContext{Event: utils.ConversationCompleted.Get()})
 		if err := initializedAnalysis.Execute(ctx, p); err != nil {
 			h.r.logger.Warnw("analysis execution failed", "name", initializedAnalysis.Name(), "error", err)
 		}
@@ -1882,7 +1887,12 @@ func (h requestorDispatchHandler) HandleExecuteWebhook(ctx context.Context, p in
 	source := variable.NewCommunicationSource(h.r)
 	registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
 	for _, initializedWebhook := range h.r.assistantWebhooks {
-		p.Arguments = registry.Apply(initializedWebhook.Options().ToStringMap(), source, variable.ResolveContext{Event: p.Event.Get()})
+		arguments, err := initializedWebhook.Arguments()
+		if err != nil {
+			h.r.logger.Warnw("failed to get webhook arguments", "webhookID", initializedWebhook.Name(), "error", err)
+			continue
+		}
+		p.Arguments = registry.Apply(arguments, source, variable.ResolveContext{Event: p.Event.Get()})
 		if err := initializedWebhook.Execute(ctx, p); err != nil {
 			h.r.logger.Warnw("webhook execution failed", "webhookID", initializedWebhook.Name(), "error", err)
 		}
@@ -1993,7 +2003,7 @@ func (r *genericRequestor) extractClientInformation(ctx context.Context) []*prot
 	return metadata
 }
 
-func (r *genericRequestor) isConditionAllowed(opts utils.Option, key string) bool {
+func (r *genericRequestor) IsConditionAllowed(opts utils.Option, key string) bool {
 	raw, err := opts.GetString(key)
 	if err != nil {
 		return true

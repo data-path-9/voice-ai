@@ -10,12 +10,6 @@ import (
 	"github.com/rapidaai/pkg/utils"
 )
 
-const (
-	AnalysisOptionEndpointIDKey      = "endpoint_id"
-	AnalysisOptionEndpointVersionKey = "endpoint_version"
-	AnalysisOptionEndpointParamsKey  = "endpoint_parameters"
-)
-
 type AssistantAnalysis struct {
 	gorm_model.Audited
 	gorm_model.Mutable
@@ -43,23 +37,6 @@ func (AssistantAnalysisOption) TableName() string {
 func (aa *AssistantAnalysis) GetName() string {
 	return aa.Name
 }
-
-func (aa *AssistantAnalysis) GetEndpointId() uint64 {
-	raw, err := aa.GetOptions().GetUint64(AnalysisOptionEndpointIDKey)
-	if err != nil {
-		return 0
-	}
-	return raw
-}
-
-func (aa *AssistantAnalysis) GetEndpointVersion() string {
-	raw, err := aa.GetOptions().GetString(AnalysisOptionEndpointVersionKey)
-	if err != nil {
-		return "latest"
-	}
-	return raw
-}
-
 func (aa *AssistantAnalysis) GetExecutionPriority() uint32 {
 	return aa.ExecutionPriority
 }
@@ -68,14 +45,6 @@ func (aa *AssistantAnalysis) GetOptions() utils.Option {
 	opts := make(utils.Option, len(aa.AssistantAnalysisOption))
 	for _, v := range aa.AssistantAnalysisOption {
 		opts[v.Key] = v.Value
-	}
-	return opts
-}
-
-func (aa *AssistantAnalysis) GetParameters() map[string]string {
-	opts, err := aa.GetOptions().GetStringMap(AnalysisOptionEndpointParamsKey)
-	if err != nil {
-		return nil
 	}
 	return opts
 }

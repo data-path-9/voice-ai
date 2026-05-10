@@ -20,6 +20,12 @@ import (
 	"github.com/rapidaai/protos"
 )
 
+const (
+	AnalysisOptionEndpointIDKey      = "endpoint_id"
+	AnalysisOptionEndpointVersionKey = "endpoint_version"
+	AnalysisOptionEndpointParamsKey  = "endpoint_parameters"
+)
+
 type runtimeExecutor struct {
 	logger       commons.Logger
 	callback     internal_type.Callback
@@ -53,15 +59,37 @@ func (e *runtimeExecutor) Options() utils.Option {
 	return e.analysis.GetOptions()
 }
 
+func (e *runtimeExecutor) Arguments() (map[string]string, error) {
+	return e.analysis.GetOptions().GetStringMap(AnalysisOptionEndpointParamsKey)
+}
+
+func (e *runtimeExecutor) GetEndpointId() (uint64, error) {
+	return e.analysis.GetOptions().GetUint64(AnalysisOptionEndpointIDKey)
+}
+
+func (e *runtimeExecutor) GetEndpointVersion() (string, error) {
+	return e.analysis.GetOptions().GetString(AnalysisOptionEndpointVersionKey)
+}
+
 // Execute runs one analysis and pushes metadata via callback packet.
 func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.ExecuteAnalysisPacket) error {
+
+	endpointID, err := e.GetEndpointId()
+	if err != nil {
+		return fmt.Errorf("failed to get endpoint ID: %w", err)
+	}
+	endpointVersion, err := e.GetEndpointVersion()
+	if err != nil {
+		return fmt.Errorf("failed to get endpoint version: %w", err)
+	}
+
 	response, err := e.caller.DeploymentCaller().Invoke(
 		ctx,
 		packet.Auth,
 		e.inputBuilder.Invoke(
 			&protos.EndpointDefinition{
-				EndpointId: e.analysis.GetEndpointId(),
-				Version:    e.analysis.GetEndpointVersion(),
+				EndpointId: endpointID,
+				Version:    endpointVersion,
 			},
 			e.inputBuilder.Arguments(packet.Arguments, nil),
 			nil,
