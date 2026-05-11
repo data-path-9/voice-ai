@@ -220,10 +220,10 @@ func (as *Streamer) Send(response internal_type.Stream) error {
 			}
 		}
 	case *protos.ConversationDisconnection:
+		// Server-initiated disconnect: the talker already knows the reason
+		// (it called Notify with it). No need to round-trip back through
+		// CriticalCh — just signal hangup over AudioSocket and clean up.
 		_ = as.writeFrame(FrameTypeHangup, nil)
-		if disc := as.Disconnect(data.GetType()); disc != nil {
-			as.Input(disc)
-		}
 		as.Cancel()
 	case *protos.ConversationToolCall:
 		switch data.GetAction() {

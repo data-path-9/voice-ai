@@ -168,7 +168,7 @@ func TestSend_EndConversation_SecondCall_StillPushesToolResult(t *testing.T) {
 	}
 }
 
-func TestSend_ConversationDisconnection_RequeuesDisconnect_NoImmediateClose(t *testing.T) {
+func TestSend_ConversationDisconnection_ClosesStreamer(t *testing.T) {
 	as, remote := newTestStreamer(t)
 	drainRemoteConn(remote)
 
@@ -177,19 +177,20 @@ func TestSend_ConversationDisconnection_RequeuesDisconnect_NoImmediateClose(t *t
 	})
 	require.NoError(t, err)
 
+	// Server-initiated Send no longer requeues the disconnect onto CriticalCh —
+	// the server callsite already knows the reason. The talker exits via the
+	// Recv-err path once Cancel cancels s.Ctx.
 	select {
 	case msg := <-as.CriticalCh:
-		disc, ok := msg.(*protos.ConversationDisconnection)
-		require.True(t, ok, "expected requeued disconnection, got %T", msg)
-		assert.Equal(t, protos.ConversationDisconnection_DISCONNECTION_TYPE_USER, disc.GetType())
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for requeued disconnection")
+		t.Fatalf("server-initiated Send must not push to CriticalCh; got %T", msg)
+	default:
 	}
 
+	// Streamer should be closed: s.Ctx cancelled so Talker.Recv returns EOF.
 	select {
-	case msg := <-as.CriticalCh:
-		t.Fatalf("unexpected extra message after requeued disconnection: %T", msg)
-	case <-time.After(200 * time.Millisecond):
+	case <-as.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected streamer context to be cancelled after disconnect")
 	}
 }
 

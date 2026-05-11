@@ -153,15 +153,15 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 			}
 		}
 	case *protos.ConversationDisconnection:
+		// Server-initiated disconnect: the talker already knows the reason
+		// (it called Notify with it). No need to round-trip back through
+		// CriticalCh — just notify the carrier via Hangup and clean up.
 		if tws.GetConversationUuid() != "" {
 			if client, err := twilioClient(tws.VaultCredential()); err == nil {
 				params := &openapi.UpdateCallParams{}
 				params.SetStatus("completed")
 				client.Api.UpdateCall(tws.GetConversationUuid(), params)
 			}
-		}
-		if disc := tws.Disconnect(data.GetType()); disc != nil {
-			tws.Input(disc)
 		}
 		tws.stopAudioProcessing()
 		tws.Cancel()

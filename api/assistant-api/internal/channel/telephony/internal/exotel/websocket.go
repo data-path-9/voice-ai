@@ -157,11 +157,10 @@ func (exotel *exotelWebsocketStreamer) Send(response internal_type.Stream) error
 			}
 		}
 	case *protos.ConversationDisconnection:
-		if disc := exotel.Disconnect(data.GetType()); disc != nil {
-			exotel.Input(disc)
-		}
-		// Exotel has no REST API to terminate a call; closing the WebSocket is
-		// the only way to signal the stream end and release the call leg.
+		// Server-initiated disconnect: the talker already knows the reason
+		// (it called Notify with it). No need to round-trip back through
+		// CriticalCh — Exotel has no REST API to terminate a call; closing
+		// the WebSocket via Cancel is the only way to release the call leg.
 		exotel.stopAudioProcessing()
 		exotel.Cancel()
 	case *protos.ConversationToolCall:
