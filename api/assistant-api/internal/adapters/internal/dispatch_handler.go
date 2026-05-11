@@ -990,9 +990,6 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		})
 	}
 	for _, analysis := range h.r.assistant.AssistantAnalyses {
-		if !h.r.IsConditionAllowed(analysis.GetOptions(), "analysis.condition") {
-			continue
-		}
 		exec, err := internal_analysis.NewExecutor(h.r.logger, ctx, analysis, h.r, h.r)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -1006,9 +1003,6 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 	}
 
 	for _, webhook := range h.r.assistant.AssistantWebhooks {
-		if !h.r.IsConditionAllowed(webhook.GetOptions(), "webhook.condition") {
-			continue
-		}
 		exec, err := internal_webhook.NewExecutor(h.r.logger, ctx, webhook, h.r, h.r)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -1892,15 +1886,18 @@ func (h requestorDispatchHandler) HandleExecuteAnalysis(ctx context.Context, p i
 	source := variable.NewCommunicationSource(h.r)
 	registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
 	for _, initializedAnalysis := range h.r.assistantAnalyses {
-		arguments, err := initializedAnalysis.Arguments()
-		if err != nil {
-			h.r.logger.Warnw("failed to get analysis arguments", "name", initializedAnalysis.Name(), "error", err)
-			continue
+		if !h.r.IsConditionAllowed(initializedAnalysis.Options(), "analysis.condition") {
+			arguments, err := initializedAnalysis.Arguments()
+			if err != nil {
+				h.r.logger.Warnw("failed to get analysis arguments", "name", initializedAnalysis.Name(), "error", err)
+				continue
+			}
+			p.Arguments = registry.Apply(arguments, source, variable.ResolveContext{Event: utils.ConversationCompleted.Get()})
+			if err := initializedAnalysis.Execute(ctx, p); err != nil {
+				h.r.logger.Warnw("analysis execution failed", "name", initializedAnalysis.Name(), "error", err)
+			}
 		}
-		p.Arguments = registry.Apply(arguments, source, variable.ResolveContext{Event: utils.ConversationCompleted.Get()})
-		if err := initializedAnalysis.Execute(ctx, p); err != nil {
-			h.r.logger.Warnw("analysis execution failed", "name", initializedAnalysis.Name(), "error", err)
-		}
+
 	}
 }
 
@@ -1911,14 +1908,16 @@ func (h requestorDispatchHandler) HandleExecuteWebhook(ctx context.Context, p in
 	source := variable.NewCommunicationSource(h.r)
 	registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
 	for _, initializedWebhook := range h.r.assistantWebhooks {
-		arguments, err := initializedWebhook.Arguments()
-		if err != nil {
-			h.r.logger.Warnw("failed to get webhook arguments", "webhookID", initializedWebhook.Name(), "error", err)
-			continue
-		}
-		p.Arguments = registry.Apply(arguments, source, variable.ResolveContext{Event: p.Event.Get()})
-		if err := initializedWebhook.Execute(ctx, p); err != nil {
-			h.r.logger.Warnw("webhook execution failed", "webhookID", initializedWebhook.Name(), "error", err)
+		if h.r.IsConditionAllowed(initializedWebhook.Options(), "webhook.condition") {
+			arguments, err := initializedWebhook.Arguments()
+			if err != nil {
+				h.r.logger.Warnw("failed to get webhook arguments", "webhookID", initializedWebhook.Name(), "error", err)
+				continue
+			}
+			p.Arguments = registry.Apply(arguments, source, variable.ResolveContext{Event: p.Event.Get()})
+			if err := initializedWebhook.Execute(ctx, p); err != nil {
+				h.r.logger.Warnw("webhook execution failed", "webhookID", initializedWebhook.Name(), "error", err)
+			}
 		}
 	}
 }

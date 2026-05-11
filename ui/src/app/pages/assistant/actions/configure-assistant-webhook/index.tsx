@@ -12,7 +12,15 @@ import { UpdateAssistantWebhook } from '@/app/pages/assistant/actions/configure-
 import { useAssistantWebhookPageStore } from '@/app/pages/assistant/actions/store/use-webhook-page-store';
 import { IconOnlyButton, PrimaryButton } from '@/app/components/carbon/button';
 import { Pagination } from '@/app/components/carbon/pagination';
-import { Add, Renew, Webhook, Edit, TrashCan } from '@carbon/icons-react';
+import {
+  Add,
+  Renew,
+  Webhook,
+  Edit,
+  TrashCan,
+  Copy,
+  Checkmark,
+} from '@carbon/icons-react';
 import { Tag } from '@carbon/react';
 import {
   Table,
@@ -31,7 +39,10 @@ import {
   Breadcrumb,
   BreadcrumbItem,
 } from '@carbon/react';
-import { TableSection } from '@/app/components/sections/table-section';
+import {
+  ScrollableTableSection,
+  TableSection,
+} from '@/app/components/sections/table-section';
 
 const getWebhookOptionMap = (row: any): Map<string, string> => {
   const map = new Map<string, string>();
@@ -99,6 +110,7 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
   const [selectedWebhookId, setSelectedWebhookId] = useState<string | null>(
     null,
   );
+  const [copiedWebhookId, setCopiedWebhookId] = useState<string | null>(null);
 
   useEffect(() => {
     showLoader('block');
@@ -157,6 +169,13 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
   const selectedWebhook = filteredWebhooks.find(
     row => row.getId() === selectedWebhookId,
   );
+
+  const copyWebhookUrl = (webhookId: string, url: string) => {
+    if (!url) return;
+    navigator.clipboard.writeText(url);
+    setCopiedWebhookId(webhookId);
+    setTimeout(() => setCopiedWebhookId(null), 2000);
+  };
 
   if (loading) {
     return (
@@ -240,107 +259,129 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
       <TableSection>
         {axtion.webhooks.length > 0 && filteredWebhooks.length > 0 ? (
           <>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableHeader className="!w-12" />
-                  <TableHeader>Endpoint</TableHeader>
-                  <TableHeader>Events</TableHeader>
-                  <TableHeader>Retries</TableHeader>
-                  <TableHeader>Timeout (s)</TableHeader>
-                  <TableHeader>Priority</TableHeader>
-                  <TableHeader>Date</TableHeader>
-                  <TableHeader>Actions</TableHeader>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredWebhooks.map(row => {
-                  const selected = selectedWebhookId === row.getId();
-                  return (
-                    <TableRow
-                      key={row.getId()}
-                      isSelected={selected}
-                      onClick={() =>
-                        setSelectedWebhookId(selected ? null : row.getId())
-                      }
-                      className="cursor-pointer"
-                    >
-                      <TableCell
-                        className="!w-12 !pr-0"
-                        onClick={e => e.stopPropagation()}
+            <ScrollableTableSection>
+              <Table className="min-w-max">
+                <TableHead>
+                  <TableRow>
+                    <TableHeader className="!w-12" />
+                    <TableHeader>Endpoint</TableHeader>
+                    <TableHeader>Events</TableHeader>
+                    <TableHeader>Retries</TableHeader>
+                    <TableHeader>Timeout (s)</TableHeader>
+                    <TableHeader>Priority</TableHeader>
+                    <TableHeader>Date</TableHeader>
+                    <TableHeader>Actions</TableHeader>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredWebhooks.map(row => {
+                    const selected = selectedWebhookId === row.getId();
+                    return (
+                      <TableRow
+                        key={row.getId()}
+                        isSelected={selected}
+                        onClick={() =>
+                          setSelectedWebhookId(selected ? null : row.getId())
+                        }
+                        className="cursor-pointer"
                       >
-                        <RadioButton
-                          id={`webhook-select-${row.getId()}`}
-                          name="webhook-select"
-                          labelText=""
-                          hideLabel
-                          checked={selected}
-                          onChange={() =>
-                            setSelectedWebhookId(selected ? null : row.getId())
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        <span className="font-mono text-[13px]">
-                          {getWebhookMethod(row)}
-                        </span>{' '}
-                        <span className="truncate">{getWebhookUrl(row)}</span>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        <div className="flex flex-wrap gap-1">
-                          {getWebhookEvents(row).map((event, index) => (
-                            <Tag key={index} type="blue" size="sm">
-                              {event}
-                            </Tag>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {getWebhookRetryCount(row)}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {getWebhookTimeoutSecond(row)}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {row.getExecutionpriority()}
-                      </TableCell>
-                      <TableCell className="text-[13px] whitespace-nowrap">
-                        {row.getCreateddate()
-                          ? toHumanReadableDateTime(row.getCreateddate()!)
-                          : '—'}
-                      </TableCell>
-                      <TableCell className="text-sm" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-0">
-                          <Button
-                            hasIconOnly
-                            renderIcon={Edit}
-                            iconDescription="Edit webhook"
-                            kind="ghost"
-                            size="sm"
-                            onClick={() =>
-                              navigation.goToEditAssistantWebhook(
-                                assistantId,
-                                row.getId(),
-                              )
+                        <TableCell
+                          className="!w-12 !pr-0"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <RadioButton
+                            id={`webhook-select-${row.getId()}`}
+                            name="webhook-select"
+                            labelText=""
+                            hideLabel
+                            checked={selected}
+                            onChange={() =>
+                              setSelectedWebhookId(selected ? null : row.getId())
                             }
                           />
-                          <Button
-                            hasIconOnly
-                            renderIcon={TrashCan}
-                            iconDescription="Delete webhook"
-                            kind="danger--ghost"
-                            size="sm"
-                            onClick={() =>
-                              deleteAssistantWebhook(assistantId, row.getId())
-                            }
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          <div className="flex items-center gap-2 min-w-0 max-w-[560px]">
+                            <span className="font-mono text-[13px] shrink-0">
+                              {getWebhookMethod(row)}
+                            </span>
+                            <span className="truncate min-w-0">
+                              {getWebhookUrl(row)}
+                            </span>
+                            <Button
+                              hasIconOnly
+                              renderIcon={
+                                copiedWebhookId === row.getId()
+                                  ? Checkmark
+                                  : Copy
+                              }
+                              iconDescription="Copy endpoint URL"
+                              kind="ghost"
+                              size="sm"
+                              onClick={e => {
+                                e.stopPropagation();
+                                copyWebhookUrl(row.getId(), getWebhookUrl(row));
+                              }}
+                              className="!min-h-0 !p-1 shrink-0"
+                            />
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          <div className="flex flex-wrap gap-1">
+                            {getWebhookEvents(row).map((event, index) => (
+                              <Tag key={index} type="blue" size="sm">
+                                {event}
+                              </Tag>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {getWebhookRetryCount(row)}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {getWebhookTimeoutSecond(row)}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {row.getExecutionpriority()}
+                        </TableCell>
+                        <TableCell className="text-[13px] whitespace-nowrap">
+                          {row.getCreateddate()
+                            ? toHumanReadableDateTime(row.getCreateddate()!)
+                            : '—'}
+                        </TableCell>
+                        <TableCell className="text-sm" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-0">
+                            <Button
+                              hasIconOnly
+                              renderIcon={Edit}
+                              iconDescription="Edit webhook"
+                              kind="ghost"
+                              size="sm"
+                              onClick={() =>
+                                navigation.goToEditAssistantWebhook(
+                                  assistantId,
+                                  row.getId(),
+                                )
+                              }
+                            />
+                            <Button
+                              hasIconOnly
+                              renderIcon={TrashCan}
+                              iconDescription="Delete webhook"
+                              kind="danger--ghost"
+                              size="sm"
+                              onClick={() =>
+                                deleteAssistantWebhook(assistantId, row.getId())
+                              }
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </ScrollableTableSection>
             <Pagination
               totalItems={axtion.totalCount}
               page={axtion.page}

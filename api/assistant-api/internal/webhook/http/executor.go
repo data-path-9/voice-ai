@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
@@ -24,7 +23,6 @@ import (
 )
 
 const (
-	WebhookOptionAssistantEventsKey  = "assistant_events"
 	WebhookOptionHTTPMethodKey       = "http_method"
 	WebhookOptionHTTPURLKey          = "http_url"
 	WebhookOptionHTTPHeadersKey      = "http_headers"
@@ -97,7 +95,11 @@ func (aa *runtimeExecutor) GetUrl() string {
 }
 
 func (aa *runtimeExecutor) GetRetryStatusCode() []string {
-	return aa.getStringSliceOption(WebhookOptionRetryStatusCodesKey)
+	return aa.Options().GetStringSlice(WebhookOptionRetryStatusCodesKey)
+}
+
+func (aa *runtimeExecutor) GetAllowedEvents() []string {
+	return aa.webhook.AssistantEvents
 }
 
 func (aa *runtimeExecutor) GetMaxRetryCount() uint32 {
@@ -116,38 +118,11 @@ func (aa *runtimeExecutor) GetTimeoutSecond() uint32 {
 	return raw
 }
 
-func (aa *runtimeExecutor) getStringSliceOption(key string) []string {
-	raw, err := aa.Options().GetString(key)
-	if err != nil {
-		return []string{}
-	}
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return []string{}
-	}
-
-	parsed := []string{}
-	if json.Unmarshal([]byte(trimmed), &parsed) == nil {
-		return parsed
-	}
-
-	if strings.Contains(trimmed, ",") {
-		out := []string{}
-		for _, item := range strings.Split(trimmed, ",") {
-			part := strings.TrimSpace(item)
-			if part != "" {
-				out = append(out, part)
-			}
-		}
-		return out
-	}
-
-	return []string{trimmed}
-}
-
 // Execute runs webhook dispatch for packet event.
 func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.ExecuteWebhookPacket) error {
-	// method := strings.ToUpper()
+	if !slices.Contains(e.GetAllowedEvents(), packet.Event.Get()) {
+		return nil
+	}
 	client := rest.NewRestClientWithConfig(e.GetUrl(), e.GetHeaders(), e.GetTimeoutSecond())
 	startTime := time.Now()
 	requestPayload := e.createRequestPayload(e.GetUrl(), e.GetMethod(), e.GetHeaders(), e.GetTimeoutSecond()*1000, packet.Arguments)
