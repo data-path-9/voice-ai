@@ -1038,6 +1038,9 @@ func (s *webrtcStreamer) watchCallerContext(callerCtx context.Context) {
 	select {
 	case <-callerCtx.Done():
 		s.Logger.Infow("Caller context cancelled, closing streamer gracefully", "session", s.sessionID)
+		if disc := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); disc != nil {
+			s.Input(disc)
+		}
 		s.Close()
 	case <-s.Ctx.Done():
 		// Streamer already closed on its own, nothing to do.
@@ -1048,9 +1051,6 @@ func (s *webrtcStreamer) watchCallerContext(callerCtx context.Context) {
 func (s *webrtcStreamer) Close() error {
 	if !s.closed.CompareAndSwap(false, true) {
 		return nil
-	}
-	if disc := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); disc != nil {
-		s.Input(disc)
 	}
 	s.stopAudioProcessing()
 

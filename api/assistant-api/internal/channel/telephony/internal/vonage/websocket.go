@@ -158,9 +158,6 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 				vonage.NewVoiceClient(cAuth).Hangup(vng.GetConversationUuid())
 			}
 		}
-		if disc := vng.Disconnect(data.GetType()); disc != nil {
-			vng.Input(disc)
-		}
 		vng.stopAudioProcessing()
 		vng.Cancel()
 	case *protos.ConversationToolCall:

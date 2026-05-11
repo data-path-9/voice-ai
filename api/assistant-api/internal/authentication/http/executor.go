@@ -27,6 +27,10 @@ const (
 	OptionHTTPHeadersKey = "http_headers"
 	OptionHTTPBodyKey    = "http_body"
 
+	ResponseArgumentsKey = "arguments"
+	ResponseMetadataKey  = "metadata"
+	ResponseOptionsKey   = "options"
+
 	FailBehaviorBlock = "block"
 	FailBehaviorAllow = "allow"
 )
@@ -34,7 +38,7 @@ const (
 // Result carries the outcome of an authentication attempt.
 type Result struct {
 	Authenticated bool
-	Args          map[string]interface{}
+	Arguments     map[string]interface{}
 	Metadata      map[string]interface{}
 	Options       map[string]interface{}
 }
@@ -144,13 +148,13 @@ func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.Exec
 	e.onCreateLog(ctx, packet.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, response.Body)
 	result := &Result{Authenticated: true}
 	if parsed, err := response.ToMap(); err == nil {
-		if args, ok := parsed["args"].(map[string]interface{}); ok {
-			result.Args = args
+		if args, ok := parsed[ResponseArgumentsKey].(map[string]interface{}); ok {
+			result.Arguments = args
 		}
-		if metadata, ok := parsed["metadata"].(map[string]interface{}); ok {
+		if metadata, ok := parsed[ResponseMetadataKey].(map[string]interface{}); ok {
 			result.Metadata = metadata
 		}
-		if options, ok := parsed["options"].(map[string]interface{}); ok {
+		if options, ok := parsed[ResponseOptionsKey].(map[string]interface{}); ok {
 			result.Options = options
 		}
 	}
@@ -158,7 +162,7 @@ func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.Exec
 	e.callback.OnPacket(ctx, internal_type.SessionAuthenticationSucceededPacket{
 		ContextID:      packet.ContextID,
 		Authenticated:  result.Authenticated,
-		Arguments:      result.Args,
+		Arguments:      result.Arguments,
 		Metadata:       result.Metadata,
 		Options:        result.Options,
 		Initialization: packet.Initialization,

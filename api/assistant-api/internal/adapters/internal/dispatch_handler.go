@@ -433,10 +433,27 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 		if h.r.Conversation() != nil {
 			conversationId = h.r.Conversation().Id
 		}
-		h.r.OnPacket(ctx, internal_type.WebhookStartPacket{
-			ContextID: p.ContextId(),
-			Event:     utils.ConversationFailed,
-		})
+		h.r.OnPacket(ctx,
+			internal_type.WebhookStartPacket{
+				ContextID: p.ContextId(),
+				Event:     utils.ConversationFailed,
+			},
+			internal_type.ConversationEventPacket{
+				ContextID: h.r.GetID(),
+				Name:      observe.ComponentSession,
+				Data: map[string]string{
+					observe.DataType:   observe.EventDisconnectRequested,
+					observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String()},
+				Time: time.Now(),
+			},
+			internal_type.ConversationMetadataPacket{
+				ContextID: h.r.Conversation().Id,
+				Metadata: []*protos.Metadata{{
+					Key:   "disconnect_reason",
+					Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String(),
+				}},
+			},
+		)
 		h.r.Notify(ctx,
 			&protos.ConversationError{
 				AssistantConversationId: conversationId,
@@ -666,12 +683,46 @@ func (h requestorDispatchHandler) HandleLLMToolResult(ctx context.Context, p int
 
 	switch p.Action {
 	case protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION:
+		h.r.OnPacket(ctx,
+			internal_type.ConversationEventPacket{
+				ContextID: h.r.GetID(),
+				Name:      observe.ComponentSession,
+				Data: map[string]string{
+					observe.DataType:   observe.EventDisconnectRequested,
+					observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String()},
+				Time: time.Now(),
+			},
+			internal_type.ConversationMetadataPacket{
+				ContextID: h.r.Conversation().Id,
+				Metadata: []*protos.Metadata{{
+					Key:   "disconnect_reason",
+					Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
+				}},
+			},
+		)
 		h.r.Notify(ctx, &protos.ConversationDisconnection{
 			Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL,
 		})
 		return
 	case protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION:
 		if p.Result["next_action"] == "end_call" {
+			h.r.OnPacket(ctx,
+				internal_type.ConversationEventPacket{
+					ContextID: h.r.GetID(),
+					Name:      observe.ComponentSession,
+					Data: map[string]string{
+						observe.DataType:   observe.EventDisconnectRequested,
+						observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String()},
+					Time: time.Now(),
+				},
+				internal_type.ConversationMetadataPacket{
+					ContextID: h.r.Conversation().Id,
+					Metadata: []*protos.Metadata{{
+						Key:   "disconnect_reason",
+						Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
+					}},
+				},
+			)
 			h.r.Notify(ctx, &protos.ConversationDisconnection{
 				Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL,
 			})

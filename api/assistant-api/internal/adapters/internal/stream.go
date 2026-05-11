@@ -81,10 +81,24 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 			if t.Conversation() == nil {
 				return nil
 			}
-			// notify the client of disconnection before enqueuing the disconnect chain
-			t.Notify(t.sessionCtx, payload)
-			t.OnStreamDisconnection(totalTime, payload)
-
+			ctx := context.Background()
+			t.Notify(ctx, payload)
+			t.OnPacket(ctx,
+				internal_type.ConversationEventPacket{
+					ContextID: t.GetID(),
+					Name:      observe.ComponentSession,
+					Data: map[string]string{
+						observe.DataType:   observe.EventDisconnectRequested,
+						observe.DataReason: payload.GetType().String()},
+					Time: time.Now(),
+				},
+				internal_type.ConversationMetadataPacket{
+					ContextID: t.Conversation().Id,
+					Metadata: []*protos.Metadata{{
+						Key:   "disconnect_reason",
+						Value: payload.GetType().String(),
+					}},
+				})
 		}
 
 	}
@@ -107,26 +121,6 @@ func (t *genericRequestor) OnStreamUserMessage(ctx context.Context, payload *pro
 	default:
 		t.logger.Errorf("illegal input from the user %+v", msg)
 	}
-}
-
-func (t *genericRequestor) OnStreamDisconnection(totalTime time.Time, payload *protos.ConversationDisconnection) {
-	ctx := context.Background()
-	t.OnPacket(ctx,
-		internal_type.ConversationEventPacket{
-			ContextID: t.GetID(),
-			Name:      observe.ComponentSession,
-			Data:      map[string]string{observe.DataType: observe.EventDisconnectRequested, observe.DataReason: payload.GetType().String()},
-			Time:      time.Now(),
-		},
-		internal_type.ConversationMetadataPacket{
-			ContextID: t.Conversation().Id,
-			Metadata: []*protos.Metadata{{
-				Key:   "disconnect_reason",
-				Value: payload.GetType().String(),
-			}},
-		})
-	t.OnCallCompletion(totalTime)
-	t.OnDisconnect(ctx)
 }
 
 // OnCallCompletion emits final metrics + an EventCompleted event when the talk
@@ -158,7 +152,7 @@ func (t *genericRequestor) OnCallCompletion(startTime time.Time) {
 			ContextID: t.GetID(),
 			Name:      observe.ComponentSession,
 			Data: map[string]string{
-				observe.DataType:     observe.EventCompleted,
+				observe.DataType:     observe.EventCleanup,
 				observe.DataDuration: fmt.Sprintf("%d", duration.Milliseconds()),
 				observe.DataMessages: fmt.Sprintf("%d", len(t.GetHistories())),
 			},
@@ -196,7 +190,24 @@ func (r *genericRequestor) OnConnect(ctx context.Context, auth types.SimplePrinc
 		if r.sessionLifecycle.Current() != adapter_lifecycle.StateInitializing {
 			return
 		}
-		r.logger.Warnf("connect deadline %v exceeded, force-cancelling session", connectDeadline)
+		if r.Conversation() != nil {
+			r.OnPacket(ctx,
+				internal_type.ConversationEventPacket{
+					ContextID: r.GetID(),
+					Name:      observe.ComponentSession,
+					Data: map[string]string{
+						observe.DataType:   observe.EventDisconnectRequested,
+						observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String()},
+					Time: time.Now(),
+				},
+				internal_type.ConversationMetadataPacket{
+					ContextID: r.Conversation().Id,
+					Metadata: []*protos.Metadata{{
+						Key:   "disconnect_reason",
+						Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String(),
+					}},
+				})
+		}
 		r.Notify(r.sessionCtx,
 			&protos.ConversationError{Message: "initialization timeout"},
 			&protos.ConversationDisconnection{Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR},

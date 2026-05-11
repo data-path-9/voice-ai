@@ -65,6 +65,7 @@ const (
 	EventDisconnected         = "disconnected"
 	EventDisconnectRequested  = "disconnect_requested"
 	EventCompleted            = "completed"
+	EventCleanup              = "cleanup"
 	EventModeSwitch           = "mode_switch"
 	EventResumed              = "resumed"
 	EventSessionResolved      = "session_resolved"
