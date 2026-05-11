@@ -44,7 +44,7 @@ func (cc *chatCaller) ChatComplete(
 	metrics := internal_caller_metrics.NewMetricBuilder(options.RequestId)
 	metrics.OnStart()
 
-	llmRequest := buildResponseOptions(options)
+	llmRequest := buildChatResponseOptions(options)
 	llmRequest.Input = responses.ResponseNewParamsInputUnion{
 		OfInputItemList: buildHistory(allMessages),
 	}

@@ -114,7 +114,7 @@ func (s *streamCaller) Chat(
 	if options.Request != nil {
 		request.AdditionalData = options.Request.GetAdditionalData()
 	}
-	streamOptions := buildResponseOptions(&internal_callers.ChatCompletionOptions{
+	streamOptions := buildStreamResponseOptions(&internal_callers.ChatCompletionOptions{
 		AIOptions:       options.AIOptions,
 		Request:         request,
 		ToolDefinitions: options.ToolDefinitions,

@@ -319,7 +319,7 @@ func TestBridgeTransfer_ContextCancellation(t *testing.T) {
 		t.Fatal("BridgeTransfer did not exit after context cancel")
 	}
 	assert.False(t, inbound.IsEnded(), "BridgeTransfer must NOT end the inbound session")
-	assert.True(t, outbound.IsEnded(), "BridgeTransfer must end the outbound session")
+	assert.False(t, outbound.IsEnded(), "BridgeTransfer must NOT end the outbound session — caller owns it")
 }
 
 func TestBridgeTransfer_InboundByeEndsBridge(t *testing.T) {
@@ -345,7 +345,7 @@ func TestBridgeTransfer_InboundByeEndsBridge(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("BridgeTransfer did not exit after inbound BYE")
 	}
-	assert.True(t, outbound.IsEnded())
+	assert.False(t, outbound.IsEnded(), "outbound lifecycle is owned by caller")
 }
 
 func TestBridgeTransfer_OutboundByeEndsBridge(t *testing.T) {
@@ -372,7 +372,7 @@ func TestBridgeTransfer_OutboundByeEndsBridge(t *testing.T) {
 		t.Fatal("BridgeTransfer did not exit after outbound BYE")
 	}
 	assert.False(t, inbound.IsEnded(), "BridgeTransfer must NOT end the inbound session")
-	assert.True(t, outbound.IsEnded(), "BridgeTransfer must end the outbound session")
+	assert.False(t, outbound.IsEnded(), "BridgeTransfer must NOT end the outbound session — caller owns it")
 }
 
 func TestBridgeTransfer_SessionEndTerminatesBridge(t *testing.T) {
@@ -398,7 +398,7 @@ func TestBridgeTransfer_SessionEndTerminatesBridge(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("BridgeTransfer did not exit after inbound End()")
 	}
-	assert.True(t, outbound.IsEnded())
+	assert.False(t, outbound.IsEnded(), "outbound lifecycle is owned by caller")
 }
 
 func TestBridgeTransfer_AudioForwardsBidirectionally(t *testing.T) {
@@ -512,7 +512,7 @@ func TestBridgeTransfer_OnlyEndsOutboundSession(t *testing.T) {
 	assert.False(t, inbound.IsEnded(), "inbound must NOT be ended — caller owns its lifecycle")
 }
 
-func TestBridgeTransfer_InboundBye_OnlyEndsOutbound(t *testing.T) {
+func TestBridgeTransfer_InboundBye_DoesNotEndEitherSession(t *testing.T) {
 	t.Parallel()
 	srv := bridgeTestServer()
 
@@ -536,7 +536,9 @@ func TestBridgeTransfer_InboundBye_OnlyEndsOutbound(t *testing.T) {
 		t.Fatal("BridgeTransfer did not exit after inbound BYE")
 	}
 
-	assert.True(t, outbound.IsEnded(), "outbound must be ended by BridgeTransfer")
+	// Both session lifecycles are owned by the caller (executeTransfer); BridgeTransfer
+	// no longer ends either side on normal exit.
+	assert.False(t, outbound.IsEnded(), "outbound lifecycle is owned by caller")
 	assert.False(t, inbound.IsEnded(), "inbound must NOT be ended — NotifyBye is not End()")
 }
 

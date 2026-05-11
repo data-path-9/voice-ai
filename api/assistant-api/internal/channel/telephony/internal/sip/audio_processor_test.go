@@ -533,6 +533,53 @@ func TestClearBridgeTarget_DeactivatesBridge(t *testing.T) {
 	assert.False(t, proc.ForwardUserAudio([]byte{0x01}))
 }
 
+// TestForwardUserAudio_ConcurrentClear verifies the bridgeMu invariant: while
+// any ForwardUserAudio call is in flight, ClearBridgeTarget must NOT return.
+// This guarantees a caller can safely close the outbound RTP channel after
+// ClearBridgeTarget returns without racing into a "send on closed channel"
+// panic. Run with `-race` for full coverage.
+func TestForwardUserAudio_ConcurrentClear(t *testing.T) {
+	rec := &pushRecorder{}
+	proc := newTestAudioProcessor(t, &sip_infra.CodecPCMU, &mockResampler{}, rec)
+
+	bridgeRTP := testRTPHandler(t, &sip_infra.CodecPCMU)
+	proc.SetBridgeTarget(bridgeRTP, &sip_infra.CodecPCMU, &sip_infra.CodecPCMU)
+
+	const writers = 8
+	const iters = 200
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				proc.ForwardUserAudio([]byte{0x01, 0x02})
+			}
+		}()
+	}
+
+	// Race: while writers are spinning, clear the bridge target. Clear must
+	// block until any in-flight ForwardUserAudio releases the mutex; no
+	// writer should observe a panic. Race detector catches any unsynchronized
+	// access to p.bridge.
+	time.Sleep(2 * time.Millisecond)
+	proc.ClearBridgeTarget()
+	assert.False(t, proc.IsBridgeActive(), "ClearBridgeTarget should leave bridge inactive")
+
+	close(stop)
+	wg.Wait()
+
+	// Subsequent ForwardUserAudio returns false; no panic.
+	assert.False(t, proc.ForwardUserAudio([]byte{0x03}))
+}
+
 func TestSetBridgeTarget_MatchingCodecs_NoTranscode(t *testing.T) {
 	rec := &pushRecorder{}
 	rtp := testRTPHandler(t, &sip_infra.CodecPCMU)

@@ -55,7 +55,13 @@ type AudioProcessor struct {
 	outputBuffer internal_telephony_output.FrameBuffer
 	flushCh      chan struct{}
 
-	// Bridge state
+	// Bridge state.
+	// `bridge` is held in an atomic pointer so any goroutine can do a
+	// lock-free `bridge.Load() != nil` check (IsBridgeActive, ProcessOutputAudio).
+	// `bridgeMu` serializes ForwardUserAudio (the writer) with
+	// ClearBridgeTarget so that Clear cannot return — and the outbound RTP
+	// channel cannot be closed — while a send is in flight.
+	bridgeMu         sync.Mutex
 	bridge           atomic.Pointer[bridgeState]
 	bridgeUserCh     chan []byte
 	bridgeOperatorCh chan []byte
@@ -310,16 +316,30 @@ func (p *AudioProcessor) SetBridgeTarget(rtp *sip_infra.RTPHandler, inCodec, out
 			bs.transcode = internal_audio.UlawToAlaw
 		}
 	}
+	p.bridgeMu.Lock()
 	p.bridge.Store(bs)
+	p.bridgeMu.Unlock()
 }
 
+// ClearBridgeTarget releases the bridge target. Blocks until any in-flight
+// ForwardUserAudio call has finished writing — this is the load-bearing
+// invariant: callers may close the outbound RTP channel only AFTER this
+// returns, since no writer holds a reference to it past that point.
 func (p *AudioProcessor) ClearBridgeTarget() {
+	p.bridgeMu.Lock()
 	p.bridge.Store(nil)
+	p.bridgeMu.Unlock()
 }
 
-// ForwardUserAudio routes caller audio to the bridge target and queues it for recording.
-// Returns true if bridge is active and audio was handled.
+// ForwardUserAudio routes caller audio to the bridge target and queues it
+// for recording. Returns true if bridge is active and audio was handled.
+//
+// Holds bridgeMu for the duration of the send so that ClearBridgeTarget
+// cannot return — and therefore the outbound RTP channel cannot be closed —
+// while a send is in flight.
 func (p *AudioProcessor) ForwardUserAudio(audioData []byte) bool {
+	p.bridgeMu.Lock()
+	defer p.bridgeMu.Unlock()
 	bs := p.bridge.Load()
 	if bs == nil {
 		return false

@@ -63,6 +63,10 @@ func NewStreamer(ctx context.Context,
 
 	// Client disconnect detection (SIP BYE from peer): push disc to Input,
 	// let the talker drive Close via Notify → Send.
+	//
+	// Bridge teardown safety is owned by AudioProcessor.bridgeMu — Forward
+	// vs Clear is serialized there. We don't need to defensively clear the
+	// bridge here.
 	go func() {
 		select {
 		case <-sipSession.ByeReceived():

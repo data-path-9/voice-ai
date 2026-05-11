@@ -26,7 +26,18 @@ const (
 	chatRoleUser      = "user"
 )
 
-func buildResponseOptions(opts *internal_callers.ChatCompletionOptions) responses.ResponseNewParams {
+func buildChatResponseOptions(opts *internal_callers.ChatCompletionOptions) responses.ResponseNewParams {
+	return buildResponseOptionsWithCachePolicy(opts, false)
+}
+
+func buildStreamResponseOptions(opts *internal_callers.ChatCompletionOptions) responses.ResponseNewParams {
+	return buildResponseOptionsWithCachePolicy(opts, true)
+}
+
+func buildResponseOptionsWithCachePolicy(
+	opts *internal_callers.ChatCompletionOptions,
+	allowPromptCache bool,
+) responses.ResponseNewParams {
 	options := responses.ResponseNewParams{Store: openai.Bool(false)}
 	additionalData := map[string]string{}
 	if opts.Request != nil {
@@ -74,10 +85,16 @@ func buildResponseOptions(opts *internal_callers.ChatCompletionOptions) response
 				options.ServiceTier = responses.ResponseNewParamsServiceTier(st)
 			}
 		case "model.prompt_cache_key":
+			if !allowPromptCache {
+				continue
+			}
 			if promptCacheKey, err := utils.AnyToString(value); err == nil && promptCacheKey != "" {
 				promptCacheKeySelector = promptCacheKey
 			}
 		case "model.prompt_cache_retention":
+			if !allowPromptCache {
+				continue
+			}
 			if retention, err := utils.AnyToString(value); err == nil && retention != "" {
 				options.PromptCacheRetention = responses.ResponseNewParamsPromptCacheRetention(retention)
 			}
@@ -149,15 +166,17 @@ func buildResponseOptions(opts *internal_callers.ChatCompletionOptions) response
 		}
 	}
 
-	switch promptCacheKeySelector {
-	case "user_identifier":
-		options.PromptCacheKey = openai.String(additionalData["user_identifier"] + additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
-	case "conversation_id":
-		options.PromptCacheKey = openai.String(additionalData["conversation_id"] + additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
-	case "assistant_id":
-		options.PromptCacheKey = openai.String(additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
-	default:
-		options.PromptCacheKey = openai.String(additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
+	if allowPromptCache {
+		switch promptCacheKeySelector {
+		case "user_identifier":
+			options.PromptCacheKey = openai.String(additionalData["user_identifier"] + additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
+		case "conversation_id":
+			options.PromptCacheKey = openai.String(additionalData["conversation_id"] + additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
+		case "assistant_id":
+			options.PromptCacheKey = openai.String(additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
+		default:
+			options.PromptCacheKey = openai.String(additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
+		}
 	}
 
 	return options
