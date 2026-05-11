@@ -204,7 +204,7 @@ func (cst *cartesiaSpeechToText) Transform(ctx context.Context, in internal_type
 		}
 		cst.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		cst.mu.Lock()
 		conn := cst.connection
 		cst.mu.Unlock()

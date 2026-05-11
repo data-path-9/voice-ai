@@ -94,7 +94,7 @@ func (st *nvidiaSTT) Transform(ctx context.Context, in internal_type.Packet) err
 		}
 		st.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		st.mu.Lock()
 		st.audioBuffer.Write(pkt.Audio)
 		audioData := make([]byte, st.audioBuffer.Len())

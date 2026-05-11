@@ -30,6 +30,7 @@ func Classify(p internal_type.Packet) Route {
 		internal_type.TextToSpeechInterruptPacket,
 		internal_type.LLMInterruptPacket,
 		internal_type.SpeechToTextInterruptPacket,
+		internal_type.EndOfSpeechInterruptionPacket,
 		internal_type.TurnChangePacket:
 		return RouteControl
 
@@ -74,6 +75,8 @@ func Classify(p internal_type.Packet) Route {
 		internal_type.VadAudioPacket,
 		internal_type.VadSpeechActivityPacket,
 		internal_type.SpeechToTextPacket,
+		internal_type.SpeechToTextAudioPacket,
+		internal_type.EndOfSpeechAudioPacket,
 		internal_type.EndOfSpeechPacket,
 		internal_type.InterimEndOfSpeechPacket,
 		internal_type.UserInputPacket,

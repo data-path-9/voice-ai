@@ -94,6 +94,15 @@ func (f UserAudioReceivedPacket) ContextId() string { return f.ContextID }
 func (f UserAudioReceivedPacket) Content() []byte   { return f.Audio }
 func (f UserAudioReceivedPacket) Role() string      { return "user" }
 
+type SpeechToTextAudioPacket struct {
+	ContextID string
+	Audio     []byte
+}
+
+func (f SpeechToTextAudioPacket) ContextId() string { return f.ContextID }
+func (f SpeechToTextAudioPacket) Content() []byte   { return f.Audio }
+func (f SpeechToTextAudioPacket) IsAsync() bool     { return true }
+
 // DenoiseAudioPacket carries raw user audio to be denoised before entering the pipeline.
 type DenoiseAudioPacket struct {
 	ContextID string
@@ -141,6 +150,22 @@ type SpeechToTextPacket struct {
 func (f SpeechToTextPacket) ContextId() string { return f.ContextID }
 
 // EndOfSpeechPacket signals that the EOS detector determined the user's turn is complete.
+type EndOfSpeechAudioPacket struct {
+	ContextID string
+	Audio     []byte
+}
+
+func (f EndOfSpeechAudioPacket) ContextId() string { return f.ContextID }
+func (f EndOfSpeechAudioPacket) IsAsync() bool     { return true }
+
+type EndOfSpeechInterruptionPacket struct {
+	ContextID string
+	Source    InterruptionSource
+}
+
+func (f EndOfSpeechInterruptionPacket) ContextId() string { return f.ContextID }
+func (f EndOfSpeechInterruptionPacket) IsAsync() bool     { return true }
+
 type EndOfSpeechPacket struct {
 	ContextID string
 	Speech    string
@@ -196,6 +221,7 @@ type TextToSpeechInterruptPacket struct {
 }
 
 func (f TextToSpeechInterruptPacket) ContextId() string { return f.ContextID }
+func (f TextToSpeechInterruptPacket) IsAsync() bool     { return true }
 
 type STTErrorType int
 

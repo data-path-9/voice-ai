@@ -16,6 +16,7 @@ import (
 type DispatchHandler interface {
 	HandleUserText(context.Context, internal_type.UserTextReceivedPacket)
 	HandleUserAudio(context.Context, internal_type.UserAudioReceivedPacket)
+	HandleSpeechToTextAudio(context.Context, internal_type.SpeechToTextAudioPacket)
 	HandleDenoise(context.Context, internal_type.DenoiseAudioPacket)
 	HandleDenoisedAudio(context.Context, internal_type.DenoisedAudioPacket)
 	HandleVadAudio(context.Context, internal_type.VadAudioPacket)
@@ -25,6 +26,9 @@ type DispatchHandler interface {
 	HandleEndOfSpeech(context.Context, internal_type.EndOfSpeechPacket)
 	HandleUserInput(context.Context, internal_type.UserInputPacket)
 	HandleInterruptionDetected(context.Context, internal_type.InterruptionDetectedPacket)
+	HandleEndOfSpeechInterruption(context.Context, internal_type.EndOfSpeechInterruptionPacket)
+	HandleEndOfSpeechAudio(context.Context, internal_type.EndOfSpeechAudioPacket)
+
 	HandleTextToSpeechInterrupt(context.Context, internal_type.TextToSpeechInterruptPacket)
 	HandleLLMInterrupt(context.Context, internal_type.LLMInterruptPacket)
 	HandleSpeechToTextInterrupt(context.Context, internal_type.SpeechToTextInterruptPacket)
@@ -105,6 +109,8 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleUserText(ctx, vl)
 	case internal_type.UserAudioReceivedPacket:
 		handler.HandleUserAudio(ctx, vl)
+	case internal_type.SpeechToTextAudioPacket:
+		handler.HandleSpeechToTextAudio(ctx, vl)
 	case internal_type.DenoiseAudioPacket:
 		handler.HandleDenoise(ctx, vl)
 	case internal_type.DenoisedAudioPacket:
@@ -261,6 +267,11 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleExecuteAnalysis(ctx, vl)
 	case internal_type.ExecuteWebhookPacket:
 		handler.HandleExecuteWebhook(ctx, vl)
+
+	case internal_type.EndOfSpeechInterruptionPacket:
+		handler.HandleEndOfSpeechInterruption(ctx, vl)
+	case internal_type.EndOfSpeechAudioPacket:
+		handler.HandleEndOfSpeechAudio(ctx, vl)
 
 	default:
 		return errors.New("unknown packet")

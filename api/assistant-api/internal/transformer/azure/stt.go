@@ -150,7 +150,7 @@ func (s *azureSpeechToText) Transform(_ context.Context, in internal_type.Packet
 		}
 		s.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		s.mu.Lock()
 		stream := s.inputstream
 		s.mu.Unlock()

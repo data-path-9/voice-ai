@@ -22,8 +22,8 @@ func userInput(msg string) internal_type.UserTextReceivedPacket {
 	return internal_type.UserTextReceivedPacket{Text: msg}
 }
 
-func systemInput(msg string) internal_type.InterruptionDetectedPacket {
-	return internal_type.InterruptionDetectedPacket{Source: "vad"}
+func systemInput(msg string) internal_type.EndOfSpeechInterruptionPacket {
+	return internal_type.EndOfSpeechInterruptionPacket{Source: "vad"}
 }
 
 func sttInput(msg string, complete bool) internal_type.SpeechToTextPacket {

@@ -221,7 +221,7 @@ func (cst *sarvamSpeechToText) Transform(ctx context.Context, in internal_type.P
 		}
 		cst.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		vl, err := cst.speechToTextMessage(pkt.Audio)
 		if err != nil {
 			return fmt.Errorf("sarvam-stt: failed to encode audio: %w", err)

@@ -81,22 +81,31 @@ func (h requestorDispatchHandler) HandleUserAudio(ctx context.Context, vl intern
 	h.r.OnPacket(ctx,
 		internal_type.RecordUserAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 		internal_type.VadAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
+		internal_type.SpeechToTextAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
+		internal_type.EndOfSpeechAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 	)
-	if h.r.speechToTextTransformer != nil {
-		utils.Go(ctx, func() {
-			if err := h.r.speechToTextTransformer.Transform(ctx, vl); err != nil {
-				h.r.logger.Tracef(ctx, "error while transforming input %s and error %s", h.r.speechToTextTransformer.Name(), err.Error())
-			}
-		})
+	// h.callEndOfSpeech(ctx, vl)
+}
+
+func (h requestorDispatchHandler) HandleEndOfSpeechAudio(ctx context.Context, vl internal_type.EndOfSpeechAudioPacket) {
+	if h.r.endOfSpeech != nil {
+		if err := h.r.endOfSpeech.Analyze(ctx, vl); err != nil {
+			h.r.logger.Errorf("end of speech analyze error: %v", err)
+		}
 	}
-	h.callEndOfSpeech(ctx, vl)
+}
+
+func (h requestorDispatchHandler) HandleSpeechToTextAudio(ctx context.Context, vl internal_type.SpeechToTextAudioPacket) {
+	if h.r.speechToTextTransformer != nil {
+		if err := h.r.speechToTextTransformer.Transform(ctx, vl); err != nil {
+			h.r.logger.Tracef(ctx, "error while transforming input %s and error %s", h.r.speechToTextTransformer.Name(), err.Error())
+		}
+	}
 }
 
 func (h requestorDispatchHandler) HandleDenoise(ctx context.Context, vl internal_type.DenoiseAudioPacket) {
-	if h.r.denoiser != nil {
-		if err := h.r.denoiser.Denoise(ctx, vl); err != nil {
-			h.r.logger.Warnf("denoiser returned unexpected error: %+v", err)
-		}
+	if err := h.r.denoiser.Denoise(ctx, vl); err != nil {
+		h.r.logger.Warnf("denoiser returned unexpected error: %+v", err)
 	}
 }
 func (h requestorDispatchHandler) HandleDenoisedAudio(ctx context.Context, vl internal_type.DenoisedAudioPacket) {
@@ -202,10 +211,13 @@ func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context
 	}
 	switch p.Source {
 	case internal_type.InterruptionSourceWord:
-		h.r.OnPacket(ctx, internal_type.StopIdleTimeoutPacket{ContextID: p.ContextID})
-		if err := h.callEndOfSpeech(ctx, p); err != nil {
-			h.r.logger.Errorf("end of speech error: %v", err)
-		}
+		h.r.OnPacket(ctx,
+			internal_type.StopIdleTimeoutPacket{ContextID: p.ContextID},
+			internal_type.EndOfSpeechInterruptionPacket{ContextID: p.ContextID, Source: internal_type.InterruptionSourceWord},
+		)
+		// if err := h.callEndOfSpeech(ctx, p); err != nil {
+		// 	h.r.logger.Errorf("end of speech error: %v", err)
+		// }
 		if err := h.r.Transition(Interrupted); err != nil {
 			return
 		}
@@ -225,10 +237,10 @@ func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context
 		if p.StartAt < 5 {
 			return
 		}
-		h.r.OnPacket(ctx, internal_type.SpeechToTextInterruptPacket{ContextID: p.ContextID})
-		if err := h.callEndOfSpeech(ctx, p); err != nil {
-			h.r.logger.Errorf("end of speech error: %v", err)
-		}
+		h.r.OnPacket(ctx,
+			internal_type.SpeechToTextInterruptPacket{ContextID: p.ContextID},
+			internal_type.EndOfSpeechInterruptionPacket{ContextID: p.ContextID, Source: internal_type.InterruptionSourceVad})
+
 		if err := h.r.Transition(Interrupt); err != nil {
 			return
 		}
@@ -240,6 +252,15 @@ func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context
 		})
 	}
 }
+
+func (h requestorDispatchHandler) HandleEndOfSpeechInterruption(ctx context.Context, p internal_type.EndOfSpeechInterruptionPacket) {
+	if h.r.endOfSpeech != nil {
+		if err := h.r.endOfSpeech.Analyze(ctx, p); err != nil {
+			h.r.logger.Errorf("end of speech analyze error: %v", err)
+		}
+	}
+}
+
 func (h requestorDispatchHandler) HandleTextToSpeechInterrupt(ctx context.Context, p internal_type.TextToSpeechInterruptPacket) {
 	if h.r.textToSpeechTransformer != nil {
 		if err := h.r.textToSpeechTransformer.Transform(ctx, p); err != nil {
@@ -1946,6 +1967,7 @@ func (r *genericRequestor) notifyConfiguration(ctx context.Context, config *prot
 	if base, err := utils.AnyMapToInterfaceMap(config.GetOptions()); err == nil {
 		mergedOptions = base
 	}
+
 	if outputAudio, err := r.GetTextToSpeechTransformer(); err == nil && outputAudio != nil {
 		outputOpts := outputAudio.GetOptions()
 		if ambient, err := outputOpts.GetString("speaker.ambient"); err == nil && ambient != "" {
@@ -1957,6 +1979,7 @@ func (r *genericRequestor) notifyConfiguration(ctx context.Context, config *prot
 			mergedOptions["speaker.ambient_volume"] = volumeNum
 		}
 	}
+
 	if len(mergedOptions) > 0 {
 		if anyMap, err := utils.InterfaceMapToAnyMap(mergedOptions); err == nil {
 			options = anyMap

@@ -98,7 +98,7 @@ func (google *googleSpeechToText) Transform(c context.Context, in internal_type.
 		}
 		google.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		google.mu.Lock()
 		strm := google.stream
 		google.mu.Unlock()

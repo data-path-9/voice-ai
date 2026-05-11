@@ -169,6 +169,13 @@ func (s *dispatchHandlerStub) HandleExecuteAnalysis(context.Context, internal_ty
 func (s *dispatchHandlerStub) HandleExecuteWebhook(context.Context, internal_type.ExecuteWebhookPacket) {
 }
 
+func (s *dispatchHandlerStub) HandleSpeechToTextAudio(context.Context, internal_type.SpeechToTextAudioPacket) {
+}
+func (s *dispatchHandlerStub) HandleEndOfSpeechInterruption(context.Context, internal_type.EndOfSpeechInterruptionPacket) {
+}
+func (s *dispatchHandlerStub) HandleEndOfSpeechAudio(context.Context, internal_type.EndOfSpeechAudioPacket) {
+}
+
 func TestDispatchPacket_DispatchesKnownPacket(t *testing.T) {
 	handler := &dispatchHandlerStub{}
 

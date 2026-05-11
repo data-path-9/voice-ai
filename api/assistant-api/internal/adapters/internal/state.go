@@ -239,64 +239,54 @@ func (tc *genericRequestor) applyOptions(opts map[string]interface{}) {
 func (tc *genericRequestor) onAddMetadata(_ context.Context, metadata ...*protos.Metadata) error {
 	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 	defer cancel()
-	_, err := tc.conversationService.ApplyConversationMetadata(
-		dbCtx,
-		tc.auth,
-		tc.assistant.Id,
-		tc.assistantConversation.Id,
-		types.ToMetadatas(metadata),
-	)
-	if err != nil {
-		tc.logger.Errorf("unable to flush metadata for conversation %+v", err)
-	}
-	return err
-}
-
-func (tc *genericRequestor) onAddMetrics(_ context.Context, metrics ...*protos.Metric) error {
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	_, err := tc.conversationService.ApplyConversationMetrics(
-		dbCtx,
-		tc.auth,
-		tc.assistant.Id,
-		tc.assistantConversation.Id,
-		types.ToMetrics(metrics),
-	)
-	if err != nil {
-		tc.logger.Errorf("unable to flush metrics for conversation %+v", err)
-	}
-	return err
+	utils.Go(context.Background(), func() {
+		_, err := tc.conversationService.ApplyConversationMetadata(
+			dbCtx,
+			tc.auth,
+			tc.assistant.Id,
+			tc.assistantConversation.Id,
+			types.ToMetadatas(metadata),
+		)
+		if err != nil {
+			tc.logger.Errorf("unable to flush metadata for conversation %+v", err)
+		}
+	})
+	return nil
 }
 
 func (deb *genericRequestor) onAddMessage(_ context.Context, msg internal_type.MessagePacket) error {
 	deb.histories = append(deb.histories, msg)
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	_, err := deb.conversationService.CreateConversationMessage(dbCtx, deb.Auth(), deb.GetSource(), deb.Assistant().Id, deb.Assistant().AssistantProviderId, deb.Conversation().Id,
-		fmt.Sprintf("%s-%s", msg.Role(), msg.ContextId()), msg.Role(), msg.Content())
-	if err != nil {
-		deb.logger.Error("unable to create message for the user")
-		return err
-	}
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		_, err := deb.conversationService.CreateConversationMessage(dbCtx, deb.Auth(), deb.GetSource(), deb.Assistant().Id, deb.Assistant().AssistantProviderId, deb.Conversation().Id,
+			fmt.Sprintf("%s-%s", msg.Role(), msg.ContextId()), msg.Role(), msg.Content())
+		if err != nil {
+			deb.logger.Error("unable to create message for the user")
+		}
+	})
 	return nil
 }
 
 func (deb *genericRequestor) onAddMessageMetric(_ context.Context, prefix string, messageId string, metrics []*protos.Metric) error {
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	if _, err := deb.conversationService.ApplyMessageMetrics(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metrics); err != nil {
-		deb.logger.Errorf("error updating metrics for message: %v", err)
-		return err
-	}
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		if _, err := deb.conversationService.ApplyMessageMetrics(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metrics); err != nil {
+			deb.logger.Errorf("error updating metrics for message: %v", err)
+		}
+	})
 	return nil
 }
 
 func (deb *genericRequestor) onAddMessageMetadata(_ context.Context, prefix string, messageId string, metadata []*protos.Metadata) error {
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	if _, err := deb.conversationService.ApplyMessageMetadata(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metadata); err != nil {
-		deb.logger.Errorf("Error in ApplyMessageMetadata: %v", err)
-	}
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		if _, err := deb.conversationService.ApplyMessageMetadata(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metadata); err != nil {
+			deb.logger.Errorf("Error in ApplyMessageMetadata: %v", err)
+		}
+	})
 	return nil
 }
 

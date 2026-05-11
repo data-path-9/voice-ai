@@ -67,7 +67,7 @@ func (o *openaiSpeechToText) Transform(ctx context.Context, byt internal_type.Pa
 		return nil
 	case internal_type.SpeechToTextInterruptPacket:
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		return nil
 	default:
 		return nil

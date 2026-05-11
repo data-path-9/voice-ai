@@ -34,18 +34,18 @@ func sttInput(msg string, complete bool) internal_type.SpeechToTextPacket {
 	return internal_type.SpeechToTextPacket{Script: msg, Interim: !complete}
 }
 
-func interruptInput() internal_type.InterruptionDetectedPacket {
-	return internal_type.InterruptionDetectedPacket{Source: "vad"}
+func interruptInput() internal_type.EndOfSpeechInterruptionPacket {
+	return internal_type.EndOfSpeechInterruptionPacket{Source: "vad"}
 }
 
-func audioInput(nSamples int) internal_type.UserAudioReceivedPacket {
+func audioInput(nSamples int) internal_type.EndOfSpeechAudioPacket {
 	pcm := make([]byte, nSamples*2)
 	for i := 0; i < nSamples; i++ {
 		// 440 Hz sine wave as PCM16
 		v := int16(16000.0 * math.Sin(2.0*math.Pi*440.0*float64(i)/16000.0))
 		binary.LittleEndian.PutUint16(pcm[i*2:], uint16(v))
 	}
-	return internal_type.UserAudioReceivedPacket{Audio: pcm}
+	return internal_type.EndOfSpeechAudioPacket{Audio: pcm}
 }
 
 func newTestOpts(m map[string]any) utils.Option {
