@@ -144,7 +144,12 @@ jest.mock('@/app/components/carbon/overflow-menu', () => ({
 }));
 
 jest.mock('@/app/components/carbon/empty-state', () => ({
-  EmptyState: ({ title, subtitle, actionButtonText, onActionButtonClick }: any) => (
+  EmptyState: ({
+    title,
+    subtitle,
+    actionButtonText,
+    onActionButtonClick,
+  }: any) => (
     <div>
       <div>{title}</div>
       <div>{subtitle}</div>
@@ -267,8 +272,8 @@ describe('CreateAssistantAuthenticationPage', () => {
 
   it('keeps save enabled and validates on click', async () => {
     render(<CreateAssistantAuthenticationPage />);
-    await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
     await waitUntilReady();
+    expect(GetAssistantAuthentication).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByLabelText('Enable Session Authentication'));
 
@@ -287,8 +292,8 @@ describe('CreateAssistantAuthenticationPage', () => {
 
   it('supports add and edit for authentication parameter mapping', async () => {
     render(<CreateAssistantAuthenticationPage />);
-    await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
     await waitUntilReady();
+    expect(GetAssistantAuthentication).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByLabelText('Enable Session Authentication'));
     fireEvent.change(screen.getByTestId('assistant-auth-endpoint'), {
@@ -311,20 +316,17 @@ describe('CreateAssistantAuthenticationPage', () => {
   });
 
   it('creates authentication when enabled and valid', async () => {
-    (GetAssistantAuthentication as jest.Mock).mockResolvedValueOnce(
-      getSuccessLoadResponse('active'),
-    );
     render(<CreateAssistantAuthenticationPage />);
-    await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
     await waitUntilReady();
+    expect(GetAssistantAuthentication).not.toHaveBeenCalled();
 
-    expect(
-      screen.getByRole('checkbox', { name: 'Enable Session Authentication' }),
-    ).toBeChecked();
+    fireEvent.click(screen.getByLabelText('Enable Session Authentication'));
     fireEvent.change(screen.getByTestId('assistant-auth-endpoint'), {
       target: { value: 'https://auth.example.com/resolve' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save authentication' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save authentication' }),
+    );
 
     await waitFor(() =>
       expect(CreateAssistantAuthentication).toHaveBeenCalledTimes(1),
@@ -343,7 +345,10 @@ describe('CreateAssistantAuthenticationPage', () => {
     expect(createRequest.status).toBe('ACTIVE');
     expect(createRequest.failBehavior).toBe('BLOCK');
     const optionMap = new Map(
-      createRequest.optionsList.map(option => [option.getKey(), option.getValue()]),
+      createRequest.optionsList.map(option => [
+        option.getKey(),
+        option.getValue(),
+      ]),
     );
     expect(optionMap.get('http_method')).toBe('POST');
     expect(optionMap.get('http_url')).toBe('https://auth.example.com/resolve');
@@ -365,20 +370,20 @@ describe('CreateAssistantAuthenticationPage', () => {
   });
 
   it('sends DO_NOTHING when on error is set to do nothing', async () => {
-    (GetAssistantAuthentication as jest.Mock).mockResolvedValueOnce(
-      getSuccessLoadResponse('active'),
-    );
     render(<CreateAssistantAuthenticationPage />);
-    await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
     await waitUntilReady();
+    expect(GetAssistantAuthentication).not.toHaveBeenCalled();
 
+    fireEvent.click(screen.getByLabelText('Enable Session Authentication'));
     fireEvent.change(screen.getByTestId('assistant-auth-endpoint'), {
       target: { value: 'https://auth.example.com/resolve' },
     });
     fireEvent.change(screen.getByTestId('assistant-auth-fail-behavior'), {
       target: { value: 'do_nothing' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save authentication' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save authentication' }),
+    );
 
     await waitFor(() =>
       expect(CreateAssistantAuthentication).toHaveBeenCalledTimes(1),
@@ -392,10 +397,12 @@ describe('CreateAssistantAuthenticationPage', () => {
 
   it('disables authentication when toggled off and saved', async () => {
     render(<CreateAssistantAuthenticationPage />);
-    await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
     await waitUntilReady();
+    expect(GetAssistantAuthentication).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save authentication' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save authentication' }),
+    );
 
     await waitFor(() =>
       expect(DisableAssistantAuthentication).toHaveBeenCalledTimes(1),
@@ -407,7 +414,7 @@ describe('CreateAssistantAuthenticationPage', () => {
       getSuccessLoadResponse('inactive'),
     );
 
-    render(<CreateAssistantAuthenticationPage />);
+    render(<UpdateAssistantAuthenticationPage />);
     await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
     await waitUntilReady();
 
@@ -424,7 +431,7 @@ describe('CreateAssistantAuthenticationPage', () => {
       getSuccessLoadResponse('active', 'DO_NOTHING'),
     );
 
-    render(<CreateAssistantAuthenticationPage />);
+    render(<UpdateAssistantAuthenticationPage />);
     await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
     await waitUntilReady();
 
@@ -438,7 +445,7 @@ describe('CreateAssistantAuthenticationPage', () => {
       getSuccessLoadResponse('active', 'none'),
     );
 
-    render(<CreateAssistantAuthenticationPage />);
+    render(<UpdateAssistantAuthenticationPage />);
     await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
     await waitUntilReady();
 
@@ -452,14 +459,16 @@ describe('CreateAssistantAuthenticationPage', () => {
       getSuccessLoadResponse('active', 'none'),
     );
 
-    render(<CreateAssistantAuthenticationPage />);
+    render(<UpdateAssistantAuthenticationPage />);
     await waitFor(() => expect(GetAssistantAuthentication).toHaveBeenCalled());
     await waitUntilReady();
 
     fireEvent.change(screen.getByTestId('assistant-auth-endpoint'), {
       target: { value: 'https://auth.example.com/resolve' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save authentication' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save authentication' }),
+    );
 
     await waitFor(() =>
       expect(CreateAssistantAuthentication).toHaveBeenCalledTimes(1),
@@ -471,7 +480,7 @@ describe('CreateAssistantAuthenticationPage', () => {
     expect(createRequest.failBehavior).toBe('DO_NOTHING');
   });
 
-  it('shows load error and blocks save when initial load fails', async () => {
+  it('falls back to add flow when initial load does not return authentication data', async () => {
     (GetAssistantAuthentication as jest.Mock).mockResolvedValueOnce({
       getSuccess: () => false,
       getError: () => ({
@@ -482,14 +491,21 @@ describe('CreateAssistantAuthenticationPage', () => {
     render(<UpdateAssistantAuthenticationPage />);
 
     await waitFor(() =>
-      expect(screen.getByText('Failed to load auth')).toBeInTheDocument(),
+      expect(screen.getByText('Add Authentication')).toBeInTheDocument(),
     );
-    expect(
-      screen.getByRole('button', { name: 'Save authentication' }),
-    ).toBeDisabled();
+    expect(screen.queryByText('Failed to load auth')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save authentication' }),
+      ).not.toBeDisabled(),
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save authentication' }));
-    expect(DisableAssistantAuthentication).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save authentication' }),
+    );
+    await waitFor(() =>
+      expect(DisableAssistantAuthentication).toHaveBeenCalledTimes(1),
+    );
     expect(CreateAssistantAuthentication).not.toHaveBeenCalled();
   });
 });
