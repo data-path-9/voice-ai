@@ -264,15 +264,46 @@ describe('Text provider runtime parity', () => {
   it.each(configuredTextProviders.map(p => p.code))(
     '%s preserves explicit existing values and fills any missing defaults',
     provider => {
+      const textConfig = loadProviderConfig(provider)?.text;
+      expect(textConfig).toBeDefined();
+
+      const dataFile = textConfig!.parameters[0]?.data;
+      expect(dataFile).toBeDefined();
+
+      const modelCatalog = loadProviderData(provider, dataFile!);
+      expect(modelCatalog.length).toBeGreaterThan(0);
+
+      const modelIndex = modelCatalog.length > 1 ? 1 : 0;
       const { modelId, modelName, parameterDefaults } = getModelConfigContext(
         provider,
-        1,
+        modelIndex,
       );
-      const overridableParam = getOverridableDefaultParam(provider, 1);
-      expect(overridableParam).toBeDefined();
+      const overridableParam = getOverridableDefaultParam(provider, modelIndex);
 
-      const overrideKey = overridableParam!.key;
-      const overrideValue = buildAlternateValue(overridableParam!);
+      if (!overridableParam) {
+        expect(provider).toBe('custom-llm');
+
+        const seeded = [
+          createMetadata('model.id', modelId),
+          createMetadata('model.name', modelName),
+          createMetadata('model.parameters', '{"temperature":0.8}'),
+        ];
+
+        const hydrated = GetDefaultTextProviderConfigIfInvalid(
+          provider,
+          seeded,
+        );
+
+        expect(getMetadataValue(hydrated, 'model.id')).toBe(modelId);
+        expect(getMetadataValue(hydrated, 'model.name')).toBe(modelName);
+        expect(getMetadataValue(hydrated, 'model.parameters')).toBe(
+          '{"temperature":0.8}',
+        );
+        return;
+      }
+
+      const overrideKey = overridableParam.key;
+      const overrideValue = buildAlternateValue(overridableParam);
       expect(overrideValue).not.toBeNull();
 
       const seeded = [

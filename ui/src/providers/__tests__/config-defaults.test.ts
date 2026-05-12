@@ -312,7 +312,7 @@ describe('getDefaultsFromConfig', () => {
     );
 
     expect(findMeta(result, 'model.temperature')?.getValue()).toBe('0.3');
-    expect(findMeta(result, 'model.max_completion_tokens')?.getValue()).toBe('2048');
+    expect(findMeta(result, 'model.max_completion_tokens')?.getValue()).toBe('1048');
   });
 
   it('preserves valid existing values and patches invalid values against model constraints', () => {

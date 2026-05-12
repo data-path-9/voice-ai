@@ -1,6 +1,6 @@
 module github.com/rapidaai
 
-go 1.25.9
+go 1.25.10
 
 replace github.com/vonage/vonage-go-sdk => github.com/iamprashant/vonage-go-sdk v0.0.0-20251001095859-c473c1750cbd
 
@@ -12,6 +12,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.4
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/Microsoft/cognitive-services-speech-sdk-go v1.43.0
+	github.com/OpenRouterTeam/go-sdk v0.4.1
 	github.com/anthropics/anthropic-sdk-go v1.20.0
 	github.com/aws/aws-sdk-go v1.49.6
 	github.com/aws/aws-sdk-go-v2/config v1.32.0
@@ -44,7 +45,6 @@ require (
 	github.com/pion/webrtc/v4 v4.2.3
 	github.com/pkoukk/tiktoken-go v0.1.7
 	github.com/redis/go-redis/v9 v9.6.3
-	github.com/replicate/replicate-go v0.26.0
 	github.com/sendgrid/sendgrid-go v3.16.1+incompatible
 	github.com/soheilhy/cmux v0.1.5
 	github.com/spf13/viper v1.13.0
@@ -88,7 +88,6 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.55.0 // indirect
-	github.com/OpenRouterTeam/go-sdk v0.4.1 // indirect
 	github.com/antihax/optional v1.0.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.40.0 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.14 // indirect
@@ -202,7 +201,6 @@ require (
 	github.com/tphakala/simd v1.0.14 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
-	github.com/vincent-petithory/dataurl v1.0.0 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect

@@ -38,6 +38,7 @@ jest.mock('@/app/components/loader/section-loader', () => ({
 
 jest.mock('@/app/components/sections/table-section', () => ({
   TableSection: ({ children }: any) => <div>{children}</div>,
+  ScrollableTableSection: ({ children }: any) => <div>{children}</div>,
 }));
 
 jest.mock('@/app/components/carbon/empty-state', () => ({

@@ -85,7 +85,9 @@ func WithAssistant(a *AssistantInfo) SourceOption { return func(s *VariableSourc
 func WithConversation(c *ConversationInfo) SourceOption {
 	return func(s *VariableSource) { s.conversation = c }
 }
-func WithHistories(h []ConversationMessageInfo) SourceOption { return func(s *VariableSource) { s.histories = h } }
+func WithHistories(h []ConversationMessageInfo) SourceOption {
+	return func(s *VariableSource) { s.histories = h }
+}
 func WithArguments(a map[string]any) SourceOption { return func(s *VariableSource) { s.args = a } }
 func WithMetadata(m map[string]any) SourceOption  { return func(s *VariableSource) { s.metadata = m } }
 func WithOptions(o map[string]any) SourceOption   { return func(s *VariableSource) { s.options = o } }
@@ -107,11 +109,11 @@ func (s *VariableSource) WithClock(now func() time.Time) *VariableSource {
 	return s
 }
 
-func (s *VariableSource) Assistant() *AssistantInfo       { return s.assistant }
-func (s *VariableSource) Conversation() *ConversationInfo { return s.conversation }
-func (s *VariableSource) Histories() []ConversationMessageInfo       { return s.histories }
-func (s *VariableSource) Arguments() map[string]any       { return s.args }
-func (s *VariableSource) Metadata() map[string]any        { return s.metadata }
-func (s *VariableSource) Options() map[string]any         { return s.options }
-func (s *VariableSource) Mode() string                    { return s.mode }
-func (s *VariableSource) Now() time.Time                  { return s.now() }
+func (s *VariableSource) Assistant() *AssistantInfo            { return s.assistant }
+func (s *VariableSource) Conversation() *ConversationInfo      { return s.conversation }
+func (s *VariableSource) Histories() []ConversationMessageInfo { return s.histories }
+func (s *VariableSource) Arguments() map[string]any            { return s.args }
+func (s *VariableSource) Metadata() map[string]any             { return s.metadata }
+func (s *VariableSource) Options() map[string]any              { return s.options }
+func (s *VariableSource) Mode() string                         { return s.mode }
+func (s *VariableSource) Now() time.Time                       { return s.now() }

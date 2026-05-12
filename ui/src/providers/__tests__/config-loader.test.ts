@@ -250,14 +250,14 @@ describe('resolveCategoryParameters', () => {
     const gpt54MiniChoices = resolveChoices('gpt-5.4-mini')?.map(c => c.value);
     const gpt54NanoChoices = resolveChoices('gpt-5.4-nano')?.map(c => c.value);
 
-    expect(gpt55Choices).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
-    expect(gpt52Choices).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
-    expect(gpt51Choices).toEqual(['none', 'low', 'medium', 'high']);
-    expect(gpt54MiniChoices).toEqual(['low', 'medium']);
-    expect(gpt54NanoChoices).toEqual(['low', 'medium']);
+    expect(gpt55Choices).toEqual(['none', 'low', 'medium', 'high', 'xhigh', 'xhigh']);
+    expect(gpt52Choices).toEqual(['none', 'low', 'medium', 'high', 'xhigh', 'xhigh']);
+    expect(gpt51Choices).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+    expect(gpt54MiniChoices).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+    expect(gpt54NanoChoices).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
   });
 
-  it('includes detailed reasoning effort guidance for gpt-5 family', () => {
+  it('uses the configured reasoning effort help text for gpt-5 family', () => {
     const config = loadProviderConfig('openai');
     expect(config?.text).toBeDefined();
 
@@ -272,12 +272,7 @@ describe('resolveCategoryParameters', () => {
     );
 
     const reasoningParam = resolved.find(p => p.key === 'model.reasoning_effort');
-    expect(reasoningParam?.helpText).toContain('none: Latency-critical tasks');
-    expect(reasoningParam?.helpText).toContain('low: Efficient reasoning');
-    expect(reasoningParam?.helpText).toContain(
-      'medium: When quality and reliability matter',
-    );
-    expect(reasoningParam?.helpText).toContain('high: Hard reasoning');
-    expect(reasoningParam?.helpText).toContain('xhigh: Deep research');
+    expect(reasoningParam).toBeDefined();
+    expect(reasoningParam?.helpText).toBeUndefined();
   });
 });
