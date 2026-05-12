@@ -31,13 +31,7 @@ jest.mock('@carbon/icons-react', () => ({
 }));
 
 jest.mock('@carbon/react', () => ({
-  Dropdown: ({
-    id,
-    items,
-    selectedItem,
-    onChange,
-    itemToString,
-  }: any) => (
+  Dropdown: ({ id, items, selectedItem, onChange, itemToString }: any) => (
     <select
       data-testid={id}
       value={selectedItem?.code || ''}
@@ -58,6 +52,11 @@ jest.mock('@carbon/react', () => ({
     <select data-testid={id} value={value} onChange={onChange}>
       {children}
     </select>
+  ),
+  Button: ({ children, onClick, ...props }: any) => (
+    <button onClick={onClick} {...props}>
+      {children}
+    </button>
   ),
   SelectItem: ({ value, text }: any) => <option value={value}>{text}</option>,
   Tooltip: ({ children }: any) => <>{children}</>,
@@ -178,7 +177,9 @@ describe('tools index', () => {
     const out = GetDefaultToolConfigIfInvalid('api_request', [
       createMetadata('tool.method', 'POST'),
     ]);
-    const byKey = Object.fromEntries(out.map(item => [item.getKey(), item.getValue()]));
+    const byKey = Object.fromEntries(
+      out.map(item => [item.getKey(), item.getValue()]),
+    );
     expect(byKey['tool.method']).toBe('POST');
     expect(byKey['tool.condition']).toContain('"source"');
   });
@@ -230,5 +231,55 @@ describe('tools index', () => {
       target: { value: 'api_request' },
     });
     expect(onChangeBuildinTool).toHaveBeenCalledWith('api_request');
+  });
+
+  it('supports adding another rule and setting conversation mode', () => {
+    const onChangeConfig = jest.fn();
+    const Harness = () => {
+      const [config, setConfig] = React.useState({
+        code: 'knowledge_retrieval',
+        parameters: [] as Metadata[],
+      });
+      return (
+        <BuildinTool
+          toolDefinition={{
+            name: 'tool',
+            description: 'desc',
+            parameters: '{}',
+          }}
+          onChangeToolDefinition={jest.fn()}
+          onChangeBuildinTool={jest.fn()}
+          onChangeConfig={next => {
+            onChangeConfig(next);
+            setConfig(next);
+          }}
+          config={config}
+        />
+      );
+    };
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add rule' }));
+    const addedRuleConfig = onChangeConfig.mock.calls.at(-1)?.[0];
+    const addedCondition = addedRuleConfig.parameters.find(
+      (m: Metadata) => m.getKey() === 'tool.condition',
+    );
+    const addedEntries = JSON.parse(addedCondition.getValue());
+    expect(addedEntries).toHaveLength(2);
+
+    fireEvent.change(screen.getByTestId('tool-condition-key'), {
+      target: { value: 'conversation_mode' },
+    });
+    fireEvent.change(screen.getByTestId('tool-condition-source-value'), {
+      target: { value: 'text' },
+    });
+
+    const lastConfig = onChangeConfig.mock.calls.at(-1)?.[0];
+    const condition = lastConfig.parameters.find(
+      (m: Metadata) => m.getKey() === 'tool.condition',
+    );
+    expect(condition.getValue()).toContain('"conversation_mode"');
+    expect(condition.getValue()).toContain('"text"');
   });
 });

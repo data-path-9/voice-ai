@@ -12,6 +12,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.4
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/Microsoft/cognitive-services-speech-sdk-go v1.43.0
+	github.com/OpenRouterTeam/go-sdk v0.4.1
 	github.com/anthropics/anthropic-sdk-go v1.20.0
 	github.com/aws/aws-sdk-go v1.49.6
 	github.com/aws/aws-sdk-go-v2/config v1.32.0
@@ -44,7 +45,6 @@ require (
 	github.com/pion/webrtc/v4 v4.2.3
 	github.com/pkoukk/tiktoken-go v0.1.7
 	github.com/redis/go-redis/v9 v9.6.3
-	github.com/replicate/replicate-go v0.26.0
 	github.com/sendgrid/sendgrid-go v3.16.1+incompatible
 	github.com/soheilhy/cmux v0.1.5
 	github.com/spf13/viper v1.13.0
@@ -192,6 +192,7 @@ require (
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
+	github.com/spyzhov/ajson v0.8.0 // indirect
 	github.com/subosito/gotenv v1.4.1 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
@@ -200,7 +201,6 @@ require (
 	github.com/tphakala/simd v1.0.14 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
-	github.com/vincent-petithory/dataurl v1.0.0 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect

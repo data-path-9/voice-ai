@@ -30,12 +30,25 @@ describe('tool condition helpers', () => {
   });
 
   it('upserts normalized condition metadata entry', () => {
-    const out = withToolConditionEntries([], [
-      { key: 'source', condition: '=', value: 'debugger' },
-    ]);
+    const out = withToolConditionEntries(
+      [],
+      [{ key: 'source', condition: '=', value: 'debugger' }],
+    );
     const raw = out.find(m => m.getKey() === 'tool.condition')?.getValue();
     expect(raw).toContain('"source"');
     expect(raw).toContain('"debugger"');
+  });
+
+  it('persists multiple condition entries including conversation_mode', () => {
+    const out = withToolConditionEntries([], [
+      { key: 'source', condition: '=', value: 'phone' },
+      { key: 'conversation_mode', condition: '=', value: 'text' },
+    ]);
+    const raw = out.find(m => m.getKey() === 'tool.condition')?.getValue() || '';
+    expect(raw).toContain('"source"');
+    expect(raw).toContain('"phone"');
+    expect(raw).toContain('"conversation_mode"');
+    expect(raw).toContain('"text"');
   });
 
   it('supports source shortcut helper', () => {
@@ -62,9 +75,9 @@ describe('tool condition helpers', () => {
     expect(validateToolConditionMetadata([meta('tool.condition', '{}')])).toBe(
       'Condition must be a valid JSON array.',
     );
-    expect(
-      validateToolConditionMetadata([meta('tool.condition', '[]')]),
-    ).toBe('Condition must include at least one entry.');
+    expect(validateToolConditionMetadata([meta('tool.condition', '[]')])).toBe(
+      'Condition must include at least one entry.',
+    );
     expect(
       validateToolConditionMetadata([
         meta(
@@ -72,7 +85,7 @@ describe('tool condition helpers', () => {
           JSON.stringify([{ key: 'channel', condition: '=', value: 'phone' }]),
         ),
       ]),
-    ).toBe('Condition currently supports only the "source" key.');
+    ).toBe('Condition key must be one of: source, conversation_mode, direction.');
     expect(
       validateToolConditionMetadata([
         meta(
@@ -88,12 +101,52 @@ describe('tool condition helpers', () => {
           JSON.stringify([{ key: 'source', condition: '=', value: 'sms' }]),
         ),
       ]),
-    ).toBe('Condition source must be one of: all, sdk, web_plugin, debugger, phone.');
+    ).toBe(
+      'Condition source must be one of: all, sdk, web_plugin, debugger, phone.',
+    );
     expect(
       validateToolConditionMetadata([
         meta(
           'tool.condition',
           JSON.stringify([{ key: 'source', condition: '=', value: 'all' }]),
+        ),
+      ]),
+    ).toBeUndefined();
+    expect(
+      validateToolConditionMetadata([
+        meta(
+          'tool.condition',
+          JSON.stringify([
+            { key: 'conversation_mode', condition: '=', value: 'sms' },
+          ]),
+        ),
+      ]),
+    ).toBe('Condition conversation_mode must be one of: all, text, voice.');
+    expect(
+      validateToolConditionMetadata([
+        meta(
+          'tool.condition',
+          JSON.stringify([
+            { key: 'conversation_mode', condition: '=', value: 'all' },
+          ]),
+        ),
+      ]),
+    ).toBeUndefined();
+    expect(
+      validateToolConditionMetadata([
+        meta(
+          'tool.condition',
+          JSON.stringify([{ key: 'direction', condition: '=', value: 'sideway' }]),
+        ),
+      ]),
+    ).toBe(
+      'Condition direction must be one of: both, inbound, outbound.',
+    );
+    expect(
+      validateToolConditionMetadata([
+        meta(
+          'tool.condition',
+          JSON.stringify([{ key: 'direction', condition: '=', value: 'both' }]),
         ),
       ]),
     ).toBeUndefined();

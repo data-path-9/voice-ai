@@ -22,8 +22,10 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 	assistant_config "github.com/rapidaai/api/assistant-api/config"
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
+	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
 	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
 	channel_base "github.com/rapidaai/api/assistant-api/internal/channel/base"
+	internal_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
 	"github.com/rapidaai/api/assistant-api/internal/observe"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -32,6 +34,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+const ambientPCMFrameBytes = webrtc_internal.OpusFrameBytes
 
 // webrtcStreamer implements Streamer using Pion WebRTC for media and gRPC for signaling.
 type webrtcStreamer struct {
@@ -71,6 +75,14 @@ type webrtcStreamer struct {
 	// iceStartedAt records when ICE negotiation began (inside setupAudioAndHandshake)
 	// so we can report ICE latency in the peer_connected observability event.
 	iceStartedAt time.Time
+
+	ambientMixer internal_ambient.Mixer
+	outputHealth *internal_output.HealthStats
+
+	pendingAudioMu sync.Mutex
+	pendingAudio   [][]byte
+
+	pendingAudioDroppedFrames atomic.Uint64
 }
 
 // NewWebRTCStreamer creates a new WebRTC streamer with gRPC signaling.
@@ -101,19 +113,32 @@ func NewWebRTCStreamer(
 			channel_base.WithOutputBufferThreshold(webrtc_internal.OutputBufferThreshold),
 			channel_base.WithOutputFrameSize(webrtc_internal.OpusFrameBytes),
 		),
-		config:      webrtc_internal.DefaultConfig(),
-		webrtcCfg:   webrtcCfg,
-		grpcStream:  grpcStream,
-		sessionID:   uuid.New().String(),
-		resampler:   resampler,
-		opusCodec:   opusCodec,
-		currentMode: protos.StreamMode_STREAM_MODE_TEXT,
+		config:       webrtc_internal.DefaultConfig(),
+		webrtcCfg:    webrtcCfg,
+		grpcStream:   grpcStream,
+		sessionID:    uuid.New().String(),
+		resampler:    resampler,
+		opusCodec:    opusCodec,
+		currentMode:  protos.StreamMode_STREAM_MODE_TEXT,
+		outputHealth: internal_output.NewHealthStats(),
 		// peerConnected zero-value is false — correct: not connected yet
 	}
+	ambientMixer, err := internal_ambient.NewLoopMixer(internal_ambient.MixerSpec{
+		Logger:            logger,
+		Resampler:         resampler,
+		TargetAudioConfig: internal_audio.WEBRTC_AUDIO_CONFIG,
+		FrameBytes:        ambientPCMFrameBytes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ambient mixer: %w", err)
+	}
+	s.ambientMixer = ambientMixer
 
 	// Start background loops
 	go s.runGrpcReader()   // inputCh feeder
-	go s.runOutputWriter() // outputCh consumer
+	go s.runOutputWriter() // outputCh consumer (non-audio + audio queue)
+	go s.runAudioPacer()   // paced audio sender
+	go s.runOutputHealthReporter()
 
 	// Watch the caller's context so a cancelled parent triggers graceful close
 	// rather than an abrupt context cancellation mid-cleanup.
@@ -355,13 +380,14 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote) {
 		return
 	}
 
-	opusDecoder, err := webrtc_internal.NewOpusCodec()
+	opusDecoder, err := webrtc_internal.NewOpusDecoder()
 	if err != nil {
 		s.Logger.Errorw("Failed to create Opus decoder", "error", err)
 		return
 	}
 
 	buf := make([]byte, webrtc_internal.RTPBufferSize)
+	pkt := &rtp.Packet{}
 	consecutiveErrors := 0
 
 	for {
@@ -385,7 +411,6 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote) {
 		}
 		consecutiveErrors = 0
 
-		pkt := &rtp.Packet{}
 		if err := pkt.Unmarshal(buf[:n]); err != nil {
 			s.Logger.Debugw("Failed to unmarshal RTP packet", "error", err)
 			continue
@@ -412,34 +437,18 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote) {
 // runOutputWriter drains outputCh: audio → Opus-encode → WebRTC track (paced 20ms);
 // non-audio → wrap in WebTalkResponse → gRPC.
 func (s *webrtcStreamer) runOutputWriter() {
-	ticker := time.NewTicker(time.Duration(webrtc_internal.OutputPaceInterval) * time.Millisecond)
-	defer ticker.Stop()
-
-	var pendingAudio [][]byte
-
 	for {
 		select {
 		case <-s.Ctx.Done():
 			return
 
 		case <-s.FlushAudioCh:
-			pendingAudio = pendingAudio[:0]
-
-		case <-ticker.C:
-			if len(pendingAudio) > 0 && s.peerConnected.Load() {
-				encoded, err := s.opusCodec.Encode(pendingAudio[0])
-				if err != nil {
-					s.Logger.Debugw("Opus encode failed", "error", err)
-				} else {
-					s.writeAudioFrame(encoded)
-				}
-				pendingAudio = pendingAudio[1:]
-			}
+			s.clearPendingAudio()
 
 		case msg := <-s.OutputCh:
 			if m, ok := msg.(*protos.ConversationAssistantMessage); ok {
 				if audio, ok := m.Message.(*protos.ConversationAssistantMessage_Audio); ok {
-					pendingAudio = append(pendingAudio, audio.Audio)
+					s.enqueuePendingAudio(audio.Audio)
 					continue
 				}
 			}
@@ -448,6 +457,72 @@ func (s *webrtcStreamer) runOutputWriter() {
 				s.dispatchOutput(resp)
 			}
 		}
+	}
+}
+
+func (s *webrtcStreamer) runAudioPacer() {
+	(&internal_output.Pacer{
+		Logger:        s.Logger,
+		FrameDuration: time.Duration(webrtc_internal.OutputPaceInterval) * time.Millisecond,
+		Provider:      s,
+		Consumer:      s,
+		Health:        s.outputHealth,
+	}).Run(s.Ctx)
+}
+
+func (s *webrtcStreamer) runOutputHealthReporter() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	var prev internal_output.HealthSnapshot
+	for {
+		select {
+		case <-s.Ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		if s.outputHealth == nil {
+			continue
+		}
+		snap := s.outputHealth.Snapshot()
+		if snap.Ticks == prev.Ticks {
+			continue
+		}
+
+		s.Input(&protos.ConversationEvent{
+			Name: observe.ComponentWebRTC,
+			Data: map[string]string{
+				"type":         "output_pacer_health",
+				"session_id":   s.sessionID,
+				"ticks":        fmt.Sprintf("%d", snap.Ticks),
+				"late_ticks":   fmt.Sprintf("%d", snap.LateTicks),
+				"active_ticks": fmt.Sprintf("%d", snap.ActiveTicks),
+				"idle_ticks":   fmt.Sprintf("%d", snap.IdleTicks),
+				"send_errors":  fmt.Sprintf("%d", snap.SendErrors),
+				"idle_ratio":   fmt.Sprintf("%.4f", snap.IdleRatio),
+			},
+			Time: timestamppb.Now(),
+		})
+
+		if snap.SendErrors > prev.SendErrors {
+			s.Input(&protos.ConversationEvent{
+				Name: observe.ComponentWebRTC,
+				Data: map[string]string{
+					"type":              "output_send_error",
+					"session_id":        s.sessionID,
+					"send_errors_delta": fmt.Sprintf("%d", snap.SendErrors-prev.SendErrors),
+					"total_send_errors": fmt.Sprintf("%d", snap.SendErrors),
+					"ticks":             fmt.Sprintf("%d", snap.Ticks),
+					"late_ticks":        fmt.Sprintf("%d", snap.LateTicks),
+					"active_ticks":      fmt.Sprintf("%d", snap.ActiveTicks),
+					"idle_ticks":        fmt.Sprintf("%d", snap.IdleTicks),
+					"idle_ratio":        fmt.Sprintf("%.4f", snap.IdleRatio),
+				},
+				Time: timestamppb.Now(),
+			})
+		}
+		prev = snap
 	}
 }
 
@@ -577,7 +652,6 @@ func (s *webrtcStreamer) runGrpcReader() {
 			s.Input(msg.GetInitialization())
 		case *protos.WebTalkRequest_Configuration:
 			s.Input(msg.GetConfiguration())
-			s.handleConfigurationMessage(msg.GetConfiguration().GetStreamMode())
 		case *protos.WebTalkRequest_Message:
 			s.Input(msg.GetMessage())
 		case *protos.WebTalkRequest_Metadata:
@@ -598,12 +672,122 @@ func (s *webrtcStreamer) runGrpcReader() {
 	}
 }
 
+func (s *webrtcStreamer) applyAmbientConfig(cfg internal_ambient.Config, source string) {
+	if s.ambientMixer == nil {
+		return
+	}
+	if err := s.ambientMixer.Configure(cfg); err != nil {
+		s.Logger.Warnw("WebRTC ambient configuration ignored", "session", s.sessionID, "error", err)
+		return
+	}
+}
+
+func (s *webrtcStreamer) applyAmbientToFrame(primary []byte) []byte {
+	if s.ambientMixer == nil {
+		return primary
+	}
+	out, err := s.ambientMixer.Mix(primary)
+	if err != nil {
+		s.Logger.Debugw("WebRTC ambient mix failed", "session", s.sessionID, "error", err)
+		return primary
+	}
+	return out
+}
+
+func (s *webrtcStreamer) enqueuePendingAudio(frame []byte) {
+	if len(frame) == 0 {
+		return
+	}
+	copied := append([]byte(nil), frame...)
+
+	droppedFrames := 0
+	queueDepth := 0
+
+	s.pendingAudioMu.Lock()
+	limit := webrtc_internal.PendingAudioMaxFrames
+	if limit > 0 && len(s.pendingAudio) >= limit {
+		s.pendingAudio[0] = nil
+		copy(s.pendingAudio[0:], s.pendingAudio[1:])
+		s.pendingAudio[len(s.pendingAudio)-1] = copied
+		droppedFrames = 1
+	} else {
+		s.pendingAudio = append(s.pendingAudio, copied)
+	}
+	queueDepth = len(s.pendingAudio)
+	s.pendingAudioMu.Unlock()
+
+	if droppedFrames > 0 {
+		totalDropped := s.pendingAudioDroppedFrames.Add(uint64(droppedFrames))
+		s.Input(&protos.ConversationEvent{
+			Name: observe.ComponentWebRTC,
+			Data: map[string]string{
+				"type":                 "output_queue_overflow",
+				"session_id":           s.sessionID,
+				"policy":               "drop_oldest",
+				"dropped_frames":       fmt.Sprintf("%d", droppedFrames),
+				"limit_frames":         fmt.Sprintf("%d", webrtc_internal.PendingAudioMaxFrames),
+				"queue_depth_frames":   fmt.Sprintf("%d", queueDepth),
+				"total_dropped_frames": fmt.Sprintf("%d", totalDropped),
+			},
+			Time: timestamppb.Now(),
+		})
+	}
+}
+
+func (s *webrtcStreamer) popPendingAudio() []byte {
+	s.pendingAudioMu.Lock()
+	defer s.pendingAudioMu.Unlock()
+	if len(s.pendingAudio) == 0 {
+		return nil
+	}
+	frame := s.pendingAudio[0]
+	s.pendingAudio[0] = nil
+	s.pendingAudio = s.pendingAudio[1:]
+	return frame
+}
+
+func (s *webrtcStreamer) clearPendingAudio() {
+	s.pendingAudioMu.Lock()
+	for i := range s.pendingAudio {
+		s.pendingAudio[i] = nil
+	}
+	s.pendingAudio = s.pendingAudio[:0]
+	s.pendingAudioMu.Unlock()
+}
+
+func (s *webrtcStreamer) NextFrame() []byte {
+	if !s.peerConnected.Load() {
+		return nil
+	}
+	frame := s.popPendingAudio()
+	if len(frame) == 0 {
+		return nil
+	}
+	return s.applyAmbientToFrame(frame)
+}
+
+func (s *webrtcStreamer) IdleFrame() []byte {
+	if !s.peerConnected.Load() {
+		return nil
+	}
+	return s.applyAmbientToFrame(nil)
+}
+
+func (s *webrtcStreamer) ConsumeFrame(frame []byte) error {
+	encoded, err := s.opusCodec.Encode(frame)
+	if err != nil {
+		return err
+	}
+	s.writeAudioFrame(encoded)
+	return nil
+}
+
 // NotifyMode is called by the Talk loop after Connect() completes.
 // For AUDIO mode it triggers the WebRTC handshake; for TEXT it is a no-op
 // (or tears down audio if switching back to text).
-func (s *webrtcStreamer) NotifyMode(mode protos.StreamMode) {
-	s.handleConfigurationMessage(mode)
-}
+// func (s *webrtcStreamer) NotifyMode(mode protos.StreamMode) {
+// 	s.handleConfigurationMessage(mode)
+// }
 
 // handleConfigurationMessage processes transport mode changes.
 // Switching text <-> audio only changes I/O transport - it does NOT create a new session.
@@ -615,7 +799,10 @@ func (s *webrtcStreamer) handleConfigurationMessage(mode protos.StreamMode) {
 	if mode == currentMode {
 		return
 	}
-
+	// clean the buffer and reset state on mode switch to avoid replaying stale audio or sending
+	s.ClearOutputBuffer()
+	s.sendClear()
+	// swith it
 	switch mode {
 	case protos.StreamMode_STREAM_MODE_AUDIO:
 		if err := s.setupAudioAndHandshake(); err != nil {
@@ -679,6 +866,14 @@ func (s *webrtcStreamer) handleClientSignaling(signaling *protos.ClientSignaling
 }
 
 func (s *webrtcStreamer) resetAudioSession() {
+	// Flush pending output state so stale assistant frames are never replayed
+	// after reconnect / mode restart.
+	s.ClearOutputBuffer()
+	s.clearPendingAudio()
+	if s.ambientMixer != nil {
+		s.ambientMixer.Reset()
+	}
+
 	s.stopAudioProcessing()
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
@@ -694,6 +889,8 @@ func (s *webrtcStreamer) resetAudioSession() {
 // setupAudioAndHandshake tears down any stale peer connection, creates a fresh
 // one, and initiates the WebRTC handshake (config -> offer -> answer -> ICE).
 func (s *webrtcStreamer) setupAudioAndHandshake() error {
+	s.stopAudioProcessing()
+
 	// Always start fresh
 	s.Mu.Lock()
 	if s.pc != nil {
@@ -777,8 +974,13 @@ func (s *webrtcStreamer) Send(response internal_type.Stream) error {
 			s.Output(data)
 		}
 	case *protos.ConversationConfiguration:
+		s.handleConfigurationMessage(data.GetStreamMode())
 		s.Output(data)
 	case *protos.ConversationInitialization:
+		s.handleConfigurationMessage(data.GetStreamMode())
+		if ambientCfg, ok := internal_ambient.ParseFromInitialization(data); ok {
+			s.applyAmbientConfig(ambientCfg, "server_initialization")
+		}
 		s.Output(data)
 	case *protos.ConversationUserMessage:
 		s.Output(data)
@@ -823,11 +1025,11 @@ func (s *webrtcStreamer) Send(response internal_type.Stream) error {
 		s.Output(data)
 	case *protos.ConversationDisconnection:
 		s.Output(data)
-		if disc := s.Disconnect(data.GetType()); disc != nil {
-			s.Input(disc)
-		}
+		s.Close()
 	case *protos.ConversationMetric:
 		s.Output(data)
+	default:
+		s.Logger.Warnw("Unknown send message type, skipping", "type", fmt.Sprintf("%T", response))
 	}
 	return nil
 }
@@ -836,6 +1038,9 @@ func (s *webrtcStreamer) watchCallerContext(callerCtx context.Context) {
 	select {
 	case <-callerCtx.Done():
 		s.Logger.Infow("Caller context cancelled, closing streamer gracefully", "session", s.sessionID)
+		if disc := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); disc != nil {
+			s.Input(disc)
+		}
 		s.Close()
 	case <-s.Ctx.Done():
 		// Streamer already closed on its own, nothing to do.
@@ -846,9 +1051,6 @@ func (s *webrtcStreamer) watchCallerContext(callerCtx context.Context) {
 func (s *webrtcStreamer) Close() error {
 	if !s.closed.CompareAndSwap(false, true) {
 		return nil
-	}
-	if disc := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); disc != nil {
-		s.Input(disc)
 	}
 	s.stopAudioProcessing()
 

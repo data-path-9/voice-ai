@@ -1,19 +1,6 @@
 import { FC } from 'react';
 import { unstable__ShapeIndicator as ShapeIndicatorModule } from '@carbon/react';
 
-// ─── Status mapping to Carbon ShapeIndicator kinds ───────────────────────────
-// failed     — red X (error, failure)
-// critical   — red diamond (critical error)
-// high       — orange triangle up (high severity)
-// medium     — orange diamond (medium severity)
-// low        — yellow triangle down (low severity)
-// cautious   — yellow diamond (warning, pending)
-// undefined  — gray dash (unknown)
-// stable     — green circle (healthy, success)
-// informative — blue square (info, in progress)
-// incomplete — gray dashed circle (not started, inactive)
-// draft      — gray half circle (draft, archived)
-
 const statusMap: Record<string, { kind: string; label: string }> = {
   // Success / complete — stable (green)
   SUCCESS: { kind: 'stable', label: 'Success' },
@@ -86,5 +73,6 @@ export const CarbonStatusIndicator: FC<CarbonStatusIndicatorProps> = ({
   textSize = 12,
 }) => {
   const { kind, label } = statusMap[state] || defaultStatus;
+
   return <ShapeIndicator kind={kind as any} label={label} textSize={textSize} />;
 };

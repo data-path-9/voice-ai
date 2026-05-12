@@ -227,7 +227,12 @@ const EditAssistantCallDeployment: FC<{ assistantId: string }> = ({
       telephonyConfig.provider,
       telephonyConfig.parameters,
     );
-    if (!ValidateTelephonyOptions(telephonyConfig.provider, resolvedTelephonyParameters)) {
+    if (
+      !ValidateTelephonyOptions(
+        telephonyConfig.provider,
+        resolvedTelephonyParameters,
+      )
+    ) {
       setIsDeploying(false);
       setErrorMessage('Please provide a valid telephony configuration.');
       return;
@@ -358,7 +363,7 @@ const EditAssistantCallDeployment: FC<{ assistantId: string }> = ({
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
         {activeTab === 'telephony' && (
-          <div className="flex flex-col gap-6 max-w-4xl  px-6 py-8">
+          <div className="flex flex-col gap-6 max-w-4xl p-6">
             <TelephonyProvider
               provider={telephonyConfig.provider}
               parameters={telephonyConfig.parameters}

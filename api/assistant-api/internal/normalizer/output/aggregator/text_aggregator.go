@@ -64,7 +64,7 @@ const (
 // textAggregator implements internal_type.LLMTextAggregator using regex-based
 // sentence boundary detection. It accumulates streamed text deltas, extracts
 // complete sentences at punctuation boundaries, and pushes them directly to
-// the onPacket callback as TTSTextPacket values.
+// the onPacket callback as TextToSpeechTextPacket values.
 //
 // Thread safety: all mutable state is guarded by mu. The onPacket callback is
 // invoked outside the lock to prevent deadlocks with slow consumers.
@@ -134,15 +134,15 @@ func compileBoundaryRegex() (*regexp.Regexp, error) {
 // ============================================================================
 
 // Aggregate processes one or more LLM packets and pushes completed sentences
-// to the onPacket callback as TTSTextPacket values.
+// to the onPacket callback as TextToSpeechTextPacket values.
 //
 // Behaviour per packet type:
 //   - LLMResponseDeltaPacket: text is appended to the buffer. If a context
 //     switch is detected (different ContextID), the buffer is reset first.
 //     Complete sentences are extracted at boundary positions and pushed.
 //   - LLMResponseDonePacket: any remaining buffered text for the active
-//     context is flushed as TTSTextPacket{IsFinal: false}, then a final
-//     TTSTextPacket{IsFinal: true} is pushed to signal end of generation.
+//     context is flushed as TextToSpeechTextPacket{IsFinal: false}, then a final
+//     TextToSpeechTextPacket{IsFinal: true} is pushed to signal end of generation.
 //
 // Returns an error if the aggregator has been closed.
 func (st *textAggregator) Aggregate(ctx context.Context, pkts ...internal_type.LLMPacket) error {
@@ -233,7 +233,7 @@ func (st *textAggregator) handleDeltaLocked(delta internal_type.LLMResponseDelta
 }
 
 // handleDoneLocked flushes any remaining buffered text for the active context
-// as a non-final TTSTextPacket, then emits a final TTSTextPacket to signal
+// as a non-final TextToSpeechTextPacket, then emits a final TextToSpeechTextPacket to signal
 // end of generation.
 // MUST be called with mu held.
 func (st *textAggregator) handleDoneLocked(done internal_type.LLMResponseDonePacket) {
@@ -241,7 +241,7 @@ func (st *textAggregator) handleDoneLocked(done internal_type.LLMResponseDonePac
 		st.flushBufferLocked(done.ContextID)
 		st.currentContext = ""
 	}
-	st.toEmitBuffer = append(st.toEmitBuffer, internal_type.TTSDonePacket{
+	st.toEmitBuffer = append(st.toEmitBuffer, internal_type.TextToSpeechDonePacket{
 		ContextID: done.ContextID,
 		Text:      done.Text,
 	})
@@ -252,7 +252,7 @@ func (st *textAggregator) handleDoneLocked(done internal_type.LLMResponseDonePac
 // ============================================================================
 
 // extractSentencesAtBoundaryLocked scans the buffer for sentence boundaries,
-// emits all complete text up to the last boundary as a single TTSTextPacket,
+// emits all complete text up to the last boundary as a single TextToSpeechTextPacket,
 // and retains any trailing partial sentence in the buffer.
 // MUST be called with mu held.
 func (st *textAggregator) extractSentencesAtBoundaryLocked(contextID string) {
@@ -271,7 +271,7 @@ func (st *textAggregator) extractSentencesAtBoundaryLocked(contextID string) {
 	}
 
 	if complete := text[:lastBoundaryEnd]; complete != "" {
-		st.toEmitBuffer = append(st.toEmitBuffer, internal_type.TTSTextPacket{
+		st.toEmitBuffer = append(st.toEmitBuffer, internal_type.TextToSpeechTextPacket{
 			ContextID: contextID,
 			Text:      complete,
 		})
@@ -285,11 +285,11 @@ func (st *textAggregator) extractSentencesAtBoundaryLocked(contextID string) {
 }
 
 // flushBufferLocked emits any non-empty buffered text as a non-final
-// TTSTextPacket and resets the buffer.
+// TextToSpeechTextPacket and resets the buffer.
 // MUST be called with mu held.
 func (st *textAggregator) flushBufferLocked(contextID string) {
 	if remaining := st.buffer.String(); remaining != "" {
-		st.toEmitBuffer = append(st.toEmitBuffer, internal_type.TTSTextPacket{
+		st.toEmitBuffer = append(st.toEmitBuffer, internal_type.TextToSpeechTextPacket{
 			ContextID: contextID,
 			Text:      remaining,
 		})

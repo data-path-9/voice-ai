@@ -7,47 +7,43 @@ package internal_llm
 
 import (
 	"context"
+	"errors"
 
+	internal_llm_agentkit "github.com/rapidaai/api/assistant-api/internal/llm/agentkit"
+	internal_llm_model "github.com/rapidaai/api/assistant-api/internal/llm/model"
+	internal_llm_websocket "github.com/rapidaai/api/assistant-api/internal/llm/websocket"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+	"github.com/rapidaai/pkg/commons"
+	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/protos"
 )
 
-/*
-AssistantExecutor and its related interfaces define the contract for executing
-assistant-related actions in the system. These interfaces are crucial for
-implementing various modes of interaction with the assistant, such as text-based
-chat and voice communication.
-
-AssistantMessageExecutor handles text-based chat interactions. It defines a Chat
-method that processes messaging requests and returns any errors encountered during
-the chat process.
-
-AssistantTalkExecutor is responsible for voice-based interactions. Its Talk method
-takes care of processing talking requests and handles any errors that may occur
-during the voice interaction.
-
-AssistantExecutor combines both text and voice capabilities, allowing for a more
-versatile assistant that can handle multiple modes of communication. By embedding
-both AssistantMessageExecutor and AssistantTalkExecutor, it ensures that any
-implementing type can handle both chat and talk functionalities.
-
-These interfaces provide a clean separation of concerns and allow for easy
-extension of the assistant's capabilities in the future. They also promote
-loose coupling between the assistant's implementation and the rest of the system,
-making it easier to maintain and evolve the codebase over time.
-*/
-
+// AssistantExecutor defines LLM runtime behavior. Implementations live under
+// llm/agentkit, llm/model, llm/websocket.
 type AssistantExecutor interface {
-
-	// Initialize sets up all fields after creation
 	Initialize(ctx context.Context, communication internal_type.Communication, cfg *protos.ConversationInitialization) error
-
-	// name
 	Name() string
-
-	// Execute processes an incoming packet
-	Execute(ctx context.Context, communication internal_type.Communication, pctk internal_type.Packet) error
-
-	// disconnect
+	Execute(ctx context.Context, communication internal_type.Communication, pkt internal_type.Packet) error
 	Close(ctx context.Context) error
+}
+
+// NewExecutor is the factory that returns the LLM executor implementation
+// matching the assistant's provider type. Construction and Initialize are
+// folded together — callers receive a fully wired executor or an error.
+func NewExecutor(logger commons.Logger, ctx context.Context, communication internal_type.Communication, cfg *protos.ConversationInitialization) (AssistantExecutor, error) {
+	var executor AssistantExecutor
+	switch communication.Assistant().AssistantProvider {
+	case type_enums.AGENTKIT:
+		executor = internal_llm_agentkit.NewAgentKitAssistantExecutor(logger)
+	case type_enums.WEBSOCKET:
+		executor = internal_llm_websocket.NewWebsocketAssistantExecutor(logger)
+	case type_enums.MODEL:
+		executor = internal_llm_model.NewModelAssistantExecutor(logger)
+	default:
+		return nil, errors.New("illegal assistant executor")
+	}
+	if err := executor.Initialize(ctx, communication, cfg); err != nil {
+		return nil, err
+	}
+	return executor, nil
 }

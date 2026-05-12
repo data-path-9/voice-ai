@@ -122,6 +122,7 @@ describe('ConfigureTransferCall', () => {
       ),
       createMetadata('tool.transfer_delay', '700'),
       createMetadata('tool.post_transfer_action', 'end_call'),
+      createMetadata('tool.ringtone', 'ring-ring'),
     ];
 
     render(
@@ -134,10 +135,12 @@ describe('ConfigureTransferCall', () => {
     const message = screen.getByTestId('transfer-message');
     const delay = screen.getByTestId('transfer-delay');
     const postTransferAction = screen.getByTestId('post-transfer-action');
+    const ringtone = screen.getByTestId('transfer-ringtone');
 
     expect(message).toHaveValue('Please hold while I transfer your call.');
     expect(delay).toHaveValue('700');
     expect(postTransferAction).toHaveValue('end_call');
+    expect(ringtone).toHaveValue('ring-ring');
 
     fireEvent.change(message, {
       target: { value: 'Connecting you now to our support specialist.' },
@@ -183,9 +186,18 @@ describe('ConfigureTransferCall', () => {
         .find(m => m.getKey() === 'tool.post_transfer_action')
         ?.getValue(),
     ).toBe('resume_ai');
+
+    fireEvent.change(ringtone, { target: { value: 'transfer-music' } });
+
+    const afterRingtoneUpdate = onParameterChange.mock.calls.at(
+      -1,
+    )?.[0] as Metadata[];
+    expect(
+      afterRingtoneUpdate.find(m => m.getKey() === 'tool.ringtone')?.getValue(),
+    ).toBe('transfer-music');
   });
 
-  it('shows 500ms as default transfer delay when delay parameter is missing', () => {
+  it('shows defaults for transfer delay and ringtone when parameters are missing', () => {
     render(
       <ConfigureTransferCall
         parameters={[createMetadata('tool.transfer_to', '+14155551234')]}
@@ -194,6 +206,9 @@ describe('ConfigureTransferCall', () => {
     );
 
     const delay = screen.getByTestId('transfer-delay');
+    const ringtone = screen.getByTestId('transfer-ringtone');
+
     expect(delay).toHaveValue('500');
+    expect(ringtone).toHaveValue('default');
   });
 });

@@ -8,72 +8,48 @@ package internal_assistant_entity
 import (
 	gorm_model "github.com/rapidaai/pkg/models/gorm"
 	gorm_types "github.com/rapidaai/pkg/models/gorm/types"
+	"github.com/rapidaai/pkg/utils"
 )
 
 type AssistantWebhook struct {
 	gorm_model.Audited
 	gorm_model.Mutable
+	gorm_model.Organizational
 
-	AssistantId     uint64                 `json:"assistantId" gorm:"type:bigint;not null"`
-	AssistantEvents gorm_types.StringArray `json:"assistantEvents" gorm:"type:string;not null;"`
-	Description     string                 `json:"description" gorm:"type:text"`
+	AssistantId            uint64                    `json:"assistantId" gorm:"type:bigint;not null"`
+	Provider               string                    `json:"provider" gorm:"type:varchar(50);not null;default:http"`
+	Description            string                    `json:"description" gorm:"type:text"`
+	ExecutionPriority      uint32                    `json:"executionPriority" gorm:"type:int"`
+	AssistantEvents        gorm_types.StringArray    `json:"assistantEvents" gorm:"type:text;not null;default:'[]'::text"`
+	AssistantWebhookOption []*AssistantWebhookOption `json:"options" gorm:"foreignKey:AssistantWebhookId"`
+}
 
-	HttpMethod  string               `json:"httpMethod" gorm:"type:text"`
-	HttpUrl     string               `json:"httpUrl" gorm:"type:text"`
-	HttpHeaders gorm_types.StringMap `json:"httpHeaders" gorm:"type:string;"`
-	HttpBody    gorm_types.StringMap `json:"httpBody" gorm:"type:string;"`
+type AssistantWebhookOption struct {
+	gorm_model.Audited
+	gorm_model.Mutable
+	gorm_model.Metadata
+	AssistantWebhookId uint64 `json:"assistantWebhookId" gorm:"type:bigint;size:20;not null"`
+}
 
-	//
-	RetryStatusCodes  gorm_types.StringArray `json:"retryStatusCodes" gorm:"type:string;not null;"`
-	MaxRetryCount     uint32                 `json:"maxRetryCount" gorm:"type:int"`
-	TimeoutSeconds    uint32                 `json:"timeoutSecond" gorm:"type:int"`
-	ExecutionPriority uint32                 `json:"executionPriority" gorm:"type:int"`
+func (AssistantWebhookOption) TableName() string {
+	return "assistant_webhook_options"
 }
 
 func (aa *AssistantWebhook) GetExecutionPriority() uint32 {
 	return aa.ExecutionPriority
 }
 
-func (aa *AssistantWebhook) GetHeaders() map[string]string {
-	return aa.HttpHeaders
+func (aa *AssistantWebhook) GetOptions() utils.Option {
+	opts := make(utils.Option, len(aa.AssistantWebhookOption))
+	for _, v := range aa.AssistantWebhookOption {
+		opts[v.Key] = v.Value
+	}
+	return opts
 }
 
-func (aa *AssistantWebhook) GetBody() map[string]string {
-	return aa.HttpBody
-}
-
-func (aa *AssistantWebhook) GetMethod() string {
-	return aa.HttpMethod
-}
-
-func (aa *AssistantWebhook) GetUrl() string {
-	return aa.HttpUrl
-}
-
-func (aa *AssistantWebhook) GetRetryStatusCode() []string {
-	return aa.RetryStatusCodes
-}
-
-func (aa *AssistantWebhook) GetMaxRetryCount() uint32 {
-	return aa.MaxRetryCount
-}
-
-func (aa *AssistantWebhook) GetTimeoutSecond() uint32 {
-	return aa.TimeoutSeconds
-}
-
-type AssistantWebhookLog struct {
-	gorm_model.Audited
-	gorm_model.Mutable
-	gorm_model.Organizational
-	WebhookId               uint64 `json:"webhookId" gorm:"type:bigint"`
-	HttpMethod              string `json:"httpMethod" gorm:"type:string;size:200;not null"`
-	HttpUrl                 string `json:"httpUrl" gorm:"type:string;size:400;not null"`
-	AssistantId             uint64 `json:"assistantId" gorm:"type:bigint"`
-	AssistantConversationId uint64 `json:"assistantConversationId" gorm:"type:bigint"`
-	Event                   string `json:"event" gorm:"type:string;size:200;not null"`
-	AssetPrefix             string `json:"assetPrefix" gorm:"type:string;size:200;not null"`
-	ResponseStatus          int64  `json:"responseStatus" gorm:"type:bigint;size:10"`
-	TimeTaken               int64  `json:"timeTaken" gorm:"type:bigint;size:20"`
-	RetryCount              uint32 `json:"retryCount" gorm:"type:bigint;size:20"`
+func (aa *AssistantWebhook) GetAssistantEvents() []string {
+	if aa.AssistantEvents == nil {
+		return []string{}
+	}
+	return []string(aa.AssistantEvents)
 }

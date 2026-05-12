@@ -163,8 +163,18 @@ func (d *Dispatcher) executeTransfer(ctx context.Context, v sip_infra.TransferIn
 
 	// SIP layer owns transfer transport only. Policy decisions (continue vs end_call)
 	// are handled upstream via tool-result handling.
+	//
+	// Teardown order matters:
+	//   1. OnTeardown — calls streamer.ClearBridgeTarget which blocks until any
+	//      in-flight ForwardUserAudio write to the outbound RTP has finished.
+	//   2. outboundSession.End() — only now safe to close the outbound RTP
+	//      channels; no streamer goroutine still holds a reference.
+	//   3. OnResumeAI — bridge state is fully torn down; AI resumes.
 	if v.OnTeardown != nil {
 		v.OnTeardown()
+	}
+	if !outboundSession.IsEnded() {
+		outboundSession.End()
 	}
 	if v.OnResumeAI != nil {
 		v.OnResumeAI()

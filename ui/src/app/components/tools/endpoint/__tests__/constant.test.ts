@@ -19,7 +19,9 @@ describe('endpoint default options and validation', () => {
     );
 
     expect(byKey['tool.endpoint_id']).toBeUndefined();
-    expect(byKey['tool.parameters']).toBe('{"tool.argument":"argument"}');
+    expect(byKey['tool.parameters']).toBe(
+      '{"tool.argument":"argument","tool.name":"name"}',
+    );
   });
 
   it('preserves existing values when provided', () => {
@@ -40,9 +42,7 @@ describe('endpoint default options and validation', () => {
       createMetadata('tool.parameters', '{"tool.argument":"customer_id"}'),
     ]);
 
-    expect(error).toBe(
-      'Missing required metadata keys: tool.endpoint_id.',
-    );
+    expect(error).toBe('Missing required metadata keys: tool.endpoint_id.');
   });
 
   it('fails validation for invalid parameters json', () => {

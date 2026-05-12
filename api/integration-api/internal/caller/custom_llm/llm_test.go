@@ -1,11 +1,10 @@
-// Rapida – Open Source Voice AI Orchestration Platform
-// Copyright (C) 2023-2025 Prashant Srivastav <prashant@rapida.ai>
-// Licensed under a modified GPL-2.0. See the LICENSE file for details.
 package internal_custom_llm_callers
 
 import (
+	"fmt"
 	"testing"
 
+	internal_custom_llm_common "github.com/rapidaai/api/integration-api/internal/caller/custom_llm/common"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
@@ -14,131 +13,145 @@ import (
 )
 
 func newTestLogger() commons.Logger {
-	lgr, _ := commons.NewApplicationLogger()
-	return lgr
+	logger, _ := commons.NewApplicationLogger()
+	return logger
 }
 
-func newTestCaller() *largeLanguageCaller {
-	return &largeLanguageCaller{
-		CustomLLM: CustomLLM{
-			logger:     newTestLogger(),
-			credential: func() map[string]interface{} { return map[string]interface{}{} },
-		},
-	}
-}
-
-func TestBuildHistory_MixedMessages(t *testing.T) {
-	caller := newTestCaller()
-	msgs := []*protos.Message{
-		{Role: "system", Message: &protos.Message_System{System: &protos.SystemMessage{Content: "Be brief"}}},
-		{Role: "user", Message: &protos.Message_User{User: &protos.UserMessage{Content: "Hi"}}},
-		{Role: "assistant", Message: &protos.Message_Assistant{Assistant: &protos.AssistantMessage{Contents: []string{"Hello"}}}},
-		{Role: "tool", Message: &protos.Message_Tool{Tool: &protos.ToolMessage{Tools: []*protos.ToolMessage_Tool{{Id: "call_1", Name: "get_weather", Content: `{"temp":72}`}}}}},
-	}
-
-	history := caller.buildHistory(msgs)
-	require.Len(t, history, 4)
-	assert.NotNil(t, history[0].OfSystem)
-	assert.NotNil(t, history[1].OfUser)
-	assert.NotNil(t, history[2].OfAssistant)
-	assert.NotNil(t, history[3].OfTool)
-}
-
-func TestBuildHistory_AssistantWithToolCall(t *testing.T) {
-	caller := newTestCaller()
-	msgs := []*protos.Message{
-		{
-			Role: "assistant",
-			Message: &protos.Message_Assistant{
-				Assistant: &protos.AssistantMessage{
-					ToolCalls: []*protos.ToolCall{
-						{
-							Id:   "call_1",
-							Type: "function",
-							Function: &protos.FunctionCall{
-								Name:      "get_weather",
-								Arguments: `{"city":"NYC"}`,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	history := caller.buildHistory(msgs)
-	require.Len(t, history, 1)
-	require.NotNil(t, history[0].OfAssistant)
-	require.Len(t, history[0].OfAssistant.ToolCalls, 1)
-	assert.Equal(t, "call_1", history[0].OfAssistant.ToolCalls[0].ID)
-	assert.Equal(t, "get_weather", history[0].OfAssistant.ToolCalls[0].Function.Name)
-}
-
-func newCredentialCaller(t *testing.T, credentials map[string]interface{}) *largeLanguageCaller {
+func newCredential(
+	t *testing.T,
+	values map[string]interface{},
+) *protos.Credential {
 	t.Helper()
-	value, err := structpb.NewStruct(credentials)
+	pb, err := structpb.NewStruct(values)
 	require.NoError(t, err)
-	credential := &protos.Credential{Value: value}
-	return NewLargeLanguageCaller(newTestLogger(), credential).(*largeLanguageCaller)
+	return &protos.Credential{Value: pb}
 }
 
-func TestGetClient_RequiresBaseURL(t *testing.T) {
-	caller := newCredentialCaller(t, map[string]interface{}{"apiCompatibility": "openai"})
-	_, err := caller.GetClient()
-	require.Error(t, err)
-}
-
-func TestGetClient_RejectsEmptyBaseURL(t *testing.T) {
-	caller := newCredentialCaller(t, map[string]interface{}{"apiCompatibility": "openai", "baseUrl": "  "})
-	_, err := caller.GetClient()
-	require.Error(t, err)
-}
-
-func TestGetClient_RejectsNonStringBaseURL(t *testing.T) {
-	caller := newCredentialCaller(t, map[string]interface{}{"apiCompatibility": "openai", "baseUrl": 123})
-	_, err := caller.GetClient()
-	require.Error(t, err)
-}
-
-func TestGetClient_DefaultsToOpenAICompatibility(t *testing.T) {
-	caller := newCredentialCaller(t, map[string]interface{}{"baseUrl": "http://localhost:8000/v1"})
-	client, err := caller.GetClient()
+func TestNewChat_DefaultTransportIsCredentialCompatibility(t *testing.T) {
+	chat, err := NewChat(newTestLogger(), newCredential(t, map[string]interface{}{
+		"base_url": "http://localhost:8000/v1",
+	}), nil)
 	require.NoError(t, err)
-	assert.NotNil(t, client)
-}
+	assert.Equal(t, "*internal_custom_llm_openai_chat_completions.chatCaller", fmt.Sprintf("%T", chat))
 
-func TestGetClient_UsesConfiguredBaseURL(t *testing.T) {
-	caller := newCredentialCaller(t, map[string]interface{}{"apiCompatibility": "openai", "baseUrl": "http://localhost:8000/v1"})
-	client, err := caller.GetClient()
+	stream, err := NewChatStream(newTestLogger(), newCredential(t, map[string]interface{}{
+		"base_url": "http://localhost:8000/v1",
+	}), nil)
 	require.NoError(t, err)
-	assert.NotNil(t, client)
+	assert.Equal(t, "*internal_custom_llm_openai_chat_completions.streamCaller", fmt.Sprintf("%T", stream))
 }
 
-func TestGetClient_AllowsHeaders(t *testing.T) {
-	caller := newCredentialCaller(t, map[string]interface{}{
-		"apiCompatibility": "openai",
-		"baseUrl":          "http://localhost:8000/v1",
-		"headers":          `{"Authorization":"Bearer abc","X-Custom":"value"}`,
+func TestNewChat_RoutesByCompatibility(t *testing.T) {
+	tests := []struct {
+		name          string
+		compatibility string
+		wantChatType  string
+		wantStrmType  string
+	}{
+		{
+			name:          "openai chat completions",
+			compatibility: string(internal_custom_llm_common.CompatibilityOpenAIChatCompletions),
+			wantChatType:  "*internal_custom_llm_openai_chat_completions.chatCaller",
+			wantStrmType:  "*internal_custom_llm_openai_chat_completions.streamCaller",
+		},
+		{
+			name:          "openai responses",
+			compatibility: string(internal_custom_llm_common.CompatibilityOpenAIResponses),
+			wantChatType:  "*internal_custom_llm_openai_responses.chatCaller",
+			wantStrmType:  "*internal_custom_llm_openai_responses.streamCaller",
+		},
+		{
+			name:          "openai compatible",
+			compatibility: string(internal_custom_llm_common.CompatibilityOpenAICompatible),
+			wantChatType:  "*internal_custom_llm_openai_compatible.chatCaller",
+			wantStrmType:  "*internal_custom_llm_openai_compatible.streamCaller",
+		},
+		{
+			name:          "anthropic messages",
+			compatibility: string(internal_custom_llm_common.CompatibilityAnthropicMessages),
+			wantChatType:  "*internal_custom_llm_anthropic_messages.chatCaller",
+			wantStrmType:  "*internal_custom_llm_anthropic_messages.streamCaller",
+		},
+		{
+			name:          "gemini generate content",
+			compatibility: string(internal_custom_llm_common.CompatibilityGeminiGenerateContent),
+			wantChatType:  "*internal_custom_llm_gemini_generate_content.chatCaller",
+			wantStrmType:  "*internal_custom_llm_gemini_generate_content.streamCaller",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			credential := newCredential(t, map[string]interface{}{
+				"api_compatibility": tc.compatibility,
+				"base_url":          "http://localhost:8000/v1",
+			})
+
+			chat, err := NewChat(newTestLogger(), credential, nil)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantChatType, fmt.Sprintf("%T", chat))
+
+			stream, err := NewChatStream(newTestLogger(), credential, nil)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantStrmType, fmt.Sprintf("%T", stream))
+		})
+	}
+}
+
+func TestNewChat_ConnectionTransportOverridesCompatibility(t *testing.T) {
+	credential := newCredential(t, map[string]interface{}{
+		"api_compatibility": string(internal_custom_llm_common.CompatibilityAnthropicMessages),
+		"base_url":          "http://localhost:8000/v1",
 	})
-	client, err := caller.GetClient()
+
+	chat, err := NewChat(newTestLogger(), credential, map[string]string{
+		OptionTransportKey: string(internal_custom_llm_common.CompatibilityOpenAIResponses),
+	})
 	require.NoError(t, err)
-	assert.NotNil(t, client)
+	assert.Equal(t, "*internal_custom_llm_openai_responses.chatCaller", fmt.Sprintf("%T", chat))
+
+	stream, err := NewChatStream(newTestLogger(), credential, map[string]string{
+		OptionTransportKey: string(internal_custom_llm_common.CompatibilityOpenAIResponses),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "*internal_custom_llm_openai_responses.streamCaller", fmt.Sprintf("%T", stream))
 }
 
-func TestGetClient_RejectsAnthropicCompat(t *testing.T) {
-	caller := newCredentialCaller(t, map[string]interface{}{
-		"apiCompatibility": "anthropic",
-		"baseUrl":          "http://localhost:8000/v1",
+func TestNewChat_RejectsUnsupportedTransport(t *testing.T) {
+	credential := newCredential(t, map[string]interface{}{
+		"base_url": "http://localhost:8000/v1",
 	})
-	_, err := caller.GetClient()
+
+	chat, err := NewChat(newTestLogger(), credential, map[string]string{
+		OptionTransportKey: "invalid",
+	})
 	require.Error(t, err)
+	assert.Nil(t, chat)
+	assert.Contains(t, err.Error(), "unsupported custom-llm transport option")
+
+	stream, err := NewChatStream(newTestLogger(), credential, map[string]string{
+		OptionTransportKey: "invalid",
+	})
+	require.Error(t, err)
+	assert.Nil(t, stream)
+	assert.Contains(t, err.Error(), "unsupported custom-llm transport option")
 }
 
-func TestGetClient_RejectsCustomCompat(t *testing.T) {
-	caller := newCredentialCaller(t, map[string]interface{}{
-		"apiCompatibility": "custom",
-		"baseUrl":          "http://localhost:8000/v1",
+func TestNewChat_RejectsUnsupportedCompatibility(t *testing.T) {
+	credential := newCredential(t, map[string]interface{}{
+		"api_compatibility": "unsupported_compatibility",
+		"base_url":          "http://localhost:8000/v1",
 	})
-	_, err := caller.GetClient()
+
+	chat, err := NewChat(newTestLogger(), credential, nil)
 	require.Error(t, err)
+	assert.Nil(t, chat)
+	_, ok := err.(internal_custom_llm_common.UnsupportedCompatibilityError)
+	assert.True(t, ok)
+
+	stream, err := NewChatStream(newTestLogger(), credential, nil)
+	require.Error(t, err)
+	assert.Nil(t, stream)
+	_, ok = err.(internal_custom_llm_common.UnsupportedCompatibilityError)
+	assert.True(t, ok)
 }

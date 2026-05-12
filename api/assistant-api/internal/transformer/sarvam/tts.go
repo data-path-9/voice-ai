@@ -229,7 +229,7 @@ func (rt *sarvamTextToSpeech) handleServerError(conn *websocket.Conn, response s
 	rt.connection = nil
 	ctxID := rt.contextId
 	rt.mu.Unlock()
-	rt.onPacket(internal_type.TTSErrorPacket{
+	rt.onPacket(internal_type.TextToSpeechErrorPacket{
 		ContextID: ctxID,
 		Error:     fmt.Errorf("sarvam-tts: failed : %v", msg),
 		Type:      internal_type.TTSInvalidInput,
@@ -248,7 +248,7 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.Pa
 	rt.mu.Unlock()
 
 	switch input := in.(type) {
-	case internal_type.TTSInterruptPacket:
+	case internal_type.TextToSpeechInterruptPacket:
 		// Close the current connection immediately — the readLoop goroutine will
 		// exit, discarding any in-flight audio. Reconnect now so the fresh
 		// connection is ready before the next text delta arrives.
@@ -273,12 +273,12 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.Pa
 		}
 		return nil
 
-	case internal_type.TTSTextPacket:
+	case internal_type.TextToSpeechTextPacket:
 		// Fallback reconnect: handles Initialize() failure during interrupt or
 		// an unintentional connection drop between turns.
 		if connection == nil {
 			if err := rt.Initialize(); err != nil {
-				rt.onPacket(internal_type.TTSErrorPacket{
+				rt.onPacket(internal_type.TextToSpeechErrorPacket{
 					ContextID: input.ContextID,
 					Error:     fmt.Errorf("sarvam-tts: failed to connect: %w", err),
 					Type:      internal_type.TTSNetworkTimeout,
@@ -303,7 +303,7 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.Pa
 			"data": map[string]interface{}{"text": input.Text},
 		}); err != nil {
 			rt.logger.Errorf("sarvam-tts: write failed: %v", err)
-			rt.onPacket(internal_type.TTSErrorPacket{
+			rt.onPacket(internal_type.TextToSpeechErrorPacket{
 				ContextID: input.ContextID,
 				Error:     fmt.Errorf("sarvam-tts: failed to write text: %w", err),
 				Type:      internal_type.TTSNetworkTimeout,
@@ -316,14 +316,14 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.Pa
 			Time: time.Now(),
 		})
 
-	case internal_type.TTSDonePacket:
+	case internal_type.TextToSpeechDonePacket:
 		// Interrupted before done arrived — nothing to flush.
 		if connection == nil {
 			return nil
 		}
 		if err := connection.WriteJSON(map[string]interface{}{"type": "flush"}); err != nil {
 			rt.logger.Errorf("sarvam-tts: flush failed: %v", err)
-			rt.onPacket(internal_type.TTSErrorPacket{
+			rt.onPacket(internal_type.TextToSpeechErrorPacket{
 				ContextID: input.ContextID,
 				Error:     fmt.Errorf("sarvam-tts: flush failed: %w", err),
 				Type:      internal_type.TTSNetworkTimeout,

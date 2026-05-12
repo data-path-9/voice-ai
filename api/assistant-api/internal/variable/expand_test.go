@@ -3,17 +3,20 @@
 //
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
-package variable
+package variable_test
 
 import (
 	"testing"
+
+	"github.com/rapidaai/api/assistant-api/internal/variable"
+	"github.com/rapidaai/api/assistant-api/internal/variable/namespace"
 )
 
 func TestExpand_NestedNamespaces(t *testing.T) {
 	src := newFixtureSource()
-	r := NewDefaultRegistry()
+	r := namespace.NewDefaultRegistry()
 
-	out := r.Expand(src, ResolveContext{})
+	out := r.Expand(src, variable.ResolveContext{})
 
 	asst, ok := out["assistant"].(map[string]any)
 	if !ok {
@@ -44,8 +47,8 @@ func TestExpand_NestedNamespaces(t *testing.T) {
 
 func TestExpand_FlattensArgumentsAtTopLevel(t *testing.T) {
 	src := newFixtureSource()
-	r := NewDefaultRegistry()
-	out := r.Expand(src, ResolveContext{})
+	r := namespace.NewDefaultRegistry()
+	out := r.Expand(src, variable.ResolveContext{})
 
 	if out["foo"] != "bar" {
 		t.Errorf("expected bare {{foo}} = bar, got %v", out["foo"])
@@ -57,8 +60,8 @@ func TestExpand_FlattensArgumentsAtTopLevel(t *testing.T) {
 
 func TestExpand_AllDefaultNamespacesPresent(t *testing.T) {
 	src := newFixtureSource()
-	r := NewDefaultRegistry()
-	out := r.Expand(src, ResolveContext{})
+	r := namespace.NewDefaultRegistry()
+	out := r.Expand(src, variable.ResolveContext{})
 
 	expected := []string{
 		"system", "assistant", "conversation", "session",
@@ -73,7 +76,7 @@ func TestExpand_AllDefaultNamespacesPresent(t *testing.T) {
 
 func TestApply_Expand_ParityOnSharedKeys(t *testing.T) {
 	src := newFixtureSource()
-	r := NewDefaultRegistry()
+	r := namespace.NewDefaultRegistry()
 
 	mapping := map[string]string{
 		"assistant.id":        "assistant_id",
@@ -82,8 +85,8 @@ func TestApply_Expand_ParityOnSharedKeys(t *testing.T) {
 		"system.current_date": "current_date",
 		"client.direction":    "client_direction",
 	}
-	flat := r.Apply(mapping, src, ResolveContext{})
-	nested := r.Expand(src, ResolveContext{})
+	flat := r.Apply(mapping, src, variable.ResolveContext{})
+	nested := r.Expand(src, variable.ResolveContext{})
 
 	asst := nested["assistant"].(map[string]any)
 	conv := nested["conversation"].(map[string]any)

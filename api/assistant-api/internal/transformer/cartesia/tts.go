@@ -194,7 +194,7 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.Packet) e
 	ct.mu.Unlock()
 
 	switch input := in.(type) {
-	case internal_type.TTSInterruptPacket:
+	case internal_type.TextToSpeechInterruptPacket:
 		ct.mu.Lock()
 		ct.contextId = ""
 		ct.ttsStartedAt = time.Time{}
@@ -215,10 +215,10 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.Packet) e
 		}
 		return nil
 
-	case internal_type.TTSTextPacket:
+	case internal_type.TextToSpeechTextPacket:
 		if connection == nil {
 			if err := ct.Initialize(); err != nil {
-				ct.onPacket(internal_type.TTSErrorPacket{
+				ct.onPacket(internal_type.TextToSpeechErrorPacket{
 					ContextID: input.ContextID,
 					Error:     fmt.Errorf("cartesia-tts: failed to connect: %w", err),
 					Type:      internal_type.TTSNetworkTimeout,
@@ -243,7 +243,7 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.Packet) e
 		ct.mu.Unlock()
 		message := ct.GetTextToSpeechInput(input.Text, map[string]interface{}{"continue": true, "context_id": ctxId, "max_buffer_delay_ms": "0ms"})
 		if err := connection.WriteJSON(message); err != nil {
-			ct.onPacket(internal_type.TTSErrorPacket{
+			ct.onPacket(internal_type.TextToSpeechErrorPacket{
 				ContextID: input.ContextID,
 				Error:     fmt.Errorf("cartesia-tts: failed to write text: %w", err),
 				Type:      internal_type.TTSNetworkTimeout,
@@ -259,7 +259,7 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.Packet) e
 			Time: time.Now(),
 		})
 
-	case internal_type.TTSDonePacket:
+	case internal_type.TextToSpeechDonePacket:
 		// Interrupted before done arrived — nothing to flush.
 		if connection == nil {
 			return nil
@@ -270,7 +270,7 @@ func (ct *cartesiaTTS) Transform(ctx context.Context, in internal_type.Packet) e
 		// Signal end of text stream; Cartesia will respond with done:true.
 		message := ct.GetTextToSpeechInput("", map[string]interface{}{"continue": false, "flush": true, "context_id": ctxId})
 		if err := connection.WriteJSON(message); err != nil {
-			ct.onPacket(internal_type.TTSErrorPacket{
+			ct.onPacket(internal_type.TextToSpeechErrorPacket{
 				ContextID: input.ContextID,
 				Error:     fmt.Errorf("cartesia-tts: flush failed: %w", err),
 				Type:      internal_type.TTSNetworkTimeout,

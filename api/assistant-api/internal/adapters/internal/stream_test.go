@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	adapter_channel "github.com/rapidaai/api/assistant-api/internal/adapters/channel"
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
@@ -61,7 +63,9 @@ func (s *streamTestStreamer) NotifyMode(mode protos.StreamMode) {
 func TestTalk_RecvErrorBeforeInitialization_ReturnsNil(t *testing.T) {
 	streamer := &streamTestStreamer{recvErr: io.EOF}
 	r := &genericRequestor{
-		streamer: streamer,
+		streamer:         streamer,
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
 	}
 
 	err := r.Talk(context.Background(), nil)
@@ -69,7 +73,7 @@ func TestTalk_RecvErrorBeforeInitialization_ReturnsNil(t *testing.T) {
 	assert.Equal(t, 1, streamer.recvCall)
 }
 
-func TestTalk_IgnoresPacketsBeforeInitialization(t *testing.T) {
+func TestTalk_BuffersPacketsBeforeInitialization(t *testing.T) {
 	streamer := &streamTestStreamer{
 		recv: []internal_type.Stream{
 			&protos.ConversationUserMessage{
@@ -102,28 +106,31 @@ func TestTalk_IgnoresPacketsBeforeInitialization(t *testing.T) {
 	}
 
 	r := &genericRequestor{
-		streamer: streamer,
-		// If any packet is incorrectly routed before initialization, one of these
-		// channels would receive it.
-		criticalCh: make(chan packetEnvelope, 4),
-		inputCh:    make(chan packetEnvelope, 8),
-		outputCh:   make(chan packetEnvelope, 8),
-		lowCh:      make(chan packetEnvelope, 8),
+		streamer:         streamer,
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
+		// Before initialization completes, packets should be buffered in channels.
+		channels: func() *adapter_channel.RequestorChannels {
+			ch := adapter_channel.NewRequestorChannels()
+			return ch
+		}(),
 	}
 
 	err := r.Talk(context.Background(), nil)
 	require.NoError(t, err)
-	assert.Equal(t, 0, len(r.criticalCh))
-	assert.Equal(t, 0, len(r.inputCh))
-	assert.Equal(t, 0, len(r.outputCh))
-	assert.Equal(t, 0, len(r.lowCh))
+	assert.Equal(t, 0, len(r.channels.ControlChannel()))
+	assert.Equal(t, 1, len(r.channels.IngressChannel()))
+	assert.Equal(t, 0, len(r.channels.EgressChannel()))
+	assert.Equal(t, 3, len(r.channels.BackgroundChannel()))
 	assert.Equal(t, 0, len(streamer.modes))
 }
 
 func TestNotify_ForwardsAllActionData(t *testing.T) {
 	streamer := &streamTestStreamer{}
 	r := &genericRequestor{
-		streamer: streamer,
+		streamer:         streamer,
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
 	}
 
 	a := &protos.ConversationEvent{Name: "alpha"}

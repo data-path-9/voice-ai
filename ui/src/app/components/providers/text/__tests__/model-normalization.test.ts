@@ -97,6 +97,20 @@ describe('text model normalization', () => {
     expect(getValue(normalized, 'model.name')).toBe('my-custom-deployment');
   });
 
+  it('keeps custom model values for openrouter free-form models', () => {
+    const normalized = NormalizeTextProviderModelSelection('openrouter', [
+      createMetadata('model.id', 'openrouter/custom-org/custom-model'),
+      createMetadata('model.name', 'openrouter/custom-org/custom-model'),
+    ]);
+
+    expect(getValue(normalized, 'model.id')).toBe(
+      'openrouter/custom-org/custom-model',
+    );
+    expect(getValue(normalized, 'model.name')).toBe(
+      'openrouter/custom-org/custom-model',
+    );
+  });
+
   it('falls back to provider default when non-custom provider model is unknown', () => {
     const cohereModels = loadProviderData('cohere', 'text-models.json');
     const normalized = NormalizeTextProviderModelSelection('cohere', [

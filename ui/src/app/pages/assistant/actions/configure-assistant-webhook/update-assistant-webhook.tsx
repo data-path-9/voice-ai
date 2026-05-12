@@ -2,11 +2,7 @@ import React, { FC, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
-import {
-  PrimaryButton,
-  SecondaryButton,
-  TertiaryButton,
-} from '@/app/components/carbon/button';
+import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import { TextInput, TextArea, Stack } from '@/app/components/carbon/form';
 import { MultiSelect } from '@/app/components/carbon/dropdown';
 import { InputGroup } from '@/app/components/input-group';
@@ -16,17 +12,32 @@ import {
   SelectItem,
   NumberInput,
   Checkbox,
-  Button,
   Tooltip,
 } from '@carbon/react';
-import { Add, TrashCan, ArrowRight, Information } from '@carbon/icons-react';
+import { Information } from '@carbon/icons-react';
 import { Slider } from '@/app/components/form/slider';
-import { GetAssistantWebhook, UpdateWebhook } from '@rapidaai/react';
+import { APiHeader } from '@/app/components/external-api/api-header';
+import { AssistantMappingTable } from '@/app/components/tools/common';
+import {
+  ASSISTANT_CONDITION_KEY_OPTIONS,
+  ASSISTANT_CONDITION_OPERATOR_OPTIONS,
+  ASSISTANT_CONDITION_SOURCE_OPTIONS,
+  ASSISTANT_CONDITION_VALUE_OPTIONS_BY_KEY,
+  normalizeAssistantConditionEntries,
+} from '@/app/components/tools/common';
+import {
+  GetAssistantWebhook,
+  GetAssistantWebhookRequest,
+  Metadata,
+  UpdateAssistantWebhookRequest,
+  UpdateWebhook,
+} from '@rapidaai/react';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import toast from 'react-hot-toast/headless';
 import { useRapidaStore } from '@/hooks';
 import { connectionConfig } from '@/configs';
 import { TabForm } from '@/app/components/form/tab-form';
+import { SourceConditionRule } from '@/app/components/conditions/source-condition-rule';
 
 const webhookEvents = [
   {
@@ -63,7 +74,43 @@ type WebhookParameterType =
   | 'argument'
   | 'metadata'
   | 'option'
-  | 'analysis';
+  | 'analysis'
+  | 'custom';
+
+const WEBHOOK_TYPE_OPTIONS = [
+  { value: 'event', name: 'Event' },
+  { value: 'assistant', name: 'Assistant' },
+  { value: 'client', name: 'Client' },
+  { value: 'conversation', name: 'Conversation' },
+  { value: 'argument', name: 'Argument' },
+  { value: 'metadata', name: 'Metadata' },
+  { value: 'option', name: 'Option' },
+  { value: 'analysis', name: 'Analysis' },
+  { value: 'custom', name: 'Custom' },
+];
+
+const WEBHOOK_KEY_OPTIONS_BY_TYPE = {
+  event: [
+    { value: 'type', name: 'Type' },
+    { value: 'data', name: 'Data' },
+  ],
+  assistant: [
+    { value: 'id', name: 'ID' },
+    { value: 'name', name: 'Name' },
+    { value: 'version', name: 'Version' },
+  ],
+  client: [
+    { value: 'phone', name: 'Phone' },
+    { value: 'assistantPhone', name: 'Assistant Phone' },
+    { value: 'direction', name: 'Direction' },
+    { value: 'provider', name: 'Provider' },
+    { value: 'providerCallId', name: 'Provider Call ID' },
+  ],
+  conversation: [
+    { value: 'messages', name: 'Messages' },
+    { value: 'id', name: 'ID' },
+  ],
+};
 
 const getDefaultParameterKey = (type: WebhookParameterType): string => {
   switch (type) {
@@ -78,6 +125,127 @@ const getDefaultParameterKey = (type: WebhookParameterType): string => {
     default:
       return '';
   }
+};
+
+const getWebhookOptionMap = (webhook: any): Map<string, string> => {
+  const map = new Map<string, string>();
+  const options = webhook?.getOptionsList?.() || [];
+  options.forEach((option: any) => {
+    const key = option?.getKey?.();
+    const value = option?.getValue?.();
+    if (key && typeof value === 'string') {
+      map.set(key, value);
+    }
+  });
+  return map;
+};
+
+const parseStringList = (raw?: string): string[] => {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item): item is string => typeof item === 'string');
+    }
+  } catch {}
+  return [];
+};
+
+const parseStringMap = (raw?: string): Record<string, string> => {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return Object.fromEntries(
+        Object.entries(parsed)
+          .filter(([, value]) => typeof value === 'string')
+          .map(([key, value]) => [key, value as string]),
+      );
+    }
+  } catch {}
+  return {};
+};
+
+const WEBHOOK_OPTION_KEYS = {
+  method: 'http_method',
+  url: 'http_url',
+  headers: 'http_headers',
+  body: 'http_body',
+  condition: 'webhook.condition',
+  retryStatusCodes: 'retry_status_codes',
+  maxRetryCount: 'max_retry_count',
+  timeoutSeconds: 'timeout_seconds',
+};
+const DEFAULT_SOURCE_CONDITIONS = [
+  {
+    key: 'source',
+    condition: '=',
+    value: 'all',
+  },
+];
+
+const toJsonMap = (rows: { key: string; value: string }[]) => {
+  return JSON.stringify(
+    rows.reduce<Record<string, string>>((acc, current) => {
+      if (!current.key) {
+        return acc;
+      }
+      acc[current.key] = current.value;
+      return acc;
+    }, {}),
+  );
+};
+
+const buildWebhookOptions = ({
+  method,
+  endpoint,
+  headers,
+  parameterKeyValuePairs,
+  retryOnStatus,
+  maxRetries,
+  requestTimeout,
+  sourceConditions,
+}: {
+  method: string;
+  endpoint: string;
+  headers: { key: string; value: string }[];
+  parameterKeyValuePairs: { key: string; value: string }[];
+  retryOnStatus: string[];
+  maxRetries: number;
+  requestTimeout: number;
+  sourceConditions: Array<{
+    key: string;
+    condition: string;
+    value: string;
+  }>;
+}): Metadata[] => {
+  return [
+    { key: WEBHOOK_OPTION_KEYS.method, value: method || 'POST' },
+    { key: WEBHOOK_OPTION_KEYS.url, value: endpoint || '' },
+    { key: WEBHOOK_OPTION_KEYS.headers, value: toJsonMap(headers) },
+    {
+      key: WEBHOOK_OPTION_KEYS.body,
+      value: toJsonMap(parameterKeyValuePairs),
+    },
+    {
+      key: WEBHOOK_OPTION_KEYS.condition,
+      value: JSON.stringify(sourceConditions),
+    },
+    {
+      key: WEBHOOK_OPTION_KEYS.retryStatusCodes,
+      value: JSON.stringify(retryOnStatus || []),
+    },
+    { key: WEBHOOK_OPTION_KEYS.maxRetryCount, value: String(maxRetries || 0) },
+    {
+      key: WEBHOOK_OPTION_KEYS.timeoutSeconds,
+      value: String(requestTimeout || 0),
+    },
+  ].map(({ key, value }) => {
+    const option = new Metadata();
+    option.setKey(key);
+    option.setValue(value);
+    return option;
+  });
 };
 
 export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
@@ -99,6 +267,13 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
   const [maxRetries, setMaxRetries] = useState(3);
   const [requestTimeout, setRequestTimeout] = useState(180);
   const [headers, setHeaders] = useState<{ key: string; value: string }[]>([]);
+  const [sourceConditions, setSourceConditions] = useState<
+    Array<{
+      key: string;
+      condition: string;
+      value: string;
+    }>
+  >(DEFAULT_SOURCE_CONDITIONS);
   const [priority, setPriority] = useState<number>(0);
   const [parameters, setParameters] = useState<
     {
@@ -110,36 +285,62 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
   const [events, setEvents] = useState<string[]>([]);
 
   useEffect(() => {
-    showLoader();
-    GetAssistantWebhook(
-      connectionConfig,
-      assistantId,
-      webhookId!,
-      (err, res) => {
+    const load = async () => {
+      showLoader();
+      const request = new GetAssistantWebhookRequest();
+      request.setAssistantid(assistantId);
+      request.setId(webhookId!);
+
+      try {
+        const res = await GetAssistantWebhook(connectionConfig, request, {
+          'x-auth-id': authId,
+          authorization: token,
+          'x-project-id': projectId,
+        });
+
         hideLoader();
-        if (err) {
+        if (!res?.getData()) {
           toast.error('Unable to load webhook, please try again later.');
           return;
         }
-        const wb = res?.getData();
+        const wb = res.getData();
         if (wb) {
-          setMethod(wb.getHttpmethod());
-          setEndpoint(wb.getHttpurl());
+          const optionMap = getWebhookOptionMap(wb as any);
+          const optionsRetryCount = Number(optionMap.get('max_retry_count') || '0');
+          const optionsTimeout = Number(optionMap.get('timeout_seconds') || '0');
+
+          setMethod(optionMap.get('http_method') || 'POST');
+          setEndpoint(optionMap.get('http_url') || '');
           setDescription(wb.getDescription());
-          setRetryOnStatus(wb.getRetrystatuscodesList());
-          setMaxRetries(wb.getRetrycount());
-          setRequestTimeout(wb.getTimeoutsecond());
+          setRetryOnStatus(
+            parseStringList(optionMap.get('retry_status_codes')),
+          );
+          setMaxRetries(Number.isFinite(optionsRetryCount) ? optionsRetryCount : 0);
+          setRequestTimeout(Number.isFinite(optionsTimeout) ? optionsTimeout : 0);
           setPriority(wb.getExecutionpriority());
-          const headersMap = wb.getHttpheadersMap();
+          const optionsHeaders = parseStringMap(optionMap.get('http_headers'));
+          const rawCondition = optionMap.get(WEBHOOK_OPTION_KEYS.condition);
+          if (rawCondition) {
+            try {
+              setSourceConditions(
+                normalizeAssistantConditionEntries(JSON.parse(rawCondition)),
+              );
+            } catch {
+              setSourceConditions(DEFAULT_SOURCE_CONDITIONS);
+            }
+          } else {
+            setSourceConditions(DEFAULT_SOURCE_CONDITIONS);
+          }
+
           setHeaders(
-            Array.from(headersMap.entries()).map(([key, value]) => ({
+            Object.entries(optionsHeaders).map(([key, value]) => ({
               key,
               value,
             })),
           );
-          const parametersMap = wb.getHttpbodyMap();
+          const bodyMap = parseStringMap(optionMap.get('http_body'));
           setParameters(
-            Array.from(parametersMap.entries()).map(([key, value]) => {
+            Object.entries(bodyMap).map(([key, value]) => {
               const [type, paramKey] = key.split('.');
               return {
                 type: type as WebhookParameterType,
@@ -150,32 +351,14 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
           );
           setEvents(wb.getAssistanteventsList());
         }
-      },
-      {
-        'x-auth-id': authId,
-        authorization: token,
-        'x-project-id': projectId,
-      },
-    );
-  }, [assistantId, webhookId, authId, token, projectId]);
+      } catch {
+        hideLoader();
+        toast.error('Unable to load webhook, please try again later.');
+      }
+    };
 
-  const updateParameter = (index: number, field: string, value: string) => {
-    setParameters(prevParams =>
-      prevParams.map((param, i) => {
-        if (i === index) {
-          const updatedParam = { ...param, [field]: value };
-          if (field === 'type') {
-            updatedParam.key = getDefaultParameterKey(
-              value as WebhookParameterType,
-            );
-            updatedParam.value = '';
-          }
-          return updatedParam;
-        }
-        return param;
-      }),
-    );
-  };
+    load();
+  }, [assistantId, webhookId, authId, token, projectId]);
 
   const validateDestination = (): boolean => {
     setErrorMessage('');
@@ -227,7 +410,7 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
     return true;
   };
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     setErrorMessage('');
     if (events.length === 0) {
       setErrorMessage(
@@ -240,50 +423,55 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
       key: `${param.type}.${param.key}`,
       value: param.value,
     }));
-    UpdateWebhook(
-      connectionConfig,
-      assistantId,
-      webhookId!,
-      method,
-      endpoint,
-      headers,
-      parameterKeyValuePairs,
-      events,
-      retryOnStatus,
-      maxRetries,
-      requestTimeout,
-      priority,
-      (err, response) => {
-        hideLoader();
-        if (err) {
-          setErrorMessage(
-            'Unable to update assistant webhook, please check and try again.',
-          );
-          return;
-        }
-        if (response?.getSuccess()) {
-          toast.success(`Assistant's webhook updated successfully`);
-          navigator.goToAssistantWebhook(assistantId);
-        } else {
-          if (response?.getError()) {
-            const message = response.getError()?.getHumanmessage();
-            if (message) {
-              setErrorMessage(message);
-              return;
-            }
-          }
-          setErrorMessage(
-            'Unable to update assistant webhook, please check and try again.',
-          );
-        }
-      },
-      {
+    const request = new UpdateAssistantWebhookRequest();
+    request.setAssistantid(assistantId);
+    request.setId(webhookId!);
+    request.setProvider('http');
+    request.setAssistanteventsList(events);
+    request.setExecutionpriority(priority);
+    request.setDescription(description);
+    request.setOptionsList(
+      buildWebhookOptions({
+        method,
+        endpoint,
+        headers,
+        parameterKeyValuePairs,
+        retryOnStatus,
+        maxRetries,
+        requestTimeout,
+        sourceConditions,
+      }),
+    );
+
+    try {
+      const response = await UpdateWebhook(connectionConfig, request, {
         'x-auth-id': authId,
         authorization: token,
         'x-project-id': projectId,
-      },
-      description,
-    );
+      });
+
+      hideLoader();
+      if (response?.getSuccess()) {
+        toast.success(`Assistant's webhook updated successfully`);
+        navigator.goToAssistantWebhook(assistantId);
+        return;
+      }
+      if (response?.getError()) {
+        const message = response.getError()?.getHumanmessage();
+        if (message) {
+          setErrorMessage(message);
+          return;
+        }
+      }
+      setErrorMessage(
+        'Unable to update assistant webhook, please check and try again.',
+      );
+    } catch {
+      hideLoader();
+      setErrorMessage(
+        'Unable to update assistant webhook, please check and try again.',
+      );
+    }
   };
 
   return (
@@ -311,7 +499,8 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
                 <PrimaryButton
                   size="lg"
                   onClick={() => {
-                    if (validateDestination()) setActiveTab('payload');
+                    if (validateDestination() && validatePayload())
+                      setActiveTab('events');
                   }}
                 >
                   Continue
@@ -319,7 +508,19 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
               </ButtonSet>,
             ],
             body: (
-              <div className="pb-8">
+              <div className="pb-8 flex flex-col">
+                <InputGroup title="Condition">
+                  <SourceConditionRule
+                    conditions={sourceConditions}
+                    onChangeConditions={setSourceConditions}
+                    conditionOptions={ASSISTANT_CONDITION_OPERATOR_OPTIONS}
+                    sourceOptions={ASSISTANT_CONDITION_SOURCE_OPTIONS}
+                    keyOptions={ASSISTANT_CONDITION_KEY_OPTIONS}
+                    valueOptionsByKey={ASSISTANT_CONDITION_VALUE_OPTIONS_BY_KEY}
+                    keyTooltipText="The variable to evaluate before triggering this webhook."
+                  />
+                </InputGroup>
+
                 <InputGroup
                   title={renderLabelWithTooltip(
                     'Destination',
@@ -360,128 +561,13 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
                     />
                   </Stack>
                 </InputGroup>
-              </div>
-            ),
-          },
-          {
-            code: 'payload',
-            name: 'Payload',
-            description:
-              'Define the headers and data fields included in each webhook call.',
-            actions: [
-              <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <SecondaryButton
-                  size="lg"
-                  onClick={() => showDialog(navigator.goBack)}
-                >
-                  Cancel
-                </SecondaryButton>
-                <PrimaryButton
-                  size="lg"
-                  onClick={() => {
-                    if (validatePayload()) setActiveTab('events');
-                  }}
-                >
-                  Continue
-                </PrimaryButton>
-              </ButtonSet>,
-            ],
-            body: (
-              <div className="pb-8 flex flex-col">
                 <InputGroup
-                  childClass="space-y-4"
                   title={renderLabelWithTooltip(
                     `Headers (${headers.length})`,
                     'HTTP headers included with every webhook request.',
                   )}
                 >
-                  <table className="w-full border-collapse border border-gray-200 dark:border-gray-700 text-sm [&_input]:!border-none [&_.cds--text-input]:!border-none [&_.cds--text-input]:!outline-none [&_.cds--form-item]:!m-0">
-                    <thead>
-                      <tr className="bg-gray-50 dark:bg-gray-900">
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">
-                          Key
-                        </th>
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">
-                          Value
-                        </th>
-                        <th className="border-b border-gray-200 dark:border-gray-700 w-8" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {headers.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={3}
-                            className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400"
-                          >
-                            No headers yet. Click <strong>Add header</strong>{' '}
-                            below to add key-value pairs.
-                          </td>
-                        </tr>
-                      )}
-                      {headers.map((header, index) => (
-                        <tr
-                          key={index}
-                          className="border-b border-gray-200 dark:border-gray-700 last:border-b-0"
-                        >
-                          <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                            <TextInput
-                              id={`header-key-${index}`}
-                              labelText=""
-                              hideLabel
-                              value={header.key}
-                              onChange={e => {
-                                const h = [...headers];
-                                h[index].key = e.target.value;
-                                setHeaders(h);
-                              }}
-                              placeholder="Key"
-                              size="md"
-                            />
-                          </td>
-                          <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                            <TextInput
-                              id={`header-val-${index}`}
-                              labelText=""
-                              hideLabel
-                              value={header.value}
-                              onChange={e => {
-                                const h = [...headers];
-                                h[index].value = e.target.value;
-                                setHeaders(h);
-                              }}
-                              placeholder="Value"
-                              size="md"
-                            />
-                          </td>
-                          <td className="p-0 text-center">
-                            <Button
-                              hasIconOnly
-                              renderIcon={TrashCan}
-                              iconDescription="Remove"
-                              kind="danger--ghost"
-                              size="sm"
-                              onClick={() =>
-                                setHeaders(
-                                  headers.filter((_, i) => i !== index),
-                                )
-                              }
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <TertiaryButton
-                    size="md"
-                    renderIcon={Add}
-                    onClick={() =>
-                      setHeaders([...headers, { key: '', value: '' }])
-                    }
-                    className="!w-full !max-w-none"
-                  >
-                    Add header
-                  </TertiaryButton>
+                  <APiHeader headers={headers} setHeaders={setHeaders} />
                 </InputGroup>
 
                 <InputGroup
@@ -491,108 +577,26 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
                   )}
                   childClass="space-y-4"
                 >
-                  <table className="w-full border-collapse border border-gray-200 dark:border-gray-700 text-sm [&_input]:!border-none [&_.cds--text-input]:!border-none [&_.cds--text-input]:!outline-none [&_.cds--select-input]:!border-none [&_.cds--form-item]:!m-0">
-                    <thead>
-                      <tr className="bg-gray-50 dark:bg-gray-900">
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-[140px]">
-                          Type
-                        </th>
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-[140px]">
-                          Key
-                        </th>
-                        <th className="border-b border-r border-gray-200 dark:border-gray-700 w-8" />
-                        <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700">
-                          Value
-                        </th>
-                        <th className="border-b border-gray-200 dark:border-gray-700 w-8" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {parameters.map((params, index) => (
-                        <tr
-                          key={index}
-                          className="border-b border-gray-200 dark:border-gray-700 last:border-b-0"
-                        >
-                          <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                            <CarbonSelect
-                              id={`param-type-${index}`}
-                              labelText=""
-                              hideLabel
-                              value={params.type}
-                              onChange={e =>
-                                updateParameter(index, 'type', e.target.value)
-                              }
-                              size="md"
-                            >
-                              <SelectItem value="event" text="Event" />
-                              <SelectItem value="assistant" text="Assistant" />
-                              <SelectItem value="client" text="Client" />
-                              <SelectItem
-                                value="conversation"
-                                text="Conversation"
-                              />
-                              <SelectItem value="argument" text="Argument" />
-                              <SelectItem value="metadata" text="Metadata" />
-                              <SelectItem value="option" text="Option" />
-                              <SelectItem value="analysis" text="Analysis" />
-                            </CarbonSelect>
-                          </td>
-                          <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                            <TypeKeySelector
-                              type={params.type}
-                              value={params.key}
-                              onChange={newKey =>
-                                updateParameter(index, 'key', newKey)
-                              }
-                            />
-                          </td>
-                          <td className="border-r border-gray-200 dark:border-gray-700 p-0 text-center text-gray-400">
-                            <ArrowRight className="w-4 h-4 mx-auto" />
-                          </td>
-                          <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                            <TextInput
-                              id={`param-val-${index}`}
-                              labelText=""
-                              hideLabel
-                              value={params.value}
-                              onChange={e =>
-                                updateParameter(index, 'value', e.target.value)
-                              }
-                              placeholder="Value"
-                              size="md"
-                            />
-                          </td>
-                          <td className="p-0 text-center">
-                            <Button
-                              hasIconOnly
-                              renderIcon={TrashCan}
-                              iconDescription="Remove"
-                              kind="danger--ghost"
-                              size="sm"
-                              onClick={() =>
-                                setParameters(
-                                  parameters.filter((_, i) => i !== index),
-                                )
-                              }
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <TertiaryButton
-                    size="md"
-                    renderIcon={Add}
-                    onClick={() =>
-                      setParameters([
-                        ...parameters,
-                        { type: 'assistant', key: 'id', value: '' },
-                      ])
+                  <AssistantMappingTable
+                    parameters={parameters}
+                    onChange={setParameters}
+                    typeOptions={WEBHOOK_TYPE_OPTIONS}
+                    getDefaultParameterKey={type =>
+                      getDefaultParameterKey(type as WebhookParameterType)
                     }
-                    className="!w-full !max-w-none"
-                  >
-                    Add parameter
-                  </TertiaryButton>
+                    keyOptionsByType={WEBHOOK_KEY_OPTIONS_BY_TYPE}
+                    includeEmptyKeyOption
+                    resetValueOnTypeChange
+                    createNewParameter={() => ({
+                      type: 'assistant',
+                      key: 'id',
+                      value: '',
+                    })}
+                    title="Payload Mapping"
+                    addButtonLabel="Add parameter"
+                    valuePlaceholder="Value"
+                    removeButtonKind="danger--ghost"
+                  />
                 </InputGroup>
               </div>
             ),
@@ -622,7 +626,6 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
                     'Events',
                     'Choose which assistant lifecycle events trigger this webhook.',
                   )}
-                  childClass="space-y-4"
                 >
                   <MultiSelect
                     id="webhook-events"
@@ -748,97 +751,4 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
       />
     </>
   );
-};
-
-export const TypeKeySelector: FC<{
-  type:
-    | 'event'
-    | 'assistant'
-    | 'client'
-    | 'conversation'
-    | 'argument'
-    | 'metadata'
-    | 'option'
-    | 'analysis';
-  value: string;
-  onChange: (newValue: string) => void;
-}> = ({ type, value, onChange }) => {
-  switch (type) {
-    case 'event':
-      return (
-        <CarbonSelect
-          id="type-key-event"
-          labelText=""
-          hideLabel
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          size="md"
-        >
-          <SelectItem value="" text="Select key" />
-          <SelectItem value="type" text="Type" />
-          <SelectItem value="data" text="Data" />
-        </CarbonSelect>
-      );
-    case 'assistant':
-      return (
-        <CarbonSelect
-          id="type-key-assistant"
-          labelText=""
-          hideLabel
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          size="md"
-        >
-          <SelectItem value="" text="Select key" />
-          <SelectItem value="id" text="ID" />
-          <SelectItem value="name" text="Name" />
-          <SelectItem value="version" text="Version" />
-        </CarbonSelect>
-      );
-    case 'client':
-      return (
-        <CarbonSelect
-          id="type-key-client"
-          labelText=""
-          hideLabel
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          size="md"
-        >
-          <SelectItem value="" text="Select key" />
-          <SelectItem value="phone" text="Phone" />
-          <SelectItem value="assistantPhone" text="Assistant Phone" />
-          <SelectItem value="direction" text="Direction" />
-          <SelectItem value="provider" text="Provider" />
-          <SelectItem value="providerCallId" text="Provider Call ID" />
-        </CarbonSelect>
-      );
-    case 'conversation':
-      return (
-        <CarbonSelect
-          id="type-key-conversation"
-          labelText=""
-          hideLabel
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          size="md"
-        >
-          <SelectItem value="" text="Select key" />
-          <SelectItem value="messages" text="Messages" />
-          <SelectItem value="id" text="ID" />
-        </CarbonSelect>
-      );
-    default:
-      return (
-        <TextInput
-          id="type-key-custom"
-          labelText=""
-          hideLabel
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          placeholder="Key"
-          size="md"
-        />
-      );
-  }
 };

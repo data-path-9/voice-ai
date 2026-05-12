@@ -16,21 +16,10 @@ type Registry struct {
 	namespaces map[string]Namespace
 }
 
-// NewDefaultRegistry returns a Registry with all globally-available
-// namespaces registered: system, assistant, conversation, session, argument,
-// metadata, option, client, analysis.
-func NewDefaultRegistry() *Registry {
-	r := &Registry{namespaces: map[string]Namespace{}}
-	r.With("system", &SystemNamespace{})
-	r.With("assistant", &AssistantNamespace{})
-	r.With("conversation", &ConversationNamespace{})
-	r.With("session", &SessionNamespace{})
-	r.With("argument", &ArgumentNamespace{})
-	r.With("metadata", &MetadataNamespace{})
-	r.With("option", &OptionNamespace{})
-	r.With("client", &MetadataPrefixNamespace{Prefix: "client."})
-	r.With("analysis", &MetadataPrefixNamespace{Prefix: "analysis."})
-	return r
+// NewRegistry returns an empty Registry. Use With to populate it, or use
+// namespace.NewDefaultRegistry for the standard set of namespaces.
+func NewRegistry() *Registry {
+	return &Registry{namespaces: map[string]Namespace{}}
 }
 
 // With registers (or replaces) a Namespace under prefix.

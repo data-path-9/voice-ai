@@ -125,11 +125,11 @@ func (at Telephony) NewStreamer(
 ) (internal_type.Streamer, error) {
 	switch at {
 	case Twilio:
-		return internal_twilio_telephony.NewTwilioWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred), nil
+		return internal_twilio_telephony.NewTwilioWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred)
 	case Exotel:
-		return internal_exotel_telephony.NewExotelWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred), nil
+		return internal_exotel_telephony.NewExotelWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred)
 	case Vonage:
-		return internal_vonage_telephony.NewVonageWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred), nil
+		return internal_vonage_telephony.NewVonageWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred)
 	case Asterisk:
 		if opt.AudioSocketConn != nil {
 			return internal_asterisk_audiosocket.NewStreamer(logger, opt.AudioSocketConn, opt.AudioSocketReader, opt.AudioSocketWriter, cc, vaultCred)

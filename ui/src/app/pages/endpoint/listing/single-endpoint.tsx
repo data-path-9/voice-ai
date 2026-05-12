@@ -3,12 +3,11 @@ import { Endpoint } from '@rapidaai/react';
 import { useEndpointPageStore } from '@/hooks';
 import { nanoToMilli, toHumanReadableRelativeTime } from '@/utils/date';
 import { useNavigate } from 'react-router-dom';
-import { TableRow, TableCell, Tag } from '@carbon/react';
+import { TableRow, TableCell, Tag, Link } from '@carbon/react';
 import { ProviderTag } from '@/app/components/carbon/provider-tag';
 import { IconOnlyButton } from '@/app/components/carbon/button';
 import { Launch } from '@carbon/icons-react';
 import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
-import { TableLink } from '@/app/components/carbon/table-link';
 import { VersionIndicator } from '@/app/components/indicators/version';
 
 interface SingleEndpointProps {
@@ -35,19 +34,23 @@ export const SingleEndpoint: FC<SingleEndpointProps> = ({ endpoint }) => {
   return (
     <TableRow>
       {endpointAction.visibleColumn('getStatus') && (
-        <TableCell>
+        <TableCell className="text-sm">
           <CarbonStatusIndicator state="DEPLOYED" />
         </TableCell>
       )}
       {endpointAction.visibleColumn('getName') && (
-        <TableCell>
-          <TableLink href={`/deployment/endpoint/${endpoint.getId()}`}>
-            {endpoint?.getName()}
-          </TableLink>
+        <TableCell className="text-sm">
+          <Link
+            href={`/deployment/endpoint/${endpoint.getId()}`}
+            className="!text-sm !inline-flex !items-center !gap-1"
+          >
+            <span>{endpoint?.getName()}</span>
+            <Launch size={12} />
+          </Link>
         </TableCell>
       )}
       {endpointAction.visibleColumn('action') && (
-        <TableCell>
+        <TableCell className="text-sm">
           <IconOnlyButton
             kind="ghost"
             size="md"
@@ -58,12 +61,12 @@ export const SingleEndpoint: FC<SingleEndpointProps> = ({ endpoint }) => {
         </TableCell>
       )}
       {endpointAction.visibleColumn('getVersion') && (
-        <TableCell>
+        <TableCell className="text-sm">
           <VersionIndicator id={endpoint.getEndpointprovidermodel()?.getId()!} />
         </TableCell>
       )}
       {endpointAction.visibleColumn('getTags') && (
-        <TableCell>
+        <TableCell className="text-sm">
           {endpoint.getEndpointtag()?.getTagList()?.length ? (
             <div className="flex flex-wrap gap-1">
               {endpoint.getEndpointtag()?.getTagList().map((tag, i) => (
@@ -71,52 +74,52 @@ export const SingleEndpoint: FC<SingleEndpointProps> = ({ endpoint }) => {
               ))}
             </div>
           ) : (
-            <span className="text-xs text-gray-400">—</span>
+            <span className="text-sm text-gray-400">—</span>
           )}
         </TableCell>
       )}
       {endpointAction.visibleColumn('getCount') && (
-        <TableCell>
+        <TableCell className="text-sm">
           <span className="tabular-nums text-blue-500 dark:text-blue-400">
             {endpoint.getEndpointanalytics()?.getCount()}
           </span>
         </TableCell>
       )}
       {endpointAction.visibleColumn('getErrorRate') && (
-        <TableCell>
+        <TableCell className="text-sm">
           <span className="tabular-nums text-red-500 dark:text-red-400">
             {getErrorRate(endpoint)}%
           </span>
         </TableCell>
       )}
       {endpointAction.visibleColumn('getCurrentModel') && (
-        <TableCell>
+        <TableCell className="text-sm">
           <ProviderTag provider={endpoint.getEndpointprovidermodel()?.getModelprovidername()} />
         </TableCell>
       )}
       {endpointAction.visibleColumn('getCost') && (
-        <TableCell className="!font-mono !text-xs tabular-nums">
+        <TableCell className="font-mono text-[13px] tabular-nums">
           ${((endpoint.getEndpointanalytics()?.getTotalinputcost() ?? 0) +
             (endpoint.getEndpointanalytics()?.getTotaloutputcost() ?? 0)).toFixed(4)}
         </TableCell>
       )}
       {endpointAction.visibleColumn('getTotalToken') && (
-        <TableCell className="tabular-nums">
+        <TableCell className="text-sm tabular-nums">
           {endpoint.getEndpointanalytics()?.getTotaltoken()}
         </TableCell>
       )}
       {endpointAction.visibleColumn('getP50') && (
-        <TableCell className="!font-mono !text-xs tabular-nums">
+        <TableCell className="font-mono text-[13px] tabular-nums">
           {nanoToMilli(endpoint.getEndpointanalytics()?.getP50latency())}ms
         </TableCell>
       )}
       {endpointAction.visibleColumn('getP99') && (
-        <TableCell className="!font-mono !text-xs tabular-nums">
+        <TableCell className="font-mono text-[13px] tabular-nums">
           {nanoToMilli(endpoint.getEndpointanalytics()?.getP99latency())}ms
         </TableCell>
       )}
       {endpointAction.visibleColumn('getMRR') && (
-        <TableCell className="!text-xs">
+        <TableCell className="text-[13px]">
           {endpoint.getEndpointanalytics()?.getLastactivity() &&
           endpoint.getEndpointanalytics()?.getLastactivity()?.toDate().getTime()! > new Date('1970-01-01').getTime()
             ? toHumanReadableRelativeTime(endpoint.getEndpointanalytics()?.getLastactivity()!)
@@ -124,7 +127,7 @@ export const SingleEndpoint: FC<SingleEndpointProps> = ({ endpoint }) => {
         </TableCell>
       )}
       {endpointAction.visibleColumn('getCreatedBy') && (
-        <TableCell>
+        <TableCell className="text-sm">
           <span className="capitalize text-sm">
             {endpoint.getEndpointprovidermodel()?.getCreateduser()?.getName()}
           </span>

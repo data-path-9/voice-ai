@@ -186,7 +186,7 @@ func (azure *azureTextToSpeech) Transform(ctx context.Context, in internal_type.
 	}
 
 	switch input := in.(type) {
-	case internal_type.TTSInterruptPacket:
+	case internal_type.TextToSpeechInterruptPacket:
 		if currentCtx != "" {
 			<-cl.StopSpeakingAsync()
 			azure.mu.Lock()
@@ -200,7 +200,7 @@ func (azure *azureTextToSpeech) Transform(ctx context.Context, in internal_type.
 			})
 		}
 		return nil
-	case internal_type.TTSTextPacket:
+	case internal_type.TextToSpeechTextPacket:
 		azure.mu.Lock()
 		if azure.ttsStartedAt.IsZero() {
 			azure.ttsStartedAt = time.Now()
@@ -208,7 +208,7 @@ func (azure *azureTextToSpeech) Transform(ctx context.Context, in internal_type.
 		azure.mu.Unlock()
 		res := <-cl.StartSpeakingTextAsync(input.Text)
 		if res.Error != nil {
-			azure.onPacket(internal_type.TTSErrorPacket{
+			azure.onPacket(internal_type.TextToSpeechErrorPacket{
 				ContextID: input.ContextID,
 				Error:     fmt.Errorf("azure-tts: synthesis failed: %w", res.Error),
 				Type:      internal_type.TTSNetworkTimeout,
@@ -224,7 +224,7 @@ func (azure *azureTextToSpeech) Transform(ctx context.Context, in internal_type.
 			Time: time.Now(),
 		})
 		return nil
-	case internal_type.TTSDonePacket:
+	case internal_type.TextToSpeechDonePacket:
 		return nil
 	default:
 		return fmt.Errorf("azure-tts: unsupported input type %T", in)
@@ -281,7 +281,7 @@ func (azCallback *azureTextToSpeech) OnCancel(event speech.SpeechSynthesisEventA
 		azCallback.mu.Lock()
 		ctxId := azCallback.contextId
 		azCallback.mu.Unlock()
-		azCallback.onPacket(internal_type.TTSErrorPacket{
+		azCallback.onPacket(internal_type.TextToSpeechErrorPacket{
 			ContextID: ctxId,
 			Error:     fmt.Errorf("azure-tts: synthesis canceled: %v (code=%v)", cancellation.ErrorDetails, cancellation.ErrorCode),
 			Type:      internal_type.TTSNetworkTimeout,

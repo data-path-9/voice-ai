@@ -27,8 +27,9 @@ type GetAssistantOption struct {
 	//
 	InjectConversations bool
 
-	InjectAnalysis bool
-	InjectWebhook  bool
+	InjectAnalysis       bool
+	InjectWebhook        bool
+	InjectAuthentication bool
 
 	//
 	InjectTelemetryProvider bool
@@ -46,6 +47,7 @@ func NewDefaultGetAssistantOption() *GetAssistantOption {
 		InjectWhatsappDeployment:     true,
 		InjectTool:                   true,
 		InjectConversations:          true,
+		InjectAuthentication:         true,
 		InjectTelemetryProvider:      true,
 	}
 }
@@ -142,61 +144,4 @@ type AssistantService interface {
 		assistantId uint64,
 		tags []string,
 	) (*internal_assistant_entity.AssistantTag, error)
-}
-
-type AssistantDeploymentService interface {
-	CreateWhatsappDeployment(
-		ctx context.Context,
-		auth types.SimplePrinciple,
-		assistantId uint64,
-		greeting, mistake *string,
-		idealTimeout *uint64, idealTimeoutBackoff *uint64, idealTimeoutMessage *string, maxSessionDuration *uint64,
-		whatsappProvider string,
-		opts []*workflow_api.Metadata,
-	) (*internal_assistant_entity.AssistantWhatsappDeployment, error)
-
-	CreatePhoneDeployment(
-		ctx context.Context,
-		auth types.SimplePrinciple,
-		assistantId uint64,
-		greeting, mistake *string,
-		idealTimeout *uint64, idealTimeoutBackoff *uint64, idealTimeoutMessage *string, maxSessionDuration *uint64,
-		phoneProvider string,
-		inputAudio, outputAudio *workflow_api.DeploymentAudioProvider,
-		opts []*workflow_api.Metadata,
-	) (*internal_assistant_entity.AssistantPhoneDeployment, error)
-
-	CreateApiDeployment(
-		ctx context.Context,
-		auth types.SimplePrinciple,
-		assistantId uint64,
-		greeting, mistake *string,
-		idealTimeout *uint64, idealTimeoutBackoff *uint64, idealTimeoutMessage *string, maxSessionDuration *uint64,
-		inputAudio, outputAudio *workflow_api.DeploymentAudioProvider,
-	) (*internal_assistant_entity.AssistantApiDeployment, error)
-
-	CreateDebuggerDeployment(
-		ctx context.Context,
-		auth types.SimplePrinciple,
-		assistantId uint64,
-		greeting, mistake *string,
-		idealTimeout *uint64, idealTimeoutBackoff *uint64, idealTimeoutMessage *string, maxSessionDuration *uint64,
-		inputAudio, outputAudio *workflow_api.DeploymentAudioProvider,
-	) (*internal_assistant_entity.AssistantDebuggerDeployment, error)
-
-	CreateWebPluginDeployment(
-		ctx context.Context,
-		auth types.SimplePrinciple,
-		assistantId uint64,
-		greeting, mistake *string,
-		idealTimeout *uint64, idealTimeoutBackoff *uint64, idealTimeoutMessage *string, maxSessionDuration *uint64,
-		suggestion []string,
-		inputAudio, outputAudio *workflow_api.DeploymentAudioProvider,
-	) (*internal_assistant_entity.AssistantWebPluginDeployment, error)
-
-	GetAssistantApiDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantApiDeployment, error)
-	GetAssistantDebuggerDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantDebuggerDeployment, error)
-	GetAssistantPhoneDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantPhoneDeployment, error)
-	GetAssistantWebpluginDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantWebPluginDeployment, error)
-	GetAssistantWhatsappDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantWhatsappDeployment, error)
 }

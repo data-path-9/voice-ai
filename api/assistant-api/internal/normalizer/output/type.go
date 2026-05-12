@@ -31,7 +31,7 @@ type CleanTextPipeline struct {
 	IsFinal   bool
 }
 
-// OutputPipeline emits the final TTSTextPacket to TTS.
+// OutputPipeline emits the final TextToSpeechTextPacket to TTS.
 type OutputPipeline struct {
 	ContextID string
 	Text      string

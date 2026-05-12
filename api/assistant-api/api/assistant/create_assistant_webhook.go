@@ -25,14 +25,9 @@ func (assistantApi *assistantGrpcApi) CreateAssistantWebhook(ctx context.Context
 		ctx,
 		iAuth,
 		cawr.GetAssistantId(),
+		cawr.GetProvider(),
 		cawr.GetAssistantEvents(),
-		cawr.GetTimeoutSecond(),
-		cawr.GetHttpMethod(),
-		cawr.GetHttpUrl(),
-		cawr.GetHttpHeaders(),
-		cawr.GetHttpBody(),
-		cawr.GetRetryStatusCodes(),
-		cawr.GetMaxRetryCount(),
+		cawr.GetOptions(),
 		cawr.GetExecutionPriority(),
 		&cawr.Description)
 	if err != nil {

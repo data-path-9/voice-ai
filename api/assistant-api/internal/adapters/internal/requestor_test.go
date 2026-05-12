@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	assistant_config "github.com/rapidaai/api/assistant-api/config"
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_telemetry_entity "github.com/rapidaai/api/assistant-api/internal/entity/telemetry"
@@ -37,8 +38,10 @@ func requestorForTelemetryTest(t *testing.T, providers []*internal_telemetry_ent
 	orgID := uint64(22)
 
 	return &genericRequestor{
-		logger: requestorTelemetryTestLogger(t),
-		config: &assistant_config.AssistantConfig{},
+		logger:           requestorTelemetryTestLogger(t),
+		config:           &assistant_config.AssistantConfig{},
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
 		auth: &types.ServiceScope{
 			ProjectId:      &projectID,
 			OrganizationId: &orgID,
@@ -132,4 +135,25 @@ func TestInitializeCollectors_UnknownProvider_SkipsToNoopCollectors(t *testing.T
 	assert.NotNil(t, r.observer)
 	assert.True(t, strings.Contains(fmt.Sprintf("%T", r.observer.EventCollectors()), "noopEventCollector"))
 	assert.True(t, strings.Contains(fmt.Sprintf("%T", r.observer.MetricCollectors()), "noopMetricCollector"))
+}
+
+// TestInitializeTelemetry_ChannelHandoffIsRaceFree asserts the synchronization
+// pattern used in production: telemetry runs in a goroutine, then sends a
+// packet (channel send) that another goroutine receives before reading
+// r.observer. Channel send/receive establishes happens-before, so reads from
+// the receiver's goroutine observe the fully-published observer.
+//
+// Run with -race; must pass.
+func TestInitializeTelemetry_ChannelHandoffIsRaceFree(t *testing.T) {
+	r := requestorForTelemetryTest(t, nil)
+	handoff := make(chan struct{}, 1)
+
+	go func() {
+		r.initializeCollectors(context.Background())
+		handoff <- struct{}{}
+	}()
+
+	<-handoff
+	require.NotNil(t, r.observer)
+	_ = r.observer.EventCollectors()
 }

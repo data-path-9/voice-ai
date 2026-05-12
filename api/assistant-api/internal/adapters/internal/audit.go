@@ -25,17 +25,50 @@ func (kr *genericRequestor) CreateKnowledgeLog(ctx context.Context, knowledgeId 
 	return err
 }
 
-func (cr *genericRequestor) CreateWebhookLog(
+func (cr *genericRequestor) CreateHTTPLog(
 	ctx context.Context,
-	webhookID uint64, httpUrl, httpMethod, event string,
+	source string,
+	sourceRefID uint64,
+	sourceEvent string,
+	contextID string,
+	httpURL, httpMethod string,
 	responseStatus int64,
 	timeTaken int64,
 	retryCount uint32,
 	status type_enums.RecordState,
+	errorMessage *string,
 	request, response []byte) error {
 	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 	defer cancel()
-	_, err := cr.webhookService.CreateLog(dbCtx, cr.auth, webhookID, cr.assistant.Id, cr.assistantConversation.Id, httpUrl, httpMethod, event, responseStatus, timeTaken, retryCount, status, request, response)
+
+	var conversationID *uint64
+	if cr.assistantConversation != nil {
+		conversationID = &cr.assistantConversation.Id
+	}
+	var assistantID uint64
+	if cr.assistant != nil {
+		assistantID = cr.assistant.Id
+	}
+
+	_, err := cr.httpLogService.CreateLog(
+		dbCtx,
+		cr.auth,
+		source,
+		sourceRefID,
+		sourceEvent,
+		contextID,
+		assistantID,
+		conversationID,
+		httpURL,
+		httpMethod,
+		responseStatus,
+		timeTaken,
+		retryCount,
+		status,
+		errorMessage,
+		request,
+		response,
+	)
 	return err
 }
 

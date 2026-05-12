@@ -1,0 +1,280 @@
+// Copyright (c) 2023-2025 RapidaAI
+// Author: Prashant Srivastav <prashant@rapida.ai>
+//
+// Licensed under GPL-2.0 with Rapida Additional Terms.
+// See LICENSE.md or contact sales@rapida.ai for commercial usage.
+package router
+
+import (
+	"context"
+	"errors"
+
+	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+)
+
+// DispatchHandler exposes typed packet handlers used by DispatchPacket.
+type DispatchHandler interface {
+	HandleUserText(context.Context, internal_type.UserTextReceivedPacket)
+	HandleUserAudio(context.Context, internal_type.UserAudioReceivedPacket)
+	HandleSpeechToTextAudio(context.Context, internal_type.SpeechToTextAudioPacket)
+	HandleDenoise(context.Context, internal_type.DenoiseAudioPacket)
+	HandleDenoisedAudio(context.Context, internal_type.DenoisedAudioPacket)
+	HandleVadAudio(context.Context, internal_type.VadAudioPacket)
+	HandleVadSpeechActivity(context.Context, internal_type.VadSpeechActivityPacket)
+	HandleSpeechToText(context.Context, internal_type.SpeechToTextPacket)
+	HandleInterimEndOfSpeech(context.Context, internal_type.InterimEndOfSpeechPacket)
+	HandleEndOfSpeech(context.Context, internal_type.EndOfSpeechPacket)
+	HandleUserInput(context.Context, internal_type.UserInputPacket)
+	HandleInterruptionDetected(context.Context, internal_type.InterruptionDetectedPacket)
+	HandleEndOfSpeechInterruption(context.Context, internal_type.EndOfSpeechInterruptionPacket)
+	HandleEndOfSpeechAudio(context.Context, internal_type.EndOfSpeechAudioPacket)
+
+	HandleTextToSpeechInterrupt(context.Context, internal_type.TextToSpeechInterruptPacket)
+	HandleLLMInterrupt(context.Context, internal_type.LLMInterruptPacket)
+	HandleSpeechToTextInterrupt(context.Context, internal_type.SpeechToTextInterruptPacket)
+	HandleTurnChange(context.Context, internal_type.TurnChangePacket)
+	HandleLLMResponseDelta(context.Context, internal_type.LLMResponseDeltaPacket)
+	HandleLLMResponseDone(context.Context, internal_type.LLMResponseDonePacket)
+	HandleError(context.Context, internal_type.ErrorPacket)
+	HandleInjectMessage(context.Context, internal_type.InjectMessagePacket)
+	HandleStartIdleTimeout(context.Context, internal_type.StartIdleTimeoutPacket)
+	HandleStopIdleTimeout(context.Context, internal_type.StopIdleTimeoutPacket)
+	HandleTextToSpeechText(context.Context, internal_type.TextToSpeechTextPacket)
+	HandleTextToSpeechDone(context.Context, internal_type.TextToSpeechDonePacket)
+	HandleTextToSpeechAudio(context.Context, internal_type.TextToSpeechAudioPacket)
+	HandleTextToSpeechEnd(context.Context, internal_type.TextToSpeechEndPacket)
+	HandleLLMToolCall(context.Context, internal_type.LLMToolCallPacket)
+	HandleLLMToolResult(context.Context, internal_type.LLMToolResultPacket)
+	HandleRecordUserAudio(context.Context, internal_type.RecordUserAudioPacket)
+	HandleRecordAssistantAudio(context.Context, internal_type.RecordAssistantAudioPacket)
+	HandleMessageCreate(context.Context, internal_type.MessageCreatePacket)
+	HandleConversationMetric(context.Context, internal_type.ConversationMetricPacket)
+	HandleConversationMetadata(context.Context, internal_type.ConversationMetadataPacket)
+	HandleUserMessageMetric(context.Context, internal_type.UserMessageMetricPacket)
+	HandleAssistantMessageMetric(context.Context, internal_type.AssistantMessageMetricPacket)
+	HandleUserMessageMetadata(context.Context, internal_type.UserMessageMetadataPacket)
+	HandleAssistantMessageMetadata(context.Context, internal_type.AssistantMessageMetadataPacket)
+	HandleToolLogCreate(context.Context, internal_type.ToolLogCreatePacket)
+	HandleToolLogUpdate(context.Context, internal_type.ToolLogUpdatePacket)
+	HandleHTTPLogCreate(context.Context, internal_type.HTTPLogCreatePacket)
+	HandleConversationEvent(context.Context, internal_type.ConversationEventPacket)
+	HandleInitializeAssistant(context.Context, internal_type.InitializeAssistantPacket)
+	HandleInitializeConversation(context.Context, internal_type.InitializeConversationPacket)
+	HandleInitializeSessionRuntime(context.Context, internal_type.InitializeSessionRuntimePacket)
+	HandleInitializeAuthentication(context.Context, internal_type.InitializeAuthenticationPacket)
+	HandleExecuteSessionAuthentication(context.Context, internal_type.ExecuteSessionAuthenticationPacket)
+	HandleSessionAuthenticationSucceeded(context.Context, internal_type.SessionAuthenticationSucceededPacket)
+	HandleInitializeSpeechToText(context.Context, internal_type.InitializeSpeechToTextPacket)
+	HandleInitializeTextToSpeech(context.Context, internal_type.InitializeTextToSpeechPacket)
+	HandleInitializeVoiceActivityDetection(context.Context, internal_type.InitializeVoiceActivityDetectionPacket)
+	HandleInitializeEndOfSpeech(context.Context, internal_type.InitializeEndOfSpeechPacket)
+	HandleInitializeDenoise(context.Context, internal_type.InitializeDenoisePacket)
+	HandleInitializeAssistantExecutorPacket(context.Context, internal_type.InitializeAssistantExecutorPacket)
+	HandleInitializeBehavior(context.Context, internal_type.InitializeBehaviorPacket)
+	HandleInitializationCompleted(context.Context, internal_type.InitializationCompletedPacket)
+	HandleInitializeTelemetry(context.Context, internal_type.InitializeTelemetryPacket)
+	HandleInitializeOutboundDispatcher(context.Context, internal_type.InitializeOutboundDispatcherPacket)
+	HandleInitializeInboundDispatcher(context.Context, internal_type.InitializeInboundDispatcherPacket)
+	HandleModeSwitchRequested(context.Context, internal_type.ModeSwitchRequestedPacket)
+	HandleModeSwitchCompleted(context.Context, internal_type.ModeSwitchCompletedPacket)
+	HandleModeSwitchInitializeSpeechToText(context.Context, internal_type.ModeSwitchInitializeSpeechToTextPacket)
+	HandleModeSwitchInitializeTextToSpeech(context.Context, internal_type.ModeSwitchInitializeTextToSpeechPacket)
+	HandleModeSwitchInitializeVoiceActivityDetection(context.Context, internal_type.ModeSwitchInitializeVoiceActivityDetectionPacket)
+	HandleModeSwitchInitializeEndOfSpeech(context.Context, internal_type.ModeSwitchInitializeEndOfSpeechPacket)
+	HandleModeSwitchFinalizeEndOfSpeech(context.Context, internal_type.ModeSwitchFinalizeEndOfSpeechPacket)
+	HandleModeSwitchInitializeDenoise(context.Context, internal_type.ModeSwitchInitializeDenoisePacket)
+	HandleModeSwitchFinalizeDenoise(context.Context, internal_type.ModeSwitchFinalizeDenoisePacket)
+	HandleModeSwitchFinalizeVoiceActivityDetection(context.Context, internal_type.ModeSwitchFinalizeVoiceActivityDetectionPacket)
+	HandleModeSwitchFinalizeTextToSpeech(context.Context, internal_type.ModeSwitchFinalizeTextToSpeechPacket)
+	HandleModeSwitchFinalizeSpeechToText(context.Context, internal_type.ModeSwitchFinalizeSpeechToTextPacket)
+	HandleFinalizeBehavior(context.Context, internal_type.FinalizeBehaviorPacket)
+	HandleFinalizeEndOfSpeech(context.Context, internal_type.FinalizeEndOfSpeechPacket)
+	HandleFinalizeVoiceActivityDetection(context.Context, internal_type.FinalizeVoiceActivityDetectionPacket)
+	HandleFinalizeTextToSpeech(context.Context, internal_type.FinalizeTextToSpeechPacket)
+	HandleFinalizeSpeechToText(context.Context, internal_type.FinalizeSpeechToTextPacket)
+	HandleFinalizeAuthentication(context.Context, internal_type.FinalizeAuthenticationPacket)
+	HandleFinalizeSessionRuntime(context.Context, internal_type.FinalizeSessionRuntimePacket)
+	HandleFinalizeConversation(context.Context, internal_type.FinalizeConversationPacket)
+	HandleFinalizeAssistant(context.Context, internal_type.FinalizeAssistantPacket)
+	HandleFinalizationCompleted(context.Context, internal_type.FinalizationCompletedPacket)
+	HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket)
+	HandleExecuteWebhook(context.Context, internal_type.ExecuteWebhookPacket)
+}
+
+// DispatchPacket routes a packet to the matching typed method on handler.
+// Returns an error when no packet mapping exists.
+func DispatchPacket(ctx context.Context, p internal_type.Packet, handler DispatchHandler) error {
+	switch vl := p.(type) {
+	case internal_type.UserTextReceivedPacket:
+		handler.HandleUserText(ctx, vl)
+	case internal_type.UserAudioReceivedPacket:
+		handler.HandleUserAudio(ctx, vl)
+	case internal_type.SpeechToTextAudioPacket:
+		handler.HandleSpeechToTextAudio(ctx, vl)
+	case internal_type.DenoiseAudioPacket:
+		handler.HandleDenoise(ctx, vl)
+	case internal_type.DenoisedAudioPacket:
+		handler.HandleDenoisedAudio(ctx, vl)
+	case internal_type.VadAudioPacket:
+		handler.HandleVadAudio(ctx, vl)
+	case internal_type.VadSpeechActivityPacket:
+		handler.HandleVadSpeechActivity(ctx, vl)
+	case internal_type.SpeechToTextPacket:
+		handler.HandleSpeechToText(ctx, vl)
+	case internal_type.InterimEndOfSpeechPacket:
+		handler.HandleInterimEndOfSpeech(ctx, vl)
+	case internal_type.EndOfSpeechPacket:
+		handler.HandleEndOfSpeech(ctx, vl)
+	case internal_type.UserInputPacket:
+		handler.HandleUserInput(ctx, vl)
+	case internal_type.InterruptionDetectedPacket:
+		handler.HandleInterruptionDetected(ctx, vl)
+	case internal_type.TextToSpeechInterruptPacket:
+		handler.HandleTextToSpeechInterrupt(ctx, vl)
+	case internal_type.LLMInterruptPacket:
+		handler.HandleLLMInterrupt(ctx, vl)
+	case internal_type.SpeechToTextInterruptPacket:
+		handler.HandleSpeechToTextInterrupt(ctx, vl)
+	case internal_type.TurnChangePacket:
+		handler.HandleTurnChange(ctx, vl)
+	case internal_type.LLMResponseDeltaPacket:
+		handler.HandleLLMResponseDelta(ctx, vl)
+	case internal_type.LLMResponseDonePacket:
+		handler.HandleLLMResponseDone(ctx, vl)
+	case internal_type.ErrorPacket:
+		handler.HandleError(ctx, vl)
+	case internal_type.InjectMessagePacket:
+		handler.HandleInjectMessage(ctx, vl)
+	case internal_type.StartIdleTimeoutPacket:
+		handler.HandleStartIdleTimeout(ctx, vl)
+	case internal_type.StopIdleTimeoutPacket:
+		handler.HandleStopIdleTimeout(ctx, vl)
+	case internal_type.TextToSpeechTextPacket:
+		handler.HandleTextToSpeechText(ctx, vl)
+	case internal_type.TextToSpeechDonePacket:
+		handler.HandleTextToSpeechDone(ctx, vl)
+	case internal_type.TextToSpeechAudioPacket:
+		handler.HandleTextToSpeechAudio(ctx, vl)
+	case internal_type.TextToSpeechEndPacket:
+		handler.HandleTextToSpeechEnd(ctx, vl)
+	case internal_type.LLMToolCallPacket:
+		handler.HandleLLMToolCall(ctx, vl)
+	case internal_type.LLMToolResultPacket:
+		handler.HandleLLMToolResult(ctx, vl)
+	case internal_type.RecordUserAudioPacket:
+		handler.HandleRecordUserAudio(ctx, vl)
+	case internal_type.RecordAssistantAudioPacket:
+		handler.HandleRecordAssistantAudio(ctx, vl)
+	case internal_type.MessageCreatePacket:
+		handler.HandleMessageCreate(ctx, vl)
+	case internal_type.ConversationMetricPacket:
+		handler.HandleConversationMetric(ctx, vl)
+	case internal_type.ConversationMetadataPacket:
+		handler.HandleConversationMetadata(ctx, vl)
+	case internal_type.UserMessageMetricPacket:
+		handler.HandleUserMessageMetric(ctx, vl)
+	case internal_type.AssistantMessageMetricPacket:
+		handler.HandleAssistantMessageMetric(ctx, vl)
+	case internal_type.UserMessageMetadataPacket:
+		handler.HandleUserMessageMetadata(ctx, vl)
+	case internal_type.AssistantMessageMetadataPacket:
+		handler.HandleAssistantMessageMetadata(ctx, vl)
+	case internal_type.ToolLogCreatePacket:
+		handler.HandleToolLogCreate(ctx, vl)
+	case internal_type.ToolLogUpdatePacket:
+		handler.HandleToolLogUpdate(ctx, vl)
+	case internal_type.HTTPLogCreatePacket:
+		handler.HandleHTTPLogCreate(ctx, vl)
+	case internal_type.ConversationEventPacket:
+		handler.HandleConversationEvent(ctx, vl)
+	case internal_type.InitializeAssistantPacket:
+		handler.HandleInitializeAssistant(ctx, vl)
+	case internal_type.InitializeConversationPacket:
+		handler.HandleInitializeConversation(ctx, vl)
+	case internal_type.InitializeSessionRuntimePacket:
+		handler.HandleInitializeSessionRuntime(ctx, vl)
+	case internal_type.InitializeAuthenticationPacket:
+		handler.HandleInitializeAuthentication(ctx, vl)
+	case internal_type.InitializeAssistantExecutorPacket:
+		handler.HandleInitializeAssistantExecutorPacket(ctx, vl)
+	case internal_type.ExecuteSessionAuthenticationPacket:
+		handler.HandleExecuteSessionAuthentication(ctx, vl)
+	case internal_type.SessionAuthenticationSucceededPacket:
+		handler.HandleSessionAuthenticationSucceeded(ctx, vl)
+	case internal_type.InitializeSpeechToTextPacket:
+		handler.HandleInitializeSpeechToText(ctx, vl)
+	case internal_type.InitializeTextToSpeechPacket:
+		handler.HandleInitializeTextToSpeech(ctx, vl)
+	case internal_type.InitializeVoiceActivityDetectionPacket:
+		handler.HandleInitializeVoiceActivityDetection(ctx, vl)
+	case internal_type.InitializeEndOfSpeechPacket:
+		handler.HandleInitializeEndOfSpeech(ctx, vl)
+	case internal_type.InitializeBehaviorPacket:
+		handler.HandleInitializeBehavior(ctx, vl)
+	case internal_type.InitializationCompletedPacket:
+		handler.HandleInitializationCompleted(ctx, vl)
+	case internal_type.InitializeTelemetryPacket:
+		handler.HandleInitializeTelemetry(ctx, vl)
+	case internal_type.InitializeOutboundDispatcherPacket:
+		handler.HandleInitializeOutboundDispatcher(ctx, vl)
+	case internal_type.InitializeInboundDispatcherPacket:
+		handler.HandleInitializeInboundDispatcher(ctx, vl)
+	case internal_type.ModeSwitchRequestedPacket:
+		handler.HandleModeSwitchRequested(ctx, vl)
+	case internal_type.ModeSwitchCompletedPacket:
+		handler.HandleModeSwitchCompleted(ctx, vl)
+	case internal_type.ModeSwitchInitializeSpeechToTextPacket:
+		handler.HandleModeSwitchInitializeSpeechToText(ctx, vl)
+	case internal_type.ModeSwitchInitializeTextToSpeechPacket:
+		handler.HandleModeSwitchInitializeTextToSpeech(ctx, vl)
+	case internal_type.ModeSwitchInitializeVoiceActivityDetectionPacket:
+		handler.HandleModeSwitchInitializeVoiceActivityDetection(ctx, vl)
+	case internal_type.ModeSwitchInitializeEndOfSpeechPacket:
+		handler.HandleModeSwitchInitializeEndOfSpeech(ctx, vl)
+	case internal_type.ModeSwitchInitializeDenoisePacket:
+		handler.HandleModeSwitchInitializeDenoise(ctx, vl)
+	case internal_type.ModeSwitchFinalizeEndOfSpeechPacket:
+		handler.HandleModeSwitchFinalizeEndOfSpeech(ctx, vl)
+	case internal_type.ModeSwitchFinalizeDenoisePacket:
+		handler.HandleModeSwitchFinalizeDenoise(ctx, vl)
+	case internal_type.ModeSwitchFinalizeVoiceActivityDetectionPacket:
+		handler.HandleModeSwitchFinalizeVoiceActivityDetection(ctx, vl)
+	case internal_type.ModeSwitchFinalizeTextToSpeechPacket:
+		handler.HandleModeSwitchFinalizeTextToSpeech(ctx, vl)
+	case internal_type.ModeSwitchFinalizeSpeechToTextPacket:
+		handler.HandleModeSwitchFinalizeSpeechToText(ctx, vl)
+	case internal_type.FinalizeBehaviorPacket:
+		handler.HandleFinalizeBehavior(ctx, vl)
+	case internal_type.FinalizeEndOfSpeechPacket:
+		handler.HandleFinalizeEndOfSpeech(ctx, vl)
+	case internal_type.FinalizeVoiceActivityDetectionPacket:
+		handler.HandleFinalizeVoiceActivityDetection(ctx, vl)
+	case internal_type.FinalizeTextToSpeechPacket:
+		handler.HandleFinalizeTextToSpeech(ctx, vl)
+	case internal_type.FinalizeSpeechToTextPacket:
+		handler.HandleFinalizeSpeechToText(ctx, vl)
+	case internal_type.FinalizeAuthenticationPacket:
+		handler.HandleFinalizeAuthentication(ctx, vl)
+	case internal_type.FinalizeSessionRuntimePacket:
+		handler.HandleFinalizeSessionRuntime(ctx, vl)
+	case internal_type.FinalizeConversationPacket:
+		handler.HandleFinalizeConversation(ctx, vl)
+	case internal_type.FinalizeAssistantPacket:
+		handler.HandleFinalizeAssistant(ctx, vl)
+	case internal_type.FinalizationCompletedPacket:
+		handler.HandleFinalizationCompleted(ctx, vl)
+	case internal_type.ExecuteAnalysisPacket:
+		handler.HandleExecuteAnalysis(ctx, vl)
+	case internal_type.ExecuteWebhookPacket:
+		handler.HandleExecuteWebhook(ctx, vl)
+
+	case internal_type.EndOfSpeechInterruptionPacket:
+		handler.HandleEndOfSpeechInterruption(ctx, vl)
+	case internal_type.EndOfSpeechAudioPacket:
+		handler.HandleEndOfSpeechAudio(ctx, vl)
+
+	default:
+		return errors.New("unknown packet")
+	}
+	return nil
+}

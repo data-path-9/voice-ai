@@ -3,16 +3,19 @@
 //
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
-package variable
+package variable_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/rapidaai/api/assistant-api/internal/variable"
+	"github.com/rapidaai/api/assistant-api/internal/variable/namespace"
 )
 
 func TestSystemNamespace_Get(t *testing.T) {
 	src := newFixtureSource()
-	ns := &SystemNamespace{}
+	ns := &namespace.SystemNamespace{}
 
 	cases := map[string]string{
 		"current_date":     "2026-04-26",
@@ -23,22 +26,22 @@ func TestSystemNamespace_Get(t *testing.T) {
 		"date_unix_ms":     "1777206645000",
 	}
 	for suffix, want := range cases {
-		got, ok := ns.Get(suffix, src, ResolveContext{})
+		got, ok := ns.Get(suffix, src, variable.ResolveContext{})
 		if !ok || got != want {
 			t.Errorf("system.%s = %v, %v; want %v, true", suffix, got, ok, want)
 		}
 	}
 
-	if _, ok := ns.Get("missing", src, ResolveContext{}); ok {
+	if _, ok := ns.Get("missing", src, variable.ResolveContext{}); ok {
 		t.Errorf("system.missing should return ok=false")
 	}
 }
 
 func TestSystemNamespace_Enumerate_StableOnSameNow(t *testing.T) {
 	src := newFixtureSource()
-	ns := &SystemNamespace{}
-	a := ns.Enumerate(src, ResolveContext{})
-	b := ns.Enumerate(src, ResolveContext{})
+	ns := &namespace.SystemNamespace{}
+	a := ns.Enumerate(src, variable.ResolveContext{})
+	b := ns.Enumerate(src, variable.ResolveContext{})
 	if len(a) != 7 || len(b) != 7 {
 		t.Errorf("system.Enumerate should expose 7 keys, got %d / %d", len(a), len(b))
 	}
@@ -51,7 +54,7 @@ func TestSystemNamespace_Enumerate_StableOnSameNow(t *testing.T) {
 
 func TestAssistantNamespace_Get(t *testing.T) {
 	src := newFixtureSource()
-	ns := &AssistantNamespace{}
+	ns := &namespace.AssistantNamespace{}
 	cases := map[string]string{
 		"id":          "42",
 		"version":     "vrsn_7",
@@ -60,7 +63,7 @@ func TestAssistantNamespace_Get(t *testing.T) {
 		"description": "test assistant",
 	}
 	for suffix, want := range cases {
-		got, ok := ns.Get(suffix, src, ResolveContext{})
+		got, ok := ns.Get(suffix, src, variable.ResolveContext{})
 		if !ok || got != want {
 			t.Errorf("assistant.%s = %v, %v; want %v, true", suffix, got, ok, want)
 		}
@@ -68,31 +71,31 @@ func TestAssistantNamespace_Get(t *testing.T) {
 }
 
 func TestAssistantNamespace_NilAssistant(t *testing.T) {
-	src := &FakeSource{NowValue: fixedTime()}
-	ns := &AssistantNamespace{}
-	if got := ns.Enumerate(src, ResolveContext{}); len(got) != 0 {
+	src := newTestSource()
+	ns := &namespace.AssistantNamespace{}
+	if got := ns.Enumerate(src, variable.ResolveContext{}); len(got) != 0 {
 		t.Errorf("nil assistant should enumerate empty, got %v", got)
 	}
 }
 
 func TestConversationNamespace_Get(t *testing.T) {
 	src := newFixtureSource()
-	ns := &ConversationNamespace{}
+	ns := &namespace.ConversationNamespace{}
 
-	if got, _ := ns.Get("id", src, ResolveContext{}); got != "100" {
+	if got, _ := ns.Get("id", src, variable.ResolveContext{}); got != "100" {
 		t.Errorf("conversation.id = %v, want 100", got)
 	}
-	if got, _ := ns.Get("identifier", src, ResolveContext{}); got != "conv-abc" {
+	if got, _ := ns.Get("identifier", src, variable.ResolveContext{}); got != "conv-abc" {
 		t.Errorf("conversation.identifier = %v", got)
 	}
-	if got, _ := ns.Get("source", src, ResolveContext{}); got != "phone" {
+	if got, _ := ns.Get("source", src, variable.ResolveContext{}); got != "phone" {
 		t.Errorf("conversation.source = %v", got)
 	}
-	if got, _ := ns.Get("direction", src, ResolveContext{}); got != "inbound" {
+	if got, _ := ns.Get("direction", src, variable.ResolveContext{}); got != "inbound" {
 		t.Errorf("conversation.direction = %v", got)
 	}
 
-	msgs, ok := ns.Get("messages", src, ResolveContext{})
+	msgs, ok := ns.Get("messages", src, variable.ResolveContext{})
 	if !ok {
 		t.Fatalf("conversation.messages missing")
 	}
@@ -106,12 +109,9 @@ func TestConversationNamespace_Get(t *testing.T) {
 }
 
 func TestConversationNamespace_NilConversation_StillEnumeratesMessages(t *testing.T) {
-	src := &FakeSource{
-		NowValue:       fixedTime(),
-		HistoryEntries: []HistoryEntry{{Role: "user", Content: "hi"}},
-	}
-	ns := &ConversationNamespace{}
-	got := ns.Enumerate(src, ResolveContext{})
+	src := newTestSource(variable.WithHistories([]variable.ConversationMessageInfo{{Role: "user", Content: "hi"}}))
+	ns := &namespace.ConversationNamespace{}
+	got := ns.Enumerate(src, variable.ResolveContext{})
 	if _, ok := got["messages"]; !ok {
 		t.Errorf("nil conversation should still expose messages, got %v", got)
 	}
@@ -122,30 +122,30 @@ func TestConversationNamespace_NilConversation_StillEnumeratesMessages(t *testin
 
 func TestSessionNamespace(t *testing.T) {
 	src := newFixtureSource()
-	ns := &SessionNamespace{}
-	if got, _ := ns.Get("mode", src, ResolveContext{}); got != "audio" {
+	ns := &namespace.SessionNamespace{}
+	if got, _ := ns.Get("mode", src, variable.ResolveContext{}); got != "audio" {
 		t.Errorf("session.mode = %v", got)
 	}
-	if got, _ := ns.Get("source", src, ResolveContext{}); got != "phone" {
+	if got, _ := ns.Get("source", src, variable.ResolveContext{}); got != "phone" {
 		t.Errorf("session.source = %v", got)
 	}
 
-	empty := &FakeSource{NowValue: fixedTime()}
-	if got := ns.Enumerate(empty, ResolveContext{}); len(got) != 0 {
+	empty := newTestSource()
+	if got := ns.Enumerate(empty, variable.ResolveContext{}); len(got) != 0 {
 		t.Errorf("empty session should enumerate empty, got %v", got)
 	}
 }
 
 func TestArgumentNamespace(t *testing.T) {
 	src := newFixtureSource()
-	ns := &ArgumentNamespace{}
-	if got, _ := ns.Get("foo", src, ResolveContext{}); got != "bar" {
+	ns := &namespace.ArgumentNamespace{}
+	if got, _ := ns.Get("foo", src, variable.ResolveContext{}); got != "bar" {
 		t.Errorf("argument.foo = %v", got)
 	}
-	if _, ok := ns.Get("missing", src, ResolveContext{}); ok {
+	if _, ok := ns.Get("missing", src, variable.ResolveContext{}); ok {
 		t.Errorf("argument.missing should return ok=false")
 	}
-	enum := ns.Enumerate(src, ResolveContext{})
+	enum := ns.Enumerate(src, variable.ResolveContext{})
 	if enum["count"] != 3 {
 		t.Errorf("Enumerate count = %v", enum["count"])
 	}
@@ -153,38 +153,38 @@ func TestArgumentNamespace(t *testing.T) {
 
 func TestMetadataNamespace(t *testing.T) {
 	src := newFixtureSource()
-	ns := &MetadataNamespace{}
-	if got, _ := ns.Get("loose", src, ResolveContext{}); got != "value" {
+	ns := &namespace.MetadataNamespace{}
+	if got, _ := ns.Get("loose", src, variable.ResolveContext{}); got != "value" {
 		t.Errorf("metadata.loose = %v", got)
 	}
-	if got, _ := ns.Get("client.direction", src, ResolveContext{}); got != "outbound" {
+	if got, _ := ns.Get("client.direction", src, variable.ResolveContext{}); got != "outbound" {
 		t.Errorf("metadata.client.direction = %v (literal key)", got)
 	}
 }
 
 func TestOptionNamespace(t *testing.T) {
 	src := newFixtureSource()
-	ns := &OptionNamespace{}
-	if got, _ := ns.Get("max_tokens", src, ResolveContext{}); got != "1024" {
+	ns := &namespace.OptionNamespace{}
+	if got, _ := ns.Get("max_tokens", src, variable.ResolveContext{}); got != "1024" {
 		t.Errorf("option.max_tokens = %v", got)
 	}
 }
 
 func TestMetadataPrefixNamespace_Client(t *testing.T) {
 	src := newFixtureSource()
-	ns := &MetadataPrefixNamespace{Prefix: "client."}
+	ns := &namespace.MetadataPrefixNamespace{Prefix: "client."}
 
-	if got, _ := ns.Get("direction", src, ResolveContext{}); got != "outbound" {
+	if got, _ := ns.Get("direction", src, variable.ResolveContext{}); got != "outbound" {
 		t.Errorf("client.direction = %v", got)
 	}
-	if got, _ := ns.Get("phone", src, ResolveContext{}); got != "6001" {
+	if got, _ := ns.Get("phone", src, variable.ResolveContext{}); got != "6001" {
 		t.Errorf("client.phone = %v", got)
 	}
-	if _, ok := ns.Get("missing", src, ResolveContext{}); ok {
+	if _, ok := ns.Get("missing", src, variable.ResolveContext{}); ok {
 		t.Errorf("client.missing should return ok=false")
 	}
 
-	enum := ns.Enumerate(src, ResolveContext{})
+	enum := ns.Enumerate(src, variable.ResolveContext{})
 	want := map[string]string{
 		"direction":          "outbound",
 		"telephony_provider": "sip",
@@ -205,15 +205,15 @@ func TestMetadataPrefixNamespace_Client(t *testing.T) {
 
 func TestMetadataPrefixNamespace_Analysis(t *testing.T) {
 	src := newFixtureSource()
-	ns := &MetadataPrefixNamespace{Prefix: "analysis."}
-	if got, _ := ns.Get("summary", src, ResolveContext{}); got != "ok" {
+	ns := &namespace.MetadataPrefixNamespace{Prefix: "analysis."}
+	if got, _ := ns.Get("summary", src, variable.ResolveContext{}); got != "ok" {
 		t.Errorf("analysis.summary = %v", got)
 	}
 }
 
 func TestToolNamespace(t *testing.T) {
-	ns := &ToolNamespace{}
-	ctx := ResolveContext{ToolName: "search", ToolArgs: map[string]any{"q": "hi"}}
+	ns := &namespace.ToolNamespace{}
+	ctx := variable.ResolveContext{ToolName: "search", ToolArgs: map[string]any{"q": "hi"}}
 	if got, _ := ns.Get("name", nil, ctx); got != "search" {
 		t.Errorf("tool.name = %v", got)
 	}
@@ -228,8 +228,8 @@ func TestToolNamespace(t *testing.T) {
 
 func TestEventNamespace(t *testing.T) {
 	src := newFixtureSource()
-	ns := &EventNamespace{}
-	ctx := ResolveContext{Event: "conversation.ended"}
+	ns := &namespace.EventNamespace{}
+	ctx := variable.ResolveContext{Event: "conversation.ended"}
 
 	if got, _ := ns.Get("type", src, ctx); got != "conversation.ended" {
 		t.Errorf("event.type = %v", got)
@@ -254,8 +254,8 @@ func TestEventNamespace(t *testing.T) {
 
 func TestConversationNamespace_DurationFormat(t *testing.T) {
 	src := newFixtureSource()
-	ns := &ConversationNamespace{}
-	got, ok := ns.Get("duration", src, ResolveContext{})
+	ns := &namespace.ConversationNamespace{}
+	got, ok := ns.Get("duration", src, variable.ResolveContext{})
 	if !ok {
 		t.Fatalf("conversation.duration missing")
 	}

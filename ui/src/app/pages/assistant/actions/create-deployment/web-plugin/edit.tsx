@@ -37,9 +37,7 @@ import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confir
 import { Tabs } from '@/app/components/carbon/tabs';
 import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import { InputCheckbox } from '@/app/components/carbon/form/input-checkbox';
-import { InputHelper } from '@/app/components/input-helper';
-import { BaseCard } from '@/app/components/base/cards';
-import { ButtonSet } from '@carbon/react';
+import { ButtonSet, CheckboxGroup } from '@carbon/react';
 import { Notification } from '@/app/components/carbon/notification';
 
 const EDIT_TABS = [
@@ -59,7 +57,9 @@ export function EditAssistantWebDeploymentPage() {
   );
 }
 
-const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }) => {
+const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({
+  assistantId,
+}) => {
   const { goToDeploymentAssistant } = useGlobalNavigation();
   const { showLoader, hideLoader } = useRapidaStore();
   const { providerCredentials } = useAllProviderCredentials();
@@ -72,24 +72,37 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
   const [voiceInputEnable, setVoiceInputEnable] = useState(false);
   const [voiceOutputEnable, setVoiceOutputEnable] = useState(true);
 
-  const [experienceConfig, setExperienceConfig] = useState<WebWidgetExperienceConfig>({
-    greeting: undefined,
-    messageOnError: undefined,
-    idealTimeout: '30',
-    idealMessage: 'Are you there?',
-    maxCallDuration: '300',
-    idleTimeoutBackoffTimes: '2',
-    suggestions: [],
-  });
+  const [experienceConfig, setExperienceConfig] =
+    useState<WebWidgetExperienceConfig>({
+      greeting: undefined,
+      messageOnError: undefined,
+      idealTimeout: '30',
+      idealMessage: 'Are you there?',
+      maxCallDuration: '300',
+      idleTimeoutBackoffTimes: '2',
+      suggestions: [],
+    });
 
-  const [audioInputConfig, setAudioInputConfig] = useState<{ provider: string; parameters: Metadata[] }>({
+  const [audioInputConfig, setAudioInputConfig] = useState<{
+    provider: string;
+    parameters: Metadata[];
+  }>({
     provider: 'deepgram',
-    parameters: GetDefaultSpeechToTextIfInvalid('deepgram', GetDefaultMicrophoneConfig()),
+    parameters: GetDefaultSpeechToTextIfInvalid(
+      'deepgram',
+      GetDefaultMicrophoneConfig(),
+    ),
   });
 
-  const [audioOutputConfig, setAudioOutputConfig] = useState<{ provider: string; parameters: Metadata[] }>({
+  const [audioOutputConfig, setAudioOutputConfig] = useState<{
+    provider: string;
+    parameters: Metadata[];
+  }>({
     provider: 'cartesia',
-    parameters: GetDefaultTextToSpeechIfInvalid('cartesia', GetDefaultSpeakerConfig()),
+    parameters: GetDefaultTextToSpeechIfInvalid(
+      'cartesia',
+      GetDefaultSpeakerConfig(),
+    ),
   });
 
   const hasFetched = useRef(false);
@@ -104,7 +117,11 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
     GetAssistantWebpluginDeployment(
       connectionConfig,
       req,
-      ConnectionConfig.WithDebugger({ authorization: token, userId: authId, projectId }),
+      ConnectionConfig.WithDebugger({
+        authorization: token,
+        userId: authId,
+        projectId,
+      }),
     )
       .then(response => {
         hideLoader();
@@ -147,15 +164,23 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
       })
       .catch(err => {
         hideLoader();
-        setErrorMessage(err?.message || 'Failed to fetch deployment configuration');
+        setErrorMessage(
+          err?.message || 'Failed to fetch deployment configuration',
+        );
       });
   }, [assistantId, token, authId, projectId]);
 
   const getProviderCredentialIds = (provider: string) =>
-    providerCredentials.filter(c => c.getProvider() === provider).map(c => c.getId());
+    providerCredentials
+      .filter(c => c.getProvider() === provider)
+      .map(c => c.getId());
 
   const activeIndex = useMemo(
-    () => Math.max(EDIT_TABS.findIndex(tab => tab.code === activeTab), 0),
+    () =>
+      Math.max(
+        EDIT_TABS.findIndex(tab => tab.code === activeTab),
+        0,
+      ),
     [activeTab],
   );
 
@@ -172,7 +197,9 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
     if (voiceInputEnable) {
       if (!audioInputConfig.provider) {
         setIsDeploying(false);
-        setErrorMessage('Please provide a provider for interpreting input audio.');
+        setErrorMessage(
+          'Please provide a provider for interpreting input audio.',
+        );
         return;
       }
       const err = ValidateSpeechToTextIfInvalid(
@@ -190,7 +217,9 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
     if (voiceOutputEnable) {
       if (!audioOutputConfig.provider) {
         setIsDeploying(false);
-        setErrorMessage('Please provide a provider for interpreting output audio.');
+        setErrorMessage(
+          'Please provide a provider for interpreting output audio.',
+        );
         return;
       }
       const err = ValidateTextToSpeechIfInvalid(
@@ -208,13 +237,20 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
     const req = new CreateAssistantDeploymentRequest();
     const webDeployment = new AssistantWebpluginDeployment();
     webDeployment.setAssistantid(assistantId);
-    if (experienceConfig.greeting) webDeployment.setGreeting(experienceConfig.greeting);
-    if (experienceConfig.messageOnError) webDeployment.setMistake(experienceConfig.messageOnError);
-    if (experienceConfig.idealTimeout) webDeployment.setIdealtimeout(experienceConfig.idealTimeout);
+    if (experienceConfig.greeting)
+      webDeployment.setGreeting(experienceConfig.greeting);
+    if (experienceConfig.messageOnError)
+      webDeployment.setMistake(experienceConfig.messageOnError);
+    if (experienceConfig.idealTimeout)
+      webDeployment.setIdealtimeout(experienceConfig.idealTimeout);
     if (experienceConfig.idleTimeoutBackoffTimes)
-      webDeployment.setIdealtimeoutbackoff(experienceConfig.idleTimeoutBackoffTimes);
-    if (experienceConfig.idealMessage) webDeployment.setIdealtimeoutmessage(experienceConfig.idealMessage);
-    if (experienceConfig.maxCallDuration) webDeployment.setMaxsessionduration(experienceConfig.maxCallDuration);
+      webDeployment.setIdealtimeoutbackoff(
+        experienceConfig.idleTimeoutBackoffTimes,
+      );
+    if (experienceConfig.idealMessage)
+      webDeployment.setIdealtimeoutmessage(experienceConfig.idealMessage);
+    if (experienceConfig.maxCallDuration)
+      webDeployment.setMaxsessionduration(experienceConfig.maxCallDuration);
 
     webDeployment.setSuggestionList(experienceConfig.suggestions);
     webDeployment.setHelpcenterenabled(false);
@@ -240,7 +276,11 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
     CreateAssistantWebpluginDeployment(
       connectionConfig,
       req,
-      ConnectionConfig.WithDebugger({ authorization: token, userId: authId, projectId }),
+      ConnectionConfig.WithDebugger({
+        authorization: token,
+        userId: authId,
+        projectId,
+      }),
     )
       .then(response => {
         if (response?.getData() && response.getSuccess()) {
@@ -254,7 +294,9 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
         }
       })
       .catch(err => {
-        setErrorMessage(err?.message || 'Error deploying web widget. Please try again.');
+        setErrorMessage(
+          err?.message || 'Error deploying web widget. Please try again.',
+        );
       })
       .finally(() => {
         setIsDeploying(false);
@@ -300,20 +342,24 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
           )}
           {activeTab === 'voice-input' && (
             <div>
-              <div className="px-6 pt-6 pb-4">
-                <BaseCard className="p-4 gap-2">
+              <div className="px-6">
+                <CheckboxGroup
+                  legendText=""
+                  warn
+                  warnText={
+                    voiceInputEnable
+                      ? 'Assistant can now receive user input via audio and text.'
+                      : 'Assistant will now receive user input via text only.'
+                  }
+                >
                   <InputCheckbox
                     checked={voiceInputEnable}
                     onChange={e => setVoiceInputEnable(e.target.checked)}
+                    id="voice-input-toggle-edit"
                   >
-                    Enable voice input (Speech-to-Text)
+                    Enable Voice Input (Speech-to-Text)
                   </InputCheckbox>
-                  <InputHelper>
-                    {voiceInputEnable
-                      ? 'Voice input is currently enabled.'
-                      : 'Voice input is disabled. This deployment will not transcribe user speech, and existing STT settings will be removed when you save.'}
-                  </InputHelper>
-                </BaseCard>
+                </CheckboxGroup>
               </div>
               {voiceInputEnable && (
                 <ConfigureAudioInputProvider
@@ -325,20 +371,24 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
           )}
           {activeTab === 'voice-output' && (
             <div>
-              <div className="px-6 pt-6 pb-4">
-                <BaseCard className="p-4 gap-2">
+              <div className="px-6">
+                <CheckboxGroup
+                  legendText=""
+                  warn
+                  warnText={
+                    voiceOutputEnable
+                      ? 'Assistant responses will now be delivered via audio and text.'
+                      : 'Assistant responses will now be delivered via text.'
+                  }
+                >
                   <InputCheckbox
                     checked={voiceOutputEnable}
                     onChange={e => setVoiceOutputEnable(e.target.checked)}
+                    id="voice-output-toggle-edit"
                   >
-                    Enable voice output (Text-to-Speech)
+                    Enable Voice Output (Text-to-Speech)
                   </InputCheckbox>
-                  <InputHelper>
-                    {voiceOutputEnable
-                      ? 'Voice output is currently enabled.'
-                      : 'Voice output is disabled. Assistant responses will be text only.'}
-                  </InputHelper>
-                </BaseCard>
+                </CheckboxGroup>
               </div>
               {voiceOutputEnable && (
                 <ConfigureAudioOutputProvider
@@ -351,12 +401,16 @@ const EditAssistantWebDeployment: FC<{ assistantId: string }> = ({ assistantId }
         </div>
 
         <div className="shrink-0">
-          {errorMessage && <Notification kind="error" title="Error" subtitle={errorMessage} />}
+          {errorMessage && (
+            <Notification kind="error" title="Error" subtitle={errorMessage} />
+          )}
           <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
             <SecondaryButton
               size="lg"
               className="w-full h-full"
-              onClick={() => showDialog(() => goToDeploymentAssistant(assistantId))}
+              onClick={() =>
+                showDialog(() => goToDeploymentAssistant(assistantId))
+              }
             >
               Cancel
             </SecondaryButton>

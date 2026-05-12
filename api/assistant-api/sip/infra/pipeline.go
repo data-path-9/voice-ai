@@ -142,39 +142,3 @@ type DTMFReceivedPipeline struct {
 }
 
 func (p DTMFReceivedPipeline) CallID() string { return p.ID }
-
-// RegisterRequestedPipeline is emitted to initiate SIP REGISTER for a DID.
-type RegisterRequestedPipeline struct {
-	ID           string // synthetic, e.g. "reg-{DID}"
-	DID          string
-	Registration *Registration
-}
-
-func (p RegisterRequestedPipeline) CallID() string { return p.ID }
-
-// RegisterActivePipeline is emitted when a SIP registration succeeds.
-type RegisterActivePipeline struct {
-	ID          string
-	DID         string
-	AssistantID uint64
-	ExpiresAt   time.Time
-}
-
-func (p RegisterActivePipeline) CallID() string { return p.ID }
-
-// RegisterFailedPipeline is emitted when a SIP registration fails.
-type RegisterFailedPipeline struct {
-	ID    string
-	DID   string
-	Error error
-}
-
-func (p RegisterFailedPipeline) CallID() string { return p.ID }
-
-// RegisterExpiringPipeline is emitted when a registration is about to expire and needs renewal.
-type RegisterExpiringPipeline struct {
-	ID  string
-	DID string
-}
-
-func (p RegisterExpiringPipeline) CallID() string { return p.ID }

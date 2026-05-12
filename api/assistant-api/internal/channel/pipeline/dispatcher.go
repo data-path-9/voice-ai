@@ -74,7 +74,6 @@ type Dispatcher struct {
 	onCreateTalker            OnCreateTalkerFunc
 	onRunTalk                 OnRunTalkFunc
 	onCreateObserver          OnCreateObserverFunc
-	onCreateHooks             OnCreateHooksFunc
 	onCompleteSession         OnCompleteSessionFunc
 }
 
@@ -114,9 +113,6 @@ type OnRunTalkFunc func(ctx context.Context, talker internal_type.Talking, auth 
 // OnCreateObserverFunc creates a ConversationObserver.
 type OnCreateObserverFunc func(ctx context.Context, callID string, auth types.SimplePrinciple, assistantID, conversationID uint64) *observe.ConversationObserver
 
-// OnCreateHooksFunc creates ConversationHooks (webhooks + analysis).
-type OnCreateHooksFunc func(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64) *observe.ConversationHooks
-
 // OnCompleteSessionFunc marks a call context as completed.
 type OnCompleteSessionFunc func(ctx context.Context, contextID string)
 
@@ -135,7 +131,6 @@ type DispatcherConfig struct {
 	OnCreateTalker            OnCreateTalkerFunc
 	OnRunTalk                 OnRunTalkFunc
 	OnCreateObserver          OnCreateObserverFunc
-	OnCreateHooks             OnCreateHooksFunc
 	OnCompleteSession         OnCompleteSessionFunc
 }
 
@@ -154,7 +149,6 @@ func NewDispatcher(cfg *DispatcherConfig) *Dispatcher {
 		onCreateTalker:            cfg.OnCreateTalker,
 		onRunTalk:                 cfg.OnRunTalk,
 		onCreateObserver:          cfg.OnCreateObserver,
-		onCreateHooks:             cfg.OnCreateHooks,
 		onCompleteSession:         cfg.OnCompleteSession,
 		signalCh:                  make(chan callEnvelope, signalChSize),
 		setupCh:                   make(chan callEnvelope, setupChSize),

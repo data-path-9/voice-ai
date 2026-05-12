@@ -17,6 +17,7 @@ import (
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_asterisk "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/asterisk/internal"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -52,8 +53,6 @@ func newTestStreamer(t *testing.T) (*Streamer, net.Conn) {
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	outputCtx, outputCancel := context.WithCancel(context.Background())
-
 	as := &Streamer{
 		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
 			logger, cc, nil,
@@ -64,14 +63,12 @@ func newTestStreamer(t *testing.T) (*Streamer, net.Conn) {
 		audioProcessor: audioProcessor,
 		ctx:            ctx,
 		cancel:         cancel,
-		outputCtx:      outputCtx,
-		outputCancel:   outputCancel,
 		initialUUID:    "test-uuid",
 	}
+	as.mediaSession = internal_telephony_media.NewMediaSession(ctx, logger, audioProcessor, nil)
 
 	t.Cleanup(func() {
 		cancel()
-		outputCancel()
 		local.Close()
 		remote.Close()
 	})
@@ -171,7 +168,7 @@ func TestSend_EndConversation_SecondCall_StillPushesToolResult(t *testing.T) {
 	}
 }
 
-func TestSend_ConversationDisconnection_RequeuesDisconnect_NoImmediateClose(t *testing.T) {
+func TestSend_ConversationDisconnection_ClosesStreamer(t *testing.T) {
 	as, remote := newTestStreamer(t)
 	drainRemoteConn(remote)
 
@@ -180,19 +177,20 @@ func TestSend_ConversationDisconnection_RequeuesDisconnect_NoImmediateClose(t *t
 	})
 	require.NoError(t, err)
 
+	// Server-initiated Send no longer requeues the disconnect onto CriticalCh —
+	// the server callsite already knows the reason. The talker exits via the
+	// Recv-err path once Cancel cancels s.Ctx.
 	select {
 	case msg := <-as.CriticalCh:
-		disc, ok := msg.(*protos.ConversationDisconnection)
-		require.True(t, ok, "expected requeued disconnection, got %T", msg)
-		assert.Equal(t, protos.ConversationDisconnection_DISCONNECTION_TYPE_USER, disc.GetType())
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for requeued disconnection")
+		t.Fatalf("server-initiated Send must not push to CriticalCh; got %T", msg)
+	default:
 	}
 
+	// Streamer should be closed: s.Ctx cancelled so Talker.Recv returns EOF.
 	select {
-	case msg := <-as.CriticalCh:
-		t.Fatalf("unexpected extra message after requeued disconnection: %T", msg)
-	case <-time.After(200 * time.Millisecond):
+	case <-as.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected streamer context to be cancelled after disconnect")
 	}
 }
 

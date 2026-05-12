@@ -114,7 +114,7 @@ func (eos *SilenceBasedEOS) Analyze(ctx context.Context, pkt internal_type.Packe
 		)
 		eos.send(command{ctx: ctx, segment: seg, fireNow: true})
 
-	case internal_type.InterruptionDetectedPacket:
+	case internal_type.EndOfSpeechInterruptionPacket:
 		eos.mu.RLock()
 		seg := eos.state.segment
 		eos.mu.RUnlock()

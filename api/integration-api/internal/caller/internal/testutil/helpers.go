@@ -53,6 +53,23 @@ func BuildChatOptions(pcfg ProviderConfig) *internal_types.ChatCompletionOptions
 	}
 }
 
+// BuildChatStreamOptions creates ChatStreamCompletionOptions from a ProviderConfig.
+func BuildChatStreamOptions(pcfg ProviderConfig) *internal_types.ChatStreamCompletionOptions {
+	modelParams := BuildModelParameters(pcfg.Options)
+	return &internal_types.ChatStreamCompletionOptions{
+		AIOptions: internal_types.AIOptions{
+			RequestId:      1,
+			PreHook:        NoopPreHook,
+			PostHook:       NoopPostHook,
+			ModelParameter: modelParams,
+		},
+		Request: &protos.StreamChatInput{
+			RequestId:       "integration-test-1",
+			ModelParameters: modelParams,
+		},
+	}
+}
+
 // BuildEmbeddingOptions creates EmbeddingOptions from a ProviderConfig.
 func BuildEmbeddingOptions(pcfg ProviderConfig) *internal_types.EmbeddingOptions {
 	return &internal_types.EmbeddingOptions{

@@ -7,16 +7,20 @@
 package internal_sip_telephony
 
 import (
-	"bytes"
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
+	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
+	internal_telephony_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
+	"github.com/rapidaai/api/assistant-api/internal/observe"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	"github.com/rapidaai/protos"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -28,6 +32,7 @@ const (
 var (
 	rapida16kConfig = internal_audio.NewLinear16khzMonoAudioConfig()
 	mulaw8kConfig   = internal_audio.NewMulaw8khzMonoAudioConfig()
+	linear8kConfig  = internal_audio.NewLinear8khzMonoAudioConfig()
 )
 
 type bridgeState struct {
@@ -44,13 +49,19 @@ type AudioProcessor struct {
 	resampler  internal_type.AudioResampler
 	rtpHandler *sip_infra.RTPHandler
 	pushInput  func(internal_type.Stream)
+	onInput    func([]byte)
 
 	// Output buffering (AI TTS → RTP)
-	outputBuffer   bytes.Buffer
-	outputBufferMu sync.Mutex
-	flushCh        chan struct{}
+	outputBuffer internal_telephony_output.FrameBuffer
+	flushCh      chan struct{}
 
-	// Bridge state
+	// Bridge state.
+	// `bridge` is held in an atomic pointer so any goroutine can do a
+	// lock-free `bridge.Load() != nil` check (IsBridgeActive, ProcessOutputAudio).
+	// `bridgeMu` serializes ForwardUserAudio (the writer) with
+	// ClearBridgeTarget so that Clear cannot return — and the outbound RTP
+	// channel cannot be closed — while a send is in flight.
+	bridgeMu         sync.Mutex
 	bridge           atomic.Pointer[bridgeState]
 	bridgeUserCh     chan []byte
 	bridgeOperatorCh chan []byte
@@ -58,6 +69,14 @@ type AudioProcessor struct {
 	// Ringback
 	ringtoneMu sync.RWMutex
 	ringtone   []byte
+
+	ambientMixer internal_ambient.Mixer
+	adapter      internal_telephony_output.AudioAdapter
+
+	outputSenderRunning atomic.Bool
+	outputHealth        *internal_telephony_output.HealthStats
+	droppedOutputFrames atomic.Uint64
+	transferActive      atomic.Bool
 }
 
 type AudioProcessorConfig struct {
@@ -65,6 +84,7 @@ type AudioProcessorConfig struct {
 	Resampler  internal_type.AudioResampler
 	PushInput  func(internal_type.Stream)
 	Ringtone   string
+	Ambient    *internal_ambient.Config
 }
 
 func NewAudioProcessor(cfg AudioProcessorConfig) *AudioProcessor {
@@ -72,11 +92,25 @@ func NewAudioProcessor(cfg AudioProcessorConfig) *AudioProcessor {
 		resampler:        cfg.Resampler,
 		rtpHandler:       cfg.RTPHandler,
 		pushInput:        cfg.PushInput,
+		outputBuffer:     internal_telephony_output.NewBytesFrameBuffer(mulawFrameSize * 8),
 		flushCh:          make(chan struct{}, 1),
 		bridgeUserCh:     make(chan []byte, audioChSize),
 		bridgeOperatorCh: make(chan []byte, audioChSize),
+		outputHealth:     internal_telephony_output.NewHealthStats(),
 	}
+	p.adapter = newAudioAdapter(cfg.Resampler, cfg.RTPHandler.GetCodec)
 	p.SetRingtone(cfg.Ringtone)
+	ambientMixer, err := internal_ambient.NewLoopMixer(internal_ambient.MixerSpec{
+		Resampler:         cfg.Resampler,
+		TargetAudioConfig: linear8kConfig,
+		FrameBytes:        mulawFrameSize * 2,
+	})
+	if err == nil {
+		p.ambientMixer = ambientMixer
+		if cfg.Ambient != nil {
+			_ = p.ambientMixer.Configure(*cfg.Ambient)
+		}
+	}
 	return p
 }
 
@@ -87,15 +121,24 @@ func (p *AudioProcessor) SetRingtone(name string) {
 	p.ringtoneMu.Unlock()
 }
 
+func (p *AudioProcessor) ConfigureAmbient(cfg internal_ambient.Config) error {
+	if p.ambientMixer == nil {
+		return nil
+	}
+	return p.ambientMixer.Configure(cfg)
+}
+
 func (p *AudioProcessor) ringtoneBytes() []byte {
 	p.ringtoneMu.RLock()
 	defer p.ringtoneMu.RUnlock()
 	return p.ringtone
 }
 
-// ProcessInputAudio normalizes codec and resamples RTP audio to 16kHz LINEAR16.
-// Returns the resampled audio, or nil if conversion fails.
-func (p *AudioProcessor) ProcessInputAudio(audioData []byte) []byte {
+func (p *AudioProcessor) SetInputAudioCallback(callback func(audio []byte)) {
+	p.onInput = callback
+}
+
+func (p *AudioProcessor) convertInputAudio(audioData []byte) []byte {
 	codec := p.rtpHandler.GetCodec()
 	if codec != nil && codec.Name == "PCMA" {
 		audioData = internal_audio.AlawToUlaw(audioData)
@@ -107,41 +150,47 @@ func (p *AudioProcessor) ProcessInputAudio(audioData []byte) []byte {
 	return resampled
 }
 
-// ProcessOutputAudio resamples 16kHz LINEAR16 to 8kHz µ-law and buffers for pacing.
-// Discards audio when a bridge is active — the caller hears the operator, not the AI.
-func (p *AudioProcessor) ProcessOutputAudio(audioData []byte) error {
-	if p.bridge.Load() != nil {
+// ProcessInputAudio normalizes codec and resamples RTP audio to 16kHz LINEAR16.
+// It forwards converted bytes to the registered input callback.
+func (p *AudioProcessor) ProcessInputAudio(audioData []byte) error {
+	resampled := p.convertInputAudio(audioData)
+	if len(resampled) == 0 {
 		return nil
 	}
-	outData, err := p.resampler.Resample(audioData, rapida16kConfig, mulaw8kConfig)
-	if err != nil {
-		return err
+	if p.onInput != nil {
+		p.onInput(resampled)
 	}
-	codec := p.rtpHandler.GetCodec()
-	if codec != nil && codec.Name == "PCMA" {
-		outData = internal_audio.UlawToAlaw(outData)
-	}
-	p.outputBufferMu.Lock()
-	p.outputBuffer.Write(outData)
-	p.outputBufferMu.Unlock()
 	return nil
 }
 
-func (p *AudioProcessor) getNextChunk() []byte {
-	p.outputBufferMu.Lock()
-	defer p.outputBufferMu.Unlock()
-	if p.outputBuffer.Len() < mulawFrameSize {
+// ProcessOutputAudio resamples 16kHz LINEAR16 to 8kHz µ-law and buffers for pacing.
+// Discards audio when a bridge is active — the caller hears the operator, not the AI.
+func (p *AudioProcessor) ProcessOutputAudio(audioData []byte) error {
+	if p.bridge.Load() != nil || p.transferActive.Load() {
 		return nil
 	}
-	chunk := make([]byte, mulawFrameSize)
-	p.outputBuffer.Read(chunk)
+	outData, err := p.adapter.ConvertOutput(audioData)
+	if err != nil {
+		return err
+	}
+	p.outputBuffer.Write(outData)
+	return nil
+}
+
+func (p *AudioProcessor) Complete() {
+	p.outputBuffer.Complete(mulawFrameSize, p.adapter.SilenceByte())
+}
+
+func (p *AudioProcessor) getNextChunk() []byte {
+	chunk, ok := p.outputBuffer.Next(mulawFrameSize)
+	if !ok {
+		return nil
+	}
 	return chunk
 }
 
 func (p *AudioProcessor) ClearOutputBuffer() {
-	p.outputBufferMu.Lock()
-	p.outputBuffer.Reset()
-	p.outputBufferMu.Unlock()
+	p.outputBuffer.Clear()
 	select {
 	case p.flushCh <- struct{}{}:
 	default:
@@ -156,9 +205,7 @@ func (p *AudioProcessor) WaitOutputDrain(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			p.outputBufferMu.Lock()
 			empty := p.outputBuffer.Len() == 0
-			p.outputBufferMu.Unlock()
 			if empty {
 				return
 			}
@@ -168,27 +215,85 @@ func (p *AudioProcessor) WaitOutputDrain(ctx context.Context) {
 
 // RunOutputSender paces 20ms audio frames to the RTP handler. Blocks until ctx is cancelled.
 func (p *AudioProcessor) RunOutputSender(ctx context.Context) {
-	ticker := time.NewTicker(chunkDuration)
-	defer ticker.Stop()
+	if !p.outputSenderRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer p.outputSenderRunning.Store(false)
+
+	go p.runFlushSignalWorker(ctx)
+	(&internal_telephony_output.Pacer{
+		FrameDuration: chunkDuration,
+		Provider:      p,
+		Consumer:      p,
+		Health:        p.outputHealth,
+	}).Run(ctx)
+}
+
+func (p *AudioProcessor) OutputHealthSnapshot() internal_telephony_output.HealthSnapshot {
+	if p.outputHealth == nil {
+		return internal_telephony_output.HealthSnapshot{}
+	}
+	return p.outputHealth.Snapshot()
+}
+
+func (p *AudioProcessor) runFlushSignalWorker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-p.flushCh:
 			p.rtpHandler.FlushAudioOut()
-		case <-ticker.C:
-			chunk := p.getNextChunk()
-			if chunk == nil {
-				continue
-			}
-			select {
-			case p.rtpHandler.AudioOut() <- chunk:
-			case <-ctx.Done():
-				return
-			default:
+		}
+	}
+}
+
+func (p *AudioProcessor) applyAmbient(chunk []byte) []byte {
+	return p.adapter.MixAmbient(chunk, p.ambientMixer)
+}
+
+func (p *AudioProcessor) NextFrame() []byte {
+	if p.transferActive.Load() {
+		return nil
+	}
+	chunk := p.getNextChunk()
+	if len(chunk) == 0 {
+		return nil
+	}
+	return p.applyAmbient(chunk)
+}
+
+func (p *AudioProcessor) IdleFrame() []byte {
+	if p.transferActive.Load() {
+		return nil
+	}
+	return p.applyAmbient(nil)
+}
+
+func (p *AudioProcessor) SetTransferActive(active bool) {
+	p.transferActive.Store(active)
+}
+
+func (p *AudioProcessor) ConsumeFrame(frame []byte) error {
+	select {
+	case p.rtpHandler.AudioOut() <- frame:
+	default:
+		dropped := p.droppedOutputFrames.Add(1)
+		if dropped == 1 || dropped%100 == 0 {
+			if p.pushInput != nil {
+				p.pushInput(&protos.ConversationEvent{
+					Name: observe.ComponentTelephony,
+					Data: map[string]string{
+						"type":                 "output_send_error",
+						"provider":             "sip",
+						"reason":               "audio_out_full",
+						"dropped_frames_total": fmt.Sprintf("%d", dropped),
+					},
+					Time: timestamppb.Now(),
+				})
 			}
 		}
 	}
+	return nil
 }
 
 // =============================================================================
@@ -211,16 +316,30 @@ func (p *AudioProcessor) SetBridgeTarget(rtp *sip_infra.RTPHandler, inCodec, out
 			bs.transcode = internal_audio.UlawToAlaw
 		}
 	}
+	p.bridgeMu.Lock()
 	p.bridge.Store(bs)
+	p.bridgeMu.Unlock()
 }
 
+// ClearBridgeTarget releases the bridge target. Blocks until any in-flight
+// ForwardUserAudio call has finished writing — this is the load-bearing
+// invariant: callers may close the outbound RTP channel only AFTER this
+// returns, since no writer holds a reference to it past that point.
 func (p *AudioProcessor) ClearBridgeTarget() {
+	p.bridgeMu.Lock()
 	p.bridge.Store(nil)
+	p.bridgeMu.Unlock()
 }
 
-// ForwardUserAudio routes caller audio to the bridge target and queues it for recording.
-// Returns true if bridge is active and audio was handled.
+// ForwardUserAudio routes caller audio to the bridge target and queues it
+// for recording. Returns true if bridge is active and audio was handled.
+//
+// Holds bridgeMu for the duration of the send so that ClearBridgeTarget
+// cannot return — and therefore the outbound RTP channel cannot be closed —
+// while a send is in flight.
 func (p *AudioProcessor) ForwardUserAudio(audioData []byte) bool {
+	p.bridgeMu.Lock()
+	defer p.bridgeMu.Unlock()
 	bs := p.bridge.Load()
 	if bs == nil {
 		return false
@@ -289,13 +408,20 @@ func (p *AudioProcessor) PlayRingback(ctx context.Context) {
 		case <-ticker.C:
 			var frame []byte
 			if useFile {
-				end := fileOffset + mulawFrameSize
-				if end > len(ringtone) {
-					fileOffset = 0
-					end = mulawFrameSize
+				if len(ringtone) >= mulawFrameSize {
+					end := fileOffset + mulawFrameSize
+					if end > len(ringtone) {
+						fileOffset = 0
+						end = mulawFrameSize
+					}
+					if end <= len(ringtone) {
+						frame = ringtone[fileOffset:end]
+						fileOffset = end
+					}
 				}
-				frame = ringtone[fileOffset:end]
-				fileOffset = end
+				if len(frame) == 0 {
+					frame, offset = internal_audio.GenerateRingbackMulawFrame(offset)
+				}
 			} else {
 				frame, offset = internal_audio.GenerateRingbackMulawFrame(offset)
 			}

@@ -3,16 +3,18 @@
 //
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
-package variable
+package variable_test
 
 import (
 	"testing"
+
+	"github.com/rapidaai/api/assistant-api/internal/variable"
+	"github.com/rapidaai/api/assistant-api/internal/variable/namespace"
 )
 
 func TestApply_DefaultNamespaces(t *testing.T) {
 	src := newFixtureSource()
-	r := NewDefaultRegistry()
-
+	r := namespace.NewDefaultRegistry()
 	mapping := map[string]string{
 		"assistant.id":          "agent_id",
 		"conversation.id":       "conv_id",
@@ -24,8 +26,7 @@ func TestApply_DefaultNamespaces(t *testing.T) {
 		"system.does_not_exist": "skipped",
 	}
 
-	out := r.Apply(mapping, src, ResolveContext{})
-
+	out := r.Apply(mapping, src, variable.ResolveContext{})
 	want := map[string]any{
 		"agent_id": "42",
 		"conv_id":  "100",
@@ -52,13 +53,13 @@ func TestApply_DefaultNamespaces(t *testing.T) {
 
 func TestApply_CustomPrefix_WritesMappingValueUnderSuffix(t *testing.T) {
 	src := newFixtureSource()
-	r := NewDefaultRegistry()
+	r := namespace.NewDefaultRegistry()
 
 	mapping := map[string]string{
 		"custom.literal_key": "literal_value",
 	}
 
-	out := r.Apply(mapping, src, ResolveContext{})
+	out := r.Apply(mapping, src, variable.ResolveContext{})
 	if out["literal_key"] != "literal_value" {
 		t.Errorf("custom.* should write mapping value under suffix; got %v", out)
 	}
@@ -69,13 +70,13 @@ func TestApply_CustomPrefix_WritesMappingValueUnderSuffix(t *testing.T) {
 
 func TestApply_ToolNamespace_RegisteredByCaller(t *testing.T) {
 	src := newFixtureSource()
-	r := NewDefaultRegistry().With("tool", &ToolNamespace{})
+	r := namespace.NewDefaultRegistry().With("tool", &namespace.ToolNamespace{})
 
 	mapping := map[string]string{
 		"tool.name":     "tool_name",
 		"tool.argument": "tool_arg",
 	}
-	ctx := ResolveContext{ToolName: "search", ToolArgs: map[string]any{"q": "hi"}}
+	ctx := variable.ResolveContext{ToolName: "search", ToolArgs: map[string]any{"q": "hi"}}
 
 	out := r.Apply(mapping, src, ctx)
 	if out["tool_name"] != "search" {
@@ -88,16 +89,16 @@ func TestApply_ToolNamespace_RegisteredByCaller(t *testing.T) {
 }
 
 func TestApply_EmptyMapping(t *testing.T) {
-	r := NewDefaultRegistry()
-	out := r.Apply(nil, newFixtureSource(), ResolveContext{})
+	r := namespace.NewDefaultRegistry()
+	out := r.Apply(nil, newFixtureSource(), variable.ResolveContext{})
 	if len(out) != 0 {
 		t.Errorf("nil mapping should produce empty output, got %v", out)
 	}
 }
 
 func TestApply_KeyWithoutDot(t *testing.T) {
-	r := NewDefaultRegistry()
-	out := r.Apply(map[string]string{"justaword": "dest"}, newFixtureSource(), ResolveContext{})
+	r := namespace.NewDefaultRegistry()
+	out := r.Apply(map[string]string{"justaword": "dest"}, newFixtureSource(), variable.ResolveContext{})
 	if len(out) != 0 {
 		t.Errorf("dotless key should be skipped, got %v", out)
 	}

@@ -49,7 +49,7 @@ export const SimpleMessagingAction: FC<SimpleMessagingAcitonProps> = ({
         {/* Textarea — grows with content, no overlap with buttons */}
         <ScalableTextarea
           placeholder={placeholder}
-          wrapperClassName="bg-white dark:bg-gray-900 border-t border-l border-r border-gray-200 dark:border-gray-800 px-4 pt-3 pb-2"
+          wrapperClassName="bg-white dark:bg-gray-900 border-t border-l border-r border-gray-200 dark:border-gray-800 p-2"
           className="bg-transparent"
           {...register('message', {
             required: 'Please write your message.',

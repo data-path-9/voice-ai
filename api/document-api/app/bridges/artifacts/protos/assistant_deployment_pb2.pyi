@@ -272,8 +272,88 @@ class GetAssistantWebpluginDeploymentResponse(_message.Message):
     error: _common_pb2.Error
     def __init__(self, code: _Optional[int] = ..., success: bool = ..., data: _Optional[_Union[AssistantWebpluginDeployment, _Mapping]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ...) -> None: ...
 
+class GetAllAssistantApiDeploymentResponse(_message.Message):
+    __slots__ = ("code", "success", "data", "error", "paginated")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    PAGINATED_FIELD_NUMBER: _ClassVar[int]
+    code: int
+    success: bool
+    data: _containers.RepeatedCompositeFieldContainer[AssistantApiDeployment]
+    error: _common_pb2.Error
+    paginated: _common_pb2.Paginated
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., data: _Optional[_Iterable[_Union[AssistantApiDeployment, _Mapping]]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ..., paginated: _Optional[_Union[_common_pb2.Paginated, _Mapping]] = ...) -> None: ...
+
+class GetAllAssistantPhoneDeploymentResponse(_message.Message):
+    __slots__ = ("code", "success", "data", "error", "paginated")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    PAGINATED_FIELD_NUMBER: _ClassVar[int]
+    code: int
+    success: bool
+    data: _containers.RepeatedCompositeFieldContainer[AssistantPhoneDeployment]
+    error: _common_pb2.Error
+    paginated: _common_pb2.Paginated
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., data: _Optional[_Iterable[_Union[AssistantPhoneDeployment, _Mapping]]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ..., paginated: _Optional[_Union[_common_pb2.Paginated, _Mapping]] = ...) -> None: ...
+
+class GetAllAssistantWhatsappDeploymentResponse(_message.Message):
+    __slots__ = ("code", "success", "data", "error", "paginated")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    PAGINATED_FIELD_NUMBER: _ClassVar[int]
+    code: int
+    success: bool
+    data: _containers.RepeatedCompositeFieldContainer[AssistantWhatsappDeployment]
+    error: _common_pb2.Error
+    paginated: _common_pb2.Paginated
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., data: _Optional[_Iterable[_Union[AssistantWhatsappDeployment, _Mapping]]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ..., paginated: _Optional[_Union[_common_pb2.Paginated, _Mapping]] = ...) -> None: ...
+
+class GetAllAssistantDebuggerDeploymentResponse(_message.Message):
+    __slots__ = ("code", "success", "data", "error", "paginated")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    PAGINATED_FIELD_NUMBER: _ClassVar[int]
+    code: int
+    success: bool
+    data: _containers.RepeatedCompositeFieldContainer[AssistantDebuggerDeployment]
+    error: _common_pb2.Error
+    paginated: _common_pb2.Paginated
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., data: _Optional[_Iterable[_Union[AssistantDebuggerDeployment, _Mapping]]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ..., paginated: _Optional[_Union[_common_pb2.Paginated, _Mapping]] = ...) -> None: ...
+
+class GetAllAssistantWebpluginDeploymentResponse(_message.Message):
+    __slots__ = ("code", "success", "data", "error", "paginated")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    PAGINATED_FIELD_NUMBER: _ClassVar[int]
+    code: int
+    success: bool
+    data: _containers.RepeatedCompositeFieldContainer[AssistantWebpluginDeployment]
+    error: _common_pb2.Error
+    paginated: _common_pb2.Paginated
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., data: _Optional[_Iterable[_Union[AssistantWebpluginDeployment, _Mapping]]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ..., paginated: _Optional[_Union[_common_pb2.Paginated, _Mapping]] = ...) -> None: ...
+
 class GetAssistantDeploymentRequest(_message.Message):
     __slots__ = ("assistantId",)
     ASSISTANTID_FIELD_NUMBER: _ClassVar[int]
     assistantId: int
     def __init__(self, assistantId: _Optional[int] = ...) -> None: ...
+
+class GetAllAssistantDeploymentRequest(_message.Message):
+    __slots__ = ("assistantId", "paginate", "criterias")
+    ASSISTANTID_FIELD_NUMBER: _ClassVar[int]
+    PAGINATE_FIELD_NUMBER: _ClassVar[int]
+    CRITERIAS_FIELD_NUMBER: _ClassVar[int]
+    assistantId: int
+    paginate: _common_pb2.Paginate
+    criterias: _containers.RepeatedCompositeFieldContainer[_common_pb2.Criteria]
+    def __init__(self, assistantId: _Optional[int] = ..., paginate: _Optional[_Union[_common_pb2.Paginate, _Mapping]] = ..., criterias: _Optional[_Iterable[_Union[_common_pb2.Criteria, _Mapping]]] = ...) -> None: ...

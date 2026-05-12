@@ -67,6 +67,38 @@ func Go(ctx context.Context, fn func()) {
 	go CallSafe(ctx, fn)
 }
 
+// WithDeadline runs fn with a deadline-bound context derived from parent.
+// Lifecycle is fully owned by the helper:
+//
+//   - If onTimeout != nil, a watchdog goroutine releases the internal cancel
+//     and invokes onTimeout iff the context expired by deadline (not by
+//     parent cancel). The returned context can outlive fn — suitable for
+//     async work that uses ctx beyond fn's return (packet emits, goroutine
+//     hand-offs).
+//
+//   - If onTimeout == nil, cancel is released after fn returns and no
+//     goroutine is spawned. Suitable for synchronous, short-lived scopes
+//     like a single DB write.
+//
+// Logging on deadline exceedance is the caller's responsibility (do it
+// inside onTimeout).
+func WithDeadline(parent context.Context, dur time.Duration, onTimeout func(), fn func(context.Context)) {
+	ctx, cancel := context.WithTimeout(parent, dur)
+	if onTimeout == nil {
+		defer cancel()
+		fn(ctx)
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		cancel()
+		if ctx.Err() == context.DeadlineExceeded {
+			onTimeout()
+		}
+	}()
+	fn(ctx)
+}
+
 // PanicIfNotNil reports the provided recovered value if it's not nil,
 // waits for 1 second (allowing logs to flush), then re-panics with formatted info.
 //

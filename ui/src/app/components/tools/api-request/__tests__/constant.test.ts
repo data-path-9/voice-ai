@@ -21,7 +21,9 @@ describe('api-request default options and validation', () => {
     expect(byKey['tool.method']).toBe('POST');
     expect(byKey['tool.endpoint']).toBeUndefined();
     expect(byKey['tool.headers']).toBe('{}');
-    expect(byKey['tool.parameters']).toBe('{"tool.argument":"argument"}');
+    expect(byKey['tool.parameters']).toBe(
+      '{"tool.argument":"argument","tool.name":"name"}',
+    );
   });
 
   it('preserves existing values when provided', () => {

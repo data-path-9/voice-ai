@@ -120,7 +120,7 @@ func TestSpeechmaticsSTTAudioAcceptance(t *testing.T) {
 	// Flow: each Transform call accepts the audio chunk without error
 	chunks := testutil.ChunkAudio(testutil.SineTonePCM(440, 1.0), testutil.FrameSize)
 	for i, chunk := range chunks {
-		err := stt.Transform(ctx, internal_type.UserAudioReceivedPacket{
+		err := stt.Transform(ctx, internal_type.SpeechToTextAudioPacket{
 			ContextID: "sm-stt-accept",
 			Audio:     chunk,
 		})
@@ -226,7 +226,7 @@ func TestSpeechmaticsSTTCloseWhileStreaming(t *testing.T) {
 				return
 			default:
 			}
-			_ = stt.Transform(ctx, internal_type.UserAudioReceivedPacket{
+			_ = stt.Transform(ctx, internal_type.SpeechToTextAudioPacket{
 				ContextID: "sm-stt-close-mid", Audio: chunk})
 			time.Sleep(time.Duration(testutil.FrameDuration) * time.Millisecond)
 		}

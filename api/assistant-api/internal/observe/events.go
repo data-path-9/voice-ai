@@ -59,10 +59,13 @@ const (
 
 const (
 	EventConnected            = "connected"
+	EventInitializing         = "initializing"
+	EventInitialized          = "initialized"
 	EventConnectFailed        = "connect_failed"
 	EventDisconnected         = "disconnected"
 	EventDisconnectRequested  = "disconnect_requested"
 	EventCompleted            = "completed"
+	EventCleanup              = "cleanup"
 	EventModeSwitch           = "mode_switch"
 	EventResumed              = "resumed"
 	EventSessionResolved      = "session_resolved"
@@ -157,7 +160,8 @@ const (
 	MetricRTPBytesReceived   = "rtp.bytes_received"
 
 	// --- WebRTC ---
-	MetricICELatencyMs = "webrtc.ice_latency_ms"
+	MetricICELatencyMs           = "webrtc.ice_latency_ms"
+	MetricWebRTCOutputQueueDrops = "webrtc.output_queue_dropped_frames"
 
 	// --- Telephony ---
 	MetricTelephonyStatus = "telephony.status"

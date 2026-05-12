@@ -175,7 +175,7 @@ func (st *speechmaticsSTT) readLoop(conn *websocket.Conn) {
 			st.mu.Unlock()
 			if !intentional {
 				st.logger.Errorf("speechmatics-stt: connection lost: %v", err)
-				st.onPacket(internal_type.STTErrorPacket{
+				st.onPacket(internal_type.SpeechToTextErrorPacket{
 					ContextID: st.contextId,
 					Error:     fmt.Errorf("speechmatics-stt: connection lost: %w", err),
 					Type:      internal_type.STTNetworkTimeout,
@@ -245,7 +245,7 @@ func (st *speechmaticsSTT) readLoop(conn *websocket.Conn) {
 			}
 		case "Error":
 			st.logger.Errorf("speechmatics-stt: server error: %s", string(msg))
-			st.onPacket(internal_type.STTErrorPacket{
+			st.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: ctxId,
 				Error:     fmt.Errorf("speechmatics-stt: server error"),
 				Type:      internal_type.STTNetworkTimeout,
@@ -265,14 +265,14 @@ func (st *speechmaticsSTT) Transform(ctx context.Context, in internal_type.Packe
 		st.contextId = pkt.ContextID
 		st.mu.Unlock()
 		return nil
-	case internal_type.STTInterruptPacket:
+	case internal_type.SpeechToTextInterruptPacket:
 		st.mu.Lock()
 		if st.startedAt.IsZero() {
 			st.startedAt = time.Now()
 		}
 		st.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		st.mu.Lock()
 		conn := st.connection
 		st.mu.Unlock()
@@ -286,7 +286,7 @@ func (st *speechmaticsSTT) Transform(ctx context.Context, in internal_type.Packe
 		st.writeMu.Unlock()
 		if err != nil {
 			st.logger.Errorf("speechmatics-stt: error sending audio: %v", err)
-			st.onPacket(internal_type.STTErrorPacket{
+			st.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: st.contextId,
 				Error:     fmt.Errorf("speechmatics-stt: send failed: %w", err),
 				Type:      internal_type.STTNetworkTimeout,

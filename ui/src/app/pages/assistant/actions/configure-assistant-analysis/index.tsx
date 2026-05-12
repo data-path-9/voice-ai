@@ -32,6 +32,25 @@ import {
 } from '@carbon/react';
 import { TableSection } from '@/app/components/sections/table-section';
 
+const getAnalysisOptionMap = (row: any): Map<string, string> => {
+  const map = new Map<string, string>();
+  const options = row?.getOptionsList?.() || [];
+  options.forEach((option: any) => {
+    const key = option?.getKey?.();
+    const value = option?.getValue?.();
+    if (key && typeof value === 'string') {
+      map.set(key, value);
+    }
+  });
+  return map;
+};
+
+const getAnalysisEndpointId = (row: any): string =>
+  getAnalysisOptionMap(row).get('endpoint_id') || '';
+
+const getAnalysisEndpointVersion = (row: any): string =>
+  getAnalysisOptionMap(row).get('endpoint_version') || 'latest';
+
 export function ConfigureAssistantAnalysisPage() {
   const { assistantId } = useParams();
   return (
@@ -110,8 +129,8 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
     ? axtion.analysises.filter(row =>
         [
           row.getName(),
-          row.getEndpointid(),
-          row.getEndpointversion(),
+          getAnalysisEndpointId(row),
+          getAnalysisEndpointVersion(row),
           row.getExecutionpriority(),
           row.getStatus(),
         ]
@@ -153,13 +172,12 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
           totalSelected={selectedAnalysis ? 1 : 0}
           totalCount={filteredAnalyses.length}
           onCancel={() => setSelectedAnalysisId(null)}
-          className="[&_[class*=divider]]:hidden [&_.cds--btn]:transition-colors [&_.cds--btn:hover]:!bg-primary [&_.cds--btn:hover]:!text-white"
         >
           {selectedAnalysis && (
             <>
               <TableBatchAction
                 renderIcon={Edit}
-                kind="ghost"
+                
                 onClick={() => {
                   navigation.goToEditAssistantAnalysis(
                     assistantId,
@@ -172,7 +190,7 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
               </TableBatchAction>
               <TableBatchAction
                 renderIcon={TrashCan}
-                kind="ghost"
+                
                 onClick={() => {
                   deleteAssistantAnalysis(
                     assistantId,
@@ -218,7 +236,7 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
                   <TableHeader>Endpoint</TableHeader>
                   <TableHeader>Version</TableHeader>
                   <TableHeader>Priority</TableHeader>
-                  <TableHeader>Created</TableHeader>
+                  <TableHeader>Date</TableHeader>
                   <TableHeader>Action</TableHeader>
                 </TableRow>
               </TableHead>
@@ -249,20 +267,24 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
                           }
                         />
                       </TableCell>
-                      <TableCell>{row.getName()}</TableCell>
-                      <TableCell>
-                        <span className="font-mono text-xs">
-                          {row.getEndpointid()}
+                      <TableCell className="text-sm">{row.getName()}</TableCell>
+                      <TableCell className="text-sm">
+                        <span className="font-mono text-[13px]">
+                          {getAnalysisEndpointId(row) || '—'}
                         </span>
                       </TableCell>
-                      <TableCell>{row.getEndpointversion()}</TableCell>
-                      <TableCell>{row.getExecutionpriority()}</TableCell>
-                      <TableCell>
+                      <TableCell className="text-sm">
+                        {getAnalysisEndpointVersion(row)}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {row.getExecutionpriority()}
+                      </TableCell>
+                      <TableCell className="text-[13px] whitespace-nowrap">
                         {row.getCreateddate()
                           ? toHumanReadableDateTime(row.getCreateddate()!)
                           : '—'}
                       </TableCell>
-                      <TableCell onClick={e => e.stopPropagation()}>
+                      <TableCell className="text-sm" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-0">
                           <Button
                             hasIconOnly

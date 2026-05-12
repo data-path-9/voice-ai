@@ -78,7 +78,7 @@ func TestSingleText(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 
-	ts, ok := results[0].(internal_type.TTSTextPacket)
+	ts, ok := results[0].(internal_type.TextToSpeechTextPacket)
 	if !ok {
 		t.Fatalf("unexpected result type: %T", results[0])
 	}
@@ -117,7 +117,7 @@ func TestMultipleTexts(t *testing.T) {
 
 	expected := []string{"First sentence.", " Second sentence.", " Third sentence."}
 	for i, result := range results {
-		if ts, ok := result.(internal_type.TTSTextPacket); ok {
+		if ts, ok := result.(internal_type.TextToSpeechTextPacket); ok {
 			if ts.Text != expected[i] {
 				t.Errorf("result %d: expected %q, got %q", i, expected[i], ts.Text)
 			}
@@ -158,7 +158,7 @@ func TestMultipleBoundaries(t *testing.T) {
 		}
 
 		if len(results) > 0 {
-			if ts, ok := results[0].(internal_type.TTSTextPacket); ok {
+			if ts, ok := results[0].(internal_type.TextToSpeechTextPacket); ok {
 				if ts.Text != tc.expectedText {
 					t.Errorf("input %q: expected text %q, got %q", tc.input, tc.expectedText, ts.Text)
 				}
@@ -204,7 +204,7 @@ func TestUnicodeBoundaries(t *testing.T) {
 			}
 
 			if len(results) > 0 {
-				if ts, ok := results[0].(internal_type.TTSTextPacket); ok {
+				if ts, ok := results[0].(internal_type.TextToSpeechTextPacket); ok {
 					if ts.Text != tc.expectedText {
 						t.Errorf("input %q: expected text %q, got %q", tc.input, tc.expectedText, ts.Text)
 					}
@@ -234,7 +234,7 @@ func TestContextSwitching(t *testing.T) {
 
 	foundSpeaker1, foundSpeaker2 := false, false
 	for _, result := range results {
-		if ts, ok := result.(internal_type.TTSTextPacket); ok {
+		if ts, ok := result.(internal_type.TextToSpeechTextPacket); ok {
 			switch ts.ContextID {
 			case "speaker1":
 				foundSpeaker1 = true
@@ -273,18 +273,18 @@ func TestDonePacketFlush(t *testing.T) {
 		t.Fatalf("expected 2 results (flushed text + final), got %d", len(results))
 	}
 
-	ts0, ok := results[0].(internal_type.TTSTextPacket)
+	ts0, ok := results[0].(internal_type.TextToSpeechTextPacket)
 	if !ok {
-		t.Errorf("expected first result to be TTSTextPacket, got %T", results[0])
+		t.Errorf("expected first result to be TextToSpeechTextPacket, got %T", results[0])
 	} else {
 		if ts0.Text != "This is incomplete" {
 			t.Errorf("expected flushed text 'This is incomplete', got %q", ts0.Text)
 		}
 	}
 
-	done, ok := results[1].(internal_type.TTSDonePacket)
+	done, ok := results[1].(internal_type.TextToSpeechDonePacket)
 	if !ok {
-		t.Errorf("expected second result to be TTSDonePacket, got %T", results[1])
+		t.Errorf("expected second result to be TextToSpeechDonePacket, got %T", results[1])
 	} else if done.ContextID != "speaker1" {
 		t.Errorf("expected done contextID 'speaker1', got %q", done.ContextID)
 	}
@@ -382,7 +382,7 @@ func TestBufferStateMaintenance(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 
-	if ts, ok := results[0].(internal_type.TTSTextPacket); ok && ts.Text != "Hello world." {
+	if ts, ok := results[0].(internal_type.TextToSpeechTextPacket); ok && ts.Text != "Hello world." {
 		t.Errorf("expected 'Hello world.', got %q", ts.Text)
 	}
 }
@@ -405,12 +405,12 @@ func TestWhitespaceHandling(t *testing.T) {
 
 	// Whitespace after the boundary stays in the buffer, not consumed by the regex.
 	// First chunk: just the sentence up to and including the boundary punctuation.
-	if ts, ok := results[0].(internal_type.TTSTextPacket); ok && ts.Text != "Hello." {
+	if ts, ok := results[0].(internal_type.TextToSpeechTextPacket); ok && ts.Text != "Hello." {
 		t.Errorf("expected %q, got %q", "Hello.", ts.Text)
 	}
 
 	// Second chunk: the preserved whitespace followed by the next sentence.
-	if ts, ok := results[1].(internal_type.TTSTextPacket); ok && ts.Text != "   \n  World." {
+	if ts, ok := results[1].(internal_type.TextToSpeechTextPacket); ok && ts.Text != "   \n  World." {
 		t.Errorf("expected %q, got %q", "   \n  World.", ts.Text)
 	}
 }
@@ -443,7 +443,7 @@ func TestSpecialCharacterBoundaries(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 
-	if ts, ok := results[0].(internal_type.TTSTextPacket); ok && ts.Text != "Really?" {
+	if ts, ok := results[0].(internal_type.TextToSpeechTextPacket); ok && ts.Text != "Really?" {
 		t.Errorf("special character boundary failed: got %q", ts.Text)
 	}
 }
@@ -505,7 +505,7 @@ func TestLLMStreamingInput(t *testing.T) {
 	}
 
 	for i, r := range results {
-		ts, ok := r.(internal_type.TTSTextPacket)
+		ts, ok := r.(internal_type.TextToSpeechTextPacket)
 		if !ok {
 			t.Errorf("result %d: unexpected type %T", i, r)
 			continue
@@ -538,7 +538,7 @@ func TestLLMStreamingWithPauses(t *testing.T) {
 		t.Fatalf("expected 1 sentence, got %d", len(results))
 	}
 
-	if ts, ok := results[0].(internal_type.TTSTextPacket); ok && ts.Text != "This sentence arrives slowly." {
+	if ts, ok := results[0].(internal_type.TextToSpeechTextPacket); ok && ts.Text != "This sentence arrives slowly." {
 		t.Errorf("unexpected sentence: %q", ts.Text)
 	}
 }
@@ -559,7 +559,7 @@ func TestLLMStreamingWithContextSwitch(t *testing.T) {
 		t.Fatalf("expected at least 2 results, got %d", len(results))
 	}
 
-	if ts, ok := results[0].(internal_type.TTSTextPacket); ok {
+	if ts, ok := results[0].(internal_type.TextToSpeechTextPacket); ok {
 		if ts.ContextID != "llm-A" {
 			t.Errorf("expected first result from llm-A, got %s", ts.ContextID)
 		}
@@ -567,7 +567,7 @@ func TestLLMStreamingWithContextSwitch(t *testing.T) {
 
 	foundB := false
 	for _, r := range results {
-		if ts, ok := r.(internal_type.TTSTextPacket); ok && ts.ContextID == "llm-B" {
+		if ts, ok := r.(internal_type.TextToSpeechTextPacket); ok && ts.ContextID == "llm-B" {
 			foundB = true
 		}
 	}
@@ -592,18 +592,18 @@ func TestLLMStreamingForcedCompletion(t *testing.T) {
 		t.Fatalf("expected 2 results (flushed text + final), got %d", len(results))
 	}
 
-	ts0, ok := results[0].(internal_type.TTSTextPacket)
+	ts0, ok := results[0].(internal_type.TextToSpeechTextPacket)
 	if !ok {
-		t.Errorf("expected first result to be TTSTextPacket, got %T", results[0])
+		t.Errorf("expected first result to be TextToSpeechTextPacket, got %T", results[0])
 	} else {
 		if ts0.Text != "This sentence never ends" {
 			t.Errorf("expected flushed text 'This sentence never ends', got %q", ts0.Text)
 		}
 	}
 
-	done, ok := results[1].(internal_type.TTSDonePacket)
+	done, ok := results[1].(internal_type.TextToSpeechDonePacket)
 	if !ok {
-		t.Errorf("expected second result to be TTSDonePacket, got %T", results[1])
+		t.Errorf("expected second result to be TextToSpeechDonePacket, got %T", results[1])
 	} else if done.ContextID != "llm" {
 		t.Errorf("expected done contextID 'llm', got %q", done.ContextID)
 	}
@@ -628,16 +628,16 @@ func TestLLMStreamingUnformattedButComplete(t *testing.T) {
 		t.Fatalf("expected 2 results (flushed text + final), got %d", len(results))
 	}
 
-	ts0, ok := results[0].(internal_type.TTSTextPacket)
+	ts0, ok := results[0].(internal_type.TextToSpeechTextPacket)
 	if !ok {
-		t.Errorf("expected first result to be TTSTextPacket, got %T", results[0])
+		t.Errorf("expected first result to be TextToSpeechTextPacket, got %T", results[0])
 	} else if ts0.Text != "this is a raw llm response" {
 		t.Errorf("expected flushed text 'this is a raw llm response', got %q", ts0.Text)
 	}
 
-	done, ok := results[1].(internal_type.TTSDonePacket)
+	done, ok := results[1].(internal_type.TextToSpeechDonePacket)
 	if !ok {
-		t.Errorf("expected second result to be TTSDonePacket, got %T", results[1])
+		t.Errorf("expected second result to be TextToSpeechDonePacket, got %T", results[1])
 	} else if done.ContextID != "llm" {
 		t.Errorf("expected done contextID 'llm', got %q", done.ContextID)
 	}
@@ -645,7 +645,7 @@ func TestLLMStreamingUnformattedButComplete(t *testing.T) {
 
 // TestRealisticLLMStream_CafeConversation replays a real production LLM
 // stream (61 chunks) and verifies the aggregator flushes at every sentence
-// boundary and emits a final TTSDonePacket on done.
+// boundary and emits a final TextToSpeechDonePacket on done.
 //
 // Production contextID: c85c1cc3-1535-4a58-bb5f-dce9e1f6def3
 // Full text: "Oh, I like that idea---something chill and cozy sounds perfect
@@ -702,23 +702,23 @@ func TestRealisticLLMStream_CafeConversation(t *testing.T) {
 	//   2. " I definitely want to relax, maybe find some nice spots to unwind."       (at ".")
 	//   3. " Do you have any places in mind that are more laid-back but still beautiful?" (at "?")
 	//   4. " Like, maybe with good cafes, pretty scenery, and not too hectic?"         (at "?" --- trailing flush or boundary)
-	//   5. TTSDonePacket
+	//   5. TextToSpeechDonePacket
 	//
 	// The exact count depends on whether the aggregator flushes on the second "?"
 	// during streaming or defers it to the done flush. We verify at minimum:
 	//   - At least 3 mid-stream sentence flushes
-	//   - The last packet is TTSDonePacket
+	//   - The last packet is TextToSpeechDonePacket
 	//   - All packets carry the correct contextID
 
 	if len(results) < 4 {
 		t.Fatalf("expected at least 4 results (sentence flushes + final), got %d", len(results))
 	}
 
-	// Verify every result except the last is a TTSTextPacket with the correct contextID.
+	// Verify every result except the last is a TextToSpeechTextPacket with the correct contextID.
 	for i, r := range results[:len(results)-1] {
-		sp, ok := r.(internal_type.TTSTextPacket)
+		sp, ok := r.(internal_type.TextToSpeechTextPacket)
 		if !ok {
-			t.Errorf("result[%d]: expected TTSTextPacket, got %T", i, r)
+			t.Errorf("result[%d]: expected TextToSpeechTextPacket, got %T", i, r)
 			continue
 		}
 		if sp.ContextID != ctxID {
@@ -726,19 +726,19 @@ func TestRealisticLLMStream_CafeConversation(t *testing.T) {
 		}
 	}
 
-	// Last packet must be the done/final marker (TTSDonePacket).
-	last, ok := results[len(results)-1].(internal_type.TTSDonePacket)
+	// Last packet must be the done/final marker (TextToSpeechDonePacket).
+	last, ok := results[len(results)-1].(internal_type.TextToSpeechDonePacket)
 	if !ok {
-		t.Errorf("last packet: expected TTSDonePacket, got %T", results[len(results)-1])
+		t.Errorf("last packet: expected TextToSpeechDonePacket, got %T", results[len(results)-1])
 	}
 	if last.ContextID != ctxID {
 		t.Errorf("last packet: contextID = %q, want %q", last.ContextID, ctxID)
 	}
 
-	// Reconstruct the full text from TTSTextPacket (non-final) packets and verify completeness.
+	// Reconstruct the full text from TextToSpeechTextPacket (non-final) packets and verify completeness.
 	var fullText string
 	for _, r := range results {
-		if sp, ok := r.(internal_type.TTSTextPacket); ok {
+		if sp, ok := r.(internal_type.TextToSpeechTextPacket); ok {
 			fullText += sp.Text
 		}
 	}

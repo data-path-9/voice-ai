@@ -65,39 +65,6 @@ import (
 )
 
 // ============================================================================
-// Frame pool — eliminates per-frame heap allocations in the output hot path.
-// ============================================================================
-
-// framePool recycles fixed-size byte slices used by BufferAndSendOutput.
-// The pool is sized to the output frame size (typically 160–1920 bytes
-// depending on codec/sample-rate). Callers must return slices via putFrame
-// after the downstream consumer has finished with the data.
-//
-// sync.Pool is safe for concurrent use and its per-P caching avoids
-// cross-goroutine contention on the hot path.
-var framePool = sync.Pool{
-	New: func() interface{} {
-		// Fallback: allocate a default-sized slice.
-		// In practice getFrame(n) always creates correctly-sized slices.
-		return make([]byte, 0)
-	},
-}
-
-// getFrame returns a []byte of exactly n bytes from the pool.
-// If the pooled slice is too small it is discarded and a fresh one allocated.
-func getFrame(n int) []byte {
-	if b, ok := framePool.Get().([]byte); ok && cap(b) >= n {
-		return b[:n]
-	}
-	return make([]byte, n)
-}
-
-// putFrame returns a frame slice to the pool for reuse.
-func putFrame(b []byte) {
-	framePool.Put(b) //nolint:staticcheck // slice is intentionally pooled
-}
-
-// ============================================================================
 // Default constants
 // ============================================================================
 
@@ -418,9 +385,7 @@ func (s *BaseStreamer) ClearInputBuffer() {
 //   - Single lock acquisition: all frames are extracted under one lock, then
 //     pushed to the channel outside the lock. This reduces lock contention
 //     from N acquires to 1 per call.
-//   - sync.Pool frames: frame slices come from a pool and are recycled after
-//     the downstream consumer is done (see FrameRelease).
-//   - No intermediate copy: bytes.Buffer.Read fills the pooled slice directly.
+//   - No intermediate copy: bytes.Buffer.Read fills each frame slice directly.
 //
 // audio received -> outputAudioBuffer -> check threshold -> flush frames -> OutputCh
 func (s *BaseStreamer) BufferAndSendOutput(audio []byte) {
@@ -437,7 +402,7 @@ func (s *BaseStreamer) BufferAndSendOutput(audio []byte) {
 	// Collect all complete frames under a single lock acquisition.
 	var frames [][]byte
 	for s.outputAudioBuffer.Len() >= frameSize {
-		frame := getFrame(frameSize)
+		frame := make([]byte, frameSize)
 		s.outputAudioBuffer.Read(frame)
 		frames = append(frames, frame)
 	}

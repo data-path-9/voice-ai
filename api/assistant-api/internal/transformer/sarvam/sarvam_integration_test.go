@@ -545,7 +545,7 @@ func TestSarvamSTTAudioAcceptance(t *testing.T) {
 
 	chunks := testutil.ChunkAudio(testutil.SineTonePCM(440, 1.0), testutil.FrameSize)
 	for i, chunk := range chunks {
-		err := stt.Transform(ctx, internal_type.UserAudioReceivedPacket{
+		err := stt.Transform(ctx, internal_type.SpeechToTextAudioPacket{
 			ContextID: "sarvam-stt-accept", Audio: chunk})
 		require.NoError(t, err, "chunk %d should be accepted", i)
 	}
@@ -646,7 +646,7 @@ func TestSarvamSTTCloseWhileStreaming(t *testing.T) {
 				return
 			default:
 			}
-			_ = stt.Transform(ctx, internal_type.UserAudioReceivedPacket{
+			_ = stt.Transform(ctx, internal_type.SpeechToTextAudioPacket{
 				ContextID: "sarvam-stt-close-mid", Audio: chunk})
 			time.Sleep(time.Duration(testutil.FrameDuration) * time.Millisecond)
 		}

@@ -37,7 +37,7 @@ const headers = [
   { key: 'description', header: 'Description' },
   { key: 'status', header: 'Status' },
   { key: 'createdBy', header: 'Created By' },
-  { key: 'createdDate', header: 'Created' },
+  { key: 'createdDate', header: 'Date' },
 ];
 
 function VersionId({ id }: { id: string }) {
@@ -49,7 +49,7 @@ function VersionId({ id }: { id: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <span className="inline-flex items-center gap-1 font-mono text-xs text-gray-600 dark:text-gray-400">
+    <span className="inline-flex items-center gap-1 font-mono text-[13px] text-gray-600 dark:text-gray-400">
       {version}
       <Button
         hasIconOnly
@@ -300,16 +300,16 @@ export function Version(props: VersionProps) {
                     disabled={isCurrent}
                   />
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   <VersionId id={data.id} />
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   <Tag type={data.typeColor} size="sm">
                     {data.type}
                   </Tag>
                 </TableCell>
-                <TableCell>{data.description}</TableCell>
-                <TableCell>
+                <TableCell className="text-sm">{data.description}</TableCell>
+                <TableCell className="text-sm">
                   {isCurrent ? (
                     <IconIndicator kind="succeeded" label="In use" size={16} />
                   ) : isDeploying ? (
@@ -326,10 +326,11 @@ export function Version(props: VersionProps) {
                     />
                   )}
                 </TableCell>
-                <TableCell>{data.createdBy}</TableCell>
-                <TableCell>
-                  {data.createdDate &&
-                    toHumanReadableDateTime(data.createdDate)}
+                <TableCell className="text-sm">{data.createdBy}</TableCell>
+                <TableCell className="text-[13px] whitespace-nowrap">
+                  {data.createdDate
+                    ? toHumanReadableDateTime(data.createdDate)
+                    : '—'}
                 </TableCell>
               </TableRow>
             );

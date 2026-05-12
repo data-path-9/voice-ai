@@ -3,7 +3,13 @@ import { SidebarIconWrapper } from '@/app/components/navigation/sidebar/sidebar-
 import { SidebarLabel } from '@/app/components/navigation/sidebar/sidebar-label';
 import { SidebarSimpleListItem } from '@/app/components/navigation/sidebar/sidebar-simple-list-item';
 import { useLocation } from 'react-router-dom';
-import { Activity, DataBase, Chat, Webhook, ToolKit } from '@carbon/icons-react';
+import {
+  Activity,
+  DataBase,
+  Chat,
+  EventSchedule,
+  ToolKit,
+} from '@carbon/icons-react';
 import { useWorkspace } from '@/workspace';
 
 export const Observability = memo(({ isLoading }: { isLoading?: boolean }) => {
@@ -35,14 +41,14 @@ export const Observability = memo(({ isLoading }: { isLoading?: boolean }) => {
         <SidebarLabel isLoading={isLoading}>Tool logs</SidebarLabel>
       </SidebarSimpleListItem>
       <SidebarSimpleListItem
-        active={pathname.includes('/logs/webhook')}
-        navigate="/logs/webhook"
+        active={pathname.includes('/logs/request')}
+        navigate="/logs/request"
         loading={isLoading}
       >
         <SidebarIconWrapper>
-          <Webhook size={20} />
+          <EventSchedule size={20} />
         </SidebarIconWrapper>
-        <SidebarLabel isLoading={isLoading}>Webhook logs</SidebarLabel>
+        <SidebarLabel isLoading={isLoading}>Request logs</SidebarLabel>
       </SidebarSimpleListItem>
       {workspace.features?.knowledge !== false && (
         <SidebarSimpleListItem

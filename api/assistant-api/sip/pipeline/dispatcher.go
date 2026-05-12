@@ -49,7 +49,6 @@ type Dispatcher struct {
 	onCallStart          OnCallStartFunc
 	onCallEnd            OnCallEndFunc
 	onCreateObserver     OnCreateObserverFunc
-	onCreateHooks        OnCreateHooksFunc
 }
 
 type DIDResolverFunc func(did string) (assistantID uint64, auth types.SimplePrinciple, err error)
@@ -92,8 +91,6 @@ type OnCallEndFunc func(callID string)
 
 type OnCreateObserverFunc func(ctx context.Context, setup *CallSetupResult, auth types.SimplePrinciple) *observe.ConversationObserver
 
-type OnCreateHooksFunc func(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64) *observe.ConversationHooks
-
 type DispatcherConfig struct {
 	Logger               commons.Logger
 	Server               *sip_infra.Server
@@ -106,7 +103,6 @@ type DispatcherConfig struct {
 	OnCallStart          OnCallStartFunc
 	OnCallEnd            OnCallEndFunc
 	OnCreateObserver     OnCreateObserverFunc
-	OnCreateHooks        OnCreateHooksFunc
 }
 
 // TransferServer is the minimal SIP infra surface required by transfer orchestration.
@@ -132,7 +128,6 @@ func NewDispatcher(cfg *DispatcherConfig) *Dispatcher {
 		onCallStart:          cfg.OnCallStart,
 		onCallEnd:            cfg.OnCallEnd,
 		onCreateObserver:     cfg.OnCreateObserver,
-		onCreateHooks:        cfg.OnCreateHooks,
 		signalCh:             make(chan callEnvelope, signalChSize),
 		setupCh:              make(chan callEnvelope, setupChSize),
 		mediaCh:              make(chan callEnvelope, mediaChSize),
@@ -164,11 +159,7 @@ func (d *Dispatcher) OnPipeline(ctx context.Context, stages ...sip_infra.Pipelin
 			d.mediaCh <- e
 		case sip_infra.EventEmittedPipeline,
 			sip_infra.MetricEmittedPipeline,
-			sip_infra.DTMFReceivedPipeline,
-			sip_infra.RegisterRequestedPipeline,
-			sip_infra.RegisterActivePipeline,
-			sip_infra.RegisterFailedPipeline,
-			sip_infra.RegisterExpiringPipeline:
+			sip_infra.DTMFReceivedPipeline:
 			d.controlCh <- e
 		default:
 			d.logger.Warnw("OnPipeline: unrouted type", "type", fmt.Sprintf("%T", s))
@@ -224,14 +215,6 @@ func (d *Dispatcher) dispatch(ctx context.Context, p sip_infra.Pipeline) {
 		d.handleMetricEmitted(ctx, v)
 	case sip_infra.DTMFReceivedPipeline:
 		d.handleDTMFReceived(ctx, v)
-	case sip_infra.RegisterRequestedPipeline:
-		d.handleRegisterRequested(ctx, v)
-	case sip_infra.RegisterActivePipeline:
-		d.handleRegisterActive(ctx, v)
-	case sip_infra.RegisterFailedPipeline:
-		d.handleRegisterFailed(ctx, v)
-	case sip_infra.RegisterExpiringPipeline:
-		d.handleRegisterExpiring(ctx, v)
 	default:
 		d.logger.Warnw("dispatch: unknown pipeline type", "type", fmt.Sprintf("%T", p))
 	}

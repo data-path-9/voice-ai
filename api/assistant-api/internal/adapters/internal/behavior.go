@@ -7,7 +7,6 @@ package adapter_internal
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,8 +16,6 @@ import (
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
-
-var errDeploymentNotEnabled = errors.New("deployment is not enabled for source")
 
 // GetBehavior retrieves the deployment behavior configuration based on the source type.
 func (r *genericRequestor) GetBehavior() (*internal_assistant_entity.AssistantDeploymentBehavior, error) {
@@ -71,13 +68,10 @@ func (r *genericRequestor) initializeGreeting(ctx context.Context, behavior *int
 	if behavior.Greeting == nil {
 		return
 	}
-
 	greetingContent := *behavior.Greeting
 	if strings.TrimSpace(greetingContent) == "" {
 		return
 	}
-
-	// r.Transition(Interrupted)
 	if err := r.OnPacket(ctx,
 		internal_type.InjectMessagePacket{ContextID: r.GetID(), Text: greetingContent},
 		internal_type.ConversationEventPacket{
@@ -133,7 +127,7 @@ func (r *genericRequestor) OnError(ctx context.Context) error {
 
 	r.Transition(Interrupted)
 	if err := r.OnPacket(ctx,
-		internal_type.TTSInterruptPacket{ContextID: r.GetID()},
+		internal_type.TextToSpeechInterruptPacket{ContextID: r.GetID()},
 		internal_type.InjectMessagePacket{ContextID: r.GetID(), Text: mistakeContent},
 		internal_type.ConversationEventPacket{
 			Name: "behavior",
@@ -190,7 +184,7 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 	contextID := r.GetID()
 
 	if err := r.OnPacket(ctx,
-		internal_type.TTSInterruptPacket{ContextID: contextID},
+		internal_type.TextToSpeechInterruptPacket{ContextID: contextID},
 		internal_type.InjectMessagePacket{ContextID: contextID, Text: timeoutContent},
 		internal_type.ConversationEventPacket{
 			Name: "behavior",

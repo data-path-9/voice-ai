@@ -94,8 +94,18 @@ const (
 // for hangup. The inbound→outbound direction is handled by the caller (the SIP
 // streamer's forwardIncomingAudio switches destination via bridgeOutRTP).
 // Blocks until one side hangs up, a safety timeout, or context cancellation.
-// Ends the outbound session on exit; the inbound session lifecycle is owned by
-// the caller (executeTransfer) to avoid racing with metadata writes.
+//
+// BOTH session lifecycles are owned by the caller (executeTransfer). On any
+// normal exit, BridgeTransfer cancels its internal audio context and returns;
+// the caller is responsible for calling outbound.End() AFTER any cleanup that
+// depends on the outbound's RTP being alive (e.g. AudioProcessor.ClearBridgeTarget,
+// which blocks on in-flight ForwardUserAudio writes). Closing the outbound
+// RTP channel before that cleanup runs panics the streamer with "send on closed
+// channel".
+//
+// The early-error path (RTP unavailable) still ends both sessions inline
+// because there's no streamer state to coordinate with.
+//
 // Returns the reason the bridge ended so the caller can decide whether to
 // resume the AI (operator hung up) or tear down (caller hung up).
 func (s *Server) BridgeTransfer(ctx context.Context, inbound, outbound *Session, onOperatorAudio func([]byte)) (BridgeEndReason, error) {
@@ -164,15 +174,9 @@ func (s *Server) BridgeTransfer(ctx context.Context, inbound, outbound *Session,
 
 	audioCancel()
 
-	// End the outbound (bridge) leg — this is infrastructure-only, owned by us.
-	// The inbound session lifecycle is owned by the caller (pipelineCallStart or
-	// handleBye). Ending it here would race with metadata writes in executeTransfer
-	// and with the observer teardown in media.go.
-	if !outbound.IsEnded() {
-		s.beginEnding(outbound, "bridge_transfer_exit")
-		outbound.End()
-	}
-
+	// NOTE: outbound.End() is NOT called here — the caller owns the outbound
+	// lifecycle now and must call it AFTER draining streamer-side bridge
+	// references (AudioProcessor.ClearBridgeTarget). See doc comment above.
 	s.logger.Infow("Audio bridge completed",
 		"inbound_call_id", inCallID, "outbound_call_id", outCallID,
 		"reason", reason)

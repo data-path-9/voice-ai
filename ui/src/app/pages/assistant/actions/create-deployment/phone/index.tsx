@@ -233,7 +233,12 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
         telephonyConfig.provider,
         telephonyConfig.parameters,
       );
-      if (!ValidateTelephonyOptions(telephonyConfig.provider, resolvedTelephonyParameters)) {
+      if (
+        !ValidateTelephonyOptions(
+          telephonyConfig.provider,
+          resolvedTelephonyParameters,
+        )
+      ) {
         setErrorMessage('Please provide a valid telephony configuration.');
         return;
       }
@@ -276,7 +281,12 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
       telephonyConfig.provider,
       telephonyConfig.parameters,
     );
-    if (!ValidateTelephonyOptions(telephonyConfig.provider, resolvedTelephonyParameters)) {
+    if (
+      !ValidateTelephonyOptions(
+        telephonyConfig.provider,
+        resolvedTelephonyParameters,
+      )
+    ) {
       setIsDeploying(false);
       setErrorMessage('Please provide a valid telephony configuration.');
       return;
@@ -401,7 +411,10 @@ const ConfigureAssistantCallDeployment: FC<{ assistantId: string }> = ({
                   onChangeProvider={provider =>
                     setTelephonyConfig({
                       provider,
-                      parameters: GetDefaultTelephonyConfigIfInvalid(provider, []),
+                      parameters: GetDefaultTelephonyConfigIfInvalid(
+                        provider,
+                        [],
+                      ),
                     })
                   }
                   onChangeParameter={parameters =>

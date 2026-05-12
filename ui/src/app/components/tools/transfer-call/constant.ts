@@ -15,7 +15,12 @@ const ALL_KEYS = [
   'tool.ringtone',
 ];
 const ALLOWED_POST_TRANSFER_ACTIONS = ['end_call', 'resume_ai'];
-const ALLOWED_RINGTONES = ['ringtone_in', 'ringtone_uk', 'ringtone_us'];
+const ALLOWED_RINGTONES = [
+  'default',
+  'dial-and-ring',
+  'ring-ring',
+  'transfer-music',
+];
 
 // ============================================================================
 // Default Options
@@ -31,7 +36,7 @@ export const GetTransferCallDefaultOptions = (
       { key: 'tool.transfer_message' },
       { key: 'tool.transfer_delay', defaultValue: '500' },
       { key: 'tool.post_transfer_action', defaultValue: 'end_call' },
-      { key: 'tool.ringtone', defaultValue: 'ringtone_us' },
+      { key: 'tool.ringtone', defaultValue: 'default' },
     ],
     ALL_KEYS,
   );

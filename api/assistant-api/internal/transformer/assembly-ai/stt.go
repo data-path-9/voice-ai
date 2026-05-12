@@ -222,7 +222,7 @@ func (aai *assemblyaiSTT) readLoop(conn *websocket.Conn) {
 			aai.logger.Debugf("assembly-ai-stt: received Begin message")
 		case "Error":
 			aai.onPacket(
-				internal_type.STTErrorPacket{
+				internal_type.SpeechToTextErrorPacket{
 					ContextID: aai.contextId,
 					Error:     fmt.Errorf("assembly-ai-stt: error from provider: %s (code %d)", transcript.Error, transcript.ErrorCode),
 					Type:      internal_type.STTNetworkTimeout,
@@ -242,14 +242,14 @@ func (aai *assemblyaiSTT) Transform(ctx context.Context, in internal_type.Packet
 		aai.contextId = pkt.ContextID
 		aai.mu.Unlock()
 		return nil
-	case internal_type.STTInterruptPacket:
+	case internal_type.SpeechToTextInterruptPacket:
 		aai.mu.Lock()
 		if aai.startedAt.IsZero() {
 			aai.startedAt = time.Now()
 		}
 		aai.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		aai.mu.Lock()
 		defer aai.mu.Unlock()
 		if aai.connection == nil {
@@ -257,7 +257,7 @@ func (aai *assemblyaiSTT) Transform(ctx context.Context, in internal_type.Packet
 		}
 		if err := aai.connection.WriteMessage(websocket.BinaryMessage, pkt.Content()); err != nil {
 			aai.logger.Errorf("assembly-ai-stt: error sending audio: %v", err)
-			aai.onPacket(internal_type.STTErrorPacket{
+			aai.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: aai.contextId,
 				Error:     fmt.Errorf("assembly-ai-stt: send failed: %w", err),
 				Type:      internal_type.STTNetworkTimeout,

@@ -7,13 +7,14 @@ package adapter_internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rapidaai/api/assistant-api/config"
+	adapter_channel "github.com/rapidaai/api/assistant-api/internal/adapters/channel"
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	"github.com/rapidaai/protos"
 
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -48,39 +49,21 @@ import (
 // InteractionState — conversation turn state machine
 // =============================================================================
 
-// InteractionState tracks the current LLM/TTS generation turn state.
-type InteractionState int
-
 const (
-	Unknown       InteractionState = 1
-	Interrupt     InteractionState = 6
-	Interrupted   InteractionState = 7
-	LLMGenerating InteractionState = 8
-	LLMGenerated  InteractionState = 5
+	Unknown               = adapter_lifecycle.Unknown
+	Interrupt             = adapter_lifecycle.Interrupt
+	Interrupted           = adapter_lifecycle.Interrupted
+	LLMGenerating         = adapter_lifecycle.LLMGenerating
+	LLMGenerated          = adapter_lifecycle.LLMGenerated
+	dbWriteTimeout        = 5 * time.Second
+	collectorWriteTimeout = 10 * time.Second
+	connectDeadline       = 30 * time.Second
+	disconnectDeadline    = 30 * time.Second
 )
 
-func (s InteractionState) String() string {
-	switch s {
-	case Unknown:
-		return "Unknown"
-	case LLMGenerated:
-		return "LLMGenerated"
-	case Interrupt:
-		return "Interrupt"
-	case Interrupted:
-		return "Interrupted"
-	case LLMGenerating:
-		return "LLMGenerating"
-	default:
-		return "InvalidState"
-	}
-}
-
-// packetEnvelope carries a packet together with the context it was sent from.
-type packetEnvelope struct {
-	ctx context.Context
-	pkt internal_type.Packet
-}
+var (
+	errDeploymentNotEnabled = errors.New("deployment is not enabled for source")
+)
 
 type genericRequestor struct {
 	logger   commons.Logger
@@ -92,7 +75,7 @@ type genericRequestor struct {
 	// service
 	assistantService     internal_services.AssistantService
 	conversationService  internal_services.AssistantConversationService
-	webhookService       internal_services.AssistantWebhookService
+	httpLogService       internal_services.AssistantHTTPLogService
 	knowledgeService     internal_services.KnowledgeService
 	assistantToolService internal_services.AssistantToolService
 
@@ -105,21 +88,21 @@ type genericRequestor struct {
 
 	// observe — shared observability infrastructure (DB + exporters)
 	observer *observe.ConversationObserver
-	hooks    *observe.ConversationHooks
 
 	// integration client
-	integrationClient integration_client.IntegrationServiceClient
 	vaultClient       web_client.VaultClient
+	integrationClient integration_client.IntegrationServiceClient
 	deploymentClient  endpoint_client.DeploymentServiceClient
 
-	// interaction state — inline replacement for the former Messaging wrapper
-	msgMu            sync.RWMutex
-	contextID        string
-	interactionState InteractionState
-	msgMode          type_enums.MessageMode
+	// interaction/session lifecycle owners.
+	messageLifecycle adapter_lifecycle.MessageLifecycle
+	sessionLifecycle adapter_lifecycle.SessionLifecycle
+	lowStart         sync.Once
+	inputStart       sync.Once
 
 	// listening
 	speechToTextTransformer internal_type.SpeechToTextTransformer
+	textToSpeechTransformer internal_type.TextToSpeechTransformer
 
 	// audio intelligence
 	endOfSpeech internal_type.EndOfSpeech
@@ -130,12 +113,13 @@ type genericRequestor struct {
 	inputNormalizer  internal_type.PacketNormalizer
 	outputNormalizer internal_type.PacketNormalizer
 
-	textToSpeechTransformer internal_type.TextToSpeechTransformer
-
 	recorder internal_type.Recorder
 
 	// executor
-	assistantExecutor internal_llm.AssistantExecutor
+	assistantAnalyses      []internal_type.AnalysisExecutor
+	assistantWebhooks      []internal_type.WebhookExecutor
+	authenticationExecutor internal_type.AuthenticationExecutor
+	assistantExecutor      internal_llm.AssistantExecutor
 
 	// states
 	assistant             *internal_assistant_entity.Assistant
@@ -152,11 +136,13 @@ type genericRequestor struct {
 	idleTimeoutCount    uint64
 	maxSessionTimer     *time.Timer
 
-	// packet dispatcher channels — four priority tiers, each with its own goroutine
-	criticalCh chan packetEnvelope // interrupts and directives                        (cap 16)
-	inputCh    chan packetEnvelope // inbound: user audio, denoise, VAD, STT, EOS      (cap 4096)
-	outputCh   chan packetEnvelope // outbound: LLM, text aggregator, TTS pipeline     (cap 2048)
-	lowCh      chan packetEnvelope // recording, metrics, persistence, events           (cap 512)
+	// sessionCtx is the adapter-owned lifecycle context. Outlives the gRPC stream.
+	// cancelSession is invoked exactly once, by HandleFinalizationCompleted, after
+	// the disconnect chain has fully drained. No other call site should invoke it.
+	sessionCtx    context.Context
+	cancelSession context.CancelFunc
+	// channel registry with semantic names.
+	channels adapter_channel.RequestorChannelBus
 }
 
 func NewGenericRequestor(
@@ -166,7 +152,8 @@ func NewGenericRequestor(
 	postgres connectors.PostgresConnector, opensearch connectors.OpenSearchConnector,
 	redis connectors.RedisConnector, storage storages.Storage, streamer internal_type.Streamer,
 ) *genericRequestor {
-	return &genericRequestor{
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	gr := &genericRequestor{
 		logger:   logger,
 		config:   config,
 		source:   source,
@@ -175,7 +162,7 @@ func NewGenericRequestor(
 		assistantService:     internal_assistant_service.NewAssistantService(config, logger, postgres, opensearch),
 		knowledgeService:     internal_knowledge_service.NewKnowledgeService(config, logger, postgres, storage),
 		conversationService:  internal_assistant_service.NewAssistantConversationService(logger, postgres, storage),
-		webhookService:       internal_assistant_service.NewAssistantWebhookService(logger, postgres, storage),
+		httpLogService:       internal_assistant_service.NewAssistantHTTPLogService(logger, postgres, storage),
 		assistantToolService: internal_assistant_service.NewAssistantToolService(logger, postgres, storage),
 		//
 
@@ -190,27 +177,31 @@ func NewGenericRequestor(
 		deploymentClient:  endpoint_client.NewDeploymentServiceClientGRPC(&config.AppConfig, logger, redis),
 		vaultClient:       web_client.NewVaultClientGRPC(&config.AppConfig, logger, redis),
 
-		// observer and hooks are initialized after session creation in initializeCollectors
+		// observer and hook executors are initialized after session creation in initializeCollectors
 
-		contextID:         uuid.NewString(),
-		interactionState:  Unknown,
-		msgMode:           type_enums.TextMode,
-		assistantExecutor: internal_llm.NewAssistantExecutor(logger),
-		inputNormalizer:   internal_input_normalizer.NewInputNormalizer(logger),
-		outputNormalizer:  internal_output_normalizer.NewOutputNormalizer(logger),
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
+
+		inputNormalizer:  internal_input_normalizer.NewInputNormalizer(logger),
+		outputNormalizer: internal_output_normalizer.NewOutputNormalizer(logger),
 
 		//
-		histories: make([]internal_type.MessagePacket, 0),
-		metadata:  make(map[string]interface{}),
-		args:      make(map[string]interface{}),
-		options:   make(map[string]interface{}),
-
-		// dispatcher channels
-		criticalCh: make(chan packetEnvelope, 256),
-		inputCh:    make(chan packetEnvelope, 4096),
-		outputCh:   make(chan packetEnvelope, 2048),
-		lowCh:      make(chan packetEnvelope, 2048),
+		histories:         make([]internal_type.MessagePacket, 0),
+		metadata:          make(map[string]interface{}),
+		args:              make(map[string]interface{}),
+		options:           make(map[string]interface{}),
+		assistantAnalyses: make([]internal_type.AnalysisExecutor, 0),
+		assistantWebhooks: make([]internal_type.WebhookExecutor, 0),
+		sessionCtx:        sessionCtx,
+		cancelSession:     cancelSession,
+		channels:          adapter_channel.NewRequestorChannels(),
 	}
+
+	go gr.runBootstrapDispatcher(sessionCtx)
+	go gr.runCriticalDispatcher(sessionCtx)
+	go gr.runOutputDispatcher(sessionCtx)
+	go gr.runDataDispatcher(sessionCtx)
+	return gr
 }
 
 // GetSource implements internal_adapter_requests.Messaging.
@@ -228,58 +219,44 @@ func (gr *genericRequestor) GetAssistantConversation(ctx context.Context, auth t
 	)
 }
 
-func (talking *genericRequestor) BeginConversation(ctx context.Context, assistant *internal_assistant_entity.Assistant, direction type_enums.ConversationDirection, config *protos.ConversationInitialization) (*internal_conversation_entity.AssistantConversation, error) {
+func (talking *genericRequestor) BeginConversation(ctx context.Context, assistant *internal_assistant_entity.Assistant, direction type_enums.ConversationDirection, config *protos.ConversationInitialization) error {
 	talking.assistant = assistant
-
 	conversation, err := talking.conversationService.CreateConversation(ctx, talking.Auth(), talking.identifier(config), assistant.Id, assistant.AssistantProviderId, direction, talking.GetSource())
 	if err != nil {
-		return conversation, err
-	}
-
-	if arguments, err := utils.AnyMapToInterfaceMap(config.GetArgs()); err == nil {
-		talking.args = arguments
-		utils.Go(ctx, func() {
-			talking.conversationService.ApplyConversationArgument(ctx, talking.Auth(), assistant.Id, conversation.Id, arguments)
-		})
-	}
-	if options, err := utils.AnyMapToInterfaceMap(config.GetOptions()); err == nil {
-		talking.options = options
-		utils.Go(ctx, func() {
-			talking.conversationService.ApplyConversationOption(ctx, talking.Auth(), assistant.Id, conversation.Id, options)
-		})
-	}
-	if metadata, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil {
-		talking.metadata = metadata
-		utils.Go(ctx, func() {
-			talking.conversationService.ApplyConversationMetadata(ctx, talking.Auth(), assistant.Id, conversation.Id, types.NewMetadataList(metadata))
-		})
+		return err
 	}
 	talking.assistantConversation = conversation
-	return conversation, err
+	if arguments, err := utils.AnyMapToInterfaceMap(config.GetArgs()); err == nil {
+		talking.applyArguments(arguments)
+	}
+	if options, err := utils.AnyMapToInterfaceMap(config.GetOptions()); err == nil {
+		talking.applyOptions(options)
+	}
+	if metadata, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil {
+		talking.applyMetadata(metadata)
+	}
+	return err
 }
 
-func (talking *genericRequestor) ResumeConversation(ctx context.Context, assistant *internal_assistant_entity.Assistant, config *protos.ConversationInitialization) (*internal_conversation_entity.AssistantConversation, error) {
+func (talking *genericRequestor) ResumeConversation(ctx context.Context, assistant *internal_assistant_entity.Assistant, config *protos.ConversationInitialization) error {
 	talking.assistant = assistant
 	conversation, err := talking.GetAssistantConversation(ctx, talking.Auth(), assistant.Id, config.GetAssistantConversationId())
 	if err != nil {
 		talking.logger.Errorf("failed to get assistant conversation: %+v", err)
-		return nil, err
+		return err
 	}
 	if conversation == nil {
 		talking.logger.Errorf("conversation not found: %d", config.GetAssistantConversationId())
-		return nil, fmt.Errorf("conversation not found: %d", config.GetAssistantConversationId())
+		return fmt.Errorf("conversation not found: %d", config.GetAssistantConversationId())
 	}
 	talking.assistantConversation = conversation
 	talking.args = conversation.GetArguments()
 	talking.options = conversation.GetOptions()
 	talking.metadata = conversation.GetMetadatas()
-	if extra, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil && len(extra) > 0 {
-		talking.metadata = utils.MergeMaps(talking.metadata, extra)
-		utils.Go(ctx, func() {
-			talking.conversationService.ApplyConversationMetadata(ctx, talking.Auth(), assistant.Id, conversation.Id, types.NewMetadataList(extra))
-		})
+	if extra, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil {
+		talking.applyMetadata(extra)
 	}
-	return conversation, nil
+	return nil
 }
 
 func (talking *genericRequestor) IntegrationCaller() integration_client.IntegrationServiceClient {
@@ -311,7 +288,7 @@ func (dm *genericRequestor) GetHistories() []internal_type.MessagePacket {
 	return dm.histories
 }
 
-func (gr *genericRequestor) CreateConversationRecording(ctx context.Context, user, assistant []byte) error {
+func (gr *genericRequestor) CreateConversationRecording(_ context.Context, user, assistant []byte) error {
 	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 	defer cancel()
 	if _, err := gr.conversationService.CreateConversationRecording(dbCtx, gr.auth, gr.assistant.Id, gr.assistantConversation.Id, user, assistant); err != nil {
@@ -328,21 +305,17 @@ func (gr *genericRequestor) CreateConversationRecording(ctx context.Context, use
 // GetID returns the current interaction context UUID.
 // Rotates to a new UUID each time an Interrupted transition fires.
 func (r *genericRequestor) GetID() string {
-	r.msgMu.RLock()
-	defer r.msgMu.RUnlock()
-	return r.contextID
+	return r.messageLifecycle.ContextID()
 }
 
 // GetMode returns the current stream mode (text or audio).
 func (r *genericRequestor) GetMode() type_enums.MessageMode {
-	return r.msgMode
+	return r.messageLifecycle.Mode()
 }
 
 // SwitchMode sets the stream mode.
 func (r *genericRequestor) SwitchMode(mm type_enums.MessageMode) {
-	r.msgMu.Lock()
-	defer r.msgMu.Unlock()
-	r.msgMode = mm
+	r.messageLifecycle.SetMode(mm)
 }
 
 // Transition advances the interaction state machine.
@@ -361,29 +334,16 @@ func (r *genericRequestor) SwitchMode(mm type_enums.MessageMode) {
 //     Unknown     → Interrupt | Interrupted (nothing active — no LLM, no TTS)
 //     Interrupted → Interrupted             (already interrupted)
 //     Interrupt   → Interrupt               (already soft-interrupted)
-func (r *genericRequestor) Transition(newState InteractionState) error {
-	r.msgMu.Lock()
-	defer r.msgMu.Unlock()
-	switch newState {
-	case Unknown:
-		return fmt.Errorf("Transition: cannot transition to Unknown state")
-	case Interrupt:
-		if r.interactionState == Interrupted || r.interactionState == Interrupt {
-			return fmt.Errorf("Transition: cannot soft-interrupt from state %s", r.interactionState)
+func (r *genericRequestor) Transition(newState adapter_lifecycle.MessageState) error {
+	oldCtxID := r.GetID()
+	if err := r.messageLifecycle.Transition(newState); err != nil {
+		return err
+	}
+	if newState == Interrupted {
+		nCtxID := r.GetID()
+		if oldCtxID == nCtxID {
+			return nil
 		}
-		if r.interactionState == Unknown {
-			return fmt.Errorf("Transition: nothing active to soft-interrupt in state %s", r.interactionState)
-		}
-	case Interrupted:
-		if r.interactionState == Interrupted {
-			return fmt.Errorf("Transition: already interrupted")
-		}
-		oldCtxID := r.contextID // read directly — we already hold msgMu
-		nCtxID := uuid.NewString()
-		r.contextID = nCtxID
-		// Emit turn-change event asynchronously to avoid holding msgMu while
-		// enqueuing into a dispatcher channel (which could stall if the channel
-		// is near capacity and the consumer goroutine is also waiting on msgMu).
 		utils.Go(context.Background(), func() {
 			r.OnPacket(context.Background(), internal_type.TurnChangePacket{
 				ContextID:         nCtxID,
@@ -394,8 +354,35 @@ func (r *genericRequestor) Transition(newState InteractionState) error {
 			})
 		})
 	}
-	r.interactionState = newState
 	return nil
+}
+
+func (r *genericRequestor) getSessionState() adapter_lifecycle.SessionState {
+	return r.sessionLifecycle.Current()
+}
+
+func (r *genericRequestor) canAcceptInput() bool {
+	return r.getSessionState() == adapter_lifecycle.StateReady
+}
+
+func (r *genericRequestor) canSwitchSession() bool {
+	return r.sessionLifecycle.CanBe(adapter_lifecycle.EventSwitchRequested)
+}
+
+func (r *genericRequestor) getInteractionState() adapter_lifecycle.MessageState {
+	return r.messageLifecycle.Current()
+}
+
+func (r *genericRequestor) setInteractionStateForTest(state adapter_lifecycle.MessageState) {
+	r.messageLifecycle = adapter_lifecycle.NewMessageLifecycleWithState(state, r.GetID(), r.GetMode(), nil)
+}
+
+func (r *genericRequestor) setContextIDForTest(contextID string) {
+	r.messageLifecycle.SetContextID(contextID)
+}
+
+func (r *genericRequestor) setModeForTest(mode type_enums.MessageMode) {
+	r.messageLifecycle.SetMode(mode)
 }
 
 // initializeCollectors builds EventCollector and MetricCollector from the
@@ -445,22 +432,17 @@ func (r *genericRequestor) initializeCollectors(ctx context.Context) {
 
 	for _, p := range providers {
 		opts := p.GetOptions()
-		// Resolve vault credential and merge its fields into opts so that
-		// exporter config parsers (e.g. DatadogConfigFromOptions) can read
-		// api_key, headers, access_token etc. from the credential store.
-		if credIDStr, ok := opts["rapida.credential_id"]; ok {
-			credID, parseErr := utils.Option(opts).GetUint64("rapida.credential_id")
-			if parseErr != nil {
-				r.logger.Errorf("observe: invalid credential_id %q for provider %d (%s): %v", credIDStr, p.Id, p.ProviderType, parseErr)
-			} else {
-				credential, credErr := r.VaultCaller().GetCredential(ctx, r.Auth(), credID)
-				if credErr != nil {
-					r.logger.Errorf("observe: vault credential lookup failed for provider %d (%s): %v", p.Id, p.ProviderType, credErr)
-				} else if credential != nil && credential.GetValue() != nil {
-					for k, v := range credential.GetValue().AsMap() {
-						if s, ok := v.(string); ok {
-							opts[k] = s
-						}
+		credID, parseErr := opts.GetUint64("rapida.credential_id")
+		if parseErr != nil {
+			r.logger.Errorf("observe: invalid credential_id for provider %d (%s): %v", p.Id, p.ProviderType, parseErr)
+		} else {
+			credential, credErr := r.VaultCaller().GetCredential(ctx, r.Auth(), credID)
+			if credErr != nil {
+				r.logger.Errorf("observe: vault credential lookup failed for provider %d (%s): %v", p.Id, p.ProviderType, credErr)
+			} else if credential != nil && credential.GetValue() != nil {
+				for k, v := range credential.GetValue().AsMap() {
+					if s, ok := v.(string); ok {
+						opts[k] = s
 					}
 				}
 			}
@@ -472,8 +454,8 @@ func (r *genericRequestor) initializeCollectors(ctx context.Context) {
 			continue
 		}
 		if evtExp == nil || metExp == nil {
-			endpoint := strings.TrimSpace(fmt.Sprintf("%v", opts["endpoint"]))
-			if (p.ProviderType == string(observe.OTLP_HTTP) || p.ProviderType == string(observe.OTLP_GRPC)) && endpoint == "" {
+			_, err := opts.GetString("endpoint")
+			if (p.ProviderType == string(observe.OTLP_HTTP) || p.ProviderType == string(observe.OTLP_GRPC)) && err != nil {
 				r.logger.Warnf("observe: skipping provider %d (%s): missing endpoint", p.Id, p.ProviderType)
 				continue
 			}
@@ -507,49 +489,28 @@ func (r *genericRequestor) initializeCollectors(ctx context.Context) {
 		Metrics: observe.NewMetricCollector(r.logger, meta, metricExporters...),
 	})
 
-	// Initialize hooks for webhook/analysis execution
-	r.hooks = observe.NewConversationHooks(&observe.ConversationHooksConfig{
-		Logger:   r.logger,
-		Snapshot: r.buildSnapshot(),
-		InvokeEndpoint: func(ctx context.Context, auth types.SimplePrinciple, endpointID uint64, endpointVersion string, arguments map[string]interface{}) (*protos.InvokeResponse, error) {
-			return r.invokeEndpoint(ctx, &protos.EndpointDefinition{
-				EndpointId: endpointID,
-				Version:    endpointVersion,
-			}, arguments, nil, nil)
-		},
-		CreateLog: func(ctx context.Context, webhookID uint64, url, method, event string, statusCode, timeTaken int64, retryCount uint32, status type_enums.RecordState, request, response []byte) error {
-			return r.CreateWebhookLog(ctx, webhookID, url, method, event, statusCode, timeTaken, retryCount, status, request, response)
-		},
-		SetMetadata: func(ctx context.Context, auth types.SimplePrinciple, metadata map[string]interface{}) error {
-			r.onSetMetadata(ctx, auth, metadata)
-			return nil
-		},
-	})
-}
-
-// buildSnapshot creates a ConversationSnapshot from the current requestor state.
-// Used to feed ConversationHooks with conversation data for webhook/analysis execution.
-func (r *genericRequestor) buildSnapshot() *observe.ConversationSnapshot {
-	histories := make([]observe.MessageEntry, 0, len(r.histories))
-	for _, m := range r.histories {
-		histories = append(histories, observe.MessageEntry{Role: m.Role(), Content: m.Content()})
-	}
-	return &observe.ConversationSnapshot{
-		Assistant:    r.assistant,
-		Conversation: &observe.ConversationRef{ID: r.assistantConversation.Id},
-		Histories:    histories,
-		Metadata:     r.GetMetadata(),
-		Arguments:    r.GetArgs(),
-		Options:      r.GetOptions(),
-		Auth:         r.auth,
-	}
 }
 
 // shutdownCollectors waits for in-flight exports and shuts down all exporters.
-func (r *genericRequestor) shutdownCollectors(_ context.Context) {
+func (r *genericRequestor) shutdownCollectors(ctx context.Context) {
 	if r.observer != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), collectorWriteTimeout)
 		defer cancel()
 		r.observer.Shutdown(shutdownCtx)
+	}
+	for _, analysis := range r.assistantAnalyses {
+		if err := analysis.Close(ctx); err != nil {
+			r.logger.Errorf("close analysis executor: %v", err)
+		}
+	}
+	for _, webhook := range r.assistantWebhooks {
+		if err := webhook.Close(ctx); err != nil {
+			r.logger.Errorf("close webhook executor: %v", err)
+		}
+	}
+	if r.authenticationExecutor != nil {
+		if err := r.authenticationExecutor.Close(ctx); err != nil {
+			r.logger.Errorf("close authentication executor: %v", err)
+		}
 	}
 }

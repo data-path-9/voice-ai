@@ -100,7 +100,7 @@ func (*neuphonicTTS) Name() string {
 // readLoop owns a single WebSocket connection for the duration of one TTS turn.
 // It exits when the connection closes — intentionally (interrupt / done) or
 // unexpectedly (network drop). Neuphonic has no server-side completion ACK so
-// the turn ends when Transform receives TTSDonePacket.
+// the turn ends when Transform receives TextToSpeechDonePacket.
 func (rt *neuphonicTTS) readLoop(conn *websocket.Conn) {
 	for {
 		select {
@@ -169,7 +169,7 @@ func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.Packet) e
 	t.mu.Unlock()
 
 	switch input := in.(type) {
-	case internal_type.TTSInterruptPacket:
+	case internal_type.TextToSpeechInterruptPacket:
 		t.mu.Lock()
 		t.contextId = ""
 		t.ttsStartedAt = time.Time{}
@@ -190,11 +190,11 @@ func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.Packet) e
 		}
 		return nil
 
-	case internal_type.TTSTextPacket:
+	case internal_type.TextToSpeechTextPacket:
 		// Fallback reconnect: handles Initialize() failure or an unintentional drop.
 		if connection == nil {
 			if err := t.Initialize(); err != nil {
-				t.onPacket(internal_type.TTSErrorPacket{
+				t.onPacket(internal_type.TextToSpeechErrorPacket{
 					ContextID: input.ContextID,
 					Error:     fmt.Errorf("neuphonic-tts: failed to connect: %w", err),
 					Type:      internal_type.TTSNetworkTimeout,
@@ -218,7 +218,7 @@ func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.Packet) e
 			"text": input.Text + " <STOP>",
 		}); err != nil {
 			t.logger.Errorf("neuphonic-tts: unable to write json for text to speech: %v", err)
-			t.onPacket(internal_type.TTSErrorPacket{
+			t.onPacket(internal_type.TextToSpeechErrorPacket{
 				ContextID: input.ContextID,
 				Error:     fmt.Errorf("neuphonic-tts: failed to write text: %w", err),
 				Type:      internal_type.TTSNetworkTimeout,
@@ -235,7 +235,7 @@ func (t *neuphonicTTS) Transform(ctx context.Context, in internal_type.Packet) e
 		})
 		return nil
 
-	case internal_type.TTSDonePacket:
+	case internal_type.TextToSpeechDonePacket:
 		// Interrupted before done arrived — nothing to flush.
 		if connection == nil {
 			return nil

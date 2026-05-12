@@ -163,9 +163,8 @@ func (eos *PipecatEOS) Name() string {
 // in a rolling buffer for model inference.
 func (eos *PipecatEOS) Analyze(ctx context.Context, pkt internal_type.Packet) error {
 	switch p := pkt.(type) {
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.EndOfSpeechAudioPacket:
 		eos.appendAudio(p.Audio)
-
 	case internal_type.UserTextReceivedPacket:
 		if p.Text == "" {
 			return nil
@@ -181,7 +180,7 @@ func (eos *PipecatEOS) Analyze(ctx context.Context, pkt internal_type.Packet) er
 		)
 		eos.send(command{ctx: ctx, segment: seg, fireNow: true})
 
-	case internal_type.InterruptionDetectedPacket:
+	case internal_type.EndOfSpeechInterruptionPacket:
 		eos.mu.RLock()
 		seg := eos.state.segment
 		eos.mu.RUnlock()

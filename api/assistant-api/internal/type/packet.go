@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/rapidaai/pkg/types"
+	type_enums "github.com/rapidaai/pkg/types/enums"
+	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
 
@@ -59,6 +61,11 @@ type ErrorPacket interface {
 	ErrMessage() string
 }
 
+type MessageEntry struct {
+	Role    string
+	Content string
+}
+
 // =============================================================================
 // Input Pipeline — user -> denoise -> VAD -> STT -> EOS -> normalize
 // =============================================================================
@@ -86,6 +93,15 @@ type UserAudioReceivedPacket struct {
 func (f UserAudioReceivedPacket) ContextId() string { return f.ContextID }
 func (f UserAudioReceivedPacket) Content() []byte   { return f.Audio }
 func (f UserAudioReceivedPacket) Role() string      { return "user" }
+
+type SpeechToTextAudioPacket struct {
+	ContextID string
+	Audio     []byte
+}
+
+func (f SpeechToTextAudioPacket) ContextId() string { return f.ContextID }
+func (f SpeechToTextAudioPacket) Content() []byte   { return f.Audio }
+func (f SpeechToTextAudioPacket) IsAsync() bool     { return true }
 
 // DenoiseAudioPacket carries raw user audio to be denoised before entering the pipeline.
 type DenoiseAudioPacket struct {
@@ -134,6 +150,22 @@ type SpeechToTextPacket struct {
 func (f SpeechToTextPacket) ContextId() string { return f.ContextID }
 
 // EndOfSpeechPacket signals that the EOS detector determined the user's turn is complete.
+type EndOfSpeechAudioPacket struct {
+	ContextID string
+	Audio     []byte
+}
+
+func (f EndOfSpeechAudioPacket) ContextId() string { return f.ContextID }
+func (f EndOfSpeechAudioPacket) IsAsync() bool     { return true }
+
+type EndOfSpeechInterruptionPacket struct {
+	ContextID string
+	Source    InterruptionSource
+}
+
+func (f EndOfSpeechInterruptionPacket) ContextId() string { return f.ContextID }
+func (f EndOfSpeechInterruptionPacket) IsAsync() bool     { return true }
+
 type EndOfSpeechPacket struct {
 	ContextID string
 	Speech    string
@@ -181,14 +213,15 @@ type InterruptionDetectedPacket struct {
 
 func (f InterruptionDetectedPacket) ContextId() string { return f.ContextID }
 
-// TTSInterruptPacket signals the TTS transformer to stop current playback.
-type TTSInterruptPacket struct {
+// TextToSpeechInterruptPacket signals the TTS transformer to stop current playback.
+type TextToSpeechInterruptPacket struct {
 	ContextID string
 	StartAt   float64
 	EndAt     float64
 }
 
-func (f TTSInterruptPacket) ContextId() string { return f.ContextID }
+func (f TextToSpeechInterruptPacket) ContextId() string { return f.ContextID }
+func (f TextToSpeechInterruptPacket) IsAsync() bool     { return true }
 
 type STTErrorType int
 
@@ -203,26 +236,26 @@ const (
 )
 
 // When IsRecoverable is true, the conversation should be gracefully terminated.
-type STTErrorPacket struct {
+type SpeechToTextErrorPacket struct {
 	ContextID string
 	Error     error
 	Type      STTErrorType
 }
 
-func (f STTErrorPacket) ContextId() string { return f.ContextID }
-func (f STTErrorPacket) IsRecoverable() bool {
+func (f SpeechToTextErrorPacket) ContextId() string { return f.ContextID }
+func (f SpeechToTextErrorPacket) IsRecoverable() bool {
 	return f.Type == STTRateLimit || f.Type == STTNetworkTimeout
 }
-func (f STTErrorPacket) Err() error         { return f.Error }
-func (f STTErrorPacket) ErrMessage() string { return fmt.Sprintf("stt: %s", f.Error.Error()) }
+func (f SpeechToTextErrorPacket) Err() error         { return f.Error }
+func (f SpeechToTextErrorPacket) ErrMessage() string { return fmt.Sprintf("stt: %s", f.Error.Error()) }
 
-type STTInterruptPacket struct {
+type SpeechToTextInterruptPacket struct {
 	ContextID string
 	StartAt   float64
 	EndAt     float64
 }
 
-func (f STTInterruptPacket) ContextId() string { return f.ContextID }
+func (f SpeechToTextInterruptPacket) ContextId() string { return f.ContextID }
 
 // InterruptLLMPacket signals the LLM executor to cancel current generation.
 type LLMInterruptPacket struct {
@@ -251,6 +284,470 @@ type InjectMessagePacket struct {
 func (f InjectMessagePacket) ContextId() string { return f.ContextID }
 func (f InjectMessagePacket) Content() string   { return f.Text }
 func (f InjectMessagePacket) Role() string      { return "rapida" }
+
+// =============================================================================
+// Initialization chain:
+// InitializeAssistant → InitializeConversation → InitializeSessionRuntime
+// → InitializeAuthentication → InitializeSpeechToText
+// → InitializeTextToSpeech → InitializeVoiceActivityDetection
+// → InitializeEndOfSpeech → InitializeBehavior → InitializationCompleted
+// Each handler enqueues the next phase to bootstrapChannel, forming an ordered chain.
+// =============================================================================
+
+// InitializeAssistantPacket loads the assistant config, starts dispatchers, inits auth executor.
+type InitializeAssistantPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeAssistantPacket) ContextId() string { return f.ContextID }
+
+// InitializeConversationPacket creates or resumes the conversation.
+type InitializeConversationPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeConversationPacket) ContextId() string { return f.ContextID }
+
+// InitializeSessionRuntimePacket initializes collectors, recorder, normalizers, metrics.
+type InitializeSessionRuntimePacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeSessionRuntimePacket) ContextId() string { return f.ContextID }
+
+// InitializeAuthenticationPacket starts session authentication stage.
+type InitializeAuthenticationPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeAuthenticationPacket) ContextId() string { return f.ContextID }
+
+// ExecuteSessionAuthenticationPacket triggers authentication against the configured endpoint.
+type ExecuteSessionAuthenticationPacket struct {
+	ContextID      string
+	Arguments      map[string]interface{}
+	Initialization *protos.ConversationInitialization
+}
+
+func (f ExecuteSessionAuthenticationPacket) ContextId() string { return f.ContextID }
+
+// SessionAuthenticationSucceededPacket carries successful auth output.
+// Authenticated can be false when fail_behavior=allow is applied.
+type SessionAuthenticationSucceededPacket struct {
+	ContextID      string
+	Authenticated  bool
+	Arguments      map[string]interface{}
+	Metadata       map[string]interface{}
+	Options        map[string]interface{}
+	Initialization *protos.ConversationInitialization
+}
+
+func (f SessionAuthenticationSucceededPacket) ContextId() string { return f.ContextID }
+
+// SessionAuthenticationFailedPacket signals auth stage failure.
+type SessionAuthenticationFailedPacket struct {
+	ContextID      string
+	Error          error
+	Initialization *protos.ConversationInitialization
+}
+
+func (f SessionAuthenticationFailedPacket) ContextId() string   { return f.ContextID }
+func (f SessionAuthenticationFailedPacket) IsRecoverable() bool { return false }
+func (f SessionAuthenticationFailedPacket) Err() error          { return f.Error }
+func (f SessionAuthenticationFailedPacket) ErrMessage() string {
+	return fmt.Sprintf("session_authentication: %s", f.Error.Error())
+}
+
+// InitializeSpeechToTextPacket initializes speech-to-text.
+type InitializeSpeechToTextPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeSpeechToTextPacket) ContextId() string { return f.ContextID }
+
+type InitializeAssistantExecutorPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeAssistantExecutorPacket) ContextId() string { return f.ContextID }
+func (f InitializeAssistantExecutorPacket) IsAsync() bool     { return true }
+
+// InitializeTextToSpeechPacket initializes text-to-speech.
+type InitializeTextToSpeechPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeTextToSpeechPacket) ContextId() string { return f.ContextID }
+
+// InitializeVoiceActivityDetectionPacket initializes voice activity detection.
+type InitializeVoiceActivityDetectionPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeVoiceActivityDetectionPacket) IsAsync() bool     { return true }
+func (f InitializeVoiceActivityDetectionPacket) ContextId() string { return f.ContextID }
+
+// InitializeEndOfSpeechPacket initializes end-of-speech detection.
+type InitializeEndOfSpeechPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeEndOfSpeechPacket) IsAsync() bool     { return true }
+func (f InitializeEndOfSpeechPacket) ContextId() string { return f.ContextID }
+
+// InitializeDenoisePacket initializes the denoiser for text->audio switch.
+type InitializeDenoisePacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeDenoisePacket) IsAsync() bool     { return true }
+func (f InitializeDenoisePacket) ContextId() string { return f.ContextID }
+
+// InitializeBehaviorPacket sets up greeting, idle timeout, max session.
+type InitializeBehaviorPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeBehaviorPacket) ContextId() string { return f.ContextID }
+
+// InitializationCompletedPacket is emitted when the connect initialization chain succeeds.
+type InitializationCompletedPacket struct {
+	ContextID string
+	Event     utils.AssistantWebhookEvent
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializationCompletedPacket) ContextId() string { return f.ContextID }
+
+// AsyncPacket marks a packet whose handler runs in its own goroutine.
+type AsyncPacket interface {
+	Packet
+	IsAsync() bool
+}
+
+// InitializeTelemetryPacket initializes the conversation observer (collectors, exporters).
+type InitializeTelemetryPacket struct {
+	ContextID string
+}
+
+func (p InitializeTelemetryPacket) ContextId() string { return p.ContextID }
+func (p InitializeTelemetryPacket) IsAsync() bool     { return true }
+
+// InitializeOutboundDispatcherPacket starts control, egress, and background dispatchers.
+type InitializeOutboundDispatcherPacket struct {
+	ContextID string
+}
+
+func (p InitializeOutboundDispatcherPacket) ContextId() string { return p.ContextID }
+
+// InitializeInboundDispatcherPacket starts the ingress dispatcher.
+type InitializeInboundDispatcherPacket struct {
+	ContextID string
+}
+
+func (p InitializeInboundDispatcherPacket) ContextId() string { return p.ContextID }
+
+// InitializationStage identifies which initialization phase failed.
+type InitializationStage string
+
+const (
+	InitializationStageAssistant           InitializationStage = "assistant"
+	InitializationStageConversation        InitializationStage = "conversation"
+	InitializationStageService             InitializationStage = "service"
+	InitializationStageAuthentication      InitializationStage = "authentication"
+	InitializationStageSpeechToText        InitializationStage = "stt"
+	InitializationStageTextToSpeech        InitializationStage = "tts"
+	InitializationStageVoiceActivity       InitializationStage = "vad"
+	InitializationStageDenoise             InitializationStage = "denoise"
+	InitializationStageEndOfSpeech         InitializationStage = "eos"
+	InitializationStageBehavior            InitializationStage = "behavior"
+	InitializationStageAnalysis            InitializationStage = "analysis"
+	InitializationStageWebhook             InitializationStage = "webhook"
+	InitializationStageInputNormalizer     InitializationStage = "input_normalizer"
+	InitializationStageOutputNormalizer    InitializationStage = "output_normalizer"
+	InitializationStageInitializationFinal InitializationStage = "initialization_completed"
+)
+
+// InitializationFailedPacket signals that initialization failed.
+// The handler notifies the client and fires ConversationFailed webhooks.
+type InitializationFailedPacket struct {
+	ContextID string
+	Stage     InitializationStage
+	Error     error
+}
+
+func (f InitializationFailedPacket) ContextId() string   { return f.ContextID }
+func (f InitializationFailedPacket) IsRecoverable() bool { return false }
+func (f InitializationFailedPacket) Err() error          { return f.Error }
+func (f InitializationFailedPacket) ErrMessage() string {
+	if f.Stage != "" {
+		return fmt.Sprintf("init[%s]: %s", string(f.Stage), f.Error.Error())
+	}
+	return fmt.Sprintf("init: %s", f.Error.Error())
+}
+
+// =============================================================================
+// Runtime mode switch chain (text <-> audio).
+// Uses dedicated mode-switch stage packets so switch flow remains independent
+// from bootstrap/finalization chains.
+// =============================================================================
+
+type ModeSwitchRequestedPacket struct {
+	ContextID   string
+	StreamMode  protos.StreamMode
+	RequestedAt time.Time
+}
+
+func (f ModeSwitchRequestedPacket) ContextId() string { return f.ContextID }
+
+type ModeSwitchCompletedPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchCompletedPacket) ContextId() string { return f.ContextID }
+
+type ModeSwitchErrorType string
+
+const (
+	ModeSwitchErrorTypeUnknown                          ModeSwitchErrorType = "unknown"
+	ModeSwitchErrorTypePreconditionNotReady             ModeSwitchErrorType = "precondition_not_ready"
+	ModeSwitchErrorTypeUnsupportedMode                  ModeSwitchErrorType = "unsupported_mode"
+	ModeSwitchErrorTypeInitializeSpeechToText           ModeSwitchErrorType = "initialize_stt"
+	ModeSwitchErrorTypeInitializeTextToSpeech           ModeSwitchErrorType = "initialize_tts"
+	ModeSwitchErrorTypeInitializeVoiceActivityDetection ModeSwitchErrorType = "initialize_vad"
+	ModeSwitchErrorTypeInitializeEndOfSpeech            ModeSwitchErrorType = "initialize_eos"
+	ModeSwitchErrorTypeFinalizeEndOfSpeech              ModeSwitchErrorType = "finalize_eos"
+	ModeSwitchErrorTypeInitializeDenoise                ModeSwitchErrorType = "initialize_denoise"
+	ModeSwitchErrorTypeFinalizeDenoise                  ModeSwitchErrorType = "finalize_denoise"
+	ModeSwitchErrorTypeFinalizeVoiceActivityDetection   ModeSwitchErrorType = "finalize_vad"
+	ModeSwitchErrorTypeFinalizeTextToSpeech             ModeSwitchErrorType = "finalize_tts"
+	ModeSwitchErrorTypeFinalizeSpeechToText             ModeSwitchErrorType = "finalize_stt"
+)
+
+type ModeSwitchErrorPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+	Type       ModeSwitchErrorType
+	Error      error
+}
+
+func (f ModeSwitchErrorPacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchErrorPacket) IsRecoverable() bool {
+	return f.Type == ModeSwitchErrorTypeUnknown ||
+		f.Type == ModeSwitchErrorTypePreconditionNotReady ||
+		f.Type == ModeSwitchErrorTypeUnsupportedMode
+}
+func (f ModeSwitchErrorPacket) Err() error { return f.Error }
+func (f ModeSwitchErrorPacket) ErrMessage() string {
+	msg := "unknown error"
+	if f.Error != nil {
+		msg = f.Error.Error()
+	}
+	return fmt.Sprintf("mode_switch[%s:%s]: %s", string(f.Type), f.StreamMode.String(), msg)
+}
+
+// ModeSwitchInitializeSpeechToTextPacket initializes STT for text->audio switch.
+// Sync — runs serially on the bootstrap goroutine; on success emits the next
+// packet in the chain, on failure emits ModeSwitchErrorPacket (non-recoverable).
+type ModeSwitchInitializeSpeechToTextPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchInitializeSpeechToTextPacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchInitializeSpeechToTextPacket) IsAsync() bool     { return true }
+
+// ModeSwitchInitializeTextToSpeechPacket initializes TTS for text->audio switch.
+type ModeSwitchInitializeTextToSpeechPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchInitializeTextToSpeechPacket) ContextId() string { return f.ContextID }
+
+// ModeSwitchInitializeVoiceActivityDetectionPacket initializes VAD for text->audio switch.
+type ModeSwitchInitializeVoiceActivityDetectionPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchInitializeVoiceActivityDetectionPacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchInitializeVoiceActivityDetectionPacket) IsAsync() bool     { return true }
+
+// ModeSwitchInitializeEndOfSpeechPacket initializes EOS for text->audio switch.
+type ModeSwitchInitializeEndOfSpeechPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchInitializeEndOfSpeechPacket) ContextId() string { return f.ContextID }
+
+// ModeSwitchInitializeDenoisePacket initializes the denoiser for text->audio switch.
+type ModeSwitchInitializeDenoisePacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchInitializeDenoisePacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchInitializeDenoisePacket) IsAsync() bool     { return true }
+
+// ModeSwitchFinalizeSpeechToTextPacket finalizes STT for audio->text switch.
+// Async — runs in its own goroutine. Fire-and-forget; the client has already
+// been confirmed in text mode by the time these handlers run. Errors are logged.
+type ModeSwitchFinalizeSpeechToTextPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchFinalizeSpeechToTextPacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchFinalizeSpeechToTextPacket) IsAsync() bool     { return true }
+
+// ModeSwitchFinalizeTextToSpeechPacket finalizes TTS for audio->text switch.
+type ModeSwitchFinalizeTextToSpeechPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchFinalizeTextToSpeechPacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchFinalizeTextToSpeechPacket) IsAsync() bool     { return true }
+
+// ModeSwitchFinalizeVoiceActivityDetectionPacket finalizes VAD for audio->text switch.
+type ModeSwitchFinalizeVoiceActivityDetectionPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchFinalizeVoiceActivityDetectionPacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchFinalizeVoiceActivityDetectionPacket) IsAsync() bool     { return true }
+
+// ModeSwitchFinalizeEndOfSpeechPacket finalizes EOS for audio->text switch.
+type ModeSwitchFinalizeEndOfSpeechPacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchFinalizeEndOfSpeechPacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchFinalizeEndOfSpeechPacket) IsAsync() bool     { return true }
+
+// ModeSwitchFinalizeDenoisePacket finalizes the denoiser for audio->text switch.
+type ModeSwitchFinalizeDenoisePacket struct {
+	ContextID  string
+	StreamMode protos.StreamMode
+}
+
+func (f ModeSwitchFinalizeDenoisePacket) ContextId() string { return f.ContextID }
+func (f ModeSwitchFinalizeDenoisePacket) IsAsync() bool     { return true }
+
+// =============================================================================
+// Finalization chain:
+// FinalizeBehavior → FinalizeEndOfSpeech → FinalizeVoiceActivityDetection
+// → FinalizeTextToSpeech → FinalizeSpeechToText → FinalizeAuthentication
+// → FinalizeSessionRuntime → AnalysisStart → ExecuteAnalysis* → AnalysisDone
+// → WebhookStart → ExecuteWebhook* → WebhookDone
+// → FinalizeConversation → FinalizeAssistant → FinalizationCompleted
+// Each handler enqueues the next phase to backgroundCh, forming an ordered chain.
+// =============================================================================
+
+// FinalizeBehaviorPacket finalizes session behavior controls (timers).
+type FinalizeBehaviorPacket struct {
+	ContextID string
+}
+
+func (f FinalizeBehaviorPacket) ContextId() string { return f.ContextID }
+
+// FinalizeEndOfSpeechPacket finalizes end-of-speech processing.
+type FinalizeEndOfSpeechPacket struct {
+	ContextID string
+}
+
+func (f FinalizeEndOfSpeechPacket) ContextId() string { return f.ContextID }
+
+// FinalizeVoiceActivityDetectionPacket finalizes VAD processing.
+type FinalizeVoiceActivityDetectionPacket struct {
+	ContextID string
+}
+
+func (f FinalizeVoiceActivityDetectionPacket) ContextId() string { return f.ContextID }
+
+// FinalizeTextToSpeechPacket finalizes text-to-speech resources.
+type FinalizeTextToSpeechPacket struct {
+	ContextID string
+}
+
+func (f FinalizeTextToSpeechPacket) ContextId() string { return f.ContextID }
+
+// FinalizeSpeechToTextPacket finalizes speech-to-text resources.
+type FinalizeSpeechToTextPacket struct {
+	ContextID string
+}
+
+func (f FinalizeSpeechToTextPacket) ContextId() string { return f.ContextID }
+
+// FinalizeAuthenticationPacket finalizes session authentication stage.
+type FinalizeAuthenticationPacket struct {
+	ContextID string
+}
+
+func (f FinalizeAuthenticationPacket) ContextId() string { return f.ContextID }
+
+// FinalizeSessionRuntimePacket finalizes runtime resources and recording.
+type FinalizeSessionRuntimePacket struct {
+	ContextID string
+}
+
+func (f FinalizeSessionRuntimePacket) ContextId() string { return f.ContextID }
+
+// FinalizeConversationPacket finalizes conversation-level collectors/events.
+type FinalizeConversationPacket struct {
+	ContextID string
+}
+
+func (f FinalizeConversationPacket) ContextId() string { return f.ContextID }
+
+// FinalizeAssistantPacket finalizes assistant runtime resources.
+type FinalizeAssistantPacket struct {
+	ContextID string
+}
+
+func (f FinalizeAssistantPacket) ContextId() string { return f.ContextID }
+
+// FinalizationCompletedPacket marks terminal completion of disconnect flow.
+type FinalizationCompletedPacket struct {
+	ContextID string
+}
+
+func (f FinalizationCompletedPacket) ContextId() string { return f.ContextID }
+
+// ExecuteAnalysisPacket triggers a single analysis execution.
+type ExecuteAnalysisPacket struct {
+	ContextID      string
+	Arguments      map[string]interface{}
+	ConversationID uint64
+	Auth           types.SimplePrinciple
+}
+
+func (f ExecuteAnalysisPacket) ContextId() string { return f.ContextID }
+
+// ExecuteWebhookPacket triggers a single webhook execution.
+type ExecuteWebhookPacket struct {
+	ContextID string
+	Event     utils.AssistantWebhookEvent
+	Arguments map[string]interface{}
+}
+
+func (f ExecuteWebhookPacket) ContextId() string { return f.ContextID }
 
 // StartIdleTimeoutPacket explicitly (re)starts the idle timeout timer.
 // Routed on outputCh so producers can order it relative to InjectMessagePacket
@@ -428,34 +925,34 @@ const (
 	TTSSystemPanic
 )
 
-type TTSErrorPacket struct {
+type TextToSpeechErrorPacket struct {
 	ContextID string
 	Error     error
 	Type      TTSErrorType
 }
 
-func (f TTSErrorPacket) ContextId() string { return f.ContextID }
-func (f TTSErrorPacket) IsRecoverable() bool {
+func (f TextToSpeechErrorPacket) ContextId() string { return f.ContextID }
+func (f TextToSpeechErrorPacket) IsRecoverable() bool {
 	return f.Type != TTSAuthentication
 }
-func (f TTSErrorPacket) Err() error         { return f.Error }
-func (f TTSErrorPacket) ErrMessage() string { return fmt.Sprintf("tts: %s", f.Error.Error()) }
+func (f TextToSpeechErrorPacket) Err() error         { return f.Error }
+func (f TextToSpeechErrorPacket) ErrMessage() string { return fmt.Sprintf("tts: %s", f.Error.Error()) }
 
-// TTSTextPacket carries a sentence-ready text chunk for TTS synthesis.
-type TTSTextPacket struct {
+// TextToSpeechTextPacket carries a sentence-ready text chunk for TTS synthesis.
+type TextToSpeechTextPacket struct {
 	ContextID string
 	Text      string
 }
 
-func (f TTSTextPacket) ContextId() string { return f.ContextID }
+func (f TextToSpeechTextPacket) ContextId() string { return f.ContextID }
 
-// TTSDonePacket signals end of this turn's output. TTS flushes remaining audio.
-type TTSDonePacket struct {
+// TextToSpeechDonePacket signals end of this turn's output. TTS flushes remaining audio.
+type TextToSpeechDonePacket struct {
 	ContextID string
 	Text      string
 }
 
-func (f TTSDonePacket) ContextId() string { return f.ContextID }
+func (f TextToSpeechDonePacket) ContextId() string { return f.ContextID }
 
 // TextToSpeechAudioPacket carries a TTS audio chunk produced by the TTS provider.
 type TextToSpeechAudioPacket struct {
@@ -499,18 +996,18 @@ func (f RecordAssistantAudioPacket) ContextId() string { return f.ContextID }
 // Persistence
 // =============================================================================
 
-// SaveMessagePacket persists a conversation message to the database and appends
+// MessageCreatePacket persists a conversation message to the database and appends
 // it to the in-memory history. It implements MessagePacket so it can be passed
 // directly to onCreateMessage.
-type SaveMessagePacket struct {
+type MessageCreatePacket struct {
 	ContextID   string
 	MessageRole string
 	Text        string
 }
 
-func (f SaveMessagePacket) ContextId() string { return f.ContextID }
-func (f SaveMessagePacket) Role() string      { return f.MessageRole }
-func (f SaveMessagePacket) Content() string   { return f.Text }
+func (f MessageCreatePacket) ContextId() string { return f.ContextID }
+func (f MessageCreatePacket) Role() string      { return f.MessageRole }
+func (f MessageCreatePacket) Content() string   { return f.Text }
 
 // ToolLogCreatePacket persists a tool call start to the database.
 type ToolLogCreatePacket struct {
@@ -530,6 +1027,26 @@ type ToolLogUpdatePacket struct {
 }
 
 func (f ToolLogUpdatePacket) ContextId() string { return f.ContextID }
+
+// HTTPLogCreatePacket persists generic HTTP execution logs (webhook, authentication, analysis).
+type HTTPLogCreatePacket struct {
+	ContextID       string
+	Source          string
+	SourceRefID     uint64
+	SourceEvent     string
+	HTTPURL         string
+	HTTPMethod      string
+	ResponseStatus  int64
+	TimeTaken       int64
+	RetryCount      uint32
+	Status          type_enums.RecordState
+	ErrorMessage    *string
+	RequestPayload  []byte
+	ResponsePayload []byte
+}
+
+func (f HTTPLogCreatePacket) ContextId() string { return f.ContextID }
+func (f HTTPLogCreatePacket) IsAsync() bool     { return true }
 
 // =============================================================================
 // Metrics & Metadata

@@ -87,6 +87,30 @@ type LargeLanguageCaller interface {
 	) error
 }
 
+// Chat handles unary chat completion.
+type Chat interface {
+	ChatComplete(
+		ctx context.Context,
+		allMessages []*protos.Message,
+		options *ChatCompletionOptions,
+	) (*protos.Message, []*protos.Metric, error)
+}
+
+// ChatStream handles stream lifecycle and turn execution.
+type ChatStream interface {
+	GetCredential() *protos.Credential
+	Connect(ctx context.Context, configuration *protos.StreamChatConfiguration) error
+	Chat(
+		ctx context.Context,
+		allMessages []*protos.Message,
+		options *ChatStreamCompletionOptions,
+		onStream func(rID string, msg *protos.Message) error,
+		onMetrics func(rID string, msg *protos.Message, mtrx []*protos.Metric) error,
+		onError func(rID string, err error),
+	) error
+	Close(ctx context.Context) error
+}
+
 // EmbeddingCaller is an interface for working with embeddings.
 // - GetEmbedding: Generates embeddings for the supplied content and options.
 type EmbeddingCaller interface {

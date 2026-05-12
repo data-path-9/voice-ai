@@ -1074,43 +1074,6 @@ func TestNewBaseStreamer_BufferPreAllocation_Fallback(t *testing.T) {
 }
 
 // ============================================================================
-// Frame pool
-// ============================================================================
-
-func TestGetFrame_ReturnsCorrectSize(t *testing.T) {
-	f := getFrame(160)
-	assert.Equal(t, 160, len(f))
-	assert.GreaterOrEqual(t, cap(f), 160)
-	putFrame(f)
-}
-
-func TestGetFrame_PoolReuse(t *testing.T) {
-	// Get and return a frame, then get again — should reuse.
-	f1 := getFrame(160)
-	f1[0] = 0xAA // mark it
-	ptr1 := &f1[0]
-	putFrame(f1)
-
-	f2 := getFrame(160)
-	// Pool reuse is best-effort; we can't guarantee same pointer,
-	// but the slice should be correctly sized.
-	assert.Equal(t, 160, len(f2))
-	_ = ptr1 // used for debugging; pool reuse is non-deterministic
-	putFrame(f2)
-}
-
-func TestGetFrame_UndersizedPooledSlice(t *testing.T) {
-	// Put a small slice, then request a larger one.
-	small := make([]byte, 10)
-	putFrame(small)
-
-	big := getFrame(160)
-	assert.Equal(t, 160, len(big))
-	assert.GreaterOrEqual(t, cap(big), 160)
-	putFrame(big)
-}
-
-// ============================================================================
 // BufferAndSendInput — buffer swap behaviour
 // ============================================================================
 

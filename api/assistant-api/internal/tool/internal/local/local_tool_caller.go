@@ -9,6 +9,7 @@ import (
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/api/assistant-api/internal/variable"
+	internal_namespace "github.com/rapidaai/api/assistant-api/internal/variable/namespace"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
@@ -32,7 +33,7 @@ func (executor *toolCaller) ExecutionMethod() string {
 }
 
 func (executor *toolCaller) Argumenting(mapping map[string]string, args map[string]interface{}, communication internal_type.Communication) map[string]interface{} {
-	registry := variable.NewDefaultRegistry().With("tool", &variable.ToolNamespace{})
+	registry := internal_namespace.NewDefaultRegistry().With("tool", &internal_namespace.ToolNamespace{})
 	src := variable.NewCommunicationSource(communication)
 	ctx := variable.ResolveContext{ToolName: executor.Name(), ToolArgs: args}
 	return registry.Apply(mapping, src, ctx)

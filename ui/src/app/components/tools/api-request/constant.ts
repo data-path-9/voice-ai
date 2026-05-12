@@ -13,16 +13,17 @@ const VALID_HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 // Default Options
 // ============================================================================
 
-export const GetAPIRequestDefaultOptions = (
-  current: Metadata[],
-): Metadata[] =>
+export const GetAPIRequestDefaultOptions = (current: Metadata[]): Metadata[] =>
   buildDefaultMetadata(
     current,
     [
       { key: 'tool.method', defaultValue: 'POST' },
       { key: 'tool.endpoint' },
       { key: 'tool.headers', defaultValue: '{}' },
-      { key: 'tool.parameters', defaultValue: '{"tool.argument":"argument"}' },
+      {
+        key: 'tool.parameters',
+        defaultValue: '{"tool.argument":"argument","tool.name":"name"}',
+      },
     ],
     ALL_KEYS,
   );
@@ -85,7 +86,11 @@ const validateParameters = (params: string | undefined): string | undefined => {
   }
   try {
     const parsed = JSON.parse(params);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       return 'Parameters must be a valid JSON object.';
     }
     const entries = Object.entries(parsed);
@@ -94,7 +99,12 @@ const validateParameters = (params: string | undefined): string | undefined => {
     }
     for (const [paramKey, paramValue] of entries) {
       const [type, key] = paramKey.split('.');
-      if (!type || !key || typeof paramValue !== 'string' || paramValue === '') {
+      if (
+        !type ||
+        !key ||
+        typeof paramValue !== 'string' ||
+        paramValue === ''
+      ) {
         return `Invalid parameter format. Key "${paramKey}" must be "type.key" and value must be a non-empty string.`;
       }
     }

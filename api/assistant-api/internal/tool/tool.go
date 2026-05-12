@@ -29,7 +29,6 @@ type toolExecutor struct {
 	tools                  map[string]internal_tool.ToolCaller
 	availableToolFunctions []*protos.FunctionDefinition
 	mcpClients             []*internal_tool_mcp.Client
-	conditionMatcher       *toolConditionMatcher
 }
 
 type toolRegistration struct {
@@ -43,7 +42,6 @@ func NewToolExecutor(logger commons.Logger) ToolExecutor {
 		mcpClients:             make([]*internal_tool_mcp.Client, 0),
 		tools:                  make(map[string]internal_tool.ToolCaller),
 		availableToolFunctions: make([]*protos.FunctionDefinition, 0),
-		conditionMatcher:       newToolConditionMatcher(),
 	}
 }
 
@@ -88,24 +86,9 @@ func (executor *toolExecutor) filterToolsByCondition(
 	tools []*internal_assistant_entity.AssistantTool,
 	communication internal_type.Communication,
 ) []*internal_assistant_entity.AssistantTool {
-	if executor.conditionMatcher == nil {
-		executor.conditionMatcher = newToolConditionMatcher()
-	}
 	filtered := make([]*internal_assistant_entity.AssistantTool, 0, len(tools))
 	for _, tool := range tools {
-		opts := tool.GetOptions()
-		rawCondition, err := opts.GetString("tool.condition")
-		if err != nil || rawCondition == "" {
-			filtered = append(filtered, tool)
-			continue
-		}
-
-		allowed, evalErr := executor.conditionMatcher.Evaluate(rawCondition, string(communication.GetSource()))
-		if evalErr != nil {
-			executor.logger.Warnf("invalid tool.condition for tool %s, excluding tool: %v", tool.Name, evalErr)
-			continue
-		}
-		if allowed {
+		if communication.IsConditionAllowed(tool.GetOptions(), "tool.condition") {
 			filtered = append(filtered, tool)
 		}
 	}
@@ -137,12 +120,10 @@ func (executor *toolExecutor) buildMCPToolRegistrations(
 		return nil, err
 	}
 	executor.mcpClients = append(executor.mcpClients, client)
-
 	definitions, err := client.ListTools(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	registrations := make([]toolRegistration, 0, len(definitions))
 	for i, def := range definitions {
 		caller := internal_tool_mcp.NewMCPToolCaller(executor.logger, client, tool.Id+uint64(i), def.Name, def)
@@ -179,8 +160,6 @@ func (executor *toolExecutor) executeTools(ctx context.Context, contextID string
 			continue
 		}
 		wg.Add(1)
-		// executor.logger.Infof("Executing tool args: %v", call)
-
 		go func(c *protos.ToolCall, caller internal_tool.ToolCaller) {
 			defer wg.Done()
 			caller.Call(ctx, contextID, c.GetId(), executor.parseArgument(c.GetFunction().GetArguments()), communication)

@@ -100,15 +100,15 @@ func (gr *genericRequestor) GetAssistant(
 	version string) (*internal_assistant_entity.Assistant, error) {
 	versionId := utils.GetVersionDefinition(version)
 	assistantOpts := &internal_services.GetAssistantOption{
-		InjectTag: false,
-		//
 		InjectAssistantProvider:      true,
 		InjectKnowledgeConfiguration: true,
 		InjectTool:                   true,
 		InjectAnalysis:               true,
 		InjectWebhook:                true,
-		InjectConversations:          false,
 		InjectTelemetryProvider:      true,
+		InjectAuthentication:         true,
+		InjectConversations:          false,
+		InjectTag:                    false,
 	}
 	switch gr.source {
 	case utils.PhoneCall:
@@ -173,7 +173,12 @@ func (tc *genericRequestor) GetMetadata() map[string]interface{} {
 	return tc.metadata
 }
 
-func (tc *genericRequestor) onSetMetadata(ctx context.Context, auth types.SimplePrinciple, mt map[string]interface{}) {
+// applyMetadata merges metadata into in-memory state and persists asynchronously.
+// Called from BeginConversation, ResumeConversation, and HandleSessionAuthenticationSucceeded.
+func (tc *genericRequestor) applyMetadata(mt map[string]interface{}) {
+	if len(mt) == 0 {
+		return
+	}
 	modified := make(map[string]interface{})
 	for k, v := range mt {
 		vl, ok := tc.metadata[k]
@@ -183,79 +188,105 @@ func (tc *genericRequestor) onSetMetadata(ctx context.Context, auth types.Simple
 		tc.metadata[k] = v
 		modified[k] = v
 	}
-	utils.Go(ctx, func() {
+	if len(modified) == 0 {
+		return
+	}
+	utils.Go(context.Background(), func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
 		start := time.Now()
 		tc.conversationService.ApplyConversationMetadata(
 			dbCtx,
-			auth, tc.assistant.Id, tc.assistantConversation.Id, types.NewMetadataList(modified))
-		tc.logger.Benchmark("genericRequestor.SetMetadata", time.Since(start))
+			tc.auth, tc.assistant.Id, tc.assistantConversation.Id, types.NewMetadataList(modified))
+		tc.logger.Benchmark("genericRequestor.applyMetadata", time.Since(start))
 	})
-
 }
 
-func (tc *genericRequestor) onAddMetadata(ctx context.Context, metadata ...*protos.Metadata) error {
+// applyArguments merges arguments into in-memory state and persists asynchronously.
+func (tc *genericRequestor) applyArguments(args map[string]interface{}) {
+	if len(args) == 0 {
+		return
+	}
+	tc.args = utils.MergeMaps(tc.args, args)
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		if _, err := tc.conversationService.ApplyConversationArgument(
+			dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, args,
+		); err != nil {
+			tc.logger.Errorf("apply arguments: %v", err)
+		}
+	})
+}
+
+// applyOptions merges options into in-memory state and persists asynchronously.
+func (tc *genericRequestor) applyOptions(opts map[string]interface{}) {
+	if len(opts) == 0 {
+		return
+	}
+	tc.options = utils.MergeMaps(tc.options, opts)
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		if _, err := tc.conversationService.ApplyConversationOption(
+			dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, opts,
+		); err != nil {
+			tc.logger.Errorf("apply options: %v", err)
+		}
+	})
+}
+
+func (tc *genericRequestor) onAddMetadata(_ context.Context, metadata ...*protos.Metadata) error {
 	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 	defer cancel()
-	_, err := tc.conversationService.ApplyConversationMetadata(
-		dbCtx,
-		tc.auth,
-		tc.assistant.Id,
-		tc.assistantConversation.Id,
-		types.ToMetadatas(metadata),
-	)
-	if err != nil {
-		tc.logger.Errorf("unable to flush metadata for conversation %+v", err)
-	}
-	return err
+	utils.Go(context.Background(), func() {
+		_, err := tc.conversationService.ApplyConversationMetadata(
+			dbCtx,
+			tc.auth,
+			tc.assistant.Id,
+			tc.assistantConversation.Id,
+			types.ToMetadatas(metadata),
+		)
+		if err != nil {
+			tc.logger.Errorf("unable to flush metadata for conversation %+v", err)
+		}
+	})
+	return nil
 }
 
-func (tc *genericRequestor) onAddMetrics(ctx context.Context, metrics ...*protos.Metric) error {
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	_, err := tc.conversationService.ApplyConversationMetrics(
-		dbCtx,
-		tc.auth,
-		tc.assistant.Id,
-		tc.assistantConversation.Id,
-		types.ToMetrics(metrics),
-	)
-	if err != nil {
-		tc.logger.Errorf("unable to flush metrics for conversation %+v", err)
-	}
-	return err
-}
-
-func (deb *genericRequestor) onAddMessage(ctx context.Context, msg internal_type.MessagePacket) error {
+func (deb *genericRequestor) onAddMessage(_ context.Context, msg internal_type.MessagePacket) error {
 	deb.histories = append(deb.histories, msg)
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	_, err := deb.conversationService.CreateConversationMessage(dbCtx, deb.Auth(), deb.GetSource(), deb.Assistant().Id, deb.Assistant().AssistantProviderId, deb.Conversation().Id,
-		fmt.Sprintf("%s-%s", msg.Role(), msg.ContextId()), msg.Role(), msg.Content())
-	if err != nil {
-		deb.logger.Error("unable to create message for the user")
-		return err
-	}
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		_, err := deb.conversationService.CreateConversationMessage(dbCtx, deb.Auth(), deb.GetSource(), deb.Assistant().Id, deb.Assistant().AssistantProviderId, deb.Conversation().Id,
+			fmt.Sprintf("%s-%s", msg.Role(), msg.ContextId()), msg.Role(), msg.Content())
+		if err != nil {
+			deb.logger.Error("unable to create message for the user")
+		}
+	})
 	return nil
 }
 
-func (deb *genericRequestor) onAddMessageMetric(ctx context.Context, prefix string, messageId string, metrics []*protos.Metric) error {
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	if _, err := deb.conversationService.ApplyMessageMetrics(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metrics); err != nil {
-		deb.logger.Errorf("error updating metrics for message: %v", err)
-		return err
-	}
+func (deb *genericRequestor) onAddMessageMetric(_ context.Context, prefix string, messageId string, metrics []*protos.Metric) error {
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		if _, err := deb.conversationService.ApplyMessageMetrics(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metrics); err != nil {
+			deb.logger.Errorf("error updating metrics for message: %v", err)
+		}
+	})
 	return nil
 }
 
-func (deb *genericRequestor) onAddMessageMetadata(ctx context.Context, prefix string, messageId string, metadata []*protos.Metadata) error {
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	if _, err := deb.conversationService.ApplyMessageMetadata(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metadata); err != nil {
-		deb.logger.Errorf("Error in ApplyMessageMetadata: %v", err)
-	}
+func (deb *genericRequestor) onAddMessageMetadata(_ context.Context, prefix string, messageId string, metadata []*protos.Metadata) error {
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		if _, err := deb.conversationService.ApplyMessageMetadata(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metadata); err != nil {
+			deb.logger.Errorf("Error in ApplyMessageMetadata: %v", err)
+		}
+	})
 	return nil
 }
 

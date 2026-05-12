@@ -14,7 +14,13 @@ const REQUIRED_KEYS = ['tool.endpoint_id', 'tool.parameters'];
 export const GetEndpointDefaultOptions = (current: Metadata[]): Metadata[] =>
   buildDefaultMetadata(
     current,
-    [{ key: 'tool.endpoint_id' }, { key: 'tool.parameters', defaultValue: '{"tool.argument":"argument"}' }],
+    [
+      { key: 'tool.endpoint_id' },
+      {
+        key: 'tool.parameters',
+        defaultValue: '{"tool.argument":"argument","tool.name":"name"}',
+      },
+    ],
     REQUIRED_KEYS,
   );
 
@@ -57,7 +63,12 @@ const validateParameters = (value: string | undefined): string | undefined => {
     }
     for (const [paramKey, paramValue] of entries) {
       const [type, key] = paramKey.split('.');
-      if (!type || !key || typeof paramValue !== 'string' || paramValue === '') {
+      if (
+        !type ||
+        !key ||
+        typeof paramValue !== 'string' ||
+        paramValue === ''
+      ) {
         return 'Each parameter key must follow the "type.key" format with a non-empty string value.';
       }
     }

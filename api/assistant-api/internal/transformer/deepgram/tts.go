@@ -205,7 +205,7 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 	t.mu.Unlock()
 
 	switch input := in.(type) {
-	case internal_type.TTSInterruptPacket:
+	case internal_type.TextToSpeechInterruptPacket:
 		t.mu.Lock()
 		t.contextId = ""
 		t.ttsStartedAt = time.Time{}
@@ -226,10 +226,10 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 		}
 		return nil
 
-	case internal_type.TTSTextPacket:
+	case internal_type.TextToSpeechTextPacket:
 		if connection == nil {
 			if err := t.Initialize(); err != nil {
-				t.onPacket(internal_type.TTSErrorPacket{
+				t.onPacket(internal_type.TextToSpeechErrorPacket{
 					ContextID: input.ContextID,
 					Error:     fmt.Errorf("deepgram-tts: failed to connect: %w", err),
 					Type:      internal_type.TTSNetworkTimeout,
@@ -255,7 +255,7 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 			"text": normalized,
 		}); err != nil {
 			t.logger.Errorf("deepgram-tts: failed to send Speak message %v", err)
-			t.onPacket(internal_type.TTSErrorPacket{
+			t.onPacket(internal_type.TextToSpeechErrorPacket{
 				ContextID: input.ContextID,
 				Error:     fmt.Errorf("deepgram-tts: failed to send Speak message: %w", err),
 				Type:      internal_type.TTSNetworkTimeout,
@@ -272,7 +272,7 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 		})
 		return nil
 
-	case internal_type.TTSDonePacket:
+	case internal_type.TextToSpeechDonePacket:
 		// Interrupted before done arrived — nothing to flush.
 		if connection == nil {
 			return nil
@@ -280,7 +280,7 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 		// Signal end of text stream; Deepgram will respond with Flushed.
 		if err := connection.WriteJSON(map[string]string{"type": "Flush"}); err != nil {
 			t.logger.Errorf("deepgram-tts: failed to send Flush %v", err)
-			t.onPacket(internal_type.TTSErrorPacket{
+			t.onPacket(internal_type.TextToSpeechErrorPacket{
 				ContextID: input.ContextID,
 				Error:     fmt.Errorf("deepgram-tts: failed to send Flush: %w", err),
 				Type:      internal_type.TTSNetworkTimeout,

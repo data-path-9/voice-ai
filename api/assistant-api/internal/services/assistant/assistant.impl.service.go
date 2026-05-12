@@ -218,6 +218,26 @@ func (eService *assistantService) Get(ctx context.Context,
 			})
 	}
 
+	if opts.InjectAuthentication {
+		wg.Add(1)
+		utils.Go(ctx,
+			func() {
+				defer wg.Done()
+				var authentication *internal_assistant_entity.AssistantAuthentication
+				tx := db.Preload("AssistantAuthenticationOption", "status = ?", type_enums.RECORD_ACTIVE).
+					Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE).
+					Order(clause.OrderByColumn{
+						Column: clause.Column{Name: "created_date"},
+						Desc:   true,
+					}).
+					First(&authentication)
+				if tx.Error != nil {
+					return
+				}
+				assistant.AssistantAuthentication = authentication
+			})
+	}
+
 	if opts.InjectKnowledgeConfiguration {
 		wg.Add(1)
 		utils.Go(ctx,
@@ -426,9 +446,10 @@ func (eService *assistantService) Get(ctx context.Context,
 				defer wg.Done()
 				var webhooks []*internal_assistant_entity.AssistantWebhook
 				tx := db.
+					Preload("AssistantWebhookOption", "status = ?", type_enums.RECORD_ACTIVE).
 					Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE.String()).
-					Find(&webhooks).
-					Order("execution_priority DESC")
+					Order("execution_priority DESC").
+					Find(&webhooks)
 				if tx.Error != nil {
 					return
 				}
@@ -443,9 +464,10 @@ func (eService *assistantService) Get(ctx context.Context,
 				defer wg.Done()
 				var analysis []*internal_assistant_entity.AssistantAnalysis
 				tx := db.
+					Preload("AssistantAnalysisOption", "status = ?", type_enums.RECORD_ACTIVE).
 					Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE.String()).
-					Find(&analysis).
-					Order("execution_priority DESC")
+					Order("execution_priority DESC").
+					Find(&analysis)
 				if tx.Error != nil {
 					return
 				}

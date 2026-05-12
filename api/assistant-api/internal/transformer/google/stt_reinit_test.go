@@ -186,7 +186,7 @@ func TestTransform_WorksAfterReinit(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Now Transform should send audio on the new stream
-	err = g.Transform(context.Background(), internal_type.UserAudioReceivedPacket{Audio: []byte{0x01, 0x02}})
+	err = g.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{Audio: []byte{0x01, 0x02}})
 	require.NoError(t, err)
 
 	assert.EqualValues(t, 1, secondSendCalled.Load(), "audio should be sent on the reinitialized stream")

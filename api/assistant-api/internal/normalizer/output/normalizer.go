@@ -14,6 +14,7 @@ import (
 	internal_output_aggregator_normalizer "github.com/rapidaai/api/assistant-api/internal/normalizer/output/aggregator"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/api/assistant-api/internal/variable"
+	internal_namespace "github.com/rapidaai/api/assistant-api/internal/variable/namespace"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/parsers"
 	"github.com/rapidaai/protos"
@@ -62,7 +63,7 @@ func (n *outputNormalizer) Initialize(ctx context.Context, communication interna
 	if dictionaries, err := communication.GetOptions().GetString("speaker.pronunciation.dictionaries"); err == nil && dictionaries != "" {
 		n.normalizers = n.buildNormalizerPipeline(strings.Split(dictionaries, commons.SEPARATOR))
 	}
-	registry := variable.NewDefaultRegistry()
+	registry := internal_namespace.NewDefaultRegistry()
 	n.expandArgs = func() map[string]interface{} {
 		return registry.Expand(variable.NewCommunicationSource(communication), variable.ResolveContext{})
 	}
@@ -85,9 +86,9 @@ func (n *outputNormalizer) Close(_ context.Context) error {
 func (n *outputNormalizer) onAggregated(ctx context.Context, pkts ...internal_type.Packet) error {
 	for _, pkt := range pkts {
 		switch sp := pkt.(type) {
-		case internal_type.TTSTextPacket:
+		case internal_type.TextToSpeechTextPacket:
 			n.Run(ctx, ArgumentationPipeline{ContextID: sp.ContextID, Text: sp.Text})
-		case internal_type.TTSDonePacket:
+		case internal_type.TextToSpeechDonePacket:
 			n.Run(ctx, ArgumentationPipeline{ContextID: sp.ContextID, Text: sp.Text, IsFinal: true})
 		}
 	}
@@ -172,9 +173,9 @@ func (n *outputNormalizer) handleOutput(ctx context.Context, v OutputPipeline) {
 		return
 	}
 	if v.IsFinal {
-		n.onPacket(ctx, internal_type.TTSDonePacket{ContextID: v.ContextID, Text: v.Text})
+		n.onPacket(ctx, internal_type.TextToSpeechDonePacket{ContextID: v.ContextID, Text: v.Text})
 	} else {
-		n.onPacket(ctx, internal_type.TTSTextPacket{ContextID: v.ContextID, Text: v.Text})
+		n.onPacket(ctx, internal_type.TextToSpeechTextPacket{ContextID: v.ContextID, Text: v.Text})
 	}
 }
 

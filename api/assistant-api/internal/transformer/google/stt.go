@@ -91,14 +91,14 @@ func (google *googleSpeechToText) Transform(c context.Context, in internal_type.
 		google.contextId = pkt.ContextID
 		google.mu.Unlock()
 		return nil
-	case internal_type.STTInterruptPacket:
+	case internal_type.SpeechToTextInterruptPacket:
 		google.mu.Lock()
 		if google.startedAt.IsZero() {
 			google.startedAt = time.Now()
 		}
 		google.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		google.mu.Lock()
 		strm := google.stream
 		google.mu.Unlock()
@@ -108,7 +108,7 @@ func (google *googleSpeechToText) Transform(c context.Context, in internal_type.
 			google.mu.Lock()
 			if err := google.initializeStreamLocked(); err != nil {
 				google.mu.Unlock()
-				google.onPacket(internal_type.STTErrorPacket{
+				google.onPacket(internal_type.SpeechToTextErrorPacket{
 					ContextID: google.contextId,
 					Error:     fmt.Errorf("google-stt: re-initialize failed: %w", err),
 					Type:      internal_type.STTNetworkTimeout,
@@ -128,7 +128,7 @@ func (google *googleSpeechToText) Transform(c context.Context, in internal_type.
 			},
 		}); err != nil {
 			google.logger.Errorf("google-stt: error sending audio: %v", err)
-			google.onPacket(internal_type.STTErrorPacket{
+			google.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: google.contextId,
 				Error:     fmt.Errorf("google-stt: send failed: %w", err),
 				Type:      internal_type.STTNetworkTimeout,
@@ -164,7 +164,7 @@ func (g *googleSpeechToText) recvLoop(stream speechpb.Speech_StreamingRecognizeC
 			if reinitErr := g.initializeStreamLocked(); reinitErr != nil {
 				g.mu.Unlock()
 				g.logger.Errorf("google-stt: re-initialize failed: %v", reinitErr)
-				g.onPacket(internal_type.STTErrorPacket{
+				g.onPacket(internal_type.SpeechToTextErrorPacket{
 					ContextID: g.contextId,
 					Error:     fmt.Errorf("google-stt: stream error: %w", err),
 					Type:      internal_type.STTNetworkTimeout,

@@ -35,6 +35,7 @@ import {
   RadioButton,
   Tag,
 } from '@carbon/react';
+import { toHumanReadableDateTime } from '@/utils/date';
 
 export function ConfigureAssistantToolPage() {
   const { assistantId } = useParams();
@@ -217,6 +218,7 @@ const ConfigureAssistantTool: FC<{ assistantId: string }> = ({
                 <TableHeader>Name</TableHeader>
                 <TableHeader>Type</TableHeader>
                 <TableHeader>Description</TableHeader>
+                <TableHeader>Date</TableHeader>
                 <TableHeader>Actions</TableHeader>
               </TableRow>
             </TableHead>
@@ -254,8 +256,8 @@ const ConfigureAssistantTool: FC<{ assistantId: string }> = ({
                         }
                       />
                     </TableCell>
-                    <TableCell>{itm.getName()}</TableCell>
-                    <TableCell>
+                    <TableCell className="text-sm">{itm.getName()}</TableCell>
+                    <TableCell className="text-sm">
                       <div className="flex items-center gap-1">
                         {methodMeta && (
                           <Tag size="sm" type="gray">
@@ -280,10 +282,15 @@ const ConfigureAssistantTool: FC<{ assistantId: string }> = ({
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="max-w-[360px] truncate">
+                    <TableCell className="max-w-[360px] truncate text-sm">
                       {itm.getDescription()}
                     </TableCell>
-                    <TableCell onClick={e => e.stopPropagation()}>
+                    <TableCell className="text-[13px] whitespace-nowrap">
+                      {itm.getCreateddate()
+                        ? toHumanReadableDateTime(itm.getCreateddate()!)
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-sm" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-0">
                         <Button
                           hasIconOnly

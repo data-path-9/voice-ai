@@ -7,10 +7,13 @@
 package channel_webrtc
 
 import (
+	"bytes"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
 	channel_base "github.com/rapidaai/api/assistant-api/internal/channel/base"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
 	"github.com/rapidaai/pkg/commons"
@@ -45,6 +48,27 @@ func newTestStreamer(t *testing.T) *webrtcStreamer {
 		currentMode: protos.StreamMode_STREAM_MODE_TEXT,
 	}
 }
+
+type fakeAmbientMixer struct {
+	cfg        internal_ambient.Config
+	ambientOut []byte
+}
+
+func (f *fakeAmbientMixer) Configure(cfg internal_ambient.Config) error {
+	f.cfg = cfg
+	return nil
+}
+
+func (f *fakeAmbientMixer) Mix(primary []byte) ([]byte, error) {
+	if primary == nil {
+		return append([]byte(nil), f.ambientOut...), nil
+	}
+	return append([]byte(nil), primary...), nil
+}
+
+func (f *fakeAmbientMixer) Reset() {}
+
+func (f *fakeAmbientMixer) CurrentConfig() internal_ambient.Config { return f.cfg }
 
 // --- Test: buildGRPCResponse wraps all proto types correctly ---
 
@@ -176,6 +200,31 @@ func TestResetAudioSession_ClearsState(t *testing.T) {
 	s.Mu.Unlock()
 }
 
+func TestResetAudioSession_FlushesPendingOutput(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+
+	// Simulate buffered-but-not-yet-sent output.
+	s.WithOutputBuffer(func(buf *bytes.Buffer) {
+		buf.Write([]byte{0x01, 0x02, 0x03, 0x04})
+	})
+	s.Output(&protos.ConversationAssistantMessage{
+		Message: &protos.ConversationAssistantMessage_Audio{Audio: []byte{0xAA, 0xBB}},
+	})
+
+	s.resetAudioSession()
+
+	s.WithOutputBuffer(func(buf *bytes.Buffer) {
+		assert.Equal(t, 0, buf.Len(), "output accumulation buffer should be cleared")
+	})
+
+	select {
+	case <-s.OutputCh:
+		t.Fatal("output channel should be drained after reset")
+	default:
+	}
+}
+
 // --- Test: Send routes correctly ---
 
 func TestSend_TextMessage(t *testing.T) {
@@ -238,5 +287,92 @@ func TestSend_TransferConversation_PushesFailedResult(t *testing.T) {
 		assert.Contains(t, result.GetResult()["reason"], "transfer not supported for WebRTC")
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for ConversationToolCallResult")
+	}
+}
+
+func TestApplyAmbientConfig_ReadsTypedConfig(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	fake := &fakeAmbientMixer{}
+	s.ambientMixer = fake
+
+	s.applyAmbientConfig(internal_ambient.NewConfig("cafe", 37), "test")
+
+	assert.Equal(t, "cafe", fake.cfg.Profile)
+	assert.Equal(t, 37, fake.cfg.Volume)
+	assert.True(t, fake.cfg.Enabled)
+}
+
+func TestApplyAmbientConfig_InvalidAmbientFallsBackToNone(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	fake := &fakeAmbientMixer{}
+	s.ambientMixer = fake
+
+	s.applyAmbientConfig(internal_ambient.NewConfig("foobar", 24), "test")
+
+	assert.Equal(t, "none", fake.cfg.Profile)
+	assert.Equal(t, 24, fake.cfg.Volume)
+	assert.False(t, fake.cfg.Enabled)
+}
+
+func TestApplyAmbientToFrame_AmbientOnlyOnSilenceTicks(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	fake := &fakeAmbientMixer{
+		ambientOut: make([]byte, webrtc_internal.OpusFrameBytes),
+	}
+	for i := range fake.ambientOut {
+		fake.ambientOut[i] = 0x11
+	}
+	s.ambientMixer = fake
+
+	out := s.applyAmbientToFrame(nil)
+	require.NotNil(t, out)
+	assert.Len(t, out, webrtc_internal.OpusFrameBytes)
+	assert.NotEqual(t, make([]byte, len(out)), out)
+}
+
+func TestApplyAmbientToFrame_NoneLeavesPrimaryUntouched(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.ambientMixer = nil
+
+	in := make([]byte, webrtc_internal.OpusFrameBytes)
+	for i := range in {
+		in[i] = byte(i % 251)
+	}
+	out := s.applyAmbientToFrame(in)
+	assert.Equal(t, in, out)
+}
+
+func TestEnqueuePendingAudio_BoundedDropOldest_EmitsOverflowEvent(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+
+	limit := webrtc_internal.PendingAudioMaxFrames
+	for i := 0; i < limit+1; i++ {
+		s.enqueuePendingAudio([]byte{byte(i % 251)})
+	}
+
+	s.pendingAudioMu.Lock()
+	require.Len(t, s.pendingAudio, limit)
+	// Oldest frame should be dropped on overflow; new head is former index 1.
+	require.Len(t, s.pendingAudio[0], 1)
+	assert.Equal(t, byte(1), s.pendingAudio[0][0])
+	s.pendingAudioMu.Unlock()
+
+	select {
+	case msg := <-s.LowCh:
+		eventMsg, ok := msg.(*protos.ConversationEvent)
+		require.True(t, ok, "expected ConversationEvent, got %T", msg)
+		assert.Equal(t, "webrtc", eventMsg.GetName())
+		assert.Equal(t, "output_queue_overflow", eventMsg.GetData()["type"])
+		assert.Equal(t, "drop_oldest", eventMsg.GetData()["policy"])
+		assert.Equal(t, "1", eventMsg.GetData()["dropped_frames"])
+		assert.Equal(t, fmt.Sprintf("%d", limit), eventMsg.GetData()["limit_frames"])
+		assert.Equal(t, fmt.Sprintf("%d", limit), eventMsg.GetData()["queue_depth_frames"])
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for overflow event")
 	}
 }

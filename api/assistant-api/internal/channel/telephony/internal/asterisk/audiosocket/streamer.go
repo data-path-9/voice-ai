@@ -8,8 +8,8 @@ package internal_asterisk_audiosocket
 
 import (
 	"bufio"
-	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -20,6 +20,7 @@ import (
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_asterisk "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/asterisk/internal"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -36,11 +37,10 @@ type Streamer struct {
 	writeMu        sync.Mutex
 	closed         atomic.Bool
 	audioProcessor *internal_asterisk.AudioProcessor
+	mediaSession   *internal_telephony_media.MediaSession
 
-	ctx          context.Context
-	cancel       context.CancelFunc
-	outputCtx    context.Context
-	outputCancel context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	initialUUID string
 }
@@ -74,9 +74,6 @@ func NewStreamer(
 		writer = bufio.NewWriter(conn)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	outputCtx, outputCancel := context.WithCancel(context.Background())
-
 	as := &Streamer{
 		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
 			logger, cc, vaultCred,
@@ -85,24 +82,29 @@ func NewStreamer(
 		reader:         reader,
 		writer:         writer,
 		audioProcessor: audioProcessor,
-		ctx:            ctx,
-		cancel:         cancel,
-		outputCtx:      outputCtx,
-		outputCancel:   outputCancel,
 		initialUUID:    cc.ContextID,
 	}
+	as.ctx, as.cancel = context.WithCancel(as.Ctx)
 
-	audioProcessor.SetInputAudioCallback(as.sendProcessedInputAudio)
 	audioProcessor.SetOutputChunkCallback(as.sendAudioChunk)
-	go audioProcessor.RunOutputSender(as.outputCtx)
+	as.mediaSession = internal_telephony_media.NewMediaSession(as.ctx, logger, audioProcessor, nil)
+	as.mediaSession.SetInputSink(func(audio []byte) {
+		as.Input(&protos.ConversationUserMessage{
+			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
+		})
+	})
+	as.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
+		if event != nil {
+			if event.Data == nil {
+				event.Data = map[string]string{}
+			}
+			event.Data["provider"] = "asterisk_as"
+		}
+		as.Input(event)
+	})
+	as.mediaSession.Start()
 	go as.runFrameReader()
 	return as, nil
-}
-
-func (as *Streamer) sendProcessedInputAudio(audio []byte) {
-	as.WithInputBuffer(func(buf *bytes.Buffer) {
-		buf.Write(audio)
-	})
 }
 
 func (as *Streamer) sendAudioChunk(chunk *internal_asterisk.AudioChunk) error {
@@ -110,8 +112,10 @@ func (as *Streamer) sendAudioChunk(chunk *internal_asterisk.AudioChunk) error {
 		return nil
 	}
 	if err := as.writeFrame(FrameTypeAudio, chunk.Data); err != nil {
-		// Connection dead — stop output sender
-		as.outputCancel()
+		// Connection dead — stop media session output sender.
+		if as.mediaSession != nil {
+			as.mediaSession.Shutdown()
+		}
 		return err
 	}
 	return nil
@@ -158,6 +162,7 @@ func (as *Streamer) runFrameReader() {
 			if msg := as.Disconnect(disconnectType); msg != nil {
 				as.Input(msg)
 			}
+			as.Cancel()
 			return
 		}
 		switch frame.Type {
@@ -167,19 +172,12 @@ func (as *Streamer) runFrameReader() {
 				as.Input(as.CreateConnectionRequest())
 			}
 		case FrameTypeAudio:
-			if err := as.audioProcessor.ProcessInputAudio(frame.Payload); err != nil {
-				as.Logger.Debug("Failed to process input audio", "error", err.Error())
+			if as.mediaSession == nil {
 				continue
 			}
-			var audioRequest *protos.ConversationUserMessage
-			as.WithInputBuffer(func(buf *bytes.Buffer) {
-				if buf.Len() > 0 {
-					audioRequest = as.CreateVoiceRequest(buf.Bytes())
-					buf.Reset()
-				}
-			})
-			if audioRequest != nil {
-				as.Input(audioRequest)
+			if err := as.mediaSession.HandleProviderAudio(frame.Payload); err != nil {
+				as.Logger.Debug("Failed to process input audio", "error", err.Error())
+				continue
 			}
 		case FrameTypeSilence:
 			// no-op
@@ -187,11 +185,13 @@ func (as *Streamer) runFrameReader() {
 			if msg := as.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				as.Input(msg)
 			}
+			as.Cancel()
 			return
 		case FrameTypeError:
 			if msg := as.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_UNSPECIFIED); msg != nil {
 				as.Input(msg)
 			}
+			as.Cancel()
 			return
 		}
 	}
@@ -199,22 +199,31 @@ func (as *Streamer) runFrameReader() {
 
 func (as *Streamer) Send(response internal_type.Stream) error {
 	switch data := response.(type) {
+	case *protos.ConversationInitialization:
+		if as.mediaSession != nil {
+			as.mediaSession.HandleInitialization(data)
+		}
 	case *protos.ConversationAssistantMessage:
 		switch content := data.GetMessage().(type) {
 		case *protos.ConversationAssistantMessage_Audio:
-			if err := as.audioProcessor.ProcessOutputAudio(content.Audio); err != nil {
+			if as.mediaSession == nil {
+				return nil
+			}
+			if err := as.mediaSession.HandleAssistantAudio(content.Audio, data.GetCompleted()); err != nil {
 				return err
 			}
 		}
 	case *protos.ConversationInterruption:
 		if data.GetType() == protos.ConversationInterruption_INTERRUPTION_TYPE_WORD {
-			as.audioProcessor.ClearOutputBuffer()
+			if as.mediaSession != nil {
+				as.mediaSession.HandleInterrupt()
+			}
 		}
 	case *protos.ConversationDisconnection:
+		// Server-initiated disconnect: the talker already knows the reason
+		// (it called Notify with it). No need to round-trip back through
+		// CriticalCh — just signal hangup over AudioSocket and clean up.
 		_ = as.writeFrame(FrameTypeHangup, nil)
-		if disc := as.Disconnect(data.GetType()); disc != nil {
-			as.Input(disc)
-		}
 		as.Cancel()
 	case *protos.ConversationToolCall:
 		switch data.GetAction() {
@@ -242,6 +251,8 @@ func (as *Streamer) Send(response internal_type.Stream) error {
 				Result: map[string]string{"status": "failed", "reason": "transfer not supported for AudioSocket", "next_action": "end_call"},
 			})
 		}
+	default:
+		as.Logger.Warnw("AudioSocket Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
 	}
 
 	return nil
@@ -251,7 +262,9 @@ func (as *Streamer) Cancel() error {
 	if !as.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	as.outputCancel()
+	if as.mediaSession != nil {
+		as.mediaSession.Shutdown()
+	}
 	as.cancel()
 	as.writeMu.Lock()
 	conn := as.conn

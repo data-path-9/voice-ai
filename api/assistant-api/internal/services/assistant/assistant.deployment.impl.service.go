@@ -8,6 +8,7 @@ package internal_assistant_service
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/rapidaai/api/assistant-api/config"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
@@ -55,6 +56,7 @@ func (eService assistantDeploymentService) CreateWebPluginDeployment(
 			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
 				Mutable: gorm_models.Mutable{
 					CreatedBy: *auth.GetUserId(),
+					Status:    type_enums.RECORD_ACTIVE,
 				},
 				AssistantId: assistantId,
 			},
@@ -66,6 +68,10 @@ func (eService assistantDeploymentService) CreateWebPluginDeployment(
 			MaxSessionDuration: maxSessionDuration,
 		},
 		Suggestion: suggestion,
+	}
+
+	if err := eService.archiveDeploymentRecords(ctx, db, &internal_assistant_entity.AssistantWebPluginDeployment{}, assistantId, *auth.GetUserId()); err != nil {
+		return nil, err
 	}
 
 	tx := db.Create(deployment)
@@ -167,6 +173,10 @@ func (eService assistantDeploymentService) CreateDebuggerDeployment(
 		},
 	}
 
+	if err := eService.archiveDeploymentRecords(ctx, db, &internal_assistant_entity.AssistantDebuggerDeployment{}, assistantId, *auth.GetUserId()); err != nil {
+		return nil, err
+	}
+
 	tx := db.Create(deployment)
 	if tx.Error != nil {
 		eService.logger.Errorf("unable to create web plugin deployment for assistant wiht error %v", tx.Error)
@@ -209,6 +219,10 @@ func (eService assistantDeploymentService) CreateApiDeployment(
 			IdleTimeoutMessage: IdleTimeoutMessage,
 			MaxSessionDuration: maxSessionDuration,
 		},
+	}
+
+	if err := eService.archiveDeploymentRecords(ctx, db, &internal_assistant_entity.AssistantApiDeployment{}, assistantId, *auth.GetUserId()); err != nil {
+		return nil, err
 	}
 
 	tx := db.Create(deployment)
@@ -257,6 +271,10 @@ func (eService assistantDeploymentService) CreateWhatsappDeployment(
 		AssistantDeploymentWhatsapp: internal_assistant_entity.AssistantDeploymentWhatsapp{
 			WhatsappProvider: whatsappProvider,
 		},
+	}
+
+	if err := eService.archiveDeploymentRecords(ctx, db, &internal_assistant_entity.AssistantWhatsappDeployment{}, assistantId, *auth.GetUserId()); err != nil {
+		return nil, err
 	}
 
 	// TODO: Persist the deployment to the database
@@ -332,14 +350,7 @@ func (eService assistantDeploymentService) CreatePhoneDeployment(
 		},
 	}
 
-	// Today we support one active phone deployment per assistant. So we archive prior deployments before creating a new one. In future if we want to support multiple active phone deployments, we can remove this logic and add necessary filters while fetching the deployment for a call.
-	if err := db.Model(&internal_assistant_entity.AssistantPhoneDeployment{}).
-		Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE).
-		Updates(map[string]interface{}{
-			"status":     type_enums.RECORD_ARCHIEVE,
-			"updated_by": *auth.GetUserId(),
-		}).Error; err != nil {
-		eService.logger.Errorf("unable to archive prior phone deployments for assistant %d: %v", assistantId, err)
+	if err := eService.archiveDeploymentRecords(ctx, db, &internal_assistant_entity.AssistantPhoneDeployment{}, assistantId, *auth.GetUserId()); err != nil {
 		return nil, err
 	}
 
@@ -399,7 +410,7 @@ func (eService assistantDeploymentService) GetAssistantApiDeployment(ctx context
 		Preload("InputAudio.AudioOptions").
 		Preload("OutputAudio", "audio_type = ?", "output").
 		Preload("OutputAudio.AudioOptions").
-		Where("assistant_id = ?", assistantId)
+		Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE})
 	tx := qry.Order(clause.OrderByColumn{
 		Column: clause.Column{Name: "created_date"},
 		Desc:   true,
@@ -421,7 +432,7 @@ func (eService assistantDeploymentService) GetAssistantDebuggerDeployment(ctx co
 		Preload("InputAudio.AudioOptions").
 		Preload("OutputAudio", "audio_type = ?", "output").
 		Preload("OutputAudio.AudioOptions").
-		Where("assistant_id = ?", assistantId)
+		Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE})
 	tx := qry.Order(clause.OrderByColumn{
 		Column: clause.Column{Name: "created_date"},
 		Desc:   true,
@@ -445,7 +456,7 @@ func (eService assistantDeploymentService) GetAssistantPhoneDeployment(ctx conte
 		Preload("InputAudio.AudioOptions").
 		Preload("OutputAudio", "audio_type = ?", "output").
 		Preload("OutputAudio.AudioOptions").
-		Where("assistant_id = ?", assistantId)
+		Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE})
 	tx := qry.Order(clause.OrderByColumn{
 		Column: clause.Column{Name: "created_date"},
 		Desc:   true,
@@ -467,7 +478,7 @@ func (eService assistantDeploymentService) GetAssistantWebpluginDeployment(ctx c
 		Preload("InputAudio.AudioOptions").
 		Preload("OutputAudio", "audio_type = ?", "output").
 		Preload("OutputAudio.AudioOptions").
-		Where("assistant_id = ?", assistantId)
+		Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE})
 	tx := qry.Order(clause.OrderByColumn{
 		Column: clause.Column{Name: "created_date"},
 		Desc:   true,
@@ -486,7 +497,7 @@ func (eService assistantDeploymentService) GetAssistantWhatsappDeployment(ctx co
 	var whatsappDeployment *internal_assistant_entity.AssistantWhatsappDeployment
 	qry := db.
 		Preload("WhatsappOptions").
-		Where("assistant_id = ?", assistantId)
+		Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE})
 	tx := qry.Order(clause.OrderByColumn{
 		Column: clause.Column{Name: "created_date"},
 		Desc:   true,
@@ -500,4 +511,524 @@ func (eService assistantDeploymentService) GetAssistantWhatsappDeployment(ctx co
 		return nil, tx.Error
 	}
 	return whatsappDeployment, nil
+}
+
+func (eService assistantDeploymentService) GetAllAssistantApiDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64, criterias []*protos.Criteria, paginate *protos.Paginate) (int64, []*internal_assistant_entity.AssistantApiDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var (
+		deployments []*internal_assistant_entity.AssistantApiDeployment
+		cnt         int64
+	)
+	qry := db.Model(&internal_assistant_entity.AssistantApiDeployment{}).
+		Where("assistant_id = ?", assistantId)
+	for _, ct := range criterias {
+		qry = qry.Where(fmt.Sprintf("%s %s ?", ct.GetKey(), ct.GetLogic()), ct.GetValue())
+	}
+	tx := qry.
+		Preload("InputAudio", "audio_type = ?", "input").
+		Preload("InputAudio.AudioOptions").
+		Preload("OutputAudio", "audio_type = ?", "output").
+		Preload("OutputAudio.AudioOptions").
+		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
+			int(paginate.GetPage()),
+			int(paginate.GetPageSize()),
+			&cnt,
+			qry,
+		))).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: "created_date"},
+			Desc:   true,
+		}).
+		Find(&deployments)
+	if tx.Error != nil {
+		eService.logger.Errorf("not able to list api deployments for assistant %d with error %v", assistantId, tx.Error)
+		return cnt, nil, tx.Error
+	}
+	return cnt, deployments, nil
+}
+
+func (eService assistantDeploymentService) GetAllAssistantDebuggerDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64, criterias []*protos.Criteria, paginate *protos.Paginate) (int64, []*internal_assistant_entity.AssistantDebuggerDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var (
+		deployments []*internal_assistant_entity.AssistantDebuggerDeployment
+		cnt         int64
+	)
+	qry := db.Model(&internal_assistant_entity.AssistantDebuggerDeployment{}).
+		Where("assistant_id = ?", assistantId)
+	for _, ct := range criterias {
+		qry = qry.Where(fmt.Sprintf("%s %s ?", ct.GetKey(), ct.GetLogic()), ct.GetValue())
+	}
+	tx := qry.
+		Preload("InputAudio", "audio_type = ?", "input").
+		Preload("InputAudio.AudioOptions").
+		Preload("OutputAudio", "audio_type = ?", "output").
+		Preload("OutputAudio.AudioOptions").
+		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
+			int(paginate.GetPage()),
+			int(paginate.GetPageSize()),
+			&cnt,
+			qry,
+		))).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: "created_date"},
+			Desc:   true,
+		}).
+		Find(&deployments)
+	if tx.Error != nil {
+		eService.logger.Errorf("not able to list debugger deployments for assistant %d with error %v", assistantId, tx.Error)
+		return cnt, nil, tx.Error
+	}
+	return cnt, deployments, nil
+}
+
+func (eService assistantDeploymentService) GetAllAssistantPhoneDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64, criterias []*protos.Criteria, paginate *protos.Paginate) (int64, []*internal_assistant_entity.AssistantPhoneDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var (
+		deployments []*internal_assistant_entity.AssistantPhoneDeployment
+		cnt         int64
+	)
+	qry := db.Model(&internal_assistant_entity.AssistantPhoneDeployment{}).
+		Where("assistant_id = ?", assistantId)
+	for _, ct := range criterias {
+		qry = qry.Where(fmt.Sprintf("%s %s ?", ct.GetKey(), ct.GetLogic()), ct.GetValue())
+	}
+	tx := qry.
+		Preload("TelephonyOption").
+		Preload("InputAudio", "audio_type = ?", "input").
+		Preload("InputAudio.AudioOptions").
+		Preload("OutputAudio", "audio_type = ?", "output").
+		Preload("OutputAudio.AudioOptions").
+		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
+			int(paginate.GetPage()),
+			int(paginate.GetPageSize()),
+			&cnt,
+			qry,
+		))).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: "created_date"},
+			Desc:   true,
+		}).
+		Find(&deployments)
+	if tx.Error != nil {
+		eService.logger.Errorf("not able to list phone deployments for assistant %d with error %v", assistantId, tx.Error)
+		return cnt, nil, tx.Error
+	}
+	return cnt, deployments, nil
+}
+
+func (eService assistantDeploymentService) GetAllAssistantWebpluginDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64, criterias []*protos.Criteria, paginate *protos.Paginate) (int64, []*internal_assistant_entity.AssistantWebPluginDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var (
+		deployments []*internal_assistant_entity.AssistantWebPluginDeployment
+		cnt         int64
+	)
+	qry := db.Model(&internal_assistant_entity.AssistantWebPluginDeployment{}).
+		Where("assistant_id = ?", assistantId)
+	for _, ct := range criterias {
+		qry = qry.Where(fmt.Sprintf("%s %s ?", ct.GetKey(), ct.GetLogic()), ct.GetValue())
+	}
+	tx := qry.
+		Preload("InputAudio", "audio_type = ?", "input").
+		Preload("InputAudio.AudioOptions").
+		Preload("OutputAudio", "audio_type = ?", "output").
+		Preload("OutputAudio.AudioOptions").
+		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
+			int(paginate.GetPage()),
+			int(paginate.GetPageSize()),
+			&cnt,
+			qry,
+		))).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: "created_date"},
+			Desc:   true,
+		}).
+		Find(&deployments)
+	if tx.Error != nil {
+		eService.logger.Errorf("not able to list webplugin deployments for assistant %d with error %v", assistantId, tx.Error)
+		return cnt, nil, tx.Error
+	}
+	return cnt, deployments, nil
+}
+
+func (eService assistantDeploymentService) GetAllAssistantWhatsappDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64, criterias []*protos.Criteria, paginate *protos.Paginate) (int64, []*internal_assistant_entity.AssistantWhatsappDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var (
+		deployments []*internal_assistant_entity.AssistantWhatsappDeployment
+		cnt         int64
+	)
+	qry := db.Model(&internal_assistant_entity.AssistantWhatsappDeployment{}).
+		Where("assistant_id = ?", assistantId)
+	for _, ct := range criterias {
+		qry = qry.Where(fmt.Sprintf("%s %s ?", ct.GetKey(), ct.GetLogic()), ct.GetValue())
+	}
+	tx := qry.
+		Preload("WhatsappOptions").
+		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
+			int(paginate.GetPage()),
+			int(paginate.GetPageSize()),
+			&cnt,
+			qry,
+		))).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: "created_date"},
+			Desc:   true,
+		}).
+		Find(&deployments)
+	if tx.Error != nil {
+		eService.logger.Errorf("not able to list whatsapp deployments for assistant %d with error %v", assistantId, tx.Error)
+		return cnt, nil, tx.Error
+	}
+	return cnt, deployments, nil
+}
+
+func (eService assistantDeploymentService) DisableAssistantApiDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantApiDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var out *internal_assistant_entity.AssistantApiDeployment
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var current *internal_assistant_entity.AssistantApiDeployment
+		getTx := tx.
+			Preload("InputAudio", "audio_type = ?", "input").
+			Preload("InputAudio.AudioOptions").
+			Preload("OutputAudio", "audio_type = ?", "output").
+			Preload("OutputAudio.AudioOptions").
+			Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "created_date"}, Desc: true}).
+			First(&current)
+		if errors.Is(getTx.Error, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if getTx.Error != nil {
+			return getTx.Error
+		}
+
+		if err := eService.archiveDeploymentRecords(ctx, tx, &internal_assistant_entity.AssistantApiDeployment{}, assistantId, *auth.GetUserId()); err != nil {
+			return err
+		}
+
+		created := &internal_assistant_entity.AssistantApiDeployment{
+			AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+				AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+					Mutable: gorm_models.Mutable{
+						CreatedBy: *auth.GetUserId(),
+						UpdatedBy: *auth.GetUserId(),
+						Status:    type_enums.RECORD_INACTIVE,
+					},
+					AssistantId: assistantId,
+				},
+				Greeting:           current.Greeting,
+				Mistake:            current.Mistake,
+				IdleTimeout:        current.IdleTimeout,
+				IdleTimeoutBackoff: current.IdleTimeoutBackoff,
+				IdleTimeoutMessage: current.IdleTimeoutMessage,
+				MaxSessionDuration: current.MaxSessionDuration,
+			},
+		}
+		if err := tx.Create(created).Error; err != nil {
+			return err
+		}
+		if current.InputAudio != nil {
+			_, _ = eService.createAssistantDeploymentAudio(ctx, auth, created.Id, "input", toProtoAudioProvider(current.InputAudio))
+		}
+		if current.OutputAudio != nil {
+			_, _ = eService.createAssistantDeploymentAudio(ctx, auth, created.Id, "output", toProtoAudioProvider(current.OutputAudio))
+		}
+		out = created
+		return nil
+	})
+	return out, err
+}
+
+func (eService assistantDeploymentService) DisableAssistantDebuggerDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantDebuggerDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var out *internal_assistant_entity.AssistantDebuggerDeployment
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var current *internal_assistant_entity.AssistantDebuggerDeployment
+		getTx := tx.
+			Preload("InputAudio", "audio_type = ?", "input").
+			Preload("InputAudio.AudioOptions").
+			Preload("OutputAudio", "audio_type = ?", "output").
+			Preload("OutputAudio.AudioOptions").
+			Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "created_date"}, Desc: true}).
+			First(&current)
+		if errors.Is(getTx.Error, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if getTx.Error != nil {
+			return getTx.Error
+		}
+
+		if err := eService.archiveDeploymentRecords(ctx, tx, &internal_assistant_entity.AssistantDebuggerDeployment{}, assistantId, *auth.GetUserId()); err != nil {
+			return err
+		}
+
+		created := &internal_assistant_entity.AssistantDebuggerDeployment{
+			AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+				AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+					Mutable: gorm_models.Mutable{
+						CreatedBy: *auth.GetUserId(),
+						UpdatedBy: *auth.GetUserId(),
+						Status:    type_enums.RECORD_INACTIVE,
+					},
+					AssistantId: assistantId,
+				},
+				Greeting:           current.Greeting,
+				Mistake:            current.Mistake,
+				IdleTimeout:        current.IdleTimeout,
+				IdleTimeoutBackoff: current.IdleTimeoutBackoff,
+				IdleTimeoutMessage: current.IdleTimeoutMessage,
+				MaxSessionDuration: current.MaxSessionDuration,
+			},
+		}
+		if err := tx.Create(created).Error; err != nil {
+			return err
+		}
+		if current.InputAudio != nil {
+			_, _ = eService.createAssistantDeploymentAudio(ctx, auth, created.Id, "input", toProtoAudioProvider(current.InputAudio))
+		}
+		if current.OutputAudio != nil {
+			_, _ = eService.createAssistantDeploymentAudio(ctx, auth, created.Id, "output", toProtoAudioProvider(current.OutputAudio))
+		}
+		out = created
+		return nil
+	})
+	return out, err
+}
+
+func (eService assistantDeploymentService) DisableAssistantPhoneDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantPhoneDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var out *internal_assistant_entity.AssistantPhoneDeployment
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var current *internal_assistant_entity.AssistantPhoneDeployment
+		getTx := tx.
+			Preload("TelephonyOption").
+			Preload("InputAudio", "audio_type = ?", "input").
+			Preload("InputAudio.AudioOptions").
+			Preload("OutputAudio", "audio_type = ?", "output").
+			Preload("OutputAudio.AudioOptions").
+			Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "created_date"}, Desc: true}).
+			First(&current)
+		if errors.Is(getTx.Error, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if getTx.Error != nil {
+			return getTx.Error
+		}
+
+		if err := eService.archiveDeploymentRecords(ctx, tx, &internal_assistant_entity.AssistantPhoneDeployment{}, assistantId, *auth.GetUserId()); err != nil {
+			return err
+		}
+
+		created := &internal_assistant_entity.AssistantPhoneDeployment{
+			AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+				AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+					Mutable: gorm_models.Mutable{
+						CreatedBy: *auth.GetUserId(),
+						UpdatedBy: *auth.GetUserId(),
+						Status:    type_enums.RECORD_INACTIVE,
+					},
+					AssistantId: assistantId,
+				},
+				Greeting:           current.Greeting,
+				Mistake:            current.Mistake,
+				IdleTimeout:        current.IdleTimeout,
+				IdleTimeoutBackoff: current.IdleTimeoutBackoff,
+				IdleTimeoutMessage: current.IdleTimeoutMessage,
+				MaxSessionDuration: current.MaxSessionDuration,
+			},
+			AssistantDeploymentTelephony: internal_assistant_entity.AssistantDeploymentTelephony{
+				TelephonyProvider: current.TelephonyProvider,
+			},
+		}
+		if err := tx.Create(created).Error; err != nil {
+			return err
+		}
+
+		if current.InputAudio != nil {
+			_, _ = eService.createAssistantDeploymentAudio(ctx, auth, created.Id, "input", toProtoAudioProvider(current.InputAudio))
+		}
+		if current.OutputAudio != nil {
+			_, _ = eService.createAssistantDeploymentAudio(ctx, auth, created.Id, "output", toProtoAudioProvider(current.OutputAudio))
+		}
+
+		if len(current.TelephonyOption) > 0 {
+			phoneOpts := make([]*internal_assistant_entity.AssistantDeploymentTelephonyOption, 0, len(current.TelephonyOption))
+			for _, v := range current.TelephonyOption {
+				phoneOpts = append(phoneOpts, &internal_assistant_entity.AssistantDeploymentTelephonyOption{
+					AssistantDeploymentTelephonyId: created.Id,
+					Mutable: gorm_models.Mutable{
+						CreatedBy: *auth.GetUserId(),
+						UpdatedBy: *auth.GetUserId(),
+						Status:    type_enums.RECORD_ACTIVE,
+					},
+					Metadata: gorm_models.Metadata{
+						Key:   v.Key,
+						Value: v.Value,
+					},
+				})
+			}
+			if err := tx.Create(phoneOpts).Error; err != nil {
+				return err
+			}
+		}
+		out = created
+		return nil
+	})
+	return out, err
+}
+
+func (eService assistantDeploymentService) DisableAssistantWebpluginDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantWebPluginDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var out *internal_assistant_entity.AssistantWebPluginDeployment
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var current *internal_assistant_entity.AssistantWebPluginDeployment
+		getTx := tx.
+			Preload("InputAudio", "audio_type = ?", "input").
+			Preload("InputAudio.AudioOptions").
+			Preload("OutputAudio", "audio_type = ?", "output").
+			Preload("OutputAudio.AudioOptions").
+			Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "created_date"}, Desc: true}).
+			First(&current)
+		if errors.Is(getTx.Error, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if getTx.Error != nil {
+			return getTx.Error
+		}
+
+		if err := eService.archiveDeploymentRecords(ctx, tx, &internal_assistant_entity.AssistantWebPluginDeployment{}, assistantId, *auth.GetUserId()); err != nil {
+			return err
+		}
+
+		created := &internal_assistant_entity.AssistantWebPluginDeployment{
+			AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+				AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+					Mutable: gorm_models.Mutable{
+						CreatedBy: *auth.GetUserId(),
+						UpdatedBy: *auth.GetUserId(),
+						Status:    type_enums.RECORD_INACTIVE,
+					},
+					AssistantId: assistantId,
+				},
+				Greeting:           current.Greeting,
+				Mistake:            current.Mistake,
+				IdleTimeout:        current.IdleTimeout,
+				IdleTimeoutBackoff: current.IdleTimeoutBackoff,
+				IdleTimeoutMessage: current.IdleTimeoutMessage,
+				MaxSessionDuration: current.MaxSessionDuration,
+			},
+			Suggestion: current.Suggestion,
+		}
+		if err := tx.Create(created).Error; err != nil {
+			return err
+		}
+		if current.InputAudio != nil {
+			_, _ = eService.createAssistantDeploymentAudio(ctx, auth, created.Id, "input", toProtoAudioProvider(current.InputAudio))
+		}
+		if current.OutputAudio != nil {
+			_, _ = eService.createAssistantDeploymentAudio(ctx, auth, created.Id, "output", toProtoAudioProvider(current.OutputAudio))
+		}
+		out = created
+		return nil
+	})
+	return out, err
+}
+
+func (eService assistantDeploymentService) DisableAssistantWhatsappDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantWhatsappDeployment, error) {
+	db := eService.postgres.DB(ctx)
+	var out *internal_assistant_entity.AssistantWhatsappDeployment
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var current *internal_assistant_entity.AssistantWhatsappDeployment
+		getTx := tx.
+			Preload("WhatsappOptions").
+			Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE}).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "created_date"}, Desc: true}).
+			First(&current)
+		if errors.Is(getTx.Error, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if getTx.Error != nil {
+			return getTx.Error
+		}
+
+		if err := eService.archiveDeploymentRecords(ctx, tx, &internal_assistant_entity.AssistantWhatsappDeployment{}, assistantId, *auth.GetUserId()); err != nil {
+			return err
+		}
+
+		created := &internal_assistant_entity.AssistantWhatsappDeployment{
+			AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+				AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+					Mutable: gorm_models.Mutable{
+						CreatedBy: *auth.GetUserId(),
+						UpdatedBy: *auth.GetUserId(),
+						Status:    type_enums.RECORD_INACTIVE,
+					},
+					AssistantId: assistantId,
+				},
+				Greeting:           current.Greeting,
+				Mistake:            current.Mistake,
+				IdleTimeout:        current.IdleTimeout,
+				IdleTimeoutBackoff: current.IdleTimeoutBackoff,
+				IdleTimeoutMessage: current.IdleTimeoutMessage,
+				MaxSessionDuration: current.MaxSessionDuration,
+			},
+			AssistantDeploymentWhatsapp: internal_assistant_entity.AssistantDeploymentWhatsapp{
+				WhatsappProvider: current.WhatsappProvider,
+			},
+		}
+		if err := tx.Create(created).Error; err != nil {
+			return err
+		}
+		if len(current.WhatsappOptions) > 0 {
+			whatsappOpts := make([]*internal_assistant_entity.AssistantDeploymentWhatsappOption, 0, len(current.WhatsappOptions))
+			for _, v := range current.WhatsappOptions {
+				whatsappOpts = append(whatsappOpts, &internal_assistant_entity.AssistantDeploymentWhatsappOption{
+					AssistantDeploymentWhatsappId: created.Id,
+					Mutable: gorm_models.Mutable{
+						CreatedBy: *auth.GetUserId(),
+						UpdatedBy: *auth.GetUserId(),
+						Status:    type_enums.RECORD_ACTIVE,
+					},
+					Metadata: gorm_models.Metadata{
+						Key:   v.Key,
+						Value: v.Value,
+					},
+				})
+			}
+			if err := tx.Create(whatsappOpts).Error; err != nil {
+				return err
+			}
+		}
+		out = created
+		return nil
+	})
+	return out, err
+}
+
+func (eService assistantDeploymentService) archiveDeploymentRecords(ctx context.Context, db *gorm.DB, model interface{}, assistantId uint64, userId uint64) error {
+	return db.WithContext(ctx).
+		Model(model).
+		Where("assistant_id = ? AND status IN ?", assistantId, []type_enums.RecordState{type_enums.RECORD_ACTIVE, type_enums.RECORD_INACTIVE}).
+		Updates(map[string]interface{}{
+			"status":     type_enums.RECORD_ARCHIEVE,
+			"updated_by": userId,
+		}).Error
+}
+
+func toProtoAudioProvider(audio *internal_assistant_entity.AssistantDeploymentAudio) *protos.DeploymentAudioProvider {
+	if audio == nil {
+		return nil
+	}
+	opts := make([]*protos.Metadata, 0, len(audio.AudioOptions))
+	for _, v := range audio.AudioOptions {
+		opts = append(opts, &protos.Metadata{Key: v.Key, Value: v.Value})
+	}
+	return &protos.DeploymentAudioProvider{
+		AudioProvider: audio.AudioProvider,
+		AudioOptions:  opts,
+		Status:        string(type_enums.RECORD_ACTIVE),
+		AudioType:     audio.AudioType,
+	}
 }

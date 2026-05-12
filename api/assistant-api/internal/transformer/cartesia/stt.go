@@ -114,7 +114,7 @@ func (cst *cartesiaSpeechToText) readLoop(conn *websocket.Conn) {
 			cst.mu.Unlock()
 			if !intentional {
 				cst.logger.Errorf("cartesia-stt: connection lost: %v", err)
-				cst.onPacket(internal_type.STTErrorPacket{
+				cst.onPacket(internal_type.SpeechToTextErrorPacket{
 					ContextID: cst.contextId,
 					Error:     fmt.Errorf("cartesia-stt: connection lost: %w", err),
 					Type:      internal_type.STTNetworkTimeout,
@@ -197,14 +197,14 @@ func (cst *cartesiaSpeechToText) Transform(ctx context.Context, in internal_type
 		cst.contextId = pkt.ContextID
 		cst.mu.Unlock()
 		return nil
-	case internal_type.STTInterruptPacket:
+	case internal_type.SpeechToTextInterruptPacket:
 		cst.mu.Lock()
 		if cst.startedAt.IsZero() {
 			cst.startedAt = time.Now()
 		}
 		cst.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		cst.mu.Lock()
 		conn := cst.connection
 		cst.mu.Unlock()
@@ -218,7 +218,7 @@ func (cst *cartesiaSpeechToText) Transform(ctx context.Context, in internal_type
 		cst.writeMu.Unlock()
 		if err != nil {
 			cst.logger.Errorf("cartesia-stt: error sending audio: %v", err)
-			cst.onPacket(internal_type.STTErrorPacket{
+			cst.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: cst.contextId,
 				Error:     fmt.Errorf("cartesia-stt: send failed: %w", err),
 				Type:      internal_type.STTNetworkTimeout,

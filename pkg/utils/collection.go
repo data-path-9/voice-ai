@@ -30,6 +30,19 @@ func MergeMaps(maps ...map[string]interface{}) Option {
 	return result
 }
 
+// CloneMap returns a shallow copy of the input map.
+// Nil or empty input returns an empty writable map.
+func CloneMap[K comparable, V any](input map[K]V) map[K]V {
+	if len(input) == 0 {
+		return map[K]V{}
+	}
+	out := make(map[K]V, len(input))
+	for k, v := range input {
+		out[k] = v
+	}
+	return out
+}
+
 func GetCaseInsensitiveKeyValue(cfg map[string]string, key string) (string, bool) {
 	if value, ok := cfg[key]; ok {
 		return value, true

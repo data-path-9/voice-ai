@@ -180,6 +180,25 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -365,6 +384,25 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -550,6 +588,25 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -735,6 +792,25 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -920,6 +996,25 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -1105,6 +1200,67 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "WebSocket",
+              "value": "websocket"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -1290,6 +1446,25 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -1475,6 +1650,25 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -1660,6 +1854,63 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -1845,6 +2096,63 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -2030,6 +2338,63 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -2215,6 +2580,67 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "WebSocket",
+              "value": "websocket"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -2400,6 +2826,63 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -2585,6 +3068,63 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -2770,6 +3310,63 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -2955,6 +3552,63 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -3140,6 +3794,63 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -3277,6 +3988,67 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "24h",
+          "choices": [
+            {
+              "label": "24 Hours",
+              "value": "24h"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "WebSocket",
+              "value": "websocket"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -3414,6 +4186,71 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            },
+            {
+              "label": "24 Hours",
+              "value": "24h"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "WebSocket",
+              "value": "websocket"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -3547,6 +4384,71 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            },
+            {
+              "label": "24 Hours",
+              "value": "24h"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "WebSocket",
+              "value": "websocket"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -3680,6 +4582,71 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            },
+            {
+              "label": "24 Hours",
+              "value": "24h"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "WebSocket",
+              "value": "websocket"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -3813,6 +4780,67 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "WebSocket",
+              "value": "websocket"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }
@@ -3946,6 +4974,67 @@
           "max": 20,
           "step": 1,
           "helpText": "Number of most likely tokens to return at each position (0-20)."
+        },
+        {
+          "key": "model.prompt_cache_key",
+          "label": "Prompt Cache Key",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "assistant_id",
+          "choices": [
+            {
+              "label": "Assistant ID",
+              "value": "assistant_id"
+            },
+            {
+              "label": "User Identifier",
+              "value": "user_identifier"
+            },
+            {
+              "label": "Conversation ID",
+              "value": "conversation_id"
+            }
+          ],
+          "helpText": "Routing key used to improve prompt cache hit rates."
+        },
+        {
+          "key": "model.prompt_cache_retention",
+          "label": "Prompt Cache Retention",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "in_memory",
+          "choices": [
+            {
+              "label": "In Memory",
+              "value": "in_memory"
+            }
+          ],
+          "helpText": "Retention policy for prompt cache."
+        },
+        {
+          "key": "connection.transport",
+          "label": "Transport",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "chat_complete",
+          "choices": [
+            {
+              "label": "Chat Complete",
+              "value": "chat_complete"
+            },
+            {
+              "label": "WebSocket",
+              "value": "websocket"
+            },
+            {
+              "label": "Chat Response",
+              "value": "chat_response"
+            }
+          ],
+          "helpText": "Select transport for OpenAI requests."
         }
       ]
     }

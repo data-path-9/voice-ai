@@ -13,6 +13,14 @@ export const GetDefaultSpeakerConfig = (
 ): Metadata[] => {
   const defaultConfig = [
     {
+      key: 'speaker.ambient',
+      value: 'none',
+    },
+    {
+      key: 'speaker.ambient_volume',
+      value: '18',
+    },
+    {
       key: 'speaker.conjunction.boundaries',
       value: '',
     },

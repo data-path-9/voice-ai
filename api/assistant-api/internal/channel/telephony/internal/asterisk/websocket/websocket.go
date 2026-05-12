@@ -7,8 +7,6 @@
 package internal_asterisk_websocket
 
 import (
-	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +20,7 @@ import (
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_asterisk "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/asterisk/internal"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -32,15 +31,11 @@ type asteriskWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
 
 	audioProcessor *internal_asterisk.AudioProcessor
+	mediaSession   *internal_telephony_media.MediaSession
 	connection     *websocket.Conn
 	writeMu        sync.Mutex // guards all writes to connection (gorilla WS is not concurrent-write safe)
 	closed         atomic.Bool
 	channelName    string
-
-	outputSenderStarted bool
-	outputSenderMu      sync.Mutex
-	audioCtx            context.Context
-	audioCancel         context.CancelFunc
 
 	mediaBuffering bool
 	mediaBufferMu  sync.Mutex
@@ -70,18 +65,30 @@ func NewAsteriskWebsocketStreamer(
 		audioProcessor: audioProcessor,
 		connection:     connection,
 	}
-
-	audioProcessor.SetInputAudioCallback(aws.sendProcessedInputAudio)
 	audioProcessor.SetOutputChunkCallback(aws.sendAudioChunk)
+	aws.mediaSession = internal_telephony_media.NewMediaSession(aws.Ctx, logger, audioProcessor, func() error {
+		if aws.isMediaBuffering() {
+			return aws.sendCommand("STOP_MEDIA_BUFFERING")
+		}
+		return nil
+	})
+	aws.mediaSession.SetInputSink(func(audio []byte) {
+		aws.Input(&protos.ConversationUserMessage{
+			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
+		})
+	})
+	aws.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
+		if event != nil {
+			if event.Data == nil {
+				event.Data = map[string]string{}
+			}
+			event.Data["provider"] = "asterisk_ws"
+		}
+		aws.Input(event)
+	})
 
 	go aws.runWebSocketReader()
 	return aws, nil
-}
-
-func (aws *asteriskWebsocketStreamer) sendProcessedInputAudio(audio []byte) {
-	aws.WithInputBuffer(func(buf *bytes.Buffer) {
-		buf.Write(audio)
-	})
 }
 
 func (aws *asteriskWebsocketStreamer) sendAudioChunk(chunk *internal_asterisk.AudioChunk) error {
@@ -104,14 +111,12 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 			if msg := aws.Disconnect(disconnectTypeFromReadError(err)); msg != nil {
 				aws.Input(msg)
 			}
+			aws.Cancel()
 			return
 		}
 		switch messageType {
 		case websocket.BinaryMessage:
-			msg, _ := aws.handleAudioData(message)
-			if msg != nil {
-				aws.Input(msg)
-			}
+			_ = aws.handleAudioData(message)
 		case websocket.TextMessage:
 			event, err := internal_asterisk.ParseAsteriskEvent(string(message))
 			if err != nil {
@@ -126,7 +131,7 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 				if event.OptimalFrameSize > 0 {
 					aws.audioProcessor.SetOptimalFrameSize(event.OptimalFrameSize)
 				}
-				aws.startOutputSender()
+				aws.mediaSession.Start()
 				aws.Input(aws.CreateConnectionRequest())
 				// The inbound webhook may not have carried channel_id, so the
 				// init payload's client.provider_call_id can be empty. Emit
@@ -144,10 +149,7 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 				})
 			case "MEDIA_STOP":
 				aws.Logger.Info("Asterisk media stopped")
-				aws.stopAudioProcessing()
-				if msg := aws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
-					aws.Input(msg)
-				}
+				aws.Cancel()
 				return
 			case "MEDIA_XON":
 				aws.audioProcessor.SetXON()
@@ -173,9 +175,7 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 				}
 			}
 		case websocket.CloseMessage:
-			if msg := aws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
-				aws.Input(msg)
-			}
+			aws.Cancel()
 			return
 		default:
 			aws.Logger.Warn("Received unsupported WebSocket message type", "type", messageType)
@@ -183,29 +183,30 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 	}
 }
 
-func (aws *asteriskWebsocketStreamer) handleAudioData(audio []byte) (*protos.ConversationUserMessage, error) {
-	if err := aws.audioProcessor.ProcessInputAudio(audio); err != nil {
-		aws.Logger.Debug("Failed to process input audio", "error", err.Error())
-		return nil, nil
+func (aws *asteriskWebsocketStreamer) handleAudioData(audio []byte) error {
+	if aws.mediaSession == nil {
+		return nil
 	}
-
-	var audioRequest *protos.ConversationUserMessage
-	aws.WithInputBuffer(func(buf *bytes.Buffer) {
-		if buf.Len() > 0 {
-			audioRequest = aws.CreateVoiceRequest(buf.Bytes())
-			buf.Reset()
-		}
-	})
-
-	return audioRequest, nil
+	if err := aws.mediaSession.HandleProviderAudio(audio); err != nil {
+		aws.Logger.Debug("Failed to process input audio", "error", err.Error())
+		return nil
+	}
+	return nil
 }
 
 func (aws *asteriskWebsocketStreamer) Send(response internal_type.Stream) error {
 	switch data := response.(type) {
+	case *protos.ConversationInitialization:
+		if aws.mediaSession != nil {
+			aws.mediaSession.HandleInitialization(data)
+		}
 	case *protos.ConversationAssistantMessage:
 		switch content := data.Message.(type) {
 		case *protos.ConversationAssistantMessage_Audio:
-			if err := aws.audioProcessor.ProcessOutputAudio(content.Audio); err != nil {
+			if aws.mediaSession == nil {
+				return nil
+			}
+			if err := aws.mediaSession.HandleAssistantAudio(content.Audio, data.GetCompleted()); err != nil {
 				aws.Logger.Error("Failed to process output audio", "error", err.Error())
 				return err
 			}
@@ -213,19 +214,18 @@ func (aws *asteriskWebsocketStreamer) Send(response internal_type.Stream) error 
 
 	case *protos.ConversationInterruption:
 		if data.Type == protos.ConversationInterruption_INTERRUPTION_TYPE_WORD {
-			aws.audioProcessor.ClearOutputBuffer()
-			if aws.isMediaBuffering() {
-				aws.sendCommand("STOP_MEDIA_BUFFERING")
+			if aws.mediaSession != nil {
+				aws.mediaSession.HandleInterrupt()
 			}
 		}
 
 	case *protos.ConversationDisconnection:
+		// Server-initiated disconnect: the talker already knows the reason
+		// (it called Notify with it). No need to round-trip back through
+		// CriticalCh — just hang up the Asterisk channel and clean up.
 		aws.stopAudioProcessing()
 		if err := aws.hangupCall(); err != nil {
 			aws.Logger.Warnw("Failed to hang up call for disconnection", "error", err)
-		}
-		if disc := aws.Disconnect(data.GetType()); disc != nil {
-			aws.Input(disc)
 		}
 		aws.Cancel()
 	case *protos.ConversationToolCall:
@@ -326,25 +326,9 @@ func (aws *asteriskWebsocketStreamer) hangupCall() error {
 }
 
 func (aws *asteriskWebsocketStreamer) stopAudioProcessing() {
-	aws.outputSenderMu.Lock()
-	if aws.audioCancel != nil {
-		aws.audioCancel()
-		aws.audioCancel = nil
+	if aws.mediaSession != nil {
+		aws.mediaSession.Shutdown()
 	}
-	aws.outputSenderMu.Unlock()
-}
-
-func (aws *asteriskWebsocketStreamer) startOutputSender() {
-	aws.outputSenderMu.Lock()
-	defer aws.outputSenderMu.Unlock()
-
-	if aws.outputSenderStarted {
-		return
-	}
-
-	aws.audioCtx, aws.audioCancel = context.WithCancel(aws.BaseTelephonyStreamer.Context())
-	aws.outputSenderStarted = true
-	go aws.audioProcessor.RunOutputSender(aws.audioCtx)
 }
 
 func (aws *asteriskWebsocketStreamer) sendCommand(command string) error {

@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { initialPaginated } from '@/types/types.paginated';
-import { ServiceError } from '@rapidaai/react';
 import {
   AssistantAnalysis,
-  GetAllAssistantAnalysisResponse,
-  GetAssistantAnalysisResponse,
+  Criteria,
+  DeleteAssistantAnalysisRequest,
+  GetAllAssistantAnalysisRequest,
+  Paginate,
 } from '@rapidaai/react';
 import {
   AssistantAnalysisProperty,
@@ -110,7 +111,7 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
      * @param token
      * @param userId
      */
-    getAssistantAnalysis: (
+    getAssistantAnalysis: async (
       assistantId: string,
       projectId: string,
       token: string,
@@ -118,10 +119,29 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
       onError: (err: string) => void,
       onSuccess: (e: AssistantAnalysis[]) => void,
     ) => {
-      const afterGetAllAssistantAnalysis = (
-        err: ServiceError | null,
-        gur: GetAllAssistantAnalysisResponse | null,
-      ) => {
+      const req = new GetAllAssistantAnalysisRequest();
+      req.setAssistantid(assistantId);
+
+      const paginate = new Paginate();
+      paginate.setPage(get().page);
+      paginate.setPagesize(get().pageSize);
+      req.setPaginate(paginate);
+
+      get().criteria.forEach(({ key, value, logic }) => {
+        const ctr = new Criteria();
+        ctr.setKey(key);
+        ctr.setValue(value);
+        ctr.setLogic(logic);
+        req.addCriterias(ctr);
+      });
+
+      try {
+        const gur = await GetAllAssistantAnalysis(connectionConfig, req, {
+          authorization: token,
+          'x-project-id': projectId,
+          'x-auth-id': userId,
+        });
+
         if (gur?.getSuccess()) {
           get().onChangeAssistantAnalysises(gur.getDataList());
           let paginated = gur.getPaginated();
@@ -137,21 +157,9 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
           }
           onError('Unable to get your activity log, please try again later.');
         }
-      };
-
-      GetAllAssistantAnalysis(
-        connectionConfig,
-        assistantId,
-        get().page,
-        get().pageSize,
-        get().criteria,
-        afterGetAllAssistantAnalysis,
-        {
-          authorization: token,
-          'x-project-id': projectId,
-          'x-auth-id': userId,
-        },
-      );
+      } catch {
+        onError('Unable to get your activity log, please try again later.');
+      }
     },
 
     /**
@@ -164,7 +172,7 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
      * @param onError
      * @param onSuccess
      */
-    deleteAssistantAnalysis: (
+    deleteAssistantAnalysis: async (
       assistantId: string,
       analysisId: string,
       projectId: string,
@@ -173,10 +181,17 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
       onError: (err: string) => void,
       onSuccess: (e: AssistantAnalysis) => void,
     ) => {
-      const afterDeleteAssistantAnalysis = (
-        err: ServiceError | null,
-        gur: GetAssistantAnalysisResponse | null,
-      ) => {
+      const req = new DeleteAssistantAnalysisRequest();
+      req.setAssistantid(assistantId);
+      req.setId(analysisId);
+
+      try {
+        const gur = await DeleteAssistantAnalysis(connectionConfig, req, {
+          authorization: token,
+          'x-project-id': projectId,
+          'x-auth-id': userId,
+        });
+
         if (gur?.getSuccess() && gur.getData()) {
           onSuccess(gur.getData()!);
         } else {
@@ -189,19 +204,9 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
             'Unable to delete assistant analysis, please try again later.',
           );
         }
-      };
-
-      DeleteAssistantAnalysis(
-        connectionConfig,
-        assistantId,
-        analysisId,
-        afterDeleteAssistantAnalysis,
-        {
-          authorization: token,
-          'x-project-id': projectId,
-          'x-auth-id': userId,
-        },
-      );
+      } catch {
+        onError('Unable to delete assistant analysis, please try again later.');
+      }
     },
 
     /**

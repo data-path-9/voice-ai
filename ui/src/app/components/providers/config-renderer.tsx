@@ -28,6 +28,7 @@ import {
   resolveCategoryParameters,
 } from '@/providers/config-loader';
 import { getDefaultsFromConfig } from '@/providers/config-defaults';
+import { JsonEditor } from '@/app/components/json-editor';
 
 export const ConfigRenderer: React.FC<{
   provider: string;
@@ -154,7 +155,16 @@ export const ConfigRenderer: React.FC<{
   const renderField = (param: ParameterConfig) => {
     if (!isVisible(param)) return null;
 
-    const colSpanClass = param.colSpan === 2 ? 'col-span-2' : 'col-span-1';
+    const isSingleAdvancedTextField =
+      category === 'text' && param.advanced && advancedParams.length === 1;
+    const colSpanClass = cn(
+      'min-w-0',
+      isSingleAdvancedTextField
+        ? 'col-span-full'
+        : param.colSpan === 2
+          ? 'col-span-2'
+          : 'col-span-1',
+    );
 
     switch (param.type) {
       case 'dropdown':
@@ -287,14 +297,24 @@ export const ConfigRenderer: React.FC<{
       case 'json':
         return (
           <div className={cn(colSpanClass)} key={param.key}>
-            <TextArea
-              id={`json-${param.key}`}
-              labelText={param.label}
-              placeholder="Enter as JSON"
-              value={getParamValue(param.key) || '{}'}
-              helperText={param.helpText}
-              onChange={e => updateParameter(param.key, e.target.value)}
-            />
+            <label
+              htmlFor={`json-${param.key}`}
+              className="cds--label text-gray-900 dark:text-gray-100"
+            >
+              {param.label}
+            </label>
+            <div className="mt-1 w-full min-w-0 overflow-hidden bg-[var(--cds-field)] border-b-2 border-b-[var(--cds-border-strong)] p-2">
+              <JsonEditor
+                value={getParamValue(param.key)}
+                placeholder="Enter as JSON"
+                onChange={value => updateParameter(param.key, value)}
+                height="160px"
+                className="w-full"
+              />
+            </div>
+            {param.helpText && (
+              <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>
+            )}
           </div>
         );
 

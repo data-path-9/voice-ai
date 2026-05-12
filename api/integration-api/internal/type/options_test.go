@@ -129,6 +129,64 @@ func TestNewChatOptions_SetsOptionsAndCastsToolDefinitions(t *testing.T) {
 	assert.True(t, postCalled)
 }
 
+func TestNewChatStreamOptions_SetsOptionsAndCastsToolDefinitions(t *testing.T) {
+	preCalled := false
+	postCalled := false
+	preHook := func(map[string]interface{}) {
+		preCalled = true
+	}
+	postHook := func(map[string]interface{}, []*protos.Metric) {
+		postCalled = true
+	}
+
+	anyVal, err := anypb.New(&emptypb.Empty{})
+	require.NoError(t, err)
+
+	request := &protos.StreamChatInput{
+		ModelParameters: map[string]*anypb.Any{
+			"model.name": anyVal,
+		},
+		ToolDefinitions: []*protos.ToolDefinition{
+			{
+				Type: "function",
+				FunctionDefinition: &protos.FunctionDefinition{
+					Name:        "weather",
+					Description: "Get weather",
+					Parameters: &protos.FunctionParameter{
+						Type:     "object",
+						Required: []string{"city"},
+						Properties: map[string]*protos.FunctionParameterProperty{
+							"city": {
+								Type:        "string",
+								Description: "City",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	opts := NewChatStreamOptions(456, request, preHook, postHook)
+
+	require.NotNil(t, opts)
+	assert.Equal(t, uint64(456), opts.RequestId)
+	assert.Equal(t, request, opts.Request)
+	assert.Equal(t, request.ModelParameters, opts.ModelParameter)
+	require.Len(t, opts.ToolDefinitions, 1)
+	assert.Equal(t, "function", opts.ToolDefinitions[0].Type)
+	require.NotNil(t, opts.ToolDefinitions[0].Function)
+	assert.Equal(t, "weather", opts.ToolDefinitions[0].Function.Name)
+	require.NotNil(t, opts.ToolDefinitions[0].Function.Parameters)
+	assert.Equal(t, "object", opts.ToolDefinitions[0].Function.Parameters.Type)
+	assert.Contains(t, opts.ToolDefinitions[0].Function.Parameters.Properties, "city")
+
+	opts.PreHook(nil)
+	opts.PostHook(nil, nil)
+	assert.True(t, preCalled)
+	assert.True(t, postCalled)
+}
+
 func TestNewEmbeddingOptions_SetsExpectedFields(t *testing.T) {
 	anyVal, err := anypb.New(&emptypb.Empty{})
 	require.NoError(t, err)

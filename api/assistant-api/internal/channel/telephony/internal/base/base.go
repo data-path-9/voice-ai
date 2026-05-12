@@ -184,11 +184,6 @@ func (base *BaseTelephonyStreamer) Encoder() *base64.Encoding {
 	return base.encoder
 }
 
-// Credential returns the vault credential associated with the streamer.
-func (base *BaseTelephonyStreamer) Credential() *protos.VaultCredential {
-	return base.vaultCredential
-}
-
 // VaultCredential returns the vault credential associated with the streamer.
 func (base *BaseTelephonyStreamer) VaultCredential() *protos.VaultCredential {
 	return base.vaultCredential

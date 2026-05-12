@@ -25,12 +25,7 @@ type IntegrationServiceClient interface {
 		auth types.SimplePrinciple,
 		providerName string,
 		request *protos.ChatRequest) (*protos.ChatResponse, error)
-	// StreamChat opens a bidirectional stream for the given provider.
-	// Returns the raw grpc.BidiStreamingClient for caller to manage:
-	//   - Send requests via stream.Send(request)
-	//   - Receive responses via stream.Recv()
-	//   - Close when done via stream.CloseSend()
-	StreamChat(c context.Context, auth types.SimplePrinciple, providerName string) (grpc.BidiStreamingClient[protos.ChatRequest, protos.ChatResponse], error)
+	StreamChat(c context.Context, auth types.SimplePrinciple, providerName string) (grpc.BidiStreamingClient[protos.StreamChatRequest, protos.StreamChatResponse], error)
 	Embedding(ctx context.Context, auth types.SimplePrinciple, providerName string, in *protos.EmbeddingRequest) (*protos.EmbeddingResponse, error)
 	Reranking(ctx context.Context, auth types.SimplePrinciple, providerName string, in *protos.RerankingRequest) (*protos.RerankingResponse, error)
 	VerifyCredential(ctx context.Context, auth types.SimplePrinciple, providerName string, in *protos.Credential) (*protos.VerifyCredentialResponse, error)
@@ -84,7 +79,7 @@ func (client *integrationServiceClient) Chat(c context.Context,
 
 // StreamChat opens a bidirectional stream via the unified provider service.
 // The caller must set ProviderName on each ChatRequest before sending.
-func (client *integrationServiceClient) StreamChat(c context.Context, auth types.SimplePrinciple, providerName string) (grpc.BidiStreamingClient[protos.ChatRequest, protos.ChatResponse], error) {
+func (client *integrationServiceClient) StreamChat(c context.Context, auth types.SimplePrinciple, providerName string) (grpc.BidiStreamingClient[protos.StreamChatRequest, protos.StreamChatResponse], error) {
 	ctx := client.WithAuth(c, auth)
 	return client.unifiedClient.StreamChat(ctx)
 }

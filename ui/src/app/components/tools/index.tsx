@@ -1,8 +1,7 @@
 import { Metadata } from '@rapidaai/react';
 import { FC, useCallback, useMemo } from 'react';
-import { Dropdown, Select, SelectItem, Tooltip } from '@carbon/react';
+import { Dropdown } from '@carbon/react';
 import { CONFIG } from '@/configs';
-import { Information } from '@carbon/icons-react';
 import { ConfigureAPIRequest } from '@/app/components/tools/api-request';
 import {
   GetAPIRequestDefaultOptions,
@@ -44,14 +43,16 @@ import {
 } from '@/llm-tools';
 import {
   ConfigureToolProps,
+  ASSISTANT_CONDITION_KEY_OPTIONS,
+  ASSISTANT_CONDITION_OPERATOR_OPTIONS,
+  ASSISTANT_CONDITION_SOURCE_OPTIONS,
+  ASSISTANT_CONDITION_VALUE_OPTIONS_BY_KEY,
   getToolConditionEntries,
-  TOOL_CONDITION_SOURCE_OPTIONS,
   validateToolConditionMetadata,
   withToolConditionEntries,
   withNormalizedToolCondition,
 } from './common';
-
-const CONDITION_OPTIONS = [{ label: 'equals', value: '=' }];
+import { SourceConditionRule } from '@/app/components/conditions/source-condition-rule';
 
 // ============================================================================
 // Types
@@ -280,23 +281,6 @@ export const BuildinTool: FC<{
     () => getToolConditionEntries(config.parameters),
     [config.parameters],
   );
-  const sourceCondition = useMemo(
-    () =>
-      conditionEntries.find(entry => entry.key === 'source') || {
-        key: 'source',
-        condition: '=',
-        value: 'all',
-      },
-    [conditionEntries],
-  );
-  const selectedSourceOption = useMemo(
-    () =>
-      TOOL_CONDITION_SOURCE_OPTIONS.find(
-        option => option.value === sourceCondition.value,
-      ) || TOOL_CONDITION_SOURCE_OPTIONS[0],
-    [sourceCondition.value],
-  );
-
   const handleParameterChange = useCallback(
     (params: Metadata[]) => {
       onChangeConfig({
@@ -327,152 +311,22 @@ export const BuildinTool: FC<{
         className="relative z-20"
         childClass="overflow-visible relative z-20"
       >
-        <div className="mb-2 text-xs text-gray-500 flex items-center gap-1">
-          <span>Rule</span>
-          <Tooltip
-            align="right"
-            label="This rule is tested before the tool is added to the LLM tool list."
-          >
-            <Information size={14} />
-          </Tooltip>
-        </div>
-        <table className="w-full border-collapse border border-gray-200 dark:border-gray-700 text-sm [&_input]:!border-none [&_.cds--text-input]:!border-none [&_.cds--text-input]:!outline-none [&_.cds--select-input]:!border-none [&_.cds--form-item]:!m-0">
-          <thead>
-            <tr className="bg-gray-50 dark:bg-gray-900">
-              <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/4">
-                <span className="inline-flex items-center gap-1">
-                  Key
-                  <Tooltip
-                    align="right"
-                    label="The variable to evaluate for this condition. 'source' refers to the channel the call is coming from."
-                  >
-                    <Information size={11} />
-                  </Tooltip>
-                </span>
-              </th>
-              <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/4">
-                <span className="inline-flex items-center gap-1">
-                  Condition
-                  <Tooltip
-                    align="right"
-                    label="The condition to evaluate for this variable."
-                  >
-                    <Information size={11} />
-                  </Tooltip>
-                </span>
-              </th>
-              <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-                <span className="inline-flex items-center gap-1">
-                  Value
-                  <Tooltip
-                    align="right"
-                    label="The value to compare against the variable."
-                  >
-                    <Information size={11} />
-                  </Tooltip>
-                </span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
-              <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                <Select
-                  id="tool-condition-key"
-                  labelText=""
-                  hideLabel
-                  value={sourceCondition.key}
-                  onChange={e => {
-                    const next = [
-                      {
-                        key: e.target.value,
-                        condition: sourceCondition.condition,
-                        value: sourceCondition.value,
-                      },
-                    ];
-                    onChangeConfig({
-                      ...config,
-                      parameters: withToolConditionEntries(
-                        config.parameters,
-                        next,
-                      ),
-                    });
-                  }}
-                  size="md"
-                >
-                  <SelectItem value="source" text="Source" />
-                </Select>
-              </td>
-              <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                <Select
-                  id="tool-condition-op"
-                  labelText=""
-                  hideLabel
-                  value={sourceCondition.condition}
-                  onChange={e => {
-                    const next = [
-                      {
-                        key: sourceCondition.key,
-                        condition: e.target.value,
-                        value: sourceCondition.value,
-                      },
-                    ];
-                    onChangeConfig({
-                      ...config,
-                      parameters: withToolConditionEntries(
-                        config.parameters,
-                        next,
-                      ),
-                    });
-                  }}
-                  size="md"
-                >
-                  {CONDITION_OPTIONS.map(option => (
-                    <SelectItem
-                      key={option.value}
-                      value={option.value}
-                      text={option.label}
-                    />
-                  ))}
-                </Select>
-              </td>
-
-              <td className="p-0 min-w-[240px]">
-                <Select
-                  id="tool-condition-source-value"
-                  labelText=""
-                  hideLabel
-                  value={selectedSourceOption.value}
-                  onChange={e => {
-                    const next = [
-                      {
-                        key: sourceCondition.key,
-                        condition: sourceCondition.condition,
-                        value: e.target.value,
-                      },
-                    ];
-                    onChangeConfig({
-                      ...config,
-                      parameters: withToolConditionEntries(
-                        config.parameters,
-                        next,
-                      ),
-                    });
-                  }}
-                  size="md"
-                >
-                  {TOOL_CONDITION_SOURCE_OPTIONS.map(option => (
-                    <SelectItem
-                      key={option.value}
-                      value={option.value}
-                      text={option.label}
-                    />
-                  ))}
-                </Select>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <SourceConditionRule
+          conditions={conditionEntries}
+          onChangeConditions={nextConditions =>
+            onChangeConfig({
+              ...config,
+              parameters: withToolConditionEntries(
+                config.parameters,
+                nextConditions,
+              ),
+            })
+          }
+          conditionOptions={ASSISTANT_CONDITION_OPERATOR_OPTIONS}
+          sourceOptions={ASSISTANT_CONDITION_SOURCE_OPTIONS}
+          keyOptions={ASSISTANT_CONDITION_KEY_OPTIONS}
+          valueOptionsByKey={ASSISTANT_CONDITION_VALUE_OPTIONS_BY_KEY}
+        />
       </InputGroup>
 
       <InputGroup title="Action">

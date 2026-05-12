@@ -143,14 +143,14 @@ func (s *azureSpeechToText) Transform(_ context.Context, in internal_type.Packet
 		s.contextId = pkt.ContextID
 		s.mu.Unlock()
 		return nil
-	case internal_type.STTInterruptPacket:
+	case internal_type.SpeechToTextInterruptPacket:
 		s.mu.Lock()
 		if s.startedAt.IsZero() {
 			s.startedAt = time.Now()
 		}
 		s.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		s.mu.Lock()
 		stream := s.inputstream
 		s.mu.Unlock()
@@ -161,7 +161,7 @@ func (s *azureSpeechToText) Transform(_ context.Context, in internal_type.Packet
 
 		if err := stream.Write(pkt.Content()); err != nil {
 			s.logger.Errorf("azure-stt: error sending audio: %v", err)
-			s.onPacket(internal_type.STTErrorPacket{
+			s.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: s.contextId,
 				Error:     fmt.Errorf("azure-stt: send failed: %w", err),
 				Type:      internal_type.STTNetworkTimeout,
@@ -320,7 +320,7 @@ func (s *azureSpeechToText) OnRecognized(event speech.SpeechRecognitionEventArgs
 
 func (s *azureSpeechToText) OnCancelled(event speech.SpeechRecognitionCanceledEventArgs) {
 	defer event.Close()
-	s.onPacket(internal_type.STTErrorPacket{
+	s.onPacket(internal_type.SpeechToTextErrorPacket{
 		ContextID: s.contextId,
 		Error:     fmt.Errorf("azure-stt: recognition cancelled"),
 		Type:      internal_type.STTNetworkTimeout,

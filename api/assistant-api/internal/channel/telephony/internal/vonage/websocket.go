@@ -7,7 +7,7 @@
 package internal_vonage_telephony
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -16,6 +16,8 @@ import (
 	"github.com/gorilla/websocket"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
+	internal_vonage "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	protos "github.com/rapidaai/protos"
@@ -26,6 +28,8 @@ import (
 type vonageWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
 
+	mediaSession *internal_telephony_media.MediaSession
+
 	connection *websocket.Conn
 	writeMu    sync.Mutex
 	closed     atomic.Bool
@@ -34,15 +38,42 @@ type vonageWebsocketStreamer struct {
 // NewVonageWebsocketStreamer creates a Vonage WebSocket streamer.
 // Vonage sends linear16 16kHz — same as the internal Rapida format, so no
 // resampling is needed (nil source audio config defaults to linear16 16kHz).
-func NewVonageWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential) internal_type.Streamer {
+func NewVonageWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential) (internal_type.Streamer, error) {
+	audioProcessor, err := internal_vonage.NewAudioProcessor(logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Vonage audio processor: %w", err)
+	}
 	vng := &vonageWebsocketStreamer{
 		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
 			logger, cc, vaultCred,
 		),
 		connection: connection,
 	}
+	audioProcessor.SetOutputChunkCallback(vng.sendAudioChunk)
+	vng.mediaSession = internal_telephony_media.NewMediaSession(context.Background(), logger, audioProcessor, func() error {
+		vng.writeMu.Lock()
+		defer vng.writeMu.Unlock()
+		if vng.connection == nil {
+			return nil
+		}
+		return vng.connection.WriteMessage(websocket.TextMessage, []byte(`{"action":"clear"}`))
+	})
+	vng.mediaSession.SetInputSink(func(audio []byte) {
+		vng.Input(&protos.ConversationUserMessage{
+			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
+		})
+	})
+	vng.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
+		if event != nil {
+			if event.Data == nil {
+				event.Data = map[string]string{}
+			}
+			event.Data["provider"] = "vonage"
+		}
+		vng.Input(event)
+	})
 	go vng.runWebSocketReader()
-	return vng
+	return vng, nil
 }
 
 func (vng *vonageWebsocketStreamer) runWebSocketReader() {
@@ -53,6 +84,7 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
+			vng.stopAudioProcessing()
 			if msg := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				vng.Input(msg)
 			}
@@ -68,6 +100,9 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 			}
 			switch textEvent["event"] {
 			case "websocket:connected":
+				if vng.mediaSession != nil {
+					vng.mediaSession.Start()
+				}
 				vng.Input(vng.CreateConnectionRequest())
 				vng.Input(&protos.ConversationEvent{
 					Name: "channel",
@@ -75,19 +110,13 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 					Time: timestamppb.Now(),
 				})
 			case "stop":
-				if msg := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
-					vng.Input(msg)
-				}
-				vng.BaseStreamer.Cancel()
+				vng.Cancel()
 				return
 			default:
 				vng.Logger.Debugf("Unhandled event type: %s", textEvent["event"])
 			}
 		case websocket.BinaryMessage:
-			msg, _ := vng.handleMediaEvent(message)
-			if msg != nil {
-				vng.Input(msg)
-			}
+			_ = vng.handleMediaEvent(message)
 		default:
 			vng.Logger.Warn("Unhandled message type", "type", messageType)
 		}
@@ -99,49 +128,26 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 		return nil
 	}
 	switch data := response.(type) {
+	case *protos.ConversationInitialization:
+		if vng.mediaSession != nil {
+			vng.mediaSession.HandleInitialization(data)
+		}
 	case *protos.ConversationAssistantMessage:
 		switch content := data.Message.(type) {
 		case *protos.ConversationAssistantMessage_Audio:
-			audioData := content.Audio
-
-			var sendErr error
-			vng.WithOutputBuffer(func(buf *bytes.Buffer) {
-				buf.Write(audioData)
-				vng.writeMu.Lock()
-				defer vng.writeMu.Unlock()
-				if vng.connection == nil {
-					return
-				}
-				for buf.Len() >= vng.OutputFrameSize() {
-					chunk := buf.Next(vng.OutputFrameSize())
-					if err := vng.connection.WriteMessage(websocket.BinaryMessage, chunk); err != nil {
-						vng.Logger.Error("Failed to send audio chunk", "error", err.Error())
-						sendErr = err
-						return
-					}
-				}
-				if data.GetCompleted() && buf.Len() > 0 {
-					remainingChunk := buf.Bytes()
-					if err := vng.connection.WriteMessage(websocket.BinaryMessage, remainingChunk); err != nil {
-						vng.Logger.Errorf("Failed to send final audio chunk", "error", err.Error())
-						sendErr = err
-						return
-					}
-					buf.Reset()
-				}
-			})
-			return sendErr
+			if vng.mediaSession == nil {
+				return nil
+			}
+			if err := vng.mediaSession.HandleAssistantAudio(content.Audio, data.GetCompleted()); err != nil {
+				return err
+			}
+			return nil
 		}
 	case *protos.ConversationInterruption:
 		if data.Type == protos.ConversationInterruption_INTERRUPTION_TYPE_WORD {
-			vng.ResetOutputBuffer()
-			vng.writeMu.Lock()
-			if vng.connection != nil {
-				if err := vng.connection.WriteMessage(websocket.TextMessage, []byte(`{"action":"clear"}`)); err != nil {
-					vng.Logger.Errorf("Error sending clear command:", err)
-				}
+			if vng.mediaSession != nil {
+				vng.mediaSession.HandleInterrupt()
 			}
-			vng.writeMu.Unlock()
 		}
 	case *protos.ConversationDisconnection:
 		if vng.GetConversationUuid() != "" {
@@ -149,9 +155,7 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 				vonage.NewVoiceClient(cAuth).Hangup(vng.GetConversationUuid())
 			}
 		}
-		if disc := vng.Disconnect(data.GetType()); disc != nil {
-			vng.Input(disc)
-		}
+		vng.stopAudioProcessing()
 		vng.Cancel()
 	case *protos.ConversationToolCall:
 		switch data.GetAction() {
@@ -189,20 +193,20 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 				Result: map[string]string{"status": "failed", "reason": "transfer not supported for Vonage", "next_action": "end_call"},
 			})
 		}
+	default:
+		// vng.Logger.Warnw("Vonage Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
 	}
 	return nil
 }
 
-func (vng *vonageWebsocketStreamer) handleMediaEvent(message []byte) (*protos.ConversationUserMessage, error) {
-	var audioRequest *protos.ConversationUserMessage
-	vng.WithInputBuffer(func(buf *bytes.Buffer) {
-		buf.Write(message)
-		if buf.Len() >= vng.InputBufferThreshold() {
-			audioRequest = vng.CreateVoiceRequest(buf.Bytes())
-			buf.Reset()
-		}
-	})
-	return audioRequest, nil
+func (vng *vonageWebsocketStreamer) handleMediaEvent(message []byte) error {
+	if vng.mediaSession == nil {
+		return nil
+	}
+	if err := vng.mediaSession.HandleProviderAudio(message); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (vng *vonageWebsocketStreamer) GetConversationUuid() string {
@@ -213,6 +217,7 @@ func (vng *vonageWebsocketStreamer) Cancel() error {
 	if !vng.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	vng.stopAudioProcessing()
 	vng.writeMu.Lock()
 	conn := vng.connection
 	vng.connection = nil
@@ -222,4 +227,22 @@ func (vng *vonageWebsocketStreamer) Cancel() error {
 	}
 	vng.BaseStreamer.Cancel()
 	return nil
+}
+
+func (vng *vonageWebsocketStreamer) sendAudioChunk(chunk *internal_vonage.AudioChunk) error {
+	if chunk == nil || len(chunk.Data) == 0 {
+		return nil
+	}
+	vng.writeMu.Lock()
+	defer vng.writeMu.Unlock()
+	if vng.connection == nil {
+		return nil
+	}
+	return vng.connection.WriteMessage(websocket.BinaryMessage, chunk.Data)
+}
+
+func (vng *vonageWebsocketStreamer) stopAudioProcessing() {
+	if vng.mediaSession != nil {
+		vng.mediaSession.Shutdown()
+	}
 }
