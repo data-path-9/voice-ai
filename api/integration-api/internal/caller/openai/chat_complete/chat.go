@@ -11,7 +11,6 @@ import (
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/openai/openai-go/v3/responses"
 
 	internal_caller_metrics "github.com/rapidaai/api/integration-api/internal/caller/metrics"
 	internal_openai_common "github.com/rapidaai/api/integration-api/internal/caller/openai/common"
@@ -44,18 +43,16 @@ func (cc *chatCaller) ChatComplete(
 	metrics := internal_caller_metrics.NewMetricBuilder(options.RequestId)
 	metrics.OnStart()
 
-	llmRequest := buildChatResponseOptions(options)
-	llmRequest.Input = responses.ResponseNewParamsInputUnion{
-		OfInputItemList: buildHistory(allMessages),
-	}
+	llmRequest := buildChatCompletionOptions(options)
+	llmRequest.Messages = buildHistory(allMessages)
 
 	if options.PreHook != nil {
 		options.PreHook(utils.ToJson(llmRequest))
 	}
 
-	resp, err := cc.client.Responses.New(ctx, llmRequest)
+	resp, err := cc.client.Chat.Completions.New(ctx, llmRequest)
 	if err != nil {
-		cc.logger.Errorf("chat completion failed to get response from openai %v", err)
+		cc.logger.Errorf("chat completion failed to get chat completion from openai %v", err)
 		if options.PostHook != nil {
 			options.PostHook(map[string]interface{}{
 				"error":  err,
@@ -66,30 +63,27 @@ func (cc *chatCaller) ChatComplete(
 	}
 
 	assistantMsg := &protos.AssistantMessage{Contents: make([]string, 0), ToolCalls: make([]*protos.ToolCall, 0)}
-	if outputText := resp.OutputText(); outputText != "" {
-		assistantMsg.Contents = append(assistantMsg.Contents, outputText)
-	}
-	for _, item := range resp.Output {
-		if item.Type != "function_call" {
-			continue
+	for _, choice := range resp.Choices {
+		if choice.Message.Content != "" {
+			assistantMsg.Contents = append(assistantMsg.Contents, choice.Message.Content)
 		}
-		fnCall := item.AsFunctionCall()
-		id := fnCall.CallID
-		if id == "" {
-			id = fnCall.ID
+		for _, tool := range choice.Message.ToolCalls {
+			if tool.Type != "function" {
+				continue
+			}
+			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
+				Id:   tool.ID,
+				Type: tool.Type,
+				Function: &protos.FunctionCall{
+					Name:      tool.Function.Name,
+					Arguments: tool.Function.Arguments,
+				},
+			})
 		}
-		assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
-			Id:   id,
-			Type: "function",
-			Function: &protos.FunctionCall{
-				Name:      fnCall.Name,
-				Arguments: fnCall.Arguments,
-			},
-		})
 	}
 
 	metrics.OnSuccess()
-	metrics.OnAddMetrics(internal_openai_common.ResponseUsageMetrics(resp.Usage)...)
+	metrics.OnAddMetrics(completionUsageMetrics(resp.Usage)...)
 	if options.PostHook != nil {
 		options.PostHook(map[string]interface{}{"result": resp}, metrics.Build())
 	}

@@ -140,7 +140,7 @@ func (exo *exotelTelephony) OutboundCall(
 	formData.Set("CallerId", fromPhone)
 	formData.Set("To", fromPhone)
 	formData.Set("Url", *appUrl)
-	formData.Set("StatusCallback", fmt.Sprintf("https://%s/%s", exo.appCfg.PublicAssistantHost, internal_type.GetContextEventPath(exotelProvider, contextID)))
+	formData.Set("StatusCallback", fmt.Sprintf("https://%s/%s", exo.appCfg.Assistant.Public, internal_type.GetContextEventPath(exotelProvider, contextID)))
 	formData.Set("CustomField", internal_type.GetContextAnswerPath(exotelProvider, contextID))
 
 	client := &http.Client{Timeout: 60 * time.Second}
@@ -193,7 +193,7 @@ func (exo *exotelTelephony) InboundCall(c *gin.Context, auth types.SimplePrincip
 
 	response := map[string]string{
 		"url": fmt.Sprintf("wss://%s/%s",
-			exo.appCfg.PublicAssistantHost,
+			exo.appCfg.Assistant.Public,
 			internal_type.GetContextAnswerPath("exotel", ctxID)),
 	}
 	c.JSON(http.StatusOK, response)
@@ -214,7 +214,7 @@ func (exo *exotelTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo
 	// normal inbound call setup.
 	socketUrl, ok := queryParams["CustomField"]
 	if ok {
-		response := map[string]string{"url": fmt.Sprintf("wss://%s/%s", exo.appCfg.PublicAssistantHost, socketUrl)}
+		response := map[string]string{"url": fmt.Sprintf("wss://%s/%s", exo.appCfg.Assistant.Public, socketUrl)}
 		c.JSON(http.StatusOK, response)
 		return nil, nil
 	}

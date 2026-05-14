@@ -21,7 +21,7 @@ func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipe
 	rec := s.Record
 	key := OwnerKeyPrefix + rec.DID
 
-	claimed, err := m.redis.SetNX(ctx, key, m.externalIP, OwnershipTTL).Result()
+	claimed, err := m.redis.SetNX(ctx, key, m.instanceID, OwnershipTTL).Result()
 	if err != nil {
 		rec.Outcome = OutcomeClaimError
 		m.logger.Warnw("Ownership claim failed", "did", rec.DID, "error", err)
@@ -29,17 +29,17 @@ func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipe
 	}
 	if claimed {
 		m.logger.Debugw("DID ownership claimed",
-			"did", rec.DID, "owner", m.externalIP, "ttl", OwnershipTTL)
+			"did", rec.DID, "owner", m.instanceID, "ttl", OwnershipTTL)
 		return RegisterPipeline{Record: rec}
 	}
 
 	cur, err := m.redis.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {
 		// Race: key expired between SETNX and GET. One more attempt.
-		again, _ := m.redis.SetNX(ctx, key, m.externalIP, OwnershipTTL).Result()
+		again, _ := m.redis.SetNX(ctx, key, m.instanceID, OwnershipTTL).Result()
 		if again {
 			m.logger.Debugw("DID ownership claimed (post-race)",
-				"did", rec.DID, "owner", m.externalIP)
+				"did", rec.DID, "owner", m.instanceID)
 			return RegisterPipeline{Record: rec}
 		}
 		rec.Outcome = OutcomePeerOwned
@@ -50,16 +50,16 @@ func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipe
 		m.logger.Warnw("Ownership claim failed", "did", rec.DID, "error", err)
 		return nil
 	}
-	if cur == m.externalIP {
+	if cur == m.instanceID {
 		// Already ours — extend the lease.
 		m.redis.Expire(ctx, key, OwnershipTTL)
 		m.logger.Debugw("DID ownership refreshed",
-			"did", rec.DID, "owner", m.externalIP, "ttl", OwnershipTTL)
+			"did", rec.DID, "owner", m.instanceID, "ttl", OwnershipTTL)
 		return RegisterPipeline{Record: rec}
 	}
 	rec.Outcome = OutcomePeerOwned
 	m.logger.Debugw("DID owned by peer instance — skipping",
-		"did", rec.DID, "owner", cur, "self", m.externalIP)
+		"did", rec.DID, "owner", cur, "self", m.instanceID)
 	return nil
 }
 
@@ -72,9 +72,9 @@ func (m *Manager) releaseOwner(ctx context.Context, did string) {
 	if err != nil {
 		return
 	}
-	if cur != m.externalIP {
+	if cur != m.instanceID {
 		return
 	}
 	m.redis.Del(ctx, key)
-	m.logger.Debugw("DID ownership released", "did", did, "owner", m.externalIP)
+	m.logger.Debugw("DID ownership released", "did", did, "owner", m.instanceID)
 }

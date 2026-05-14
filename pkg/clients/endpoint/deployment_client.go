@@ -38,9 +38,7 @@ func NewDeploymentServiceClientGRPC(config *config.AppConfig, logger commons.Log
 			grpc.MaxCallSendMsgSize(commons.MaxSendMsgSize),
 		),
 	}
-	conn, err := grpc.NewClient(config.EndpointHost,
-		grpcOpts...)
-
+	conn, err := grpc.NewClient(config.Endpoint.Host, grpcOpts...)
 	if err != nil {
 		logger.Errorf("Unable to create connection %v", err)
 	}

@@ -1,0 +1,104 @@
+service_name: "workflow-api"
+host: "0.0.0.0"
+port: 9007
+log_level: "debug"
+secret: "rpd_pks"
+env: "development"
+
+postgres:
+  host: "localhost"
+  port: 5432
+  db_name: "assistant_db"
+  auth:
+    user: "rapida_user"
+    password: "rapida_db_password"
+  max_open_connection: 50
+  max_ideal_connection: 25
+  ssl_mode: "disable"
+  slc_cache:
+    host: "127.0.0.1"
+    port: 6379
+    db: 1
+    max_connection: 10
+    auth:
+      user: ""
+      password: ""
+
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  db: 0
+  max_connection: 10
+  auth:
+    user: ""
+    password: ""
+
+asset_store:
+  storage_type: "local"
+  storage_path_prefix: "/Users/prashant.srivastav/rapida-data/assets/workflow"
+  public_url_prefix: "http://localhost:8080/rapida-data/assets/workflow"
+
+opensearch:
+  schema: "http"
+  host: "localhost"
+  port: 9200
+  max_retries: 3
+  max_connection: 10
+  auth:
+    user: ""
+    password: ""
+
+
+integration:
+  host: "localhost:9004"
+  regions:
+    - region: "us"
+      host: "localhost:9004"
+    - region: "in"
+      host: "localhost:9004"
+endpoint:
+  host: "localhost:9005"
+web:
+  host: "localhost:9001"
+document:
+  host: "localhost:9010"
+ui:
+  host: "http://localhost:3000"
+assistant:
+  host: "localhost:9007"
+  public: "integral-presently-cub.ngrok-free.app"
+  regions:
+    - region: "us"
+      host: "localhost:9007"
+    - region: "in"
+      host: "localhost:9007"
+
+audiosocket:
+  host: "0.0.0.0"
+  port: 4573
+
+
+sip:
+  server: "0.0.0.0"
+  instance_id: "assistant-01"
+  external_ip: "192.168.1.4"
+  port: 5060
+  transport: "udp"
+  rtp_port_range_start: 10000
+  rtp_port_range_end: 10100
+
+
+webrtc:
+  external_ip: "192.168.1.4"
+  udp_port_range_start: 20000
+  udp_port_range_end: 20100
+
+
+telemetry:
+  type: "opensearch"
+  opensearch:
+    schema: "http"
+    host: "localhost"
+    port: 9200
+    max_retries: 3
+    max_connection: 10

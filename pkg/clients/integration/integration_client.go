@@ -39,7 +39,7 @@ type integrationServiceClient struct {
 }
 
 func NewIntegrationServiceClientGRPC(config *config.AppConfig, logger commons.Logger, redis connectors.RedisConnector) IntegrationServiceClient {
-	lightConnection, err := grpc.NewClient(config.IntegrationHost, []grpc.DialOption{
+	lightConnection, err := grpc.NewClient(config.Integration.Host, []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}...)
 	if err != nil {

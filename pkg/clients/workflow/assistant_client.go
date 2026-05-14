@@ -138,8 +138,7 @@ type assistantServiceClient struct {
 // Returns:
 // - An instance of AssistantServiceClient, or nil if an error occurs during connection establishment.
 func NewAssistantServiceClientGRPC(config *config.AppConfig, logger commons.Logger, redis connectors.RedisConnector) AssistantServiceClient {
-	logger.Debugf("conntecting to assistant client with %s", config.AssistantHost)
-	conn, err := grpc.NewClient(config.AssistantHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(config.Assistant.Host, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		logger.Errorf("Unable to create connection %v", err)
 	}

@@ -54,9 +54,9 @@ func cachePolicyOptions(t *testing.T) *internal_callers.ChatCompletionOptions {
 	}
 }
 
-func TestBuildChatResponseOptions_DisablesPromptCache(t *testing.T) {
+func TestBuildChatCompletionOptions_DisablesPromptCache(t *testing.T) {
 	options := cachePolicyOptions(t)
-	data := cacheTestToMap(t, buildChatResponseOptions(options))
+	data := cacheTestToMap(t, buildChatCompletionOptions(options))
 
 	_, hasPromptCacheKey := data["prompt_cache_key"]
 	_, hasPromptCacheRetention := data["prompt_cache_retention"]
@@ -64,9 +64,9 @@ func TestBuildChatResponseOptions_DisablesPromptCache(t *testing.T) {
 	assert.False(t, hasPromptCacheRetention)
 }
 
-func TestBuildStreamResponseOptions_EnablesPromptCache(t *testing.T) {
+func TestBuildStreamCompletionOptions_EnablesPromptCache(t *testing.T) {
 	options := cachePolicyOptions(t)
-	data := cacheTestToMap(t, buildStreamResponseOptions(options))
+	data := cacheTestToMap(t, buildStreamCompletionOptions(options))
 
 	assert.Equal(t, "conv-1model-1__assistant-1", data["prompt_cache_key"])
 	assert.Equal(t, "24h", data["prompt_cache_retention"])

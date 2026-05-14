@@ -21,36 +21,25 @@ type IntegrationConfig struct {
 
 // reading config and intializing configs for application
 func InitConfig() (*viper.Viper, error) {
-	vConfig := viper.NewWithOptions(viper.KeyDelimiter("__"))
+	vConfig := viper.New()
 
-	vConfig.AddConfigPath("./env/")
-	vConfig.SetConfigName(".integration.env")
 	path := os.Getenv("ENV_PATH")
 	if path != "" {
-		log.Printf("env path %v", path)
+		log.Printf("config path %v", path)
 		vConfig.SetConfigFile(path)
-	}
-	vConfig.SetConfigType("env")
-	vConfig.AutomaticEnv()
-	if err := vConfig.ReadInConfig(); err != nil {
-		log.Printf("Error while reading the config")
+	} else {
+		vConfig.AddConfigPath("./env/")
+		vConfig.SetConfigName("integration")
+		vConfig.SetConfigType("yaml")
 	}
 
-	//
-	setDefault(vConfig)
-	if err := vConfig.ReadInConfig(); err != nil && !os.IsNotExist(err) {
-		log.Printf("Reading from env variables.")
+	if err := vConfig.ReadInConfig(); err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("Error while reading the config: %v", err)
+		}
 	}
 
 	return vConfig, nil
-}
-
-func setDefault(v *viper.Viper) {
-	v.SetDefault("SERVICE_NAME", "go-service-template")
-	v.SetDefault("VERSION", "0.0.1")
-	v.SetDefault("HOST", "0.0.0.0")
-	v.SetDefault("PORT", 9090)
-	v.SetDefault("LOG_LEVEL", "debug")
 }
 
 // Getting application config from viper

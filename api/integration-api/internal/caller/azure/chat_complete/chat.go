@@ -10,9 +10,7 @@ import (
 	"context"
 
 	openai "github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 
-	internal_azure_common "github.com/rapidaai/api/integration-api/internal/caller/azure/common"
 	internal_caller_metrics "github.com/rapidaai/api/integration-api/internal/caller/metrics"
 	internal_callers "github.com/rapidaai/api/integration-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
@@ -26,7 +24,7 @@ type chatCaller struct {
 }
 
 func NewChat(logger commons.Logger, credential *protos.Credential) (internal_callers.Chat, error) {
-	client, err := internal_azure_common.NewClient(logger, credential)
+	client, err := newClient(credential)
 	if err != nil {
 		logger.Errorf("Failed to create Azure chat_complete chat client: %v", err)
 		return nil, err
@@ -42,18 +40,16 @@ func (cc *chatCaller) ChatComplete(
 	metrics := internal_caller_metrics.NewMetricBuilder(options.RequestId)
 	metrics.OnStart()
 
-	llmRequest := buildChatResponseOptions(options)
-	llmRequest.Input = responses.ResponseNewParamsInputUnion{
-		OfInputItemList: buildHistory(allMessages),
-	}
+	llmRequest := buildChatCompletionOptions(options)
+	llmRequest.Messages = buildHistory(allMessages)
 
 	if options.PreHook != nil {
 		options.PreHook(utils.ToJson(llmRequest))
 	}
 
-	resp, err := cc.client.Responses.New(ctx, llmRequest)
+	resp, err := cc.client.Chat.Completions.New(ctx, llmRequest)
 	if err != nil {
-		cc.logger.Errorf("chat completion failed to get response from azure %v", err)
+		cc.logger.Errorf("chat completion failed to get chat completion from azure %v", err)
 		if options.PostHook != nil {
 			options.PostHook(map[string]interface{}{
 				"error":  err,
@@ -64,30 +60,27 @@ func (cc *chatCaller) ChatComplete(
 	}
 
 	assistantMsg := &protos.AssistantMessage{Contents: make([]string, 0), ToolCalls: make([]*protos.ToolCall, 0)}
-	if outputText := resp.OutputText(); outputText != "" {
-		assistantMsg.Contents = append(assistantMsg.Contents, outputText)
-	}
-	for _, item := range resp.Output {
-		if item.Type != "function_call" {
-			continue
+	for _, choice := range resp.Choices {
+		if choice.Message.Content != "" {
+			assistantMsg.Contents = append(assistantMsg.Contents, choice.Message.Content)
 		}
-		fnCall := item.AsFunctionCall()
-		id := fnCall.CallID
-		if id == "" {
-			id = fnCall.ID
+		for _, tool := range choice.Message.ToolCalls {
+			if tool.Type != "function" {
+				continue
+			}
+			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
+				Id:   tool.ID,
+				Type: tool.Type,
+				Function: &protos.FunctionCall{
+					Name:      tool.Function.Name,
+					Arguments: tool.Function.Arguments,
+				},
+			})
 		}
-		assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
-			Id:   id,
-			Type: "function",
-			Function: &protos.FunctionCall{
-				Name:      fnCall.Name,
-				Arguments: fnCall.Arguments,
-			},
-		})
 	}
 
 	metrics.OnSuccess()
-	metrics.OnAddMetrics(internal_azure_common.ResponseUsageMetrics(resp.Usage)...)
+	metrics.OnAddMetrics(completionUsageMetrics(resp.Usage)...)
 	if options.PostHook != nil {
 		options.PostHook(map[string]interface{}{"result": resp}, metrics.Build())
 	}

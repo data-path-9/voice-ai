@@ -1,0 +1,51 @@
+service_name: "web-api"
+host: "0.0.0.0"
+port: 9001
+log_level: "debug"
+secret: "rpd_pks"
+env: "development"
+
+postgres:
+  host: "localhost"
+  port: 5432
+  db_name: "web_db"
+  auth:
+    user: "rapida_user"
+    password: "rapida_db_password"
+  max_open_connection: 10
+  max_ideal_connection: 10
+  ssl_mode: "disable"
+  slc_cache:
+    host: "127.0.0.1"
+    port: 6379
+    db: 1
+    max_connection: 10
+    auth:
+      user: ""
+      password: ""
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  max_connection: 5
+  auth:
+    user: ""
+    password: ""
+
+asset_store:
+  storage_type: "local"
+  storage_path_prefix: "/Users/prashant.srivastav/rapida-data/assets/web"
+
+integration:
+  host: "localhost:9004"
+endpoint:
+  host: "localhost:9005"
+assistant:
+  host: "localhost:9007"
+web:
+  host: "localhost:9001"
+document:
+  host: "http://localhost:9010"
+ui:
+  host: "http://localhost:3000"

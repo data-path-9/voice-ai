@@ -9,6 +9,7 @@ package sip_registration
 import (
 	"time"
 
+	"github.com/rapidaai/api/assistant-api/config"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
@@ -71,6 +72,6 @@ type Config struct {
 	Redis              connectors.RedisConnector
 	Vault              web_client.VaultClient
 	RegistrationClient *sip_infra.RegistrationClient
-	ExternalIP         string
+	Sip                *config.SIPConfig
 	ApplyOpDefaults    func(*sip_infra.Config)
 }
