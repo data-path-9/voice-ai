@@ -9,6 +9,7 @@ package internal_azure_chat_complete
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	openai "github.com/openai/openai-go/v3"
@@ -28,6 +29,38 @@ const (
 
 type idleCloser interface {
 	CloseIdleConnections()
+}
+
+func isOpenAICompatibleEndpoint(endpoint string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err == nil {
+		return strings.EqualFold(strings.TrimRight(parsed.Path, "/"), "/openai/v1")
+	}
+	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(endpoint), "/"), "/openai/v1")
+}
+
+func buildClientOptions(
+	endpoint string,
+	subscriptionKey string,
+	apiVersion string,
+	httpClient *http.Client,
+) []option.RequestOption {
+	opts := make([]option.RequestOption, 0, 3)
+	if isOpenAICompatibleEndpoint(endpoint) {
+		opts = append(opts,
+			option.WithBaseURL(endpoint),
+			sdkazure.WithAPIKey(subscriptionKey),
+		)
+	} else {
+		opts = append(opts,
+			sdkazure.WithEndpoint(endpoint, apiVersion),
+			sdkazure.WithAPIKey(subscriptionKey),
+		)
+	}
+	if httpClient != nil {
+		opts = append(opts, option.WithHTTPClient(httpClient))
+	}
+	return opts
 }
 
 func resolveCredential(credential *protos.Credential) (endpoint string, subscriptionKey string, apiVersion string, err error) {
@@ -71,10 +104,7 @@ func newClient(credential *protos.Credential) (*openai.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := openai.NewClient(
-		sdkazure.WithEndpoint(endpoint, apiVersion),
-		sdkazure.WithAPIKey(subscriptionKey),
-	)
+	client := openai.NewClient(buildClientOptions(endpoint, subscriptionKey, apiVersion, nil)...)
 	return &client, nil
 }
 
@@ -93,10 +123,6 @@ func newStreamClient(credential *protos.Credential) (*openai.Client, idleCloser,
 	}
 	httpClient := &http.Client{Transport: transport}
 
-	client := openai.NewClient(
-		sdkazure.WithEndpoint(endpoint, apiVersion),
-		sdkazure.WithAPIKey(subscriptionKey),
-		option.WithHTTPClient(httpClient),
-	)
+	client := openai.NewClient(buildClientOptions(endpoint, subscriptionKey, apiVersion, httpClient)...)
 	return &client, httpClient, nil
 }

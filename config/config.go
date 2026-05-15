@@ -1,5 +1,16 @@
 package config
 
+type RegionalHost struct {
+	Region string `mapstructure:"region" validate:"required"`
+	Host   string `mapstructure:"host" validate:"required"`
+}
+
+type ServiceHostConfig struct {
+	Host    string         `mapstructure:"host" validate:"required"`
+	Public  string         `mapstructure:"public"`
+	Regions []RegionalHost `mapstructure:"regions"`
+}
+
 type AppConfig struct {
 	//
 	Name     string `mapstructure:"service_name" validate:"required"`
@@ -10,21 +21,18 @@ type AppConfig struct {
 	LogLevel string `mapstructure:"log_level" validate:"required"`
 	Secret   string `mapstructure:"secret" validate:"required"`
 
-	// all the host
-	IntegrationHost string `mapstructure:"integration_host" validate:"required"`
-	EndpointHost    string `mapstructure:"endpoint_host" validate:"required"`
-	AssistantHost   string `mapstructure:"assistant_host" validate:"required"`
-	WebHost         string `mapstructure:"web_host" validate:"required"`
-	DocumentHost    string `mapstructure:"document_host"`
-
-	// utility
-	UiHost string `mapstructure:"ui_host" validate:"required"`
+	Integration ServiceHostConfig `mapstructure:"integration"`
+	Endpoint    ServiceHostConfig `mapstructure:"endpoint"`
+	Assistant   ServiceHostConfig `mapstructure:"assistant"`
+	Web         ServiceHostConfig `mapstructure:"web"`
+	Document    ServiceHostConfig `mapstructure:"document"`
+	Ui          ServiceHostConfig `mapstructure:"ui"`
 }
 
 func (cfg *AppConfig) IsDevelopment() bool {
 	return cfg.Env != "production"
 }
 
-func (cfg *AppConfig) BaseUrl() (baseUrl string) {
-	return cfg.UiHost
+func (cfg *AppConfig) BaseUrl() string {
+	return cfg.Ui.Host
 }

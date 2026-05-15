@@ -850,5 +850,39 @@
         ],
         "humanname": "Custom LLM",
         "website": "https://platform.openai.com/docs/api-reference/chat"
+    },
+    {
+        "code": "custom-tts",
+        "name": "Custom TTS",
+        "description": "Connect to any websocket-based TTS service with configurable packet body templates, custom headers, and provider-defined voice/model settings.",
+        "image": "https://cdn-01.rapida.ai/providers/1987967168452493312.svg",
+        "featureList": [
+            "tts",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "apiCompatibility",
+                "type": "select",
+                "label": "API Compatibility",
+                "choices": [
+                    {
+                        "label": "WebSocket v1",
+                        "value": "websocket_v1"
+                    }
+                ]
+            },
+            {
+                "name": "baseUrl",
+                "type": "string",
+                "label": "Base URL"
+            },
+            {
+                "name": "headers",
+                "type": "key_value",
+                "label": "Headers",
+                "required": false
+            }
+        ]
     }
 ]

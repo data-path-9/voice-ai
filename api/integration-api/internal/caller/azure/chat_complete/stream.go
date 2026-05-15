@@ -128,41 +128,24 @@ func (s *streamCaller) Chat(
 	}
 	defer resp.Close()
 
-	assistantMsg := &protos.AssistantMessage{Contents: make([]string, 0), ToolCalls: make([]*protos.ToolCall, 0)}
-	contentBuffer := make([]string, 0)
-	hasToolCalls := false
+	contentBuffer := make(map[int64]string)
+	toolCallChoices := make(map[int64]struct{})
 	accumulate := openai.ChatCompletionAccumulator{}
 
 	for resp.Next() {
 		chunk := resp.Current()
 		accumulate.AddChunk(chunk)
 
-		if tool, ok := accumulate.JustFinishedToolCall(); ok {
-			hasToolCalls = true
-			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
-				Id:   tool.ID,
-				Type: "function",
-				Function: &protos.FunctionCall{
-					Name:      tool.Name,
-					Arguments: tool.Arguments,
-				},
-			})
-		}
-
-		for i, choice := range chunk.Choices {
+		for _, choice := range chunk.Choices {
 			if len(choice.Delta.ToolCalls) > 0 {
-				hasToolCalls = true
+				toolCallChoices[choice.Index] = struct{}{}
 			}
 			content := choice.Delta.Content
 			if content == "" {
 				continue
 			}
-			if len(contentBuffer) <= i {
-				contentBuffer = append(contentBuffer, content)
-			} else {
-				contentBuffer[i] += content
-			}
-			if hasToolCalls {
+			contentBuffer[choice.Index] += content
+			if _, hasToolCalls := toolCallChoices[choice.Index]; hasToolCalls {
 				continue
 			}
 			if firstTokenTime == nil {
@@ -194,8 +177,10 @@ func (s *streamCaller) Chat(
 		return resp.Err()
 	}
 
-	assistantMsg.Contents = contentBuffer
-
+	assistantMsg := buildAssistantMessageFromChoices(accumulate.Choices)
+	if len(assistantMsg.Contents) == 0 {
+		assistantMsg.Contents = finalizeStreamContentsByChoiceIndex(contentBuffer)
+	}
 	protoMsg := &protos.Message{Role: chatRoleAssistant, Message: &protos.Message_Assistant{Assistant: assistantMsg}}
 	metrics.OnAddMetrics(completionUsageMetrics(accumulate.Usage)...)
 	if firstTokenTime != nil {

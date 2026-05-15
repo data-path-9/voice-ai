@@ -14,6 +14,7 @@ import (
 	internal_transformer_aws "github.com/rapidaai/api/assistant-api/internal/transformer/aws"
 	internal_transformer_azure "github.com/rapidaai/api/assistant-api/internal/transformer/azure"
 	internal_transformer_cartesia "github.com/rapidaai/api/assistant-api/internal/transformer/cartesia"
+	internal_transformer_custom_tts "github.com/rapidaai/api/assistant-api/internal/transformer/custom_tts"
 	internal_transformer_deepgram "github.com/rapidaai/api/assistant-api/internal/transformer/deepgram"
 	internal_transformer_elevenlabs "github.com/rapidaai/api/assistant-api/internal/transformer/elevenlabs"
 	internal_transformer_google "github.com/rapidaai/api/assistant-api/internal/transformer/google"
@@ -39,6 +40,7 @@ const (
 	GOOGLE_SPEECH_SERVICE AudioTransformer = "google-speech-service"
 	AZURE_SPEECH_SERVICE  AudioTransformer = "azure-speech-service"
 	CARTESIA              AudioTransformer = "cartesia"
+	CUSTOM_TTS            AudioTransformer = "custom-tts"
 	REVAI                 AudioTransformer = "revai"
 	SARVAM                AudioTransformer = "sarvamai"
 	ELEVENLABS            AudioTransformer = "elevenlabs"
@@ -70,6 +72,8 @@ func GetTextToSpeechTransformer(ctx context.Context,
 		return internal_transformer_azure.NewAzureTextToSpeech(ctx, logger, credential, onPacket, opts)
 	case CARTESIA:
 		return internal_transformer_cartesia.NewCartesiaTextToSpeech(ctx, logger, credential, onPacket, opts)
+	case CUSTOM_TTS:
+		return internal_transformer_custom_tts.NewTextToSpeech(ctx, logger, credential, onPacket, opts)
 	case GOOGLE_SPEECH_SERVICE:
 		return internal_transformer_google.NewGoogleTextToSpeech(ctx, logger, credential, onPacket, opts)
 	case REVAI:

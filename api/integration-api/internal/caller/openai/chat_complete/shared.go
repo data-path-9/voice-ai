@@ -9,6 +9,7 @@ package internal_openai_chat_complete
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	openai "github.com/openai/openai-go/v3"
@@ -55,7 +56,12 @@ func buildChatCompletionOptionsWithCachePolicy(
 	if opts != nil && len(opts.ToolDefinitions) > 0 {
 		fns := make([]openai.ChatCompletionToolUnionParam, 0, len(opts.ToolDefinitions))
 		for _, tl := range opts.ToolDefinitions {
-			if tl.Type != "function" || tl.Function == nil {
+			if tl.Function == nil {
+				continue
+			}
+			switch tl.Type {
+			case "tool", "function":
+			default:
 				continue
 			}
 			fn := tl.Function
@@ -73,7 +79,6 @@ func buildChatCompletionOptionsWithCachePolicy(
 		options.Tools = fns
 	}
 
-	directParams := make(map[string]interface{})
 	modelParams := make(map[string]interface{})
 	if opts != nil {
 		for key, value := range opts.ModelParameter {
@@ -89,40 +94,52 @@ func buildChatCompletionOptionsWithCachePolicy(
 				if asJSON, err := utils.AnyToJSON(value); err == nil {
 					modelParams = asJSON
 				}
-			default:
-				if !strings.HasPrefix(key, "model.") {
-					continue
-				}
-				rawValue, err := utils.AnyToInterface(value)
-				if err != nil {
-					continue
-				}
-				directParams[strings.TrimPrefix(key, "model.")] = rawValue
 			}
 		}
 	}
 
 	extraFields := map[string]interface{}{}
-	applyChatCompletionParameters(&options, directParams, extraFields, allowPromptCache, &promptCacheKeySelector)
 	applyChatCompletionParameters(&options, modelParams, extraFields, allowPromptCache, &promptCacheKeySelector)
 	if len(extraFields) > 0 {
 		options.SetExtraFields(extraFields)
 	}
 
 	if allowPromptCache {
-		switch promptCacheKeySelector {
-		case "user_identifier":
-			options.PromptCacheKey = openai.String(additionalData["user_identifier"] + additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
-		case "conversation_id":
-			options.PromptCacheKey = openai.String(additionalData["conversation_id"] + additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
-		case "assistant_id":
-			options.PromptCacheKey = openai.String(additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
-		default:
-			options.PromptCacheKey = openai.String(additionalData["assistant_provider_model_id"] + "__" + additionalData["assistant_id"])
+		if cacheKey, ok := buildPromptCacheKey(promptCacheKeySelector, additionalData); ok {
+			options.PromptCacheKey = openai.String(cacheKey)
+		} else {
+			options.PromptCacheRetention = ""
 		}
 	}
 
 	return options
+}
+
+func buildPromptCacheKey(selector string, additionalData map[string]string) (string, bool) {
+	assistantProviderModelID := strings.TrimSpace(additionalData["assistant_provider_model_id"])
+	assistantID := strings.TrimSpace(additionalData["assistant_id"])
+	if assistantProviderModelID == "" || assistantID == "" {
+		return "", false
+	}
+
+	switch selector {
+	case "user_identifier":
+		userIdentifier := strings.TrimSpace(additionalData["user_identifier"])
+		if userIdentifier == "" {
+			return "", false
+		}
+		return userIdentifier + "__" + assistantProviderModelID + "__" + assistantID, true
+	case "conversation_id":
+		conversationID := strings.TrimSpace(additionalData["conversation_id"])
+		if conversationID == "" {
+			return "", false
+		}
+		return conversationID + "__" + assistantProviderModelID + "__" + assistantID, true
+	case "assistant_id":
+		fallthrough
+	default:
+		return assistantProviderModelID + "__" + assistantID, true
+	}
 }
 
 func applyChatCompletionParameters(
@@ -132,6 +149,9 @@ func applyChatCompletionParameters(
 	allowPromptCache bool,
 	promptCacheKeySelector *string,
 ) {
+	var parsedLogprobs *bool
+	var parsedTopLogprobs *int64
+
 	for key, value := range params {
 		switch strings.ToLower(key) {
 		case "user":
@@ -152,12 +172,11 @@ func applyChatCompletionParameters(
 			}
 		case "top_logprobs":
 			if topLogprobs, ok := toInt64(value); ok {
-				options.TopLogprobs = openai.Int(topLogprobs)
-				options.Logprobs = openai.Bool(true)
+				parsedTopLogprobs = &topLogprobs
 			}
 		case "logprobs":
 			if logprobs, ok := toBool(value); ok {
-				options.Logprobs = openai.Bool(logprobs)
+				parsedLogprobs = &logprobs
 			}
 		case "metadata":
 			if metadata, ok := toStringMap(value); ok {
@@ -180,9 +199,7 @@ func applyChatCompletionParameters(
 				options.PresencePenalty = openai.Float(presencePenalty)
 			}
 		case "max_tokens":
-			if maxTokens, ok := toInt64(value); ok {
-				options.MaxTokens = openai.Int(maxTokens)
-			}
+			continue
 		case "max_completion_tokens", "max_output_tokens":
 			if maxCompletionTokens, ok := toInt64(value); ok {
 				options.MaxCompletionTokens = openai.Int(maxCompletionTokens)
@@ -229,6 +246,9 @@ func applyChatCompletionParameters(
 				options.Stop = openai.ChatCompletionNewParamsStopUnion{OfStringArray: stopSequences}
 			}
 		case "tool_choice":
+			if len(options.Tools) == 0 {
+				continue
+			}
 			if choice, ok := toString(value); ok {
 				switch choice {
 				case "auto", "required", "none":
@@ -275,9 +295,14 @@ func applyChatCompletionParameters(
 					},
 				}
 			}
-		default:
-			extraFields[key] = value
 		}
+	}
+
+	if parsedTopLogprobs != nil {
+		options.TopLogprobs = openai.Int(*parsedTopLogprobs)
+		options.Logprobs = openai.Bool(true)
+	} else if parsedLogprobs != nil {
+		options.Logprobs = openai.Bool(*parsedLogprobs)
 	}
 }
 
@@ -287,7 +312,13 @@ func buildHistory(allMessages []*protos.Message) []openai.ChatCompletionMessageP
 		switch cntn.GetRole() {
 		case chatRoleUser:
 			if user := cntn.GetUser(); user != nil {
-				msg = append(msg, openai.UserMessage(user.GetContent()))
+				msg = append(msg, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
+					{
+						OfText: &openai.ChatCompletionContentPartTextParam{
+							Text: user.GetContent(),
+						},
+					},
+				}))
 			}
 		case chatRoleAssistant:
 			if assistant := cntn.GetAssistant(); assistant != nil {
@@ -339,6 +370,108 @@ func buildHistory(allMessages []*protos.Message) []openai.ChatCompletionMessageP
 		}
 	}
 	return msg
+}
+
+func buildAssistantMessageFromChoices(choices []openai.ChatCompletionChoice) *protos.AssistantMessage {
+	assistantMsg := &protos.AssistantMessage{
+		Contents:  make([]string, 0),
+		ToolCalls: make([]*protos.ToolCall, 0),
+	}
+
+	for _, choice := range choices {
+		if choice.Message.Content != "" {
+			assistantMsg.Contents = append(assistantMsg.Contents, choice.Message.Content)
+		}
+		for _, tool := range choice.Message.ToolCalls {
+			if tool.Type != "function" {
+				continue
+			}
+			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
+				Id:   tool.ID,
+				Type: string(tool.Type),
+				Function: &protos.FunctionCall{
+					Name:      tool.Function.Name,
+					Arguments: tool.Function.Arguments,
+				},
+			})
+		}
+	}
+
+	return assistantMsg
+}
+
+func buildUnaryAssistantMessageFromChoices(choices []openai.ChatCompletionChoice) *protos.AssistantMessage {
+	assistantMsg := &protos.AssistantMessage{
+		Contents:  make([]string, 0),
+		ToolCalls: make([]*protos.ToolCall, 0),
+	}
+
+	for _, choice := range choices {
+		switch choice.FinishReason {
+		case "length", "content_filter":
+			continue
+		case "stop":
+			if choice.Message.Content != "" {
+				assistantMsg.Contents = append(assistantMsg.Contents, choice.Message.Content)
+			}
+		case "function_call", "tool_calls":
+			for _, tool := range choice.Message.ToolCalls {
+				if tool.Type != "function" {
+					continue
+				}
+				assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
+					Id:   tool.ID,
+					Type: string(tool.Type),
+					Function: &protos.FunctionCall{
+						Name:      tool.Function.Name,
+						Arguments: tool.Function.Arguments,
+					},
+				})
+			}
+		default:
+			if choice.Message.Content != "" {
+				assistantMsg.Contents = append(assistantMsg.Contents, choice.Message.Content)
+			}
+			for _, tool := range choice.Message.ToolCalls {
+				if tool.Type != "function" {
+					continue
+				}
+				assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
+					Id:   tool.ID,
+					Type: string(tool.Type),
+					Function: &protos.FunctionCall{
+						Name:      tool.Function.Name,
+						Arguments: tool.Function.Arguments,
+					},
+				})
+			}
+		}
+	}
+
+	return assistantMsg
+}
+
+func finalizeStreamContentsByChoiceIndex(buffer map[int64]string) []string {
+	if len(buffer) == 0 {
+		return nil
+	}
+
+	indexes := make([]int64, 0, len(buffer))
+	for idx := range buffer {
+		indexes = append(indexes, idx)
+	}
+	sort.Slice(indexes, func(i, j int) bool {
+		return indexes[i] < indexes[j]
+	})
+
+	content := make([]string, 0, len(indexes))
+	for _, idx := range indexes {
+		if buffer[idx] == "" {
+			continue
+		}
+		content = append(content, buffer[idx])
+	}
+	return content
 }
 
 func completionUsageMetrics(usages openai.CompletionUsage) []*protos.Metric {

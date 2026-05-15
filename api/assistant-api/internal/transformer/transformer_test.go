@@ -45,6 +45,11 @@ func TestAudioTransformerString(t *testing.T) {
 			expected: "cartesia",
 		},
 		{
+			name:     "Custom TTS",
+			input:    CUSTOM_TTS,
+			expected: "custom-tts",
+		},
+		{
 			name:     "RevAI",
 			input:    REVAI,
 			expected: "revai",
@@ -88,6 +93,11 @@ func TestGetTextToSpeechTransformer(t *testing.T) {
 		{
 			name:            "Deepgram TTS",
 			transformerType: DEEPGRAM,
+			shouldError:     true, // Will fail due to missing credentials, but factory works
+		},
+		{
+			name:            "Custom TTS",
+			transformerType: CUSTOM_TTS,
 			shouldError:     true, // Will fail due to missing credentials, but factory works
 		},
 		{
@@ -273,6 +283,7 @@ func TestAllTextToSpeechTransformersCallFactory(t *testing.T) {
 		DEEPGRAM,
 		AZURE_SPEECH_SERVICE,
 		CARTESIA,
+		CUSTOM_TTS,
 		GOOGLE_SPEECH_SERVICE,
 		REVAI,
 		SARVAM,

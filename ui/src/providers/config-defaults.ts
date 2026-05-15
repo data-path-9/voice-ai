@@ -7,6 +7,15 @@ import {
   loadProviderData,
   resolveCategoryParameters,
 } from './config-loader';
+import {
+  CUSTOM_TTS_DONE_REQUEST_KEY,
+  CUSTOM_TTS_QUERY_PARAMS_KEY,
+  CUSTOM_TTS_RESPONSE_PARSER_KEY,
+  CUSTOM_TTS_TEXT_REQUEST_KEY,
+  validateCustomTtsQueryParams,
+  validateCustomTtsRequestDefinition,
+  validateCustomTtsResponseParser,
+} from './custom-tts/template';
 
 interface GetDefaultsFromConfigOptions {
   includeCredential?: boolean;
@@ -32,14 +41,21 @@ export function getDefaultsFromConfig(
   const mtds: Metadata[] = [];
   const includeCredential = options.includeCredential !== false;
   const replacePrefix = options.replacePrefix;
-  const keysToKeep: string[] = includeCredential ? ['rapida.credential_id'] : [];
+  const keysToKeep: string[] = includeCredential
+    ? ['rapida.credential_id']
+    : [];
 
   const addMetadata = (
     key: string,
     defaultValue?: string,
     validationFn?: (value: string) => boolean,
   ) => {
-    const metadata = SetMetadata(currentMetadata, key, defaultValue, validationFn);
+    const metadata = SetMetadata(
+      currentMetadata,
+      key,
+      defaultValue,
+      validationFn,
+    );
     if (metadata) mtds.push(metadata);
   };
 
@@ -58,17 +74,24 @@ export function getDefaultsFromConfig(
 
     if (param.linkedField) {
       const data = param.data ? loadProviderData(provider, param.data) : [];
-      const existingValue = currentMetadata.find(m => m.getKey() === param.key)?.getValue();
-      const existingLinkedValue = currentMetadata.find(
-        m => m.getKey() === param.linkedField!.key,
-      )?.getValue();
+      const existingValue = currentMetadata
+        .find(m => m.getKey() === param.key)
+        ?.getValue();
+      const existingLinkedValue = currentMetadata
+        .find(m => m.getKey() === param.linkedField!.key)
+        ?.getValue();
       const valueToUse = existingValue || param.default;
       if (existingLinkedValue) {
         addMetadata(param.linkedField.key, existingLinkedValue);
       } else if (valueToUse && data.length > 0 && param.valueField) {
-        const matched = data.find((item: any) => item[param.valueField!] === valueToUse);
+        const matched = data.find(
+          (item: any) => item[param.valueField!] === valueToUse,
+        );
         if (matched) {
-          addMetadata(param.linkedField.key, matched[param.linkedField.sourceField]);
+          addMetadata(
+            param.linkedField.key,
+            matched[param.linkedField.sourceField],
+          );
         }
       } else if (valueToUse && param.customValue) {
         addMetadata(param.linkedField.key, valueToUse);
@@ -196,12 +219,28 @@ function validateParamValue(
     }
     case 'json': {
       if (!value) return undefined;
+      if (provider === 'custom-tts') {
+        if (param.key === CUSTOM_TTS_QUERY_PARAMS_KEY) {
+          return validateCustomTtsQueryParams(value, param.label);
+        }
+        if (
+          param.key === CUSTOM_TTS_TEXT_REQUEST_KEY ||
+          param.key === CUSTOM_TTS_DONE_REQUEST_KEY
+        ) {
+          return validateCustomTtsRequestDefinition(value, param.label);
+        }
+        if (param.key === CUSTOM_TTS_RESPONSE_PARSER_KEY) {
+          return validateCustomTtsResponseParser(value);
+        }
+      }
       try {
         const parsed = JSON.parse(value);
         if (
           provider === 'custom-llm' &&
           param.key === 'model.parameters' &&
-          (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object')
+          (parsed === null ||
+            Array.isArray(parsed) ||
+            typeof parsed !== 'object')
         ) {
           return defaultError;
         }

@@ -59,25 +59,7 @@ func (cc *chatCaller) ChatComplete(
 		return nil, metrics.OnFailure().Build(), err
 	}
 
-	assistantMsg := &protos.AssistantMessage{Contents: make([]string, 0), ToolCalls: make([]*protos.ToolCall, 0)}
-	for _, choice := range resp.Choices {
-		if choice.Message.Content != "" {
-			assistantMsg.Contents = append(assistantMsg.Contents, choice.Message.Content)
-		}
-		for _, tool := range choice.Message.ToolCalls {
-			if tool.Type != "function" {
-				continue
-			}
-			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
-				Id:   tool.ID,
-				Type: tool.Type,
-				Function: &protos.FunctionCall{
-					Name:      tool.Function.Name,
-					Arguments: tool.Function.Arguments,
-				},
-			})
-		}
-	}
+	assistantMsg := buildAssistantMessageFromChoices(resp.Choices)
 
 	metrics.OnSuccess()
 	metrics.OnAddMetrics(completionUsageMetrics(resp.Usage)...)

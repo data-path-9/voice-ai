@@ -40,8 +40,10 @@ func cachePolicyOptions(t *testing.T) *internal_callers.ChatCompletionOptions {
 	return &internal_callers.ChatCompletionOptions{
 		AIOptions: internal_callers.AIOptions{
 			ModelParameter: map[string]*anypb.Any{
-				"model.prompt_cache_key":       cacheTestAnyString(t, "conversation_id"),
-				"model.prompt_cache_retention": cacheTestAnyString(t, "24h"),
+				"model.parameters": testAny(t, map[string]interface{}{
+					"prompt_cache_key":       "conversation_id",
+					"prompt_cache_retention": "24h",
+				}),
 			},
 		},
 		Request: &protos.ChatRequest{
@@ -68,6 +70,28 @@ func TestBuildStreamCompletionOptions_EnablesPromptCache(t *testing.T) {
 	options := cachePolicyOptions(t)
 	data := cacheTestToMap(t, buildStreamCompletionOptions(options))
 
-	assert.Equal(t, "conv-1model-1__assistant-1", data["prompt_cache_key"])
+	assert.Equal(t, "conv-1__model-1__assistant-1", data["prompt_cache_key"])
 	assert.Equal(t, "24h", data["prompt_cache_retention"])
+}
+
+func TestBuildStreamCompletionOptions_OmitsPromptCacheWhenBaseKeyMetadataMissing(t *testing.T) {
+	options := cachePolicyOptions(t)
+	delete(options.Request.AdditionalData, "assistant_provider_model_id")
+	data := cacheTestToMap(t, buildStreamCompletionOptions(options))
+
+	_, hasPromptCacheKey := data["prompt_cache_key"]
+	_, hasPromptCacheRetention := data["prompt_cache_retention"]
+	assert.False(t, hasPromptCacheKey)
+	assert.False(t, hasPromptCacheRetention)
+}
+
+func TestBuildStreamCompletionOptions_OmitsPromptCacheWhenSelectorMetadataMissing(t *testing.T) {
+	options := cachePolicyOptions(t)
+	delete(options.Request.AdditionalData, "conversation_id")
+	data := cacheTestToMap(t, buildStreamCompletionOptions(options))
+
+	_, hasPromptCacheKey := data["prompt_cache_key"]
+	_, hasPromptCacheRetention := data["prompt_cache_retention"]
+	assert.False(t, hasPromptCacheKey)
+	assert.False(t, hasPromptCacheRetention)
 }
