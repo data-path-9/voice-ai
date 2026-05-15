@@ -59,10 +59,11 @@ export interface ParameterConfig {
   // select
   choices?: ParameterChoice[];
   // custom editor rendering
-  editor?: 'voice_websocket_json';
+  editor?: 'websocket_dsl_json';
   editorMode?:
     | 'query_params'
     | 'text_request'
+    | 'audio_request'
     | 'done_request'
     | 'response_parser';
 }

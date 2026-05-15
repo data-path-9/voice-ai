@@ -14,7 +14,7 @@ import (
 	internal_transformer_aws "github.com/rapidaai/api/assistant-api/internal/transformer/aws"
 	internal_transformer_azure "github.com/rapidaai/api/assistant-api/internal/transformer/azure"
 	internal_transformer_cartesia "github.com/rapidaai/api/assistant-api/internal/transformer/cartesia"
-	internal_transformer_custom_tts "github.com/rapidaai/api/assistant-api/internal/transformer/custom_tts"
+	internal_transformer_custom "github.com/rapidaai/api/assistant-api/internal/transformer/custom"
 	internal_transformer_deepgram "github.com/rapidaai/api/assistant-api/internal/transformer/deepgram"
 	internal_transformer_elevenlabs "github.com/rapidaai/api/assistant-api/internal/transformer/elevenlabs"
 	internal_transformer_google "github.com/rapidaai/api/assistant-api/internal/transformer/google"
@@ -41,6 +41,7 @@ const (
 	AZURE_SPEECH_SERVICE  AudioTransformer = "azure-speech-service"
 	CARTESIA              AudioTransformer = "cartesia"
 	CUSTOM_TTS            AudioTransformer = "custom-tts"
+	CUSTOM_STT            AudioTransformer = "custom-stt"
 	REVAI                 AudioTransformer = "revai"
 	SARVAM                AudioTransformer = "sarvamai"
 	ELEVENLABS            AudioTransformer = "elevenlabs"
@@ -73,7 +74,7 @@ func GetTextToSpeechTransformer(ctx context.Context,
 	case CARTESIA:
 		return internal_transformer_cartesia.NewCartesiaTextToSpeech(ctx, logger, credential, onPacket, opts)
 	case CUSTOM_TTS:
-		return internal_transformer_custom_tts.NewTextToSpeech(ctx, logger, credential, onPacket, opts)
+		return internal_transformer_custom.NewTextToSpeech(ctx, logger, credential, onPacket, opts)
 	case GOOGLE_SPEECH_SERVICE:
 		return internal_transformer_google.NewGoogleTextToSpeech(ctx, logger, credential, onPacket, opts)
 	case REVAI:
@@ -133,6 +134,8 @@ func GetSpeechToTextTransformer(ctx context.Context,
 		return internal_transformer_nvidia.NewNvidiaSpeechToText(ctx, logger, credential, onPacket, opts)
 	case AWS:
 		return internal_transformer_aws.NewAWSSpeechToText(ctx, logger, credential, onPacket, opts)
+	case CUSTOM_STT:
+		return internal_transformer_custom.NewSpeechToText(ctx, logger, credential, onPacket, opts)
 	default:
 		return nil, fmt.Errorf("illegal speech to text idenitfier")
 	}

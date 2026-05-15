@@ -61,6 +61,9 @@ describe('Speech-to-text provider runtime standard', () => {
   const configuredSttProviders = SPEECH_TO_TEXT_PROVIDER.filter(p =>
     Boolean(loadProviderConfig(p.code)?.stt),
   );
+  const modelDrivenSttProviders = configuredSttProviders.filter(
+    provider => provider.code !== 'custom-stt',
+  );
 
   it('all active speech-to-text providers are config-driven', () => {
     expect(configuredSttProviders.length).toBeGreaterThan(0);
@@ -69,7 +72,7 @@ describe('Speech-to-text provider runtime standard', () => {
     }
   });
 
-  it.each(configuredSttProviders.map(p => p.code))(
+  it.each(modelDrivenSttProviders.map(p => p.code))(
     '%s stt config is model-driven with speech-to-text-models catalog',
     provider => {
       const sttConfig = loadProviderConfig(provider)?.stt;
@@ -81,7 +84,7 @@ describe('Speech-to-text provider runtime standard', () => {
     },
   );
 
-  it.each(configuredSttProviders.map(p => p.code))(
+  it.each(modelDrivenSttProviders.map(p => p.code))(
     '%s model catalog carries per-model stt parameter config',
     provider => {
       const sttConfig = loadProviderConfig(provider)?.stt;
@@ -97,7 +100,7 @@ describe('Speech-to-text provider runtime standard', () => {
     },
   );
 
-  it.each(configuredSttProviders.map(p => p.code))(
+  it.each(modelDrivenSttProviders.map(p => p.code))(
     '%s defaults + validation are stable with model-level parameters',
     provider => {
       const seed = [
@@ -119,6 +122,23 @@ describe('Speech-to-text provider runtime standard', () => {
       expect(validated).toBeUndefined();
     },
   );
+
+  it('custom-stt uses websocket contract fields instead of model catalog wiring', () => {
+    const sttConfig = loadProviderConfig('custom-stt')?.stt;
+    expect(sttConfig).toBeDefined();
+    const keys = sttConfig?.parameters.map(param => param.key) ?? [];
+
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'listen.audio.encoding',
+        'listen.audio.sample_rate',
+        'listen.ws.query_params',
+        'listen.ws.audio_request',
+        'listen.ws.response_parser',
+      ]),
+    );
+    expect(sttConfig?.parameters[0].data).toBeUndefined();
+  });
 
   it('rejects stale credential ids that do not belong to selected provider', () => {
     const defaults = GetDefaultSpeechToTextIfInvalid('deepgram', [

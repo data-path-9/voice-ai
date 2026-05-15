@@ -1,35 +1,26 @@
 {
-  "preservePrefix": "speaker.",
+  "preservePrefix": "microphone.",
   "parameters": [
     {
-      "key": "speak.model",
+      "key": "listen.model",
       "label": "Model",
       "type": "input",
       "required": false,
-      "placeholder": "e.g. sonic-2",
+      "placeholder": "e.g. nova-3",
       "helpText": "Optional provider-defined model identifier that can be referenced from websocket query params and request packets.",
-      "errorMessage": "Please provide a valid model for custom TTS."
+      "errorMessage": "Please provide a valid model for custom STT."
     },
     {
-      "key": "speak.language",
+      "key": "listen.language",
       "label": "Language",
       "type": "input",
       "required": false,
       "placeholder": "e.g. en-US",
       "helpText": "Optional provider-defined language code that can be referenced from websocket query params and request packets.",
-      "errorMessage": "Please provide a valid language for custom TTS."
+      "errorMessage": "Please provide a valid language for custom STT."
     },
     {
-      "key": "speak.voice.id",
-      "label": "Voice ID",
-      "type": "input",
-      "required": true,
-      "placeholder": "e.g. narrator-1",
-      "helpText": "Plain voice identifier that can be bound into websocket query params and request packets.",
-      "errorMessage": "Please provide a valid voice ID for custom TTS."
-    },
-    {
-      "key": "speak.audio.encoding",
+      "key": "listen.audio.encoding",
       "label": "Audio Encoding",
       "type": "select",
       "required": true,
@@ -45,10 +36,10 @@
         }
       ],
       "helpText": "Available to websocket DSL bindings as \"encoding\".",
-      "errorMessage": "Please select a valid audio encoding for custom TTS."
+      "errorMessage": "Please select a valid audio encoding for custom STT."
     },
     {
-      "key": "speak.audio.sample_rate",
+      "key": "listen.audio.sample_rate",
       "label": "Sample Rate",
       "type": "select",
       "required": true,
@@ -84,10 +75,10 @@
         }
       ],
       "helpText": "Available to websocket DSL bindings as \"sample_rate\".",
-      "errorMessage": "Please select a valid sample rate for custom TTS."
+      "errorMessage": "Please select a valid sample rate for custom STT."
     },
     {
-      "key": "speak.ws.query_params",
+      "key": "listen.ws.query_params",
       "label": "Query Parameters",
       "type": "json",
       "required": false,
@@ -96,34 +87,22 @@
       "editorMode": "query_params",
       "placeholder": "Type { for DSL snippets",
       "helpText": "Optional flat JSON object for dynamic websocket query params. Use {\"$var\":\"...\"} and optional {\"$cast\":\"number\",\"value\":...} bindings.",
-      "errorMessage": "Please provide valid query parameters for custom TTS."
+      "errorMessage": "Please provide valid query parameters for custom STT."
     },
     {
-      "key": "speak.ws.text_request",
-      "label": "Text Request",
-      "type": "json",
-      "required": true,
-      "colSpan": 2,
-      "editor": "websocket_dsl_json",
-      "editorMode": "text_request",
-      "placeholder": "Type { for DSL snippets",
-      "helpText": "Required JSON object for the primary websocket request. Use {\"$var\":\"text\"}, {\"$var\":\"message_id\"}, and optional {\"$cast\":...} expressions.",
-      "errorMessage": "Please provide a valid text request for custom TTS."
-    },
-    {
-      "key": "speak.ws.done_request",
-      "label": "Done Request",
+      "key": "listen.ws.audio_request",
+      "label": "Audio Request",
       "type": "json",
       "required": false,
       "colSpan": 2,
       "editor": "websocket_dsl_json",
-      "editorMode": "done_request",
+      "editorMode": "audio_request",
       "placeholder": "Type { for DSL snippets",
-      "helpText": "Optional JSON object for two-step flows. If present, runtime sends this follow-up packet after the text request. If omitted, runtime uses one-shot mode.",
-      "errorMessage": "Please provide a valid done request for custom TTS."
+      "helpText": "Optional JSON object for websocket audio packets. If omitted, runtime can send raw binary audio frames. Use {\"$var\":\"audio\"} and optional {\"$cast\":...} expressions.",
+      "errorMessage": "Please provide a valid audio request for custom STT."
     },
     {
-      "key": "speak.ws.response_parser",
+      "key": "listen.ws.response_parser",
       "label": "Response Parser",
       "type": "json",
       "required": true,
@@ -131,8 +110,8 @@
       "editor": "websocket_dsl_json",
       "editorMode": "response_parser",
       "placeholder": "Type [ for parser snippets",
-      "helpText": "Required JSON rule list for websocket responses. Each rule defines a frame match and emit expressions for audio, message_id, done, and error.",
-      "errorMessage": "Please provide a valid response parser for custom TTS."
+      "helpText": "Required JSON rule list for websocket responses. Each rule defines a text or JSON frame match and emit expressions for script, confidence, language, interim, and error.",
+      "errorMessage": "Please provide a valid response parser for custom STT."
     }
   ]
 }

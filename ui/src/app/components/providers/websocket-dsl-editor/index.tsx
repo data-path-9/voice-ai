@@ -1,13 +1,15 @@
 import { JsonEditor } from '@/app/components/json-editor';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import {
-  getVoiceWebsocketEditorSuggestions,
-  shouldAutoTriggerVoiceWebsocketSuggestions,
-  VoiceWebsocketEditorMode,
+  getWebsocketDslEditorSuggestions,
+  shouldAutoTriggerWebsocketDslSuggestions,
+  WebsocketDslEditorMode,
+  WebsocketDslEditorProvider,
 } from './suggestions';
 
-type VoiceWebsocketEditorProps = {
-  mode: VoiceWebsocketEditorMode;
+type WebsocketDslEditorProps = {
+  provider: WebsocketDslEditorProvider;
+  mode: WebsocketDslEditorMode;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -26,7 +28,8 @@ function getCompletionKind(
       : monacoInstance.languages.CompletionItemKind.Value;
 }
 
-export const VoiceWebsocketEditor: React.FC<VoiceWebsocketEditorProps> = ({
+export const WebsocketDslEditor: React.FC<WebsocketDslEditorProps> = ({
+  provider,
   mode,
   value,
   onChange,
@@ -54,7 +57,8 @@ export const VoiceWebsocketEditor: React.FC<VoiceWebsocketEditorProps> = ({
               const linePrefix = model
                 .getLineContent(position.lineNumber)
                 .slice(0, position.column - 1);
-              const suggestions = getVoiceWebsocketEditorSuggestions(
+              const suggestions = getWebsocketDslEditorSuggestions(
+                provider,
                 mode,
                 linePrefix,
               );
@@ -116,9 +120,9 @@ export const VoiceWebsocketEditor: React.FC<VoiceWebsocketEditorProps> = ({
             .slice(0, position.column - 1);
           if (!linePrefix) return;
 
-          if (shouldAutoTriggerVoiceWebsocketSuggestions(mode, linePrefix)) {
+          if (shouldAutoTriggerWebsocketDslSuggestions(mode, linePrefix)) {
             editor.trigger(
-              'voice-websocket-editor',
+              'websocket-dsl-editor',
               'editor.action.triggerSuggest',
               {},
             );

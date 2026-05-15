@@ -14,6 +14,7 @@ const providerLabels: Record<string, string> = {
   cohere: 'Cohere',
   deepseek: 'DeepSeek',
   'custom-tts': 'Custom TTS',
+  'custom-stt': 'Custom STT',
 };
 
 export const ProviderTag: FC<{ provider?: string }> = ({ provider }) => {

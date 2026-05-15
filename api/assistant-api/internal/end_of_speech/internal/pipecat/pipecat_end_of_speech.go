@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	eosName = "pipecatSmartTurnEndOfSpeech"
-
+	eosName               = "pipecatSmartTurnEndOfSpeech"
 	optPctThreshold       = "microphone.eos.threshold"
 	optPctExtendedTimeout = "microphone.eos.extended_timeout"
 	optPctQuickTimeout    = "microphone.eos.quick_timeout"
@@ -180,7 +179,6 @@ func (eos *PipecatEOS) Analyze(ctx context.Context, pkt internal_type.Packet) er
 			internal_type.ConversationEventPacket{Name: "eos", Data: map[string]string{"type": "interim", "speech": seg.Text}},
 		)
 		eos.send(command{ctx: ctx, segment: seg, fireNow: true})
-
 	case internal_type.EndOfSpeechInterruptionPacket:
 		eos.mu.RLock()
 		seg := eos.state.segment
@@ -193,7 +191,6 @@ func (eos *PipecatEOS) Analyze(ctx context.Context, pkt internal_type.Packet) er
 	case internal_type.SpeechToTextPacket:
 		eos.mu.Lock()
 		if p.Interim {
-			// Interim: just reset timer, no text accumulation, no interim packet.
 			seg := eos.state.segment
 			eos.mu.Unlock()
 			if seg.Text == "" {
@@ -276,21 +273,14 @@ func (eos *PipecatEOS) predictEOU() float64 {
 	audio := make([]float32, len(eos.audioBuf))
 	copy(audio, eos.audioBuf)
 	eos.mu.RUnlock()
-
 	if len(audio) == 0 {
-		if eos.logger != nil {
-			eos.logger.Debugf("pipecat_eos: inference skipped: empty audio buffer")
-		}
+		eos.logger.Debugf("pipecat_eos: inference skipped: empty audio buffer")
 		return -1
 	}
-
 	if eos.predictor == nil && eos.detector == nil {
-		if eos.logger != nil {
-			eos.logger.Debugf("pipecat_eos: inference skipped: detector unavailable")
-		}
+		eos.logger.Debugf("pipecat_eos: inference skipped: detector unavailable")
 		return -1
 	}
-
 	var (
 		prob float64
 		err  error
@@ -301,16 +291,10 @@ func (eos *PipecatEOS) predictEOU() float64 {
 		prob, err = eos.detector.Predict(audio)
 	}
 	if err != nil {
-		if eos.logger != nil {
-			eos.logger.Debugf("pipecat_eos: inference failed: %v", err)
-		}
+		eos.logger.Debugf("pipecat_eos: inference failed: %v", err)
 		return -1
 	}
-
-	if eos.logger != nil {
-		eos.logger.Debugf("pipecat_eos: P(complete)=%.4f threshold=%.4f audio_samples=%d", prob, eos.threshold, len(audio))
-	}
-
+	eos.logger.Debugf("pipecat_eos: P(complete)=%.4f threshold=%.4f audio_samples=%d", prob, eos.threshold, len(audio))
 	return prob
 }
 
@@ -412,14 +396,6 @@ func (eos *PipecatEOS) worker() {
 // fire triggers the callback and enqueues reset.
 // Always emits one EndOfSpeechPacket — matches silence-based behavior.
 func (eos *PipecatEOS) fire(ctx context.Context, seg SpeechSegment) {
-	if seg.Text == "" {
-		return
-	}
-
-	if ctx.Err() != nil {
-		ctx = context.Background()
-	}
-
 	wordCount := len(strings.Fields(seg.Text))
 	triggerAt := time.Now()
 	_ = eos.callback(ctx,

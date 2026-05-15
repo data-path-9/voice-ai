@@ -117,3 +117,14 @@ func TestNewConfig_InvalidJSON(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "trailing content")
 }
+
+func TestNewConfig_QueryParamsMustResolveToPrimitive(t *testing.T) {
+	opts := baseOptions()
+	opts[optionKeyQueryParams] = `{"metadata":{"lang":"hi"}}`
+
+	_, err := NewConfig(testCredential(t, map[string]any{
+		credentialKeyBaseURLCamel: "wss://example.com/ws",
+	}), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must resolve to primitive value")
+}

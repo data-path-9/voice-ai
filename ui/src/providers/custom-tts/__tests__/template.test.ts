@@ -14,7 +14,7 @@ import {
   validateCustomTtsQueryParams,
   validateCustomTtsRequestDefinition,
   validateCustomTtsResponseParser,
-} from '../template';
+} from '../contract';
 
 const metadata = (key: string, value: string) => ({
   getKey: () => key,

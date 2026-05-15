@@ -637,6 +637,7 @@ const providerLabels: Record<string, string> = {
   cartesia: 'Cartesia',
   elevenlabs: 'ElevenLabs',
   'custom-tts': 'Custom TTS',
+  'custom-stt': 'Custom STT',
 };
 
 function getDeploymentStatus(

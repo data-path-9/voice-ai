@@ -4,7 +4,7 @@
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
 
-package internal_transformer_custom_tts
+package internal_transformer_custom
 
 import (
 	"context"
@@ -54,9 +54,39 @@ func TestResolveCompatibility_ValidateType(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be a string")
 }
 
+func TestCompatibility_UsesProviderSpecificErrorLabels(t *testing.T) {
+	_, err := compatibility("custom-tts", map[string]any{
+		CredentialKeyAPICompatibilityCamel: 123,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "custom-tts: api compatibility must be a string")
+
+	_, err = compatibility("custom-stt", map[string]any{
+		CredentialKeyAPICompatibilityCamel: "",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "custom-stt: api compatibility must not be empty")
+}
+
 func TestNewTextToSpeech_UnsupportedCompatibility(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 	_, err := NewTextToSpeech(
+		context.Background(),
+		logger,
+		testVaultCredential(t, map[string]any{
+			CredentialKeyAPICompatibilityCamel: "unknown",
+			"baseUrl":                          "wss://example.invalid/ws",
+		}),
+		func(pkt ...internal_type.Packet) error { return nil },
+		utils.Option{},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported api compatibility")
+}
+
+func TestNewSpeechToText_UnsupportedCompatibility(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	_, err := NewSpeechToText(
 		context.Background(),
 		logger,
 		testVaultCredential(t, map[string]any{

@@ -15,7 +15,15 @@ import {
   validateCustomTtsQueryParams,
   validateCustomTtsRequestDefinition,
   validateCustomTtsResponseParser,
-} from './custom-tts/template';
+} from './custom-tts/contract';
+import {
+  CUSTOM_STT_AUDIO_REQUEST_KEY,
+  CUSTOM_STT_QUERY_PARAMS_KEY,
+  CUSTOM_STT_RESPONSE_PARSER_KEY,
+  validateCustomSttQueryParams,
+  validateCustomSttRequestDefinition,
+  validateCustomSttResponseParser,
+} from './custom-stt/contract';
 
 interface GetDefaultsFromConfigOptions {
   includeCredential?: boolean;
@@ -231,6 +239,17 @@ function validateParamValue(
         }
         if (param.key === CUSTOM_TTS_RESPONSE_PARSER_KEY) {
           return validateCustomTtsResponseParser(value);
+        }
+      }
+      if (provider === 'custom-stt') {
+        if (param.key === CUSTOM_STT_QUERY_PARAMS_KEY) {
+          return validateCustomSttQueryParams(value, param.label);
+        }
+        if (param.key === CUSTOM_STT_AUDIO_REQUEST_KEY) {
+          return validateCustomSttRequestDefinition(value, param.label);
+        }
+        if (param.key === CUSTOM_STT_RESPONSE_PARSER_KEY) {
+          return validateCustomSttResponseParser(value);
         }
       }
       try {

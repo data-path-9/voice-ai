@@ -98,11 +98,7 @@ func buildChatCompletionOptionsWithCachePolicy(
 		}
 	}
 
-	extraFields := map[string]interface{}{}
-	applyChatCompletionParameters(&options, modelParams, extraFields, allowPromptCache, &promptCacheKeySelector)
-	if len(extraFields) > 0 {
-		options.SetExtraFields(extraFields)
-	}
+	applyChatCompletionParameters(&options, modelParams, allowPromptCache, &promptCacheKeySelector)
 
 	if allowPromptCache {
 		if cacheKey, ok := buildPromptCacheKey(promptCacheKeySelector, additionalData); ok {
@@ -145,7 +141,6 @@ func buildPromptCacheKey(selector string, additionalData map[string]string) (str
 func applyChatCompletionParameters(
 	options *openai.ChatCompletionNewParams,
 	params map[string]interface{},
-	extraFields map[string]interface{},
 	allowPromptCache bool,
 	promptCacheKeySelector *string,
 ) {

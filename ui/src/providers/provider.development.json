@@ -884,5 +884,39 @@
                 "required": false
             }
         ]
+    },
+    {
+        "code": "custom-stt",
+        "name": "Custom STT",
+        "description": "Connect to any websocket-based STT service with configurable query params, custom request packets, custom headers, and response parsing rules.",
+        "image": "https://cdn-01.rapida.ai/providers/1987967168452493312.svg",
+        "featureList": [
+            "stt",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "apiCompatibility",
+                "type": "select",
+                "label": "API Compatibility",
+                "choices": [
+                    {
+                        "label": "WebSocket v1",
+                        "value": "websocket_v1"
+                    }
+                ]
+            },
+            {
+                "name": "baseUrl",
+                "type": "string",
+                "label": "Base URL"
+            },
+            {
+                "name": "headers",
+                "type": "key_value",
+                "label": "Headers",
+                "required": false
+            }
+        ]
     }
 ]

@@ -15,15 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/structpb"
 )
-
-func cacheTestAnyString(t *testing.T, value string) *anypb.Any {
-	t.Helper()
-	anyValue, err := anypb.New(structpb.NewStringValue(value))
-	require.NoError(t, err)
-	return anyValue
-}
 
 func cacheTestToMap(t *testing.T, params interface{ MarshalJSON() ([]byte, error) }) map[string]interface{} {
 	t.Helper()

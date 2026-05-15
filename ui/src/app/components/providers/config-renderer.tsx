@@ -29,7 +29,7 @@ import {
 } from '@/providers/config-loader';
 import { getDefaultsFromConfig } from '@/providers/config-defaults';
 import { JsonEditor } from '@/app/components/json-editor';
-import { VoiceWebsocketEditor } from '@/app/components/providers/text-to-speech/voice-websocket-editor';
+import { WebsocketDslEditor } from '@/app/components/providers/websocket-dsl-editor';
 
 export const ConfigRenderer: React.FC<{
   provider: string;
@@ -308,8 +308,11 @@ export const ConfigRenderer: React.FC<{
               {param.label}
             </label>
             <div className="mt-1 w-full min-w-0 overflow-hidden bg-[var(--cds-field)] border-b-2 border-b-[var(--cds-border-strong)] p-2">
-              {param.editor === 'voice_websocket_json' ? (
-                <VoiceWebsocketEditor
+              {param.editor === 'websocket_dsl_json' ? (
+                <WebsocketDslEditor
+                  provider={
+                    provider === 'custom-stt' ? 'custom-stt' : 'custom-tts'
+                  }
                   mode={param.editorMode ?? 'text_request'}
                   value={getParamValue(param.key)}
                   placeholder={param.placeholder ?? 'Enter as JSON'}

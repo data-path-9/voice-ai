@@ -13,6 +13,7 @@ import (
 	"io"
 	"strings"
 
+	internal_transformer_custom_websocketdsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/websocketdsl"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
@@ -45,6 +46,47 @@ const (
 	frameTypeJSON   = "json"
 )
 
+var queryContract = internal_transformer_custom_websocketdsl.Contract{
+	SupportedVariables: []string{
+		"text",
+		"message_id",
+		"voice_id",
+		"model",
+		"language",
+		"encoding",
+		"sample_rate",
+	},
+}
+
+var requestContract = internal_transformer_custom_websocketdsl.Contract{
+	SupportedVariables: []string{
+		"text",
+		"message_id",
+		"voice_id",
+		"model",
+		"language",
+		"encoding",
+		"sample_rate",
+	},
+}
+
+var responseContract = internal_transformer_custom_websocketdsl.Contract{
+	SupportedResponseFrames: []string{
+		frameTypeBinary,
+		frameTypeJSON,
+	},
+	SupportedEmitKeys: []string{
+		"audio",
+		"message_id",
+		"done",
+		"error",
+	},
+	AllowedFrameSelectors: []string{
+		frameTypeBinary,
+	},
+	AllowDecodeBase64: true,
+}
+
 type Config struct {
 	BaseURL string
 	Headers map[string]string
@@ -63,16 +105,8 @@ type Config struct {
 	ResponseParser []ResponseRule
 }
 
-type ResponseRule struct {
-	When ResponseWhen   `json:"when"`
-	Emit map[string]any `json:"emit"`
-}
-
-type ResponseWhen struct {
-	Frame  string `json:"frame,omitempty"`
-	Path   string `json:"path,omitempty"`
-	Equals any    `json:"equals,omitempty"`
-}
+type ResponseRule = internal_transformer_custom_websocketdsl.ResponseRule
+type ResponseWhen = internal_transformer_custom_websocketdsl.When
 
 type configParser struct {
 	credential *protos.VaultCredential
@@ -263,6 +297,7 @@ func (parser *configParser) decodeJSON(payload []byte, destination any, key stri
 }
 
 func (config *Config) validate() error {
+	core := internal_transformer_custom_websocketdsl.NewCore("custom-tts websocket_v1")
 	if config.BaseURL == "" {
 		return fmt.Errorf("custom-tts websocket_v1: base url must be specified in credentials")
 	}
@@ -276,26 +311,22 @@ func (config *Config) validate() error {
 		return fmt.Errorf("custom-tts websocket_v1: %s must contain at least one rule", optionKeyResponseParser)
 	}
 
-	for index, rule := range config.ResponseParser {
-		if rule.When.Frame != "" && rule.When.Frame != frameTypeBinary && rule.When.Frame != frameTypeJSON {
-			return fmt.Errorf(
-				"custom-tts websocket_v1: %s[%d].when.frame must be %q or %q",
-				optionKeyResponseParser,
-				index,
-				frameTypeBinary,
-				frameTypeJSON,
-			)
-		}
-		if len(rule.Emit) == 0 {
-			return fmt.Errorf("custom-tts websocket_v1: %s[%d].emit must not be empty", optionKeyResponseParser, index)
-		}
-		for emitKey := range rule.Emit {
-			switch emitKey {
-			case "audio", "message_id", "done", "error":
-			default:
-				return fmt.Errorf("custom-tts websocket_v1: %s[%d].emit.%s is not supported", optionKeyResponseParser, index, emitKey)
-			}
+	if len(config.QueryParams) > 0 {
+		if err := core.ValidateQueryParams(config.QueryParams, queryContract, optionKeyQueryParams); err != nil {
+			return err
 		}
 	}
+	if err := core.ValidateRequestObject(config.TextRequest, requestContract, optionKeyTextRequest); err != nil {
+		return err
+	}
+	if config.HasDoneRequest && config.DoneRequest != nil {
+		if err := core.ValidateRequestObject(config.DoneRequest, requestContract, optionKeyDoneRequest); err != nil {
+			return err
+		}
+	}
+	if err := core.ValidateResponseRules(config.ResponseParser, responseContract, optionKeyResponseParser); err != nil {
+		return err
+	}
+
 	return nil
 }
