@@ -64,6 +64,9 @@ func (segment speechSegment) FullText() string {
 	if segment.Committed == "" {
 		return segment.Pending
 	}
+	if strings.HasSuffix(segment.Committed, " ") || strings.HasPrefix(segment.Pending, " ") {
+		return segment.Committed + segment.Pending
+	}
 	return segment.Committed + " " + segment.Pending
 }
 
@@ -301,7 +304,10 @@ func (endOfSpeech *livekitEndOfSpeech) Execute(ctx context.Context, packet inter
 			Chunks:    append([]internal_type.SpeechToTextPacket(nil), endOfSpeech.state.segment.Chunks...),
 		}
 		if segment.Committed != "" {
-			segment.Committed = fmt.Sprintf("%s %s", segment.Committed, packet.Script)
+			if packet.Script != "" && !strings.HasSuffix(segment.Committed, " ") && !strings.HasPrefix(packet.Script, " ") {
+				segment.Committed += " "
+			}
+			segment.Committed += packet.Script
 		} else {
 			segment.Committed = packet.Script
 		}

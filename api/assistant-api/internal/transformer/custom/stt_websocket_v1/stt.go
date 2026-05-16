@@ -131,7 +131,11 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		transformer.contextID = input.ContextID
 		transformer.mu.Unlock()
 		if err := transformer.handlePacketRequests(requestPacketTurnChange, input.ContextID, nil, true); err != nil {
-			transformer.emitSTTError(transformer.currentContextID(), err, internal_type.STTNetworkTimeout)
+			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+				ContextID: transformer.currentContextID(),
+				Error:     err,
+				Type:      internal_type.STTNetworkTimeout,
+			})
 		}
 		return nil
 	case internal_type.SpeechToTextInterruptPacket:
@@ -144,7 +148,11 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		}
 		transformer.mu.Unlock()
 		if err := transformer.handlePacketRequests(requestPacketInterrupt, input.ContextID, nil, false); err != nil {
-			transformer.emitSTTError(transformer.currentContextID(), err, internal_type.STTNetworkTimeout)
+			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+				ContextID: transformer.currentContextID(),
+				Error:     err,
+				Type:      internal_type.STTNetworkTimeout,
+			})
 		}
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
@@ -211,13 +219,21 @@ func (transformer *speechToText) handleAudio(contextID string, audio []byte) err
 
 	chunk, err := transformer.prepareAudioChunk(audio)
 	if err != nil {
-		transformer.emitSTTError(effectiveContextID, err, internal_type.STTInvalidInput)
+		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			ContextID: effectiveContextID,
+			Error:     err,
+			Type:      internal_type.STTInvalidInput,
+		})
 		return nil
 	}
 
 	err = transformer.handlePacketRequests(requestPacketAudio, effectiveContextID, chunk, true)
 	if err != nil {
-		transformer.emitSTTError(effectiveContextID, err, internal_type.STTNetworkTimeout)
+		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			ContextID: effectiveContextID,
+			Error:     err,
+			Type:      internal_type.STTNetworkTimeout,
+		})
 		return nil
 	}
 
@@ -286,27 +302,43 @@ func (transformer *speechToText) readLoop(conn *websocket.Conn) {
 		messageType, payload, err := conn.ReadMessage()
 		if err != nil {
 			if transformer.classifyReadError(conn, err) == readErrorFail {
-				transformer.emitSTTError(transformer.currentContextID(), fmt.Errorf("custom-stt websocket_v1: read failed: %w", err), internal_type.STTNetworkTimeout)
+				transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+					ContextID: transformer.currentContextID(),
+					Error:     fmt.Errorf("custom-stt websocket_v1: read failed: %w", err),
+					Type:      internal_type.STTNetworkTimeout,
+				})
 			}
 			return
 		}
 
 		frame, err := transformer.engine.ParseFrame(messageType, payload)
 		if err != nil {
-			transformer.emitSTTError(transformer.currentContextID(), err, internal_type.STTSystemPanic)
+			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+				ContextID: transformer.currentContextID(),
+				Error:     err,
+				Type:      internal_type.STTSystemPanic,
+			})
 			continue
 		}
 
 		outcome, err := transformer.engine.EvaluateResponse(frame)
 		if err != nil {
-			transformer.emitSTTError(transformer.currentContextID(), err, internal_type.STTSystemPanic)
+			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+				ContextID: transformer.currentContextID(),
+				Error:     err,
+				Type:      internal_type.STTSystemPanic,
+			})
 			continue
 		}
 		if !outcome.Matched {
 			continue
 		}
 		if strings.TrimSpace(outcome.ErrorText) != "" {
-			transformer.emitSTTError(transformer.currentContextID(), errors.New(strings.TrimSpace(outcome.ErrorText)), internal_type.STTSystemPanic)
+			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+				ContextID: transformer.currentContextID(),
+				Error:     errors.New(strings.TrimSpace(outcome.ErrorText)),
+				Type:      internal_type.STTSystemPanic,
+			})
 			continue
 		}
 		if strings.TrimSpace(outcome.Script) == "" {
@@ -518,14 +550,6 @@ func (transformer *speechToText) currentContextID() string {
 	transformer.mu.Lock()
 	defer transformer.mu.Unlock()
 	return transformer.contextID
-}
-
-func (transformer *speechToText) emitSTTError(contextID string, err error, errorType internal_type.STTErrorType) {
-	transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
-		ContextID: contextID,
-		Error:     err,
-		Type:      errorType,
-	})
 }
 
 func (transformer *speechToText) emitPackets(packets ...internal_type.Packet) {

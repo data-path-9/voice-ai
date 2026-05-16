@@ -183,7 +183,10 @@ func (endOfSpeech *silenceBasedEndOfSpeech) handleSpeechToTextPacket(
 		Chunks:    append([]internal_type.SpeechToTextPacket(nil), endOfSpeech.state.segment.Chunks...),
 	}
 	if segment.Text != "" {
-		segment.Text += " " + packet.Script
+		if packet.Script != "" && !strings.HasSuffix(segment.Text, " ") && !strings.HasPrefix(packet.Script, " ") {
+			segment.Text += " "
+		}
+		segment.Text += packet.Script
 	} else {
 		segment.Text = packet.Script
 	}

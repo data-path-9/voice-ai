@@ -62,10 +62,15 @@ func (s *streamTestStreamer) NotifyMode(mode protos.StreamMode) {
 
 func TestTalk_RecvErrorBeforeInitialization_ReturnsNil(t *testing.T) {
 	streamer := &streamTestStreamer{recvErr: io.EOF}
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	t.Cleanup(cancelSession)
 	r := &genericRequestor{
 		streamer:         streamer,
 		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
 		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
+		sessionCtx:       sessionCtx,
+		cancelSession:    cancelSession,
+		channels:         adapter_channel.NewRequestorChannels(),
 	}
 
 	err := r.Talk(context.Background(), nil)
@@ -105,10 +110,14 @@ func TestTalk_BuffersPacketsBeforeInitialization(t *testing.T) {
 		recvErr: io.EOF,
 	}
 
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	t.Cleanup(cancelSession)
 	r := &genericRequestor{
 		streamer:         streamer,
 		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
 		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
+		sessionCtx:       sessionCtx,
+		cancelSession:    cancelSession,
 		// Before initialization completes, packets should be buffered in channels.
 		channels: func() *adapter_channel.RequestorChannels {
 			ch := adapter_channel.NewRequestorChannels()
@@ -121,16 +130,22 @@ func TestTalk_BuffersPacketsBeforeInitialization(t *testing.T) {
 	assert.Equal(t, 0, len(r.channels.ControlChannel()))
 	assert.Equal(t, 1, len(r.channels.IngressChannel()))
 	assert.Equal(t, 0, len(r.channels.EgressChannel()))
-	assert.Equal(t, 3, len(r.channels.BackgroundChannel()))
+	assert.Equal(t, 1, len(r.channels.DataChannel()))
+	assert.Equal(t, 2, len(r.channels.BackgroundChannel()))
 	assert.Equal(t, 0, len(streamer.modes))
 }
 
 func TestNotify_ForwardsAllActionData(t *testing.T) {
 	streamer := &streamTestStreamer{}
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	t.Cleanup(cancelSession)
 	r := &genericRequestor{
 		streamer:         streamer,
 		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
 		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
+		sessionCtx:       sessionCtx,
+		cancelSession:    cancelSession,
+		channels:         adapter_channel.NewRequestorChannels(),
 	}
 
 	a := &protos.ConversationEvent{Name: "alpha"}

@@ -1,14 +1,14 @@
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { cn } from '@/utils';
-import { ChatBot, Connect, Plug, Activity, Launch } from '@carbon/icons-react';
+import {  Launch } from '@carbon/icons-react';
 import { ClickableTile, Tag, Link } from '@carbon/react';
 import { PrimaryButton } from '@/app/components/carbon/button';
 
 const quickStart = [
   {
-    title: 'Own the stack',
+    title: 'Build your first assistant',
     description:
-      'Start with a deployment pattern built for agencies, client ownership, and enterprise control.',
+      'Start with a pre-built assistant template, then customize it with your own data, tools, and branding to make it truly your own.',
     tag: 'Recommended',
     route: '/deployment/assistant/create-assistant',
     featured: true,
@@ -43,33 +43,6 @@ const quickStart = [
   },
 ];
 
-const summaryCards = [
-  {
-    title: 'Assistants',
-    icon: ChatBot,
-    route: '/deployment/assistant',
-    description: 'Deploy and manage AI voice assistants',
-  },
-  {
-    title: 'Endpoints',
-    icon: Connect,
-    route: '/deployment/endpoint',
-    description: 'Manage API endpoints and governance',
-  },
-  {
-    title: 'Integrations',
-    icon: Plug,
-    route: '/integration/models',
-    description: 'Connect AI providers and credentials',
-  },
-  {
-    title: 'Observability',
-    icon: Activity,
-    route: '/logs',
-    description: 'Monitor logs, traces, and conversations',
-  },
-];
-
 export const HomePage = () => {
   const navigation = useGlobalNavigation();
 
@@ -78,11 +51,7 @@ export const HomePage = () => {
       {/* ── Page header — IBM Dashboard style ── */}
       <div className="px-6 pt-6 pb-6 flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-light tracking-tight">Operations Dashboard</h1>
-          <p className="mt-2 max-w-3xl text-sm text-gray-600 dark:text-gray-400">
-            Built for agencies that need ownership and enterprise teams that
-            need scale, governance, and control.
-          </p>
+          <h1 className="text-2xl font-light tracking-tight">Dashboard</h1>
         </div>
         <PrimaryButton
           size="md"
