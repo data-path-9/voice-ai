@@ -9,10 +9,12 @@ package internal_transformer_custom_tts_websocket_v1
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	transformer_testutil "github.com/rapidaai/api/assistant-api/internal/transformer/internal/testutil"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/utils"
+	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -76,7 +79,7 @@ func testWSCredential(t *testing.T, values map[string]any) *protos.VaultCredenti
 	return &protos.VaultCredential{Value: pb}
 }
 
-func TestTextToSpeech_WebsocketFlow(t *testing.T) {
+func TestTextToSpeech_WebsocketFlow_RequestRules(t *testing.T) {
 	var (
 		gotAuthHeader  string
 		gotMessageID   string
@@ -103,7 +106,7 @@ func TestTextToSpeech_WebsocketFlow(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, json.Unmarshal(doneMessage, &gotDoneRequest))
 
-		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"event":"done","request_id":"ctx-1","is_final":true}`)))
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"done","request_id":"ctx-1"}`)))
 	}))
 	defer server.Close()
 
@@ -113,11 +116,13 @@ func TestTextToSpeech_WebsocketFlow(t *testing.T) {
 	opts := utils.Option{
 		optionKeyVoiceID:     "virat",
 		optionKeyQueryParams: `{"message_id":{"$var":"message_id"}}`,
-		optionKeyTextRequest: `{"text":{"$var":"text"},"voice_id":{"$var":"voice_id"},"request_id":{"$var":"message_id"}}`,
-		optionKeyDoneRequest: `{"request_id":{"$var":"message_id"},"continue":false}`,
-		optionKeyResponseParser: `[
+		optionKeyRequestRules: `[
+			{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"},"voice_id":{"$path":"config.voice.id"},"request_id":{"$path":"packet.message_id"}}}},
+			{"when":{"packet":"done"},"send":{"frame":"json","body":{"request_id":{"$path":"packet.message_id"},"type":"done"}}}
+		]`,
+		optionKeyResponseRules: `[
 			{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}},
-			{"when":{"frame":"json","path":"is_final","equals":true},"emit":{"message_id":{"$path":"request_id"},"done":true}}
+			{"when":{"frame":"json","path":"type","equals":"done"},"emit":{"message_id":{"$path":"request_id"},"done":true}}
 		]`,
 	}
 
@@ -155,7 +160,7 @@ func TestTextToSpeech_WebsocketFlow(t *testing.T) {
 	assert.Equal(t, "hello world", gotTextRequest["text"])
 	assert.Equal(t, "virat", gotTextRequest["voice_id"])
 	assert.Equal(t, "ctx-1", gotTextRequest["request_id"])
-	assert.Equal(t, false, gotDoneRequest["continue"])
+	assert.Equal(t, "done", gotDoneRequest["type"])
 	assert.Equal(t, "ctx-1", gotDoneRequest["request_id"])
 
 	packets := collector.all()
@@ -209,9 +214,9 @@ func TestTextToSpeech_EndsOnCleanServerClose(t *testing.T) {
 		}),
 		collector.onPacket,
 		utils.Option{
-			optionKeyVoiceID:        "virat",
-			optionKeyTextRequest:    `{"text":{"$var":"text"}}`,
-			optionKeyResponseParser: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
+			optionKeyVoiceID:       "virat",
+			optionKeyRequestRules:  `[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"}}}}]`,
+			optionKeyResponseRules: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
 		},
 	)
 	require.NoError(t, err)
@@ -229,4 +234,412 @@ func TestTextToSpeech_EndsOnCleanServerClose(t *testing.T) {
 
 	require.NoError(t, transformer.Close(context.Background()))
 	assert.False(t, collector.hasTTSError(), "did not expect TextToSpeechErrorPacket on clean close")
+}
+
+func TestTextToSpeech_InterruptRequestRule(t *testing.T) {
+	var (
+		gotTextRequest      map[string]any
+		gotInterruptRequest map[string]any
+	)
+
+	interruptWritten := make(chan struct{}, 1)
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		conn, err := upgrader.Upgrade(writer, request, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		_, firstMessage, err := conn.ReadMessage()
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(firstMessage, &gotTextRequest))
+
+		_, interruptMessage, err := conn.ReadMessage()
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(interruptMessage, &gotInterruptRequest))
+
+		select {
+		case interruptWritten <- struct{}{}:
+		default:
+		}
+	}))
+	defer server.Close()
+
+	baseURL := strings.Replace(server.URL, "http://", "ws://", 1)
+	collector := newPacketCollector()
+
+	transformer, err := NewTextToSpeech(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testWSCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: baseURL,
+		}),
+		collector.onPacket,
+		utils.Option{
+			optionKeyVoiceID: "virat",
+			optionKeyRequestRules: `[
+				{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"},"request_id":{"$path":"packet.message_id"}}}},
+				{"when":{"packet":"interrupt"},"send":{"frame":"json","body":{"type":"interrupt","request_id":{"$path":"packet.message_id"}}}}
+			]`,
+			optionKeyResponseRules: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
+		},
+	)
+	require.NoError(t, err)
+	require.NoError(t, transformer.Initialize())
+
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.TextToSpeechTextPacket{
+		ContextID: "ctx-int",
+		Text:      "hello",
+	}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.TextToSpeechInterruptPacket{
+		ContextID: "ctx-int",
+	}))
+
+	select {
+	case <-interruptWritten:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for interrupt request")
+	}
+
+	require.NoError(t, transformer.Close(context.Background()))
+
+	assert.Equal(t, "hello", gotTextRequest["text"])
+	assert.Equal(t, "ctx-int", gotTextRequest["request_id"])
+	assert.Equal(t, "interrupt", gotInterruptRequest["type"])
+	assert.Equal(t, "ctx-int", gotInterruptRequest["request_id"])
+
+	hasInterruptedEvent := false
+	for _, packet := range collector.all() {
+		event, ok := packet.(internal_type.ConversationEventPacket)
+		if !ok {
+			continue
+		}
+		if event.ContextID == "ctx-int" && event.Name == "tts" && event.Data["type"] == "interrupted" {
+			hasInterruptedEvent = true
+		}
+	}
+	assert.True(t, hasInterruptedEvent, "expected interrupted conversation event")
+}
+
+func TestTextToSpeech_StaleInterruptDoesNotAffectActiveConnection(t *testing.T) {
+	var (
+		upgradeCount int32
+		messagesMu   sync.Mutex
+		messages     []map[string]any
+	)
+
+	secondTextSeen := make(chan struct{}, 1)
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		atomic.AddInt32(&upgradeCount, 1)
+
+		conn, err := upgrader.Upgrade(writer, request, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(message, &payload))
+
+			messagesMu.Lock()
+			messages = append(messages, payload)
+			messagesMu.Unlock()
+
+			if payload["text"] == "hello-2" {
+				select {
+				case secondTextSeen <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}))
+	defer server.Close()
+
+	baseURL := strings.Replace(server.URL, "http://", "ws://", 1)
+	collector := newPacketCollector()
+
+	transformer, err := NewTextToSpeech(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testWSCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: baseURL,
+		}),
+		collector.onPacket,
+		utils.Option{
+			optionKeyVoiceID: "virat",
+			optionKeyRequestRules: `[
+				{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"},"request_id":{"$path":"packet.message_id"}}}},
+				{"when":{"packet":"interrupt"},"send":{"frame":"json","body":{"type":"interrupt","request_id":{"$path":"packet.message_id"}}}}
+			]`,
+			optionKeyResponseRules: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
+		},
+	)
+	require.NoError(t, err)
+	require.NoError(t, transformer.Initialize())
+
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.TextToSpeechTextPacket{
+		ContextID: "ctx-active",
+		Text:      "hello-1",
+	}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.TextToSpeechInterruptPacket{
+		ContextID: "ctx-stale",
+	}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.TextToSpeechTextPacket{
+		ContextID: "ctx-active",
+		Text:      "hello-2",
+	}))
+
+	select {
+	case <-secondTextSeen:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for second text request")
+	}
+
+	require.NoError(t, transformer.Close(context.Background()))
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(&upgradeCount), "expected a single active websocket")
+
+	messagesMu.Lock()
+	defer messagesMu.Unlock()
+	for _, payload := range messages {
+		assert.NotEqual(t, "interrupt", payload["type"], "stale interrupt must not send interrupt request")
+	}
+
+	hasStaleInterruptedEvent := false
+	for _, packet := range collector.all() {
+		event, ok := packet.(internal_type.ConversationEventPacket)
+		if !ok {
+			continue
+		}
+		if event.ContextID == "ctx-stale" && event.Name == "tts" && event.Data["type"] == "interrupted" {
+			hasStaleInterruptedEvent = true
+		}
+	}
+	assert.False(t, hasStaleInterruptedEvent, "stale interrupt must not emit interrupted event")
+}
+
+func TestTextToSpeech_ConcurrentTextUsesSingleConnection(t *testing.T) {
+	const totalPackets = 24
+
+	var (
+		upgradeCount int32
+		messageCount int32
+	)
+
+	allSeen := make(chan struct{}, 1)
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		atomic.AddInt32(&upgradeCount, 1)
+
+		conn, err := upgrader.Upgrade(writer, request, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			count := atomic.AddInt32(&messageCount, 1)
+			if count == totalPackets {
+				select {
+				case allSeen <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}))
+	defer server.Close()
+
+	baseURL := strings.Replace(server.URL, "http://", "ws://", 1)
+	collector := newPacketCollector()
+
+	transformer, err := NewTextToSpeech(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testWSCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: baseURL,
+		}),
+		collector.onPacket,
+		utils.Option{
+			optionKeyVoiceID:      "virat",
+			optionKeyRequestRules: `[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"}}}}]`,
+			optionKeyResponseRules: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
+		},
+	)
+	require.NoError(t, err)
+	require.NoError(t, transformer.Initialize())
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errCh := make(chan error, totalPackets)
+	for i := 0; i < totalPackets; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			errCh <- transformer.Transform(context.Background(), internal_type.TextToSpeechTextPacket{
+				ContextID: "ctx-concurrent",
+				Text:      fmt.Sprintf("hello-%d", index),
+			})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	select {
+	case <-allSeen:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for websocket requests")
+	}
+
+	require.NoError(t, transformer.Close(context.Background()))
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(&upgradeCount), "expected only one websocket upgrade")
+	assert.Equal(t, int32(totalPackets), atomic.LoadInt32(&messageCount), "expected all text packets to be written")
+}
+
+func TestTextToSpeech_CloseEmitsConversationDurationAfterDone(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		conn, err := upgrader.Upgrade(writer, request, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		_, _, err = conn.ReadMessage()
+		require.NoError(t, err)
+		require.NoError(t, conn.WriteMessage(websocket.BinaryMessage, []byte("pcm-audio")))
+
+		_, _, err = conn.ReadMessage()
+		require.NoError(t, err)
+		require.NoError(t, conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"done","request_id":"ctx-metric"}`)))
+	}))
+	defer server.Close()
+
+	baseURL := strings.Replace(server.URL, "http://", "ws://", 1)
+	collector := newPacketCollector()
+	transformer, err := NewTextToSpeech(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testWSCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: baseURL,
+		}),
+		collector.onPacket,
+		utils.Option{
+			optionKeyVoiceID: "virat",
+			optionKeyRequestRules: `[
+				{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"},"request_id":{"$path":"packet.message_id"}}}},
+				{"when":{"packet":"done"},"send":{"frame":"json","body":{"type":"done","request_id":{"$path":"packet.message_id"}}}}
+			]`,
+			optionKeyResponseRules: `[
+				{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}},
+				{"when":{"frame":"json","path":"type","equals":"done"},"emit":{"message_id":{"$path":"request_id"},"done":true}}
+			]`,
+		},
+	)
+	require.NoError(t, err)
+	require.NoError(t, transformer.Initialize())
+
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.TextToSpeechTextPacket{
+		ContextID: "ctx-metric",
+		Text:      "hello",
+	}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.TextToSpeechDonePacket{
+		ContextID: "ctx-metric",
+	}))
+
+	select {
+	case <-collector.endCh:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for TextToSpeechEndPacket")
+	}
+
+	require.NoError(t, transformer.Close(context.Background()))
+
+	hasDurationMetric := false
+	for _, packet := range collector.all() {
+		metricPacket, ok := packet.(internal_type.ConversationMetricPacket)
+		if !ok {
+			continue
+		}
+		for _, metric := range metricPacket.Metrics {
+			if metric.GetName() == type_enums.CONVERSATION_TTS_DURATION.String() && strings.TrimSpace(metric.GetValue()) != "" {
+				hasDurationMetric = true
+			}
+		}
+	}
+	assert.True(t, hasDurationMetric, "expected CONVERSATION_TTS_DURATION metric after Close")
+}
+
+func TestTextToSpeech_CloseUnblocksPendingDial(t *testing.T) {
+	collector := newPacketCollector()
+	transformer, err := NewTextToSpeech(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testWSCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: "wss://example.com/tts",
+		}),
+		collector.onPacket,
+		utils.Option{
+			optionKeyVoiceID:      "virat",
+			optionKeyRequestRules: `[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"}}}}]`,
+			optionKeyResponseRules: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
+		},
+	)
+	require.NoError(t, err)
+	require.NoError(t, transformer.Initialize())
+
+	typed, ok := transformer.(*textToSpeech)
+	require.True(t, ok)
+	dialStarted := make(chan struct{}, 1)
+	typed.dialWS = func(ctx context.Context, urlStr string, requestHeader http.Header) (*websocket.Conn, *http.Response, error) {
+		select {
+		case dialStarted <- struct{}{}:
+		default:
+		}
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}
+
+	transformErrCh := make(chan error, 1)
+	go func() {
+		transformErrCh <- transformer.Transform(context.Background(), internal_type.TextToSpeechTextPacket{
+			ContextID: "ctx-blocked",
+			Text:      "hello",
+		})
+	}()
+
+	select {
+	case <-dialStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for blocked dial to start")
+	}
+
+	closeErrCh := make(chan error, 1)
+	go func() {
+		closeErrCh <- transformer.Close(context.Background())
+	}()
+
+	select {
+	case err := <-closeErrCh:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Close() timed out while dial was blocked")
+	}
+
+	select {
+	case err := <-transformErrCh:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Transform() timed out after Close()")
+	}
+
+	assert.False(t, collector.hasTTSError(), "did not expect TextToSpeechErrorPacket on canceled dial during shutdown")
 }

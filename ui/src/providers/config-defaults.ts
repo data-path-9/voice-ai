@@ -8,21 +8,20 @@ import {
   resolveCategoryParameters,
 } from './config-loader';
 import {
-  CUSTOM_TTS_DONE_REQUEST_KEY,
   CUSTOM_TTS_QUERY_PARAMS_KEY,
-  CUSTOM_TTS_RESPONSE_PARSER_KEY,
-  CUSTOM_TTS_TEXT_REQUEST_KEY,
+  CUSTOM_TTS_REQUEST_RULES_KEY,
+  CUSTOM_TTS_RESPONSE_RULES_KEY,
   validateCustomTtsQueryParams,
-  validateCustomTtsRequestDefinition,
-  validateCustomTtsResponseParser,
+  validateCustomTtsRequestRules,
+  validateCustomTtsResponseRules,
 } from './custom-tts/contract';
 import {
-  CUSTOM_STT_AUDIO_REQUEST_KEY,
   CUSTOM_STT_QUERY_PARAMS_KEY,
-  CUSTOM_STT_RESPONSE_PARSER_KEY,
+  CUSTOM_STT_REQUEST_RULES_KEY,
+  CUSTOM_STT_RESPONSE_RULES_KEY,
   validateCustomSttQueryParams,
-  validateCustomSttRequestDefinition,
-  validateCustomSttResponseParser,
+  validateCustomSttRequestRules,
+  validateCustomSttResponseRules,
 } from './custom-stt/contract';
 
 interface GetDefaultsFromConfigOptions {
@@ -231,25 +230,22 @@ function validateParamValue(
         if (param.key === CUSTOM_TTS_QUERY_PARAMS_KEY) {
           return validateCustomTtsQueryParams(value, param.label);
         }
-        if (
-          param.key === CUSTOM_TTS_TEXT_REQUEST_KEY ||
-          param.key === CUSTOM_TTS_DONE_REQUEST_KEY
-        ) {
-          return validateCustomTtsRequestDefinition(value, param.label);
+        if (param.key === CUSTOM_TTS_REQUEST_RULES_KEY) {
+          return validateCustomTtsRequestRules(value);
         }
-        if (param.key === CUSTOM_TTS_RESPONSE_PARSER_KEY) {
-          return validateCustomTtsResponseParser(value);
+        if (param.key === CUSTOM_TTS_RESPONSE_RULES_KEY) {
+          return validateCustomTtsResponseRules(value);
         }
       }
       if (provider === 'custom-stt') {
         if (param.key === CUSTOM_STT_QUERY_PARAMS_KEY) {
           return validateCustomSttQueryParams(value, param.label);
         }
-        if (param.key === CUSTOM_STT_AUDIO_REQUEST_KEY) {
-          return validateCustomSttRequestDefinition(value, param.label);
+        if (param.key === CUSTOM_STT_REQUEST_RULES_KEY) {
+          return validateCustomSttRequestRules(value);
         }
-        if (param.key === CUSTOM_STT_RESPONSE_PARSER_KEY) {
-          return validateCustomSttResponseParser(value);
+        if (param.key === CUSTOM_STT_RESPONSE_RULES_KEY) {
+          return validateCustomSttResponseRules(value);
         }
       }
       try {

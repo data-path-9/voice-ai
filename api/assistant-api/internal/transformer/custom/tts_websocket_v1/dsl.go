@@ -8,7 +8,7 @@ package internal_transformer_custom_tts_websocket_v1
 
 import internal_transformer_custom_websocketdsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/websocketdsl"
 
-type requestScope struct {
+type queryScope struct {
 	Text       string
 	MessageID  string
 	VoiceID    string
@@ -16,6 +16,11 @@ type requestScope struct {
 	Language   string
 	Encoding   string
 	SampleRate int
+}
+
+type outboundRequest struct {
+	Frame string
+	Body  any
 }
 
 type responseFrame = internal_transformer_custom_websocketdsl.Frame
@@ -40,10 +45,10 @@ func (config *Config) newEngine() *dslEngine {
 	}
 }
 
-func (config *Config) newScope(contextID, text string) requestScope {
-	return requestScope{
+func (config *Config) newQueryScope(messageID, text string) queryScope {
+	return queryScope{
 		Text:       text,
-		MessageID:  contextID,
+		MessageID:  messageID,
 		VoiceID:    config.VoiceID,
 		Model:      config.Model,
 		Language:   config.Language,
@@ -52,28 +57,87 @@ func (config *Config) newScope(contextID, text string) requestScope {
 	}
 }
 
-func (engine *dslEngine) BuildConnectionURL(scope requestScope) (string, error) {
-	return engine.core.BuildConnectionURL(engine.config.BaseURL, engine.config.QueryParams, func(name string) (any, error) {
-		return engine.resolveVariable(name, scope)
-	})
-}
-
-func (engine *dslEngine) RenderTextRequest(scope requestScope) (map[string]any, error) {
-	return engine.core.RenderObject(engine.config.TextRequest, func(name string) (any, error) {
-		return engine.resolveVariable(name, scope)
-	})
-}
-
-func (engine *dslEngine) RenderDoneRequest(scope requestScope) (map[string]any, error) {
-	if !engine.config.HasDoneRequest || engine.config.DoneRequest == nil {
-		return nil, nil
+func (config *Config) newRequestScope(packet, messageID, text string) map[string]any {
+	return map[string]any{
+		"config": map[string]any{
+			"voice": map[string]any{
+				"id": config.VoiceID,
+			},
+			"model":    config.Model,
+			"language": config.Language,
+			"audio": map[string]any{
+				"encoding":    config.Encoding,
+				"sample_rate": config.SampleRate,
+			},
+		},
+		"packet": map[string]any{
+			"kind":       packet,
+			"message_id": messageID,
+			"text":       text,
+		},
 	}
-	return engine.core.RenderObject(engine.config.DoneRequest, func(name string) (any, error) {
-		return engine.resolveVariable(name, scope)
+}
+
+func (engine *dslEngine) BuildConnectionURL(scope queryScope) (string, error) {
+	return engine.core.BuildConnectionURL(engine.config.BaseURL, engine.config.QueryParams, func(name string) (any, error) {
+		return engine.resolveQueryVariable(name, scope)
 	})
 }
 
-func (engine *dslEngine) resolveVariable(name string, scope requestScope) (any, error) {
+func (engine *dslEngine) EvaluateRequestRules(packet string, scope map[string]any) ([]outboundRequest, error) {
+	requests := make([]outboundRequest, 0, len(engine.config.RequestRules))
+	for _, rule := range engine.config.RequestRules {
+		if !engine.core.MatchRequestWhen(rule.When, packet) {
+			continue
+		}
+
+		body, err := engine.core.EvalRequestRuleBody(rule.Send.Body, scope)
+		if err != nil {
+			return nil, err
+		}
+
+		switch rule.Send.Frame {
+		case frameTypeBinary:
+			payload, err := engine.core.ToBytes(body)
+			if err != nil {
+				return nil, err
+			}
+			requests = append(requests, outboundRequest{
+				Frame: frameTypeBinary,
+				Body:  payload,
+			})
+		case frameTypeText:
+			payload, err := engine.core.ToString(body)
+			if err != nil {
+				return nil, err
+			}
+			requests = append(requests, outboundRequest{
+				Frame: frameTypeText,
+				Body:  payload,
+			})
+		case frameTypeJSON:
+			requests = append(requests, outboundRequest{
+				Frame: frameTypeJSON,
+				Body:  body,
+			})
+		default:
+			return nil, engine.core.Errorf("unsupported request frame %q", rule.Send.Frame)
+		}
+	}
+
+	return requests, nil
+}
+
+func (engine *dslEngine) HasRequestRules(packet string) bool {
+	for _, rule := range engine.config.RequestRules {
+		if engine.core.MatchRequestWhen(rule.When, packet) {
+			return true
+		}
+	}
+	return false
+}
+
+func (engine *dslEngine) resolveQueryVariable(name string, scope queryScope) (any, error) {
 	switch name {
 	case "text":
 		return scope.Text, nil
@@ -101,7 +165,7 @@ func (engine *dslEngine) ParseFrame(messageType int, payload []byte) (responseFr
 }
 
 func (engine *dslEngine) EvaluateResponse(frame responseFrame, defaultMessageID string) (responseOutcome, error) {
-	for _, rule := range engine.config.ResponseParser {
+	for _, rule := range engine.config.ResponseRules {
 		matched, err := engine.core.MatchWhen(
 			internal_transformer_custom_websocketdsl.When{
 				Frame:  rule.When.Frame,

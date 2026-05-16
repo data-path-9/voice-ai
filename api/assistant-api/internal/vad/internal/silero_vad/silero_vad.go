@@ -46,7 +46,7 @@ const (
 // SileroVAD - Voice Activity Detection using Silero
 // -----------------------------------------------------------------------------
 
-// SileroVAD implements the Vad interface using the Silero ONNX model
+// SileroVAD implements the VoiceActivityDetectorExecutor interface using the Silero ONNX model
 // with native ONNX Runtime inference. It provides thread-safe voice
 // activity detection with automatic cleanup on context cancellation.
 //
@@ -56,6 +56,7 @@ type SileroVAD struct {
 	// Core dependencies
 	logger   commons.Logger
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error
+	opts     utils.Option
 
 	// Silero detector (CGO-backed, requires careful lifecycle management)
 	detector *Detector
@@ -80,7 +81,7 @@ func NewSileroVAD(
 	logger commons.Logger,
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error,
 	options utils.Option,
-) (internal_type.Vad, error) {
+) (internal_type.VoiceActivityDetectorExecutor, error) {
 	start := time.Now()
 
 	// Initialize detector
@@ -97,6 +98,7 @@ func NewSileroVAD(
 	svad := &SileroVAD{
 		logger:       logger,
 		onPacket:     onPacket,
+		opts:         options,
 		detector:     detector,
 		converter:    converter,
 		isTerminated: false,
@@ -104,7 +106,7 @@ func NewSileroVAD(
 
 	go func() {
 		<-ctx.Done()
-		_ = svad.Close()
+		_ = svad.Close(context.Background())
 	}()
 
 	if onPacket != nil {
@@ -131,11 +133,19 @@ func (s *SileroVAD) Name() string {
 	return vadName
 }
 
-// Process analyzes an audio packet for voice activity.
+func (s *SileroVAD) Options() utils.Option {
+	return s.opts
+}
+
+func (s *SileroVAD) Arguments() (map[string]string, error) {
+	return nil, nil
+}
+
+// Execute analyzes an audio packet for voice activity.
 // The packet must contain 16 kHz LINEAR16 mono audio.
 // Returns immediately if the VAD has been terminated.
 // Thread-safe for concurrent calls.
-func (s *SileroVAD) Process(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
+func (s *SileroVAD) Execute(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
 	// Early termination check
 	if !s.isActive() {
 		return nil
@@ -189,7 +199,7 @@ func (s *SileroVAD) Process(ctx context.Context, pkt internal_type.UserAudioRece
 // Close terminates the VAD and releases all CGO resources.
 // Safe to call multiple times; subsequent calls are no-ops.
 // Thread-safe.
-func (s *SileroVAD) Close() error {
+func (s *SileroVAD) Close(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

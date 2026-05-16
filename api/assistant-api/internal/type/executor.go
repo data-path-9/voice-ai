@@ -44,3 +44,7 @@ type AuthenticationExecutor interface {
 type EndOfSpeechExecutor interface {
 	Executor[Packet]
 }
+
+type VoiceActivityDetectorExecutor interface {
+	Executor[UserAudioReceivedPacket]
+}

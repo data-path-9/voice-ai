@@ -2,7 +2,10 @@ import { Metadata } from '@rapidaai/react';
 import { ProviderComponentProps } from '@/app/components/providers';
 import { GetDefaultEOSConfig } from '@/app/components/providers/end-of-speech/provider';
 import { loadProviderConfig } from '@/providers/config-loader';
-import { getDefaultsFromConfig, validateFromConfig } from '@/providers/config-defaults';
+import {
+  getDefaultsFromConfig,
+  validateFromConfig,
+} from '@/providers/config-defaults';
 import { ConfigRenderer } from '@/app/components/providers/config-renderer';
 import { FC } from 'react';
 
@@ -32,9 +35,9 @@ export const ValidateSpeechToTextIfInvalid = (
 
   if (!providerCredentialIds) return undefined;
 
-  const credentialID = parameters.find(
-    opt => opt.getKey() === 'rapida.credential_id',
-  )?.getValue();
+  const credentialID = parameters
+    .find(opt => opt.getKey() === 'rapida.credential_id')
+    ?.getValue();
   if (!credentialID) {
     return `Please provide a valid ${provider} credential.`;
   }

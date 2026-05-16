@@ -209,8 +209,8 @@ describe('custom-tts text-to-speech flow', () => {
       (screen.getByLabelText('Sample Rate') as HTMLSelectElement).value,
     ).toBe('16000');
     expect(screen.getByText('Query Parameters')).toBeInTheDocument();
-    expect(screen.getByText('Text Request')).toBeInTheDocument();
-    expect(screen.getByText('Response Parser')).toBeInTheDocument();
+    expect(screen.getByText('Request Rules')).toBeInTheDocument();
+    expect(screen.getByText('Response Rules')).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Pick custom-tts credential' }),
@@ -219,30 +219,27 @@ describe('custom-tts text-to-speech flow', () => {
       target: { value: 'narrator-1' },
     });
 
-    const requestEditors = screen.getAllByPlaceholderText(
-      'Type { for DSL snippets',
-    );
-    fireEvent.change(requestEditors[0], {
+    fireEvent.change(screen.getByPlaceholderText('Type { for DSL snippets'), {
       target: {
         value:
           '{"language":{"$var":"language"},"message_id":{"$var":"message_id"},"sample_rate":{"$cast":"number","value":{"$var":"sample_rate"}}}',
       },
     });
-    fireEvent.change(requestEditors[1], {
+    const ruleEditors = screen.getAllByPlaceholderText(
+      'Type [ for rule snippets',
+    );
+    fireEvent.change(ruleEditors[0], {
       target: {
         value:
-          '{"text":{"$var":"text"},"voice_id":{"$var":"voice_id"},"message_id":{"$var":"message_id"},"model":{"$var":"model"},"language":{"$var":"language"},"audio":{"encoding":{"$var":"encoding"},"sample_rate":{"$cast":"number","value":{"$var":"sample_rate"}}}}',
+          '[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"},"voice_id":{"$path":"config.voice.id"},"message_id":{"$path":"packet.message_id"},"model":{"$path":"config.model"},"language":{"$path":"config.language"},"audio":{"encoding":{"$path":"config.audio.encoding"},"sample_rate":{"$cast":"number","value":{"$path":"config.audio.sample_rate"}}}}}}]',
       },
     });
-    fireEvent.change(
-      screen.getByPlaceholderText('Type [ for parser snippets'),
-      {
-        target: {
-          value:
-            '[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}},{"when":{"frame":"json","path":"type","equals":"done"},"emit":{"message_id":{"$path":"message_id"},"done":true}}]',
-        },
+    fireEvent.change(ruleEditors[1], {
+      target: {
+        value:
+          '[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}},{"when":{"frame":"json","path":"type","equals":"done"},"emit":{"message_id":{"$path":"message_id"},"done":true}}]',
       },
-    );
+    });
 
     await waitFor(() => {
       expect(latestProvider).toBe('custom-tts');

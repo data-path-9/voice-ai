@@ -219,12 +219,11 @@ func (h requestorDispatchHandler) HandleDenoisedAudio(ctx context.Context, vl in
 }
 
 func (h requestorDispatchHandler) HandleVadAudio(ctx context.Context, vl internal_type.VadAudioPacket) {
-	if h.r.vad != nil {
-		utils.Go(ctx, func() {
-			if err := h.r.vad.Process(ctx, internal_type.UserAudioReceivedPacket{ContextID: vl.ContextID, Audio: vl.Audio}); err != nil {
-				h.r.logger.Warnf("error while processing with vad %s", err.Error())
-			}
-		})
+	vad := h.r.vad
+	if vad != nil {
+		if err := vad.Execute(ctx, internal_type.UserAudioReceivedPacket{ContextID: vl.ContextID, Audio: vl.Audio}); err != nil {
+			h.r.logger.Warnf("error while processing with vad %s", err.Error())
+		}
 	}
 }
 func (h requestorDispatchHandler) HandleVadSpeechActivity(ctx context.Context, vl internal_type.VadSpeechActivityPacket) {
@@ -1720,10 +1719,11 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeTextToSpeech(ctx con
 func (h requestorDispatchHandler) HandleModeSwitchInitializeVoiceActivityDetection(ctx context.Context, p internal_type.ModeSwitchInitializeVoiceActivityDetectionPacket) {
 	cfg, err := h.r.GetSpeechToTextTransformer()
 	if err != nil {
-		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
-			ContextID: p.ContextID,
-			Stage:     internal_type.InitializationStageVoiceActivity,
-			Error:     err,
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID:  p.ContextID,
+			StreamMode: p.StreamMode,
+			Type:       internal_type.ModeSwitchErrorTypeInitializeVoiceActivityDetection,
+			Error:      err,
 		})
 		return
 	}
@@ -1731,11 +1731,13 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeVoiceActivityDetecti
 	vad, err := internal_vad.GetVAD(ctx, h.r.logger, h.r.OnPacket, options)
 	if err != nil {
 		h.r.logger.Errorf("error while initializing vad %+v", err)
-		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
-			ContextID: p.ContextID,
-			Stage:     internal_type.InitializationStageVoiceActivity,
-			Error:     err,
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID:  p.ContextID,
+			StreamMode: p.StreamMode,
+			Type:       internal_type.ModeSwitchErrorTypeInitializeVoiceActivityDetection,
+			Error:      err,
 		})
+		return
 	}
 	h.r.vad = vad
 }
@@ -1816,7 +1818,7 @@ func (h requestorDispatchHandler) HandleModeSwitchFinalizeTextToSpeech(ctx conte
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeVoiceActivityDetection(ctx context.Context, p internal_type.ModeSwitchFinalizeVoiceActivityDetectionPacket) {
 	if h.r.vad != nil {
-		if err := h.r.vad.Close(); err != nil {
+		if err := h.r.vad.Close(ctx); err != nil {
 			h.r.logger.Warnf("mode-switch finalize voice activity detection: %v", err)
 		}
 		h.r.vad = nil
@@ -1938,7 +1940,7 @@ func (h requestorDispatchHandler) HandleFinalizeEndOfSpeech(ctx context.Context,
 
 func (h requestorDispatchHandler) HandleFinalizeVoiceActivityDetection(ctx context.Context, p internal_type.FinalizeVoiceActivityDetectionPacket) {
 	if h.r.vad != nil {
-		if err := h.r.vad.Close(); err != nil {
+		if err := h.r.vad.Close(ctx); err != nil {
 			h.r.logger.Tracef(ctx, "failed to close voice activity detection: %+v", err)
 		}
 		h.r.vad = nil

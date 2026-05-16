@@ -8,7 +8,6 @@ package internal_transformer_custom_stt_websocket_v1
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -34,11 +33,13 @@ type speechToText struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	dialWS func(ctx context.Context, urlStr string, requestHeader http.Header) (*websocket.Conn, *http.Response, error)
 
 	logger   commons.Logger
 	onPacket func(pkt ...internal_type.Packet) error
 
 	mu         sync.Mutex
+	connectMu  sync.Mutex
 	writeMu    sync.Mutex
 	connection *websocket.Conn
 
@@ -91,6 +92,7 @@ func NewSpeechToText(
 		engine:            config.newEngine(),
 		ctx:               transformerContext,
 		cancel:            cancel,
+		dialWS:            websocket.DefaultDialer.DialContext,
 		logger:            logger,
 		onPacket:          onPacket,
 		resampler:         resampler,
@@ -128,6 +130,9 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		transformer.mu.Lock()
 		transformer.contextID = input.ContextID
 		transformer.mu.Unlock()
+		if err := transformer.handlePacketRequests(requestPacketTurnChange, input.ContextID, nil, true); err != nil {
+			transformer.emitSTTError(transformer.currentContextID(), err, internal_type.STTNetworkTimeout)
+		}
 		return nil
 	case internal_type.SpeechToTextInterruptPacket:
 		transformer.mu.Lock()
@@ -138,6 +143,9 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 			transformer.contextID = input.ContextID
 		}
 		transformer.mu.Unlock()
+		if err := transformer.handlePacketRequests(requestPacketInterrupt, input.ContextID, nil, false); err != nil {
+			transformer.emitSTTError(transformer.currentContextID(), err, internal_type.STTNetworkTimeout)
+		}
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
 		if len(input.Audio) == 0 {
@@ -151,6 +159,8 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 
 func (transformer *speechToText) Close(_ context.Context) error {
 	transformer.cancel()
+	transformer.connectMu.Lock()
+	defer transformer.connectMu.Unlock()
 
 	transformer.mu.Lock()
 	conn := transformer.connection
@@ -196,42 +206,28 @@ func (transformer *speechToText) handleAudio(contextID string, audio []byte) err
 	if contextID != "" {
 		transformer.contextID = contextID
 	}
+	effectiveContextID := transformer.contextID
 	transformer.mu.Unlock()
 
-	conn, err := transformer.getOrOpenConnection()
+	chunk, err := transformer.prepareAudioChunk(audio)
 	if err != nil {
-		transformer.emitSTTError(transformer.currentContextID(), fmt.Errorf("custom-stt websocket_v1: failed to connect: %w", err), internal_type.STTNetworkTimeout)
+		transformer.emitSTTError(effectiveContextID, err, internal_type.STTInvalidInput)
 		return nil
 	}
 
-	audioPayload, err := transformer.prepareAudioPayload(audio)
+	err = transformer.handlePacketRequests(requestPacketAudio, effectiveContextID, chunk, true)
 	if err != nil {
-		transformer.emitSTTError(transformer.currentContextID(), err, internal_type.STTInvalidInput)
+		transformer.emitSTTError(effectiveContextID, err, internal_type.STTNetworkTimeout)
 		return nil
-	}
-
-	transformer.writeMu.Lock()
-	if transformer.config.HasAudioRequest {
-		err = conn.WriteJSON(audioPayload)
-	} else {
-		payload, ok := audioPayload.([]byte)
-		if !ok {
-			err = fmt.Errorf("custom-stt websocket_v1: expected binary payload")
-		} else {
-			err = conn.WriteMessage(websocket.BinaryMessage, payload)
-		}
-	}
-	transformer.writeMu.Unlock()
-
-	if err != nil {
-		transformer.emitSTTError(transformer.currentContextID(), fmt.Errorf("custom-stt websocket_v1: failed to write audio: %w", err), internal_type.STTNetworkTimeout)
-		transformer.dropConnection(conn)
 	}
 
 	return nil
 }
 
 func (transformer *speechToText) getOrOpenConnection() (*websocket.Conn, error) {
+	transformer.connectMu.Lock()
+	defer transformer.connectMu.Unlock()
+
 	transformer.mu.Lock()
 	if transformer.connection != nil {
 		conn := transformer.connection
@@ -240,7 +236,7 @@ func (transformer *speechToText) getOrOpenConnection() (*websocket.Conn, error) 
 	}
 	transformer.mu.Unlock()
 
-	connectionURL, err := transformer.engine.BuildConnectionURL(transformer.config.newScope(""))
+	connectionURL, err := transformer.engine.BuildConnectionURL(transformer.config.newQueryScope())
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +246,11 @@ func (transformer *speechToText) getOrOpenConnection() (*websocket.Conn, error) 
 		headers.Set(key, value)
 	}
 
-	conn, response, err := websocket.DefaultDialer.Dial(connectionURL, headers)
+	dialWS := transformer.dialWS
+	if dialWS == nil {
+		dialWS = websocket.DefaultDialer.DialContext
+	}
+	conn, response, err := dialWS(transformer.ctx, connectionURL, headers)
 	if response != nil && response.Body != nil {
 		_ = response.Body.Close()
 	}
@@ -417,7 +417,7 @@ func (transformer *speechToText) emitTranscript(outcome responseOutcome) {
 	}
 }
 
-func (transformer *speechToText) prepareAudioPayload(audio []byte) (any, error) {
+func (transformer *speechToText) prepareAudioChunk(audio []byte) ([]byte, error) {
 	chunk := audio
 	if transformer.resampler != nil {
 		resampled, err := transformer.resampler.Resample(chunk, transformer.sourceAudioConfig, transformer.targetAudioConfig)
@@ -427,12 +427,91 @@ func (transformer *speechToText) prepareAudioPayload(audio []byte) (any, error) 
 		chunk = resampled
 	}
 
-	if !transformer.config.HasAudioRequest {
-		return chunk, nil
+	return chunk, nil
+}
+
+func (transformer *speechToText) handlePacketRequests(packet string, contextID string, audio []byte, openIfNeeded bool) error {
+	if !transformer.engine.HasRequestRules(packet) {
+		return nil
+	}
+	if transformer.ctx.Err() != nil {
+		return nil
 	}
 
-	scope := transformer.config.newScope(base64.StdEncoding.EncodeToString(chunk))
-	return transformer.engine.RenderAudioRequest(scope)
+	var (
+		conn *websocket.Conn
+		err  error
+	)
+
+	if openIfNeeded {
+		conn, err = transformer.getOrOpenConnection()
+		if err != nil {
+			if transformer.ctx.Err() != nil || errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return fmt.Errorf("custom-stt websocket_v1: failed to connect: %w", err)
+		}
+	} else {
+		transformer.mu.Lock()
+		conn = transformer.connection
+		transformer.mu.Unlock()
+		if conn == nil {
+			return nil
+		}
+	}
+
+	scope := transformer.config.newRequestScope(packet, contextID, audio)
+	requests, err := transformer.engine.EvaluateRequestRules(packet, scope)
+	if err != nil {
+		return fmt.Errorf("custom-stt websocket_v1: failed to evaluate %s request rules: %w", packet, err)
+	}
+	if len(requests) == 0 {
+		return nil
+	}
+
+	if err := transformer.writeRequests(conn, requests); err != nil {
+		transformer.dropConnection(conn)
+		if transformer.ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("custom-stt websocket_v1: failed to write %s request: %w", packet, err)
+	}
+
+	return nil
+}
+
+func (transformer *speechToText) writeRequests(conn *websocket.Conn, requests []outboundRequest) error {
+	transformer.writeMu.Lock()
+	defer transformer.writeMu.Unlock()
+
+	for _, request := range requests {
+		switch request.Frame {
+		case frameTypeBinary:
+			payload, ok := request.Body.([]byte)
+			if !ok {
+				return fmt.Errorf("expected binary payload")
+			}
+			if err := conn.WriteMessage(websocket.BinaryMessage, payload); err != nil {
+				return err
+			}
+		case frameTypeText:
+			payload, ok := request.Body.(string)
+			if !ok {
+				return fmt.Errorf("expected text payload")
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(payload)); err != nil {
+				return err
+			}
+		case frameTypeJSON:
+			if err := conn.WriteJSON(request.Body); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported request frame %q", request.Frame)
+		}
+	}
+
+	return nil
 }
 
 func (transformer *speechToText) currentContextID() string {

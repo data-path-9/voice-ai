@@ -33,7 +33,7 @@ COPY --from=builder /app/integration-api .
 COPY api/integration-api/migrations/ ./api/integration-api/migrations/
 
 # Copy default YAML config for standalone container runs
-COPY docker/integration-api/config.yml ./env/integration.yml
+COPY docker/integration-api/integration.yml ./env/integration.yml
 
 # Switch to rapida-app user
 USER rapida-app

@@ -90,28 +90,29 @@
       "errorMessage": "Please provide valid query parameters for custom STT."
     },
     {
-      "key": "listen.ws.audio_request",
-      "label": "Audio Request",
+      "key": "listen.ws.request_rules",
+      "label": "Request Rules",
       "type": "json",
-      "required": false,
+      "required": true,
+      "default": "[\n  {\n    \"when\": { \"packet\": \"audio\" },\n    \"send\": {\n      \"frame\": \"binary\",\n      \"body\": { \"$path\": \"packet.audio.bytes\" }\n    }\n  }\n]",
       "colSpan": 2,
       "editor": "websocket_dsl_json",
-      "editorMode": "audio_request",
-      "placeholder": "Type { for DSL snippets",
-      "helpText": "Optional JSON object for websocket audio packets. If omitted, runtime can send raw binary audio frames. Use {\"$var\":\"audio\"} and optional {\"$cast\":...} expressions.",
-      "errorMessage": "Please provide a valid audio request for custom STT."
+      "editorMode": "request_rules",
+      "placeholder": "Type [ for rule snippets",
+      "helpText": "Ordered websocket outbound rules aligned to normalized STT packets. Each rule defines when.packet plus send.frame/send.body using \"$path\" and optional \"$cast\" expressions over config.* and packet.*.",
+      "errorMessage": "Please provide valid request rules for custom STT."
     },
     {
-      "key": "listen.ws.response_parser",
-      "label": "Response Parser",
+      "key": "listen.ws.response_rules",
+      "label": "Response Rules",
       "type": "json",
       "required": true,
       "colSpan": 2,
       "editor": "websocket_dsl_json",
-      "editorMode": "response_parser",
-      "placeholder": "Type [ for parser snippets",
+      "editorMode": "response_rules",
+      "placeholder": "Type [ for rule snippets",
       "helpText": "Required JSON rule list for websocket responses. Each rule defines a text or JSON frame match and emit expressions for script, confidence, language, interim, and error.",
-      "errorMessage": "Please provide a valid response parser for custom STT."
+      "errorMessage": "Please provide valid response rules for custom STT."
     }
   ]
 }

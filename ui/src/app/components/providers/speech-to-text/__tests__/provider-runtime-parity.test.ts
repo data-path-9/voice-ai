@@ -4,7 +4,10 @@ import {
   ValidateSpeechToTextIfInvalid,
 } from '../provider';
 import { SPEECH_TO_TEXT_PROVIDER } from '@/providers';
-import { loadProviderConfig, loadProviderData } from '@/providers/config-loader';
+import {
+  loadProviderConfig,
+  loadProviderData,
+} from '@/providers/config-loader';
 
 jest.mock('@/app/components/providers', () => ({}));
 jest.mock('@/app/components/providers/config-renderer', () => ({
@@ -107,7 +110,10 @@ describe('Speech-to-text provider runtime standard', () => {
         createMetadata('custom.key', 'custom'),
         createMetadata('rapida.credential_id', 'seed-cred'),
       ];
-      const defaults = GetDefaultSpeechToTextIfInvalid(provider, cloneMetadata(seed));
+      const defaults = GetDefaultSpeechToTextIfInvalid(
+        provider,
+        cloneMetadata(seed),
+      );
 
       expect(defaults.some(m => m.getKey() === 'listen.model')).toBe(true);
       expect(defaults.some(m => m.getKey() === 'rapida.credential_id')).toBe(
@@ -133,8 +139,8 @@ describe('Speech-to-text provider runtime standard', () => {
         'listen.audio.encoding',
         'listen.audio.sample_rate',
         'listen.ws.query_params',
-        'listen.ws.audio_request',
-        'listen.ws.response_parser',
+        'listen.ws.request_rules',
+        'listen.ws.response_rules',
       ]),
     );
     expect(sttConfig?.parameters[0].data).toBeUndefined();
@@ -165,7 +171,9 @@ describe('Speech-to-text provider runtime standard', () => {
       'cred-deepgram',
     ]);
 
-    expect(err).toBe('Please provide a valid deepgram model for speech to text.');
+    expect(err).toBe(
+      'Please provide a valid deepgram model for speech to text.',
+    );
   });
 
   it('supports deepgram model switch with parameter changes', () => {
@@ -174,7 +182,10 @@ describe('Speech-to-text provider runtime standard', () => {
     ]);
     const defaultModel = getMetadataValue(defaults, 'listen.model');
 
-    const modelCatalog = loadProviderData('deepgram', 'speech-to-text-models.json');
+    const modelCatalog = loadProviderData(
+      'deepgram',
+      'speech-to-text-models.json',
+    );
     const alternateModel = modelCatalog.find(
       m => m?.id && m.id !== defaultModel,
     )?.id as string | undefined;
@@ -202,9 +213,14 @@ describe('Speech-to-text provider runtime standard', () => {
     const seed = [createMetadata('custom.key', 'custom')];
     expect(
       normalizeMetadata(
-        GetDefaultSpeechToTextIfInvalid('unknown-provider', cloneMetadata(seed)),
+        GetDefaultSpeechToTextIfInvalid(
+          'unknown-provider',
+          cloneMetadata(seed),
+        ),
       ),
     ).toEqual(normalizeMetadata(seed));
-    expect(ValidateSpeechToTextIfInvalid('unknown-provider', [])).toBeUndefined();
+    expect(
+      ValidateSpeechToTextIfInvalid('unknown-provider', []),
+    ).toBeUndefined();
   });
 });

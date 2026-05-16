@@ -81,7 +81,7 @@ COPY --from=builder /app/api/assistant-api/internal/end_of_speech/internal/pipec
 
 # Copy migrations and default YAML config
 COPY api/assistant-api/migrations/ ./api/assistant-api/migrations/
-COPY docker/assistant-api/config.yml ./env/assistant.yml
+COPY docker/assistant-api/assistant.yml ./env/assistant.yml
 
 USER rapida-app
 

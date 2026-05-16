@@ -91,7 +91,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./docker/web-api/config.yml:/opt/apps/env/web.yml:ro
+      - ./docker/web-api/web.yml:/opt/apps/env/web.yml:ro
       - ${HOME}/rapida-data/assets:/app/rapida-data/assets
       - go-mod-cache:/go/pkg/mod
     networks:
@@ -124,7 +124,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./docker/assistant-api/config.yml:/opt/apps/env/assistant.yml:ro
+      - ./docker/assistant-api/assistant.yml:/opt/apps/env/assistant.yml:ro
       - ${HOME}/rapida-data/assets:/app/rapida-data/assets
       - go-mod-cache:/go/pkg/mod
     networks:
@@ -153,7 +153,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./docker/integration-api/config.yml:/opt/apps/env/integration.yml:ro
+      - ./docker/integration-api/integration.yml:/opt/apps/env/integration.yml:ro
       - ${HOME}/rapida-data/assets:/app/rapida-data/assets
       - go-mod-cache:/go/pkg/mod
     networks:
@@ -182,7 +182,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./docker/endpoint-api/config.yml:/opt/apps/env/endpoint.yml:ro
+      - ./docker/endpoint-api/endpoint.yml:/opt/apps/env/endpoint.yml:ro
       - ${HOME}/rapida-data/assets:/app/rapida-data/assets
       - go-mod-cache:/go/pkg/mod
     networks:

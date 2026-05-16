@@ -25,7 +25,8 @@ func testCredential(t *testing.T, values map[string]any) *protos.VaultCredential
 
 func baseOptions() utils.Option {
 	return utils.Option{
-		optionKeyResponseParser: `[{"when":{"frame":"json","path":"type","equals":"final"},"emit":{"script":{"$path":"text"},"interim":false}}]`,
+		optionKeyRequestRules:  `[{"when":{"packet":"audio"},"send":{"frame":"binary","body":{"$path":"packet.audio.bytes"}}}]`,
+		optionKeyResponseRules: `[{"when":{"frame":"json","path":"type","equals":"final"},"emit":{"script":{"$path":"text"},"interim":false}}]`,
 	}
 }
 
@@ -42,8 +43,8 @@ func TestNewConfig_DefaultsAndOptionals(t *testing.T) {
 	assert.Equal(t, defaultSampleRate, config.SampleRate)
 	assert.Empty(t, config.Model)
 	assert.Empty(t, config.Language)
-	assert.False(t, config.HasAudioRequest)
-	assert.Nil(t, config.AudioRequest)
+	require.Len(t, config.RequestRules, 1)
+	assert.Equal(t, requestPacketAudio, config.RequestRules[0].When.Packet)
 }
 
 func TestNewConfig_WithOverrides(t *testing.T) {
@@ -53,7 +54,10 @@ func TestNewConfig_WithOverrides(t *testing.T) {
 	opts[optionKeyEncoding] = "MuLaw8"
 	opts[optionKeySampleRate] = "8000"
 	opts[optionKeyQueryParams] = `{"sample_rate":{"$cast":"number","value":{"$var":"sample_rate"}}}`
-	opts[optionKeyAudioRequest] = `{"audio":{"$var":"audio"},"encoding":{"$var":"encoding"}}`
+	opts[optionKeyRequestRules] = `[
+		{"when":{"packet":"turn_change"},"send":{"frame":"json","body":{"type":"start","language":{"$path":"config.language"}}}},
+		{"when":{"packet":"audio"},"send":{"frame":"json","body":{"audio":{"$path":"packet.audio.base64"},"encoding":{"$path":"config.audio.encoding"}}}}
+	]`
 
 	config, err := NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLSnake: "wss://example.com/stt",
@@ -64,9 +68,10 @@ func TestNewConfig_WithOverrides(t *testing.T) {
 	assert.Equal(t, "hi-IN", config.Language)
 	assert.Equal(t, "MuLaw8", config.Encoding)
 	assert.Equal(t, 8000, config.SampleRate)
-	assert.True(t, config.HasAudioRequest)
-	assert.NotNil(t, config.AudioRequest)
 	assert.NotNil(t, config.QueryParams)
+	require.Len(t, config.RequestRules, 2)
+	assert.Equal(t, requestPacketTurnChange, config.RequestRules[0].When.Packet)
+	assert.Equal(t, requestPacketAudio, config.RequestRules[1].When.Packet)
 }
 
 func TestNewConfig_ValidateRequired(t *testing.T) {
@@ -75,33 +80,41 @@ func TestNewConfig_ValidateRequired(t *testing.T) {
 	assert.Contains(t, err.Error(), "base url")
 
 	opts := baseOptions()
-	delete(opts, optionKeyResponseParser)
+	delete(opts, optionKeyRequestRules)
 	_, err = NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/stt",
 	}), opts)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), optionKeyResponseParser)
+	assert.Contains(t, err.Error(), optionKeyRequestRules)
+
+	opts = baseOptions()
+	delete(opts, optionKeyResponseRules)
+	_, err = NewConfig(testCredential(t, map[string]any{
+		credentialKeyBaseURLCamel: "wss://example.com/stt",
+	}), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), optionKeyResponseRules)
 }
 
 func TestNewConfig_InvalidJSON(t *testing.T) {
 	opts := baseOptions()
-	opts[optionKeyAudioRequest] = `{"audio":{"$var":"audio"}`
+	opts[optionKeyRequestRules] = `[{"when":{"packet":"audio"},"send":{"frame":"binary","body":{"$path":"packet.audio.bytes"}}}`
 	_, err := NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/stt",
 	}), opts)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), optionKeyAudioRequest)
+	assert.Contains(t, err.Error(), optionKeyRequestRules)
 
 	opts = baseOptions()
-	opts[optionKeyResponseParser] = `{"bad":"shape"}`
+	opts[optionKeyResponseRules] = `{"bad":"shape"}`
 	_, err = NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/stt",
 	}), opts)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), optionKeyResponseParser)
+	assert.Contains(t, err.Error(), optionKeyResponseRules)
 
 	opts = baseOptions()
-	opts[optionKeyResponseParser] = `[{"when":{"frame":"json"},"emit":{"unexpected":true}}]`
+	opts[optionKeyResponseRules] = `[{"when":{"frame":"json"},"emit":{"unexpected":true}}]`
 	_, err = NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/stt",
 	}), opts)
@@ -109,21 +122,21 @@ func TestNewConfig_InvalidJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "emit.unexpected")
 }
 
-func TestNewConfig_TextResponseParser(t *testing.T) {
+func TestNewConfig_TextResponseRules(t *testing.T) {
 	opts := baseOptions()
-	opts[optionKeyResponseParser] = `[{"when":{"frame":"text"},"emit":{"script":{"$frame":"text"},"interim":false}}]`
+	opts[optionKeyResponseRules] = `[{"when":{"frame":"text"},"emit":{"script":{"$frame":"text"},"interim":false}}]`
 
 	config, err := NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/stt",
 	}), opts)
 	require.NoError(t, err)
-	require.Len(t, config.ResponseParser, 1)
-	assert.Equal(t, frameTypeText, config.ResponseParser[0].When.Frame)
+	require.Len(t, config.ResponseRules, 1)
+	assert.Equal(t, frameTypeText, config.ResponseRules[0].When.Frame)
 }
 
-func TestNewConfig_TextResponseParserRejectsPath(t *testing.T) {
+func TestNewConfig_TextResponseRulesRejectPath(t *testing.T) {
 	opts := baseOptions()
-	opts[optionKeyResponseParser] = `[{"when":{"frame":"text","path":"type","equals":"partial"},"emit":{"script":{"$frame":"text"},"interim":true}}]`
+	opts[optionKeyResponseRules] = `[{"when":{"frame":"text","path":"type","equals":"partial"},"emit":{"script":{"$frame":"text"},"interim":true}}]`
 
 	_, err := NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/stt",
@@ -141,4 +154,15 @@ func TestNewConfig_QueryParamsRejectAudioVariable(t *testing.T) {
 	}), opts)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unsupported variable "audio"`)
+}
+
+func TestNewConfig_RequestRulesRequireAudioPacket(t *testing.T) {
+	opts := baseOptions()
+	opts[optionKeyRequestRules] = `[{"when":{"packet":"turn_change"},"send":{"frame":"json","body":{"type":"start"}}}]`
+
+	_, err := NewConfig(testCredential(t, map[string]any{
+		credentialKeyBaseURLCamel: "wss://example.com/stt",
+	}), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `when.packet "audio"`)
 }

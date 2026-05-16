@@ -198,15 +198,15 @@ describe('custom-stt speech-to-text flow', () => {
       (screen.getByLabelText('Sample Rate') as HTMLSelectElement).value,
     ).toBe('16000');
     expect(screen.getByText('Query Parameters')).toBeInTheDocument();
-    expect(screen.getByText('Audio Request')).toBeInTheDocument();
-    expect(screen.getByText('Response Parser')).toBeInTheDocument();
+    expect(screen.getByText('Request Rules')).toBeInTheDocument();
+    expect(screen.getByText('Response Rules')).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Pick custom-stt credential' }),
     );
 
     fireEvent.change(
-      screen.getByPlaceholderText('Type [ for parser snippets'),
+      screen.getAllByPlaceholderText('Type [ for rule snippets')[1],
       {
         target: {
           value:

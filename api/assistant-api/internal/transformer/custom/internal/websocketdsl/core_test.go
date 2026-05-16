@@ -71,7 +71,7 @@ func TestCoreValidateResponseRules_TextContracts(t *testing.T) {
 				"interim": true,
 			},
 		},
-	}, contract, "listen.ws.response_parser")
+	}, contract, "listen.ws.response_rules")
 	require.NoError(t, err)
 
 	err = core.ValidateResponseRules([]ResponseRule{
@@ -81,7 +81,7 @@ func TestCoreValidateResponseRules_TextContracts(t *testing.T) {
 				"script": map[string]any{"$frame": FrameText},
 			},
 		},
-	}, contract, "listen.ws.response_parser")
+	}, contract, "listen.ws.response_rules")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "when.path cannot be used")
 }
@@ -108,9 +108,78 @@ func TestCoreValidateRequestObject_RejectsUnknownVariable(t *testing.T) {
 
 	err := core.ValidateRequestObject(map[string]any{
 		"audio": map[string]any{"$var": "chunk"},
-	}, contract, "listen.ws.audio_request")
+	}, contract, "speak.ws.query_params")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unsupported variable "chunk"`)
+}
+
+func TestCoreValidateRequestRules_SupportsPacketScopedPaths(t *testing.T) {
+	core := NewCore("custom-stt websocket_v1")
+	contract := Contract{
+		SupportedRequestPackets: []string{"turn_change", "audio", "interrupt"},
+		SupportedRequestFrames:  []string{FrameBinary, FrameJSON, FrameText},
+		SupportedPathRoots:      []string{"config", "packet"},
+		RequestValidationScopes: map[string]any{
+			"audio": map[string]any{
+				"config": map[string]any{
+					"audio": map[string]any{
+						"encoding":    "LINEAR16",
+						"sample_rate": 16000,
+					},
+				},
+				"packet": map[string]any{
+					"kind":       "audio",
+					"context_id": "ctx_123",
+					"audio": map[string]any{
+						"bytes":  []byte{0x00, 0x01},
+						"base64": "AAE=",
+					},
+				},
+			},
+		},
+	}
+
+	err := core.ValidateRequestRules([]RequestRule{
+		{
+			When: RequestWhen{Packet: "audio"},
+			Send: Send{
+				Frame: FrameBinary,
+				Body:  map[string]any{"$path": "packet.audio.bytes"},
+			},
+		},
+		{
+			When: RequestWhen{Packet: "audio"},
+			Send: Send{
+				Frame: FrameJSON,
+				Body: map[string]any{
+					"audio":    map[string]any{"$path": "packet.audio.base64"},
+					"encoding": map[string]any{"$path": "config.audio.encoding"},
+				},
+			},
+		},
+	}, contract, "listen.ws.request_rules")
+	require.NoError(t, err)
+}
+
+func TestCoreValidateRequestRules_RejectsUnknownPathRoot(t *testing.T) {
+	core := NewCore("custom-stt websocket_v1")
+	contract := Contract{
+		SupportedRequestPackets: []string{"audio"},
+		SupportedRequestFrames:  []string{FrameBinary},
+		SupportedPathRoots:      []string{"config", "packet"},
+	}
+
+	err := core.ValidateRequestRules([]RequestRule{
+		{
+			When: RequestWhen{Packet: "audio"},
+			Send: Send{
+				Frame: FrameBinary,
+				Body:  map[string]any{"$path": "state.audio.bytes"},
+			},
+		},
+	}, contract, "listen.ws.request_rules")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `$path root must be "config" or "packet"`)
 }
 
 func TestCoreValidateQueryParams_RejectsNestedValues(t *testing.T) {

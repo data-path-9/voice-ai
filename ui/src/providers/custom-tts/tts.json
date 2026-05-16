@@ -99,40 +99,29 @@
       "errorMessage": "Please provide valid query parameters for custom TTS."
     },
     {
-      "key": "speak.ws.text_request",
-      "label": "Text Request",
+      "key": "speak.ws.request_rules",
+      "label": "Request Rules",
+      "type": "json",
+      "required": true,
+      "default": "[\n  {\n    \"when\": { \"packet\": \"text\" },\n    \"send\": {\n      \"frame\": \"json\",\n      \"body\": {\n        \"text\": { \"$path\": \"packet.text\" },\n        \"voice_id\": { \"$path\": \"config.voice.id\" },\n        \"message_id\": { \"$path\": \"packet.message_id\" },\n        \"model\": { \"$path\": \"config.model\" },\n        \"language\": { \"$path\": \"config.language\" },\n        \"audio\": {\n          \"encoding\": { \"$path\": \"config.audio.encoding\" },\n          \"sample_rate\": {\n            \"$cast\": \"number\",\n            \"value\": { \"$path\": \"config.audio.sample_rate\" }\n          }\n        }\n      }\n    }\n  }\n]",
+      "colSpan": 2,
+      "editor": "websocket_dsl_json",
+      "editorMode": "request_rules",
+      "placeholder": "Type [ for rule snippets",
+      "helpText": "Required ordered websocket outbound rules aligned to normalized TTS packets. Each rule defines when.packet plus send.frame/send.body using \"$path\" and optional \"$cast\" expressions over config.* and packet.*.",
+      "errorMessage": "Please provide valid request rules for custom TTS."
+    },
+    {
+      "key": "speak.ws.response_rules",
+      "label": "Response Rules",
       "type": "json",
       "required": true,
       "colSpan": 2,
       "editor": "websocket_dsl_json",
-      "editorMode": "text_request",
-      "placeholder": "Type { for DSL snippets",
-      "helpText": "Required JSON object for the primary websocket request. Use {\"$var\":\"text\"}, {\"$var\":\"message_id\"}, and optional {\"$cast\":...} expressions.",
-      "errorMessage": "Please provide a valid text request for custom TTS."
-    },
-    {
-      "key": "speak.ws.done_request",
-      "label": "Done Request",
-      "type": "json",
-      "required": false,
-      "colSpan": 2,
-      "editor": "websocket_dsl_json",
-      "editorMode": "done_request",
-      "placeholder": "Type { for DSL snippets",
-      "helpText": "Optional JSON object for two-step flows. If present, runtime sends this follow-up packet after the text request. If omitted, runtime uses one-shot mode.",
-      "errorMessage": "Please provide a valid done request for custom TTS."
-    },
-    {
-      "key": "speak.ws.response_parser",
-      "label": "Response Parser",
-      "type": "json",
-      "required": true,
-      "colSpan": 2,
-      "editor": "websocket_dsl_json",
-      "editorMode": "response_parser",
-      "placeholder": "Type [ for parser snippets",
-      "helpText": "Required JSON rule list for websocket responses. Each rule defines a frame match and emit expressions for audio, message_id, done, and error.",
-      "errorMessage": "Please provide a valid response parser for custom TTS."
+      "editorMode": "response_rules",
+      "placeholder": "Type [ for rule snippets",
+      "helpText": "Required JSON rule list for websocket responses. Each rule defines a binary or JSON frame match and emit expressions for audio, message_id, done, and error.",
+      "errorMessage": "Please provide valid response rules for custom TTS."
     }
   ]
 }

@@ -25,9 +25,9 @@ func testCredential(t *testing.T, values map[string]any) *protos.VaultCredential
 
 func baseOptions() utils.Option {
 	return utils.Option{
-		optionKeyVoiceID:        "voice-1",
-		optionKeyTextRequest:    `{"text":{"$var":"text"},"request_id":{"$var":"message_id"}}`,
-		optionKeyResponseParser: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
+		optionKeyVoiceID:       "voice-1",
+		optionKeyRequestRules:  `[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"},"request_id":{"$path":"packet.message_id"}}}}]`,
+		optionKeyResponseRules: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
 	}
 }
 
@@ -45,7 +45,8 @@ func TestNewConfig_DefaultsAndOptionals(t *testing.T) {
 	assert.Equal(t, defaultSampleRate, config.SampleRate)
 	assert.Empty(t, config.Model)
 	assert.Empty(t, config.Language)
-	assert.False(t, config.HasDoneRequest)
+	require.Len(t, config.RequestRules, 1)
+	assert.Equal(t, requestPacketText, config.RequestRules[0].When.Packet)
 }
 
 func TestNewConfig_WithOverrides(t *testing.T) {
@@ -55,7 +56,10 @@ func TestNewConfig_WithOverrides(t *testing.T) {
 	opts[optionKeyModel] = "my-model"
 	opts[optionKeyLanguage] = "hi-IN"
 	opts[optionKeyQueryParams] = `{"lang":{"$var":"language"}}`
-	opts[optionKeyDoneRequest] = `{"continue":false}`
+	opts[optionKeyRequestRules] = `[
+		{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"},"message_id":{"$path":"packet.message_id"}}}},
+		{"when":{"packet":"done"},"send":{"frame":"json","body":{"type":"done","message_id":{"$path":"packet.message_id"}}}}
+	]`
 
 	config, err := NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLSnake: "wss://example.com/ws",
@@ -66,8 +70,10 @@ func TestNewConfig_WithOverrides(t *testing.T) {
 	assert.Equal(t, 48000, config.SampleRate)
 	assert.Equal(t, "my-model", config.Model)
 	assert.Equal(t, "hi-IN", config.Language)
-	assert.True(t, config.HasDoneRequest)
 	assert.NotNil(t, config.QueryParams)
+	require.Len(t, config.RequestRules, 2)
+	assert.Equal(t, requestPacketText, config.RequestRules[0].When.Packet)
+	assert.Equal(t, requestPacketDone, config.RequestRules[1].When.Packet)
 }
 
 func TestNewConfig_ValidateRequired(t *testing.T) {
@@ -84,33 +90,41 @@ func TestNewConfig_ValidateRequired(t *testing.T) {
 	assert.Contains(t, err.Error(), optionKeyVoiceID)
 
 	opts = baseOptions()
-	delete(opts, optionKeyTextRequest)
+	delete(opts, optionKeyRequestRules)
 	_, err = NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/ws",
 	}), opts)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), optionKeyTextRequest)
+	assert.Contains(t, err.Error(), optionKeyRequestRules)
+
+	opts = baseOptions()
+	delete(opts, optionKeyResponseRules)
+	_, err = NewConfig(testCredential(t, map[string]any{
+		credentialKeyBaseURLCamel: "wss://example.com/ws",
+	}), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), optionKeyResponseRules)
 }
 
 func TestNewConfig_InvalidJSON(t *testing.T) {
 	opts := baseOptions()
-	opts[optionKeyTextRequest] = `{"text":{"$var":"text"}`
+	opts[optionKeyRequestRules] = `[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"}}}`
 	_, err := NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/ws",
 	}), opts)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), optionKeyTextRequest)
+	assert.Contains(t, err.Error(), optionKeyRequestRules)
 
 	opts = baseOptions()
-	opts[optionKeyResponseParser] = `{"bad":"shape"}`
+	opts[optionKeyResponseRules] = `{"bad":"shape"}`
 	_, err = NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/ws",
 	}), opts)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), optionKeyResponseParser)
+	assert.Contains(t, err.Error(), optionKeyResponseRules)
 
 	opts = baseOptions()
-	opts[optionKeyTextRequest] = `{"text":{"$var":"text"}} trailing`
+	opts[optionKeyRequestRules] = `[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"}}}}] trailing`
 	_, err = NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/ws",
 	}), opts)
@@ -127,4 +141,46 @@ func TestNewConfig_QueryParamsMustResolveToPrimitive(t *testing.T) {
 	}), opts)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must resolve to primitive value")
+}
+
+func TestNewConfig_QueryParamsRejectTextVariable(t *testing.T) {
+	opts := baseOptions()
+	opts[optionKeyQueryParams] = `{"q":{"$var":"text"}}`
+
+	_, err := NewConfig(testCredential(t, map[string]any{
+		credentialKeyBaseURLCamel: "wss://example.com/ws",
+	}), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unsupported variable "text"`)
+}
+
+func TestNewConfig_QueryParamsAllowSupportedVariables(t *testing.T) {
+	opts := baseOptions()
+	opts[optionKeyModel] = "model-a"
+	opts[optionKeyLanguage] = "en-US"
+	opts[optionKeyQueryParams] = `{
+		"message_id":{"$var":"message_id"},
+		"voice_id":{"$var":"voice_id"},
+		"model":{"$var":"model"},
+		"language":{"$var":"language"},
+		"encoding":{"$var":"encoding"},
+		"sample_rate":{"$var":"sample_rate"}
+	}`
+
+	config, err := NewConfig(testCredential(t, map[string]any{
+		credentialKeyBaseURLCamel: "wss://example.com/ws",
+	}), opts)
+	require.NoError(t, err)
+	assert.NotNil(t, config.QueryParams)
+}
+
+func TestNewConfig_RequestRulesRequireTextPacket(t *testing.T) {
+	opts := baseOptions()
+	opts[optionKeyRequestRules] = `[{"when":{"packet":"done"},"send":{"frame":"json","body":{"type":"done"}}}]`
+
+	_, err := NewConfig(testCredential(t, map[string]any{
+		credentialKeyBaseURLCamel: "wss://example.com/ws",
+	}), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `when.packet "text"`)
 }

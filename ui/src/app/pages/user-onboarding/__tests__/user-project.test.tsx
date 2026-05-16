@@ -91,11 +91,13 @@ describe('CreateProjectPage', () => {
 
     renderWithAuth(authorize);
 
-    fireEvent.change(screen.getByPlaceholderText('eg: Customer Support Bot'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Acme Support Operations'), {
       target: { value: 'Support Bot' },
     });
     fireEvent.change(
-      screen.getByPlaceholderText('eg: Voice assistant for handling customer inquiries 24/7'),
+      screen.getByPlaceholderText(
+        'eg: White-label inbound voice agents for healthcare support across US and UK',
+      ),
       { target: { value: 'Project description' } },
     );
     fireEvent.click(screen.getByRole('button', { name: 'Go to dashboard' }));
@@ -119,7 +121,7 @@ describe('CreateProjectPage', () => {
 
     renderWithAuth();
 
-    fireEvent.change(screen.getByPlaceholderText('eg: Customer Support Bot'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Acme Support Operations'), {
       target: { value: 'Support Bot' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Go to dashboard' }));
@@ -138,7 +140,7 @@ describe('CreateProjectPage', () => {
 
     renderWithAuth();
 
-    fireEvent.change(screen.getByPlaceholderText('eg: Customer Support Bot'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Acme Support Operations'), {
       target: { value: 'Support Bot' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Go to dashboard' }));

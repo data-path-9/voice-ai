@@ -11,12 +11,29 @@ export type WebsocketDslJsonValue =
   | WebsocketDslJsonValue[]
   | { [key: string]: WebsocketDslJsonValue };
 export type WebsocketDslResponseFrameType = 'binary' | 'json' | 'text';
+export type WebsocketDslRequestFrameType = WebsocketDslResponseFrameType;
 
 export type WebsocketDslRequestContext<VariableName extends string = string> =
   Record<VariableName, string>;
 
-export interface WebsocketDslResponseParserRule<
-  FrameType extends WebsocketDslResponseFrameType = WebsocketDslResponseFrameType,
+export type WebsocketDslScopedContext = Record<string, unknown>;
+
+export interface WebsocketDslRequestRule<
+  PacketName extends string = string,
+  FrameType extends WebsocketDslRequestFrameType = WebsocketDslRequestFrameType,
+> {
+  when: {
+    packet: PacketName;
+  };
+  send: {
+    frame: FrameType;
+    body: unknown;
+  };
+}
+
+export interface WebsocketDslResponseRule<
+  FrameType extends
+    WebsocketDslResponseFrameType = WebsocketDslResponseFrameType,
   EmitKey extends string = string,
 > {
   when: {
@@ -28,7 +45,8 @@ export interface WebsocketDslResponseParserRule<
 }
 
 export interface ParsedWebsocketDslResponseFrame<
-  FrameType extends WebsocketDslResponseFrameType = WebsocketDslResponseFrameType,
+  FrameType extends
+    WebsocketDslResponseFrameType = WebsocketDslResponseFrameType,
 > {
   frameType?: FrameType;
   payload: unknown;
@@ -42,11 +60,25 @@ interface RequestValidationOptions<VariableName extends string> {
   validationContext: WebsocketDslRequestContext<VariableName>;
 }
 
+interface RequestRuleValidationOptions<
+  PacketName extends string,
+  FrameType extends WebsocketDslRequestFrameType,
+> {
+  providerLabel: string;
+  definitionLabel: string;
+  jsonErrorLabel: string;
+  supportedPackets: readonly PacketName[];
+  supportedFrameTypes: readonly FrameType[];
+  supportedPathRoots: readonly string[];
+  validationContexts: Record<PacketName, WebsocketDslScopedContext>;
+}
+
 interface ResponseValidationOptions<
   FrameType extends WebsocketDslResponseFrameType,
   EmitKey extends string,
 > {
   providerLabel: string;
+  definitionLabel?: string;
   jsonErrorLabel: string;
   supportedFrameTypes: readonly FrameType[];
   supportedEmitKeys: readonly EmitKey[];
@@ -76,6 +108,13 @@ function isPrimitive(value: unknown): value is WebsocketDslPrimitive {
   );
 }
 
+function isJsonValue(value: unknown): value is WebsocketDslJsonValue {
+  if (isPrimitive(value)) return true;
+  if (Array.isArray(value)) return value.every(item => isJsonValue(item));
+  if (!isPlainObject(value)) return false;
+  return Object.values(value).every(item => isJsonValue(item));
+}
+
 function getValueAtPath(payload: unknown, path: string): unknown {
   return path
     .split('.')
@@ -99,7 +138,9 @@ function normalizeBinaryFrame(frame: ArrayBuffer | Uint8Array): Uint8Array {
 }
 
 function decodeBase64ToBytes(value: string): Uint8Array {
-  const bufferCtor = (globalThis as { Buffer?: { from?: (...args: any[]) => Uint8Array } }).Buffer;
+  const bufferCtor = (
+    globalThis as { Buffer?: { from?: (...args: any[]) => Uint8Array } }
+  ).Buffer;
   if (bufferCtor?.from) {
     return Uint8Array.from(bufferCtor.from(value, 'base64'));
   }
@@ -184,6 +225,10 @@ function formatFrameExpressionExamples(
     .join(values.length > 1 ? ' or ' : '');
 }
 
+function getPathRoot(path: string): string {
+  return path.split('.').find(Boolean) ?? '';
+}
+
 function evaluateRequestExpression<VariableName extends string>(
   value: unknown,
   context: WebsocketDslRequestContext<VariableName>,
@@ -238,9 +283,7 @@ function validateRequestExpression<VariableName extends string>(
     if (Object.keys(value).length !== 1 || typeof value.$var !== 'string') {
       return `${options.providerLabel} ${options.definitionLabel} must define "$var" expressions as {"$var":"name"}.`;
     }
-    if (
-      !options.supportedVariables.includes(value.$var as VariableName)
-    ) {
+    if (!options.supportedVariables.includes(value.$var as VariableName)) {
       return `Unsupported ${options.providerLabel.toLowerCase()} variable "${value.$var}" in ${options.definitionLabel}. Supported variables: ${options.supportedVariables.join(', ')}.`;
     }
     return undefined;
@@ -271,8 +314,134 @@ function validateRequestExpression<VariableName extends string>(
   return undefined;
 }
 
+interface ScopedExpressionValidationOptions {
+  providerLabel: string;
+  definitionLabel: string;
+  supportedPathRoots: readonly string[];
+}
+
+function evaluateScopedExpression(
+  value: unknown,
+  context: WebsocketDslScopedContext,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => evaluateScopedExpression(item, context));
+  }
+
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  if (isOperatorObject(value, '$path')) {
+    return getValueAtPath(context, String(value.$path));
+  }
+
+  if (isOperatorObject(value, '$cast')) {
+    return castPrimitiveValue(
+      evaluateScopedExpression(value.value, context),
+      String(value.$cast) as WebsocketDslCastTarget,
+    );
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, childValue]) => [
+      key,
+      evaluateScopedExpression(childValue, context),
+    ]),
+  );
+}
+
+function validateScopedExpression(
+  value: unknown,
+  options: ScopedExpressionValidationOptions,
+): string | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const error = validateScopedExpression(item, options);
+      if (error) return error;
+    }
+    return undefined;
+  }
+
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  if (isOperatorObject(value, '$path')) {
+    if (Object.keys(value).length !== 1 || typeof value.$path !== 'string') {
+      return `${options.providerLabel} ${options.definitionLabel} "$path" expressions must be shaped as {"$path":"config.field"}.`;
+    }
+    if (!value.$path.trim()) {
+      return `${options.providerLabel} ${options.definitionLabel} "$path" expressions require a non-empty path.`;
+    }
+
+    const pathRoot = getPathRoot(value.$path);
+    if (!options.supportedPathRoots.includes(pathRoot)) {
+      return `${options.providerLabel} ${options.definitionLabel} only supports "$path" roots of ${options.supportedPathRoots.join(', ')}.`;
+    }
+
+    return undefined;
+  }
+
+  if (isOperatorObject(value, '$cast')) {
+    if (
+      Object.keys(value).length !== 2 ||
+      !('value' in value) ||
+      typeof value.$cast !== 'string'
+    ) {
+      return `${options.providerLabel} ${options.definitionLabel} "$cast" expressions must be shaped as {"$cast":"number","value":...}.`;
+    }
+    if (!isSupportedCastTarget(value.$cast)) {
+      return `${options.providerLabel} ${options.definitionLabel} only supports "$cast" values of ${WEBSOCKET_DSL_CAST_VALUES.join(', ')}.`;
+    }
+    return validateScopedExpression(value.value, options);
+  }
+
+  for (const [key, childValue] of Object.entries(value)) {
+    if (key.startsWith('$')) {
+      return `Unsupported operator "${key}" in ${options.definitionLabel}.`;
+    }
+    const error = validateScopedExpression(childValue, options);
+    if (error) return error;
+  }
+
+  return undefined;
+}
+
+function validateRenderedRequestBody(
+  rendered: unknown,
+  frame: WebsocketDslRequestFrameType,
+  providerLabel: string,
+  definitionLabel: string,
+): string | undefined {
+  if (rendered === undefined) {
+    return `${providerLabel} ${definitionLabel} send.body must resolve to a value.`;
+  }
+
+  if (frame === 'text' && typeof rendered !== 'string') {
+    return `${providerLabel} ${definitionLabel} text send.body must resolve to a string.`;
+  }
+
+  if (frame === 'json' && !isJsonValue(rendered)) {
+    return `${providerLabel} ${definitionLabel} json send.body must resolve to a JSON value.`;
+  }
+
+  if (frame === 'binary') {
+    const isBinaryLike =
+      typeof rendered === 'string' ||
+      rendered instanceof Uint8Array ||
+      rendered instanceof ArrayBuffer;
+    if (!isBinaryLike) {
+      return `${providerLabel} ${definitionLabel} binary send.body must resolve to bytes-like data.`;
+    }
+  }
+
+  return undefined;
+}
+
 interface ResponseExpressionOptions {
   providerLabel: string;
+  definitionLabel: string;
   allowedFrameExpressions: readonly WebsocketDslResponseFrameType[];
   allowDecodeBase64?: boolean;
 }
@@ -314,12 +483,12 @@ function evaluateResponseExpression(
     );
     if (typeof decodedValue !== 'string') {
       throw new Error(
-        `${options.providerLabel} response parser can only decode string values.`,
+        `${options.providerLabel} ${options.definitionLabel} can only decode string values.`,
       );
     }
     if (!options.allowDecodeBase64 || value.$decode !== 'base64') {
       throw new Error(
-        `${options.providerLabel} response parser only supports "$decode": "base64".`,
+        `${options.providerLabel} ${options.definitionLabel} only support "$decode": "base64".`,
       );
     }
     return decodeBase64ToBytes(decodedValue);
@@ -358,10 +527,10 @@ function validateResponseExpression(
 
   if (isOperatorObject(value, '$path')) {
     if (Object.keys(value).length !== 1 || typeof value.$path !== 'string') {
-      return `${options.providerLabel} response parser "$path" expressions must be shaped as {"$path":"field.path"}.`;
+      return `${options.providerLabel} ${options.definitionLabel} "$path" expressions must be shaped as {"$path":"field.path"}.`;
     }
     if (!value.$path.trim()) {
-      return `${options.providerLabel} response parser "$path" expressions require a non-empty path.`;
+      return `${options.providerLabel} ${options.definitionLabel} "$path" expressions require a non-empty path.`;
     }
     return undefined;
   }
@@ -377,21 +546,21 @@ function validateResponseExpression(
         value.$frame as WebsocketDslResponseFrameType,
       )
     ) {
-      return `${options.providerLabel} response parser "$frame" expressions only support ${allowedFrameExamples}.`;
+      return `${options.providerLabel} ${options.definitionLabel} "$frame" expressions only support ${allowedFrameExamples}.`;
     }
     return undefined;
   }
 
   if (isOperatorObject(value, '$decode')) {
     if (!options.allowDecodeBase64) {
-      return `${options.providerLabel} response parser does not support "$decode".`;
+      return `${options.providerLabel} ${options.definitionLabel} do not support "$decode".`;
     }
     if (
       Object.keys(value).length !== 2 ||
       !('value' in value) ||
       value.$decode !== 'base64'
     ) {
-      return `${options.providerLabel} response parser "$decode" expressions must be shaped as {"$decode":"base64","value":...}.`;
+      return `${options.providerLabel} ${options.definitionLabel} "$decode" expressions must be shaped as {"$decode":"base64","value":...}.`;
     }
     return validateResponseExpression(value.value, options);
   }
@@ -402,17 +571,17 @@ function validateResponseExpression(
       !('value' in value) ||
       typeof value.$cast !== 'string'
     ) {
-      return `${options.providerLabel} response parser "$cast" expressions must be shaped as {"$cast":"number","value":...}.`;
+      return `${options.providerLabel} ${options.definitionLabel} "$cast" expressions must be shaped as {"$cast":"number","value":...}.`;
     }
     if (!isSupportedCastTarget(value.$cast)) {
-      return `${options.providerLabel} response parser only supports "$cast" values of ${WEBSOCKET_DSL_CAST_VALUES.join(', ')}.`;
+      return `${options.providerLabel} ${options.definitionLabel} only support "$cast" values of ${WEBSOCKET_DSL_CAST_VALUES.join(', ')}.`;
     }
     return validateResponseExpression(value.value, options);
   }
 
   for (const [key, childValue] of Object.entries(value)) {
     if (key.startsWith('$')) {
-      return `Unsupported operator "${key}" in ${options.providerLabel.toLowerCase()} response parser.`;
+      return `Unsupported operator "${key}" in ${options.providerLabel.toLowerCase()} ${options.definitionLabel}.`;
     }
     const error = validateResponseExpression(childValue, options);
     if (error) return error;
@@ -425,7 +594,7 @@ function matchesResponseRule<
   FrameType extends WebsocketDslResponseFrameType,
   EmitKey extends string,
 >(
-  rule: WebsocketDslResponseParserRule<FrameType, EmitKey>,
+  rule: WebsocketDslResponseRule<FrameType, EmitKey>,
   frameType: FrameType,
   payload: unknown,
 ): boolean {
@@ -451,7 +620,9 @@ function matchesResponseRule<
   return getValueAtPath(payload, rule.when.path) === rule.when.equals;
 }
 
-export function renderWebsocketDslRequestDefinition<VariableName extends string>(
+export function renderWebsocketDslRequestDefinition<
+  VariableName extends string,
+>(
   definition: string,
   context: WebsocketDslRequestContext<VariableName>,
 ): unknown {
@@ -546,21 +717,126 @@ export function validateWebsocketDslQueryParams<VariableName extends string>(
   }
 }
 
-export function validateWebsocketDslResponseParser<
+export function renderWebsocketDslScopedValue(
+  definition: string,
+  context: WebsocketDslScopedContext,
+): unknown {
+  const parsed = JSON.parse(definition);
+  return evaluateScopedExpression(parsed, context);
+}
+
+export function validateWebsocketDslRequestRules<
+  PacketName extends string,
+  FrameType extends WebsocketDslRequestFrameType,
+>(
+  value: string,
+  options: RequestRuleValidationOptions<PacketName, FrameType>,
+): string | undefined {
+  const definitionLabel = resolveDefinitionLabel(options.definitionLabel);
+  const parsed = parseJsonWithMessage(
+    value,
+    `Please provide valid JSON ${definitionLabel} for ${options.jsonErrorLabel}.`,
+  );
+  if (typeof parsed === 'string') return parsed;
+
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return `${options.providerLabel} ${definitionLabel} must be a non-empty JSON array of rules.`;
+  }
+
+  for (const [index, rule] of parsed.entries()) {
+    if (
+      !isPlainObject(rule) ||
+      !isPlainObject(rule.when) ||
+      !isPlainObject(rule.send)
+    ) {
+      return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define "when" and "send" objects.`;
+    }
+
+    if (
+      Object.keys(rule.when).length !== 1 ||
+      typeof rule.when.packet !== 'string'
+    ) {
+      return `${options.providerLabel} ${definitionLabel} rule ${index + 1} only supports when.packet.`;
+    }
+
+    const packet = rule.when.packet as PacketName;
+    if (!options.supportedPackets.includes(packet)) {
+      return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define when.packet as ${formatQuotedChoices(options.supportedPackets)}.`;
+    }
+
+    if (typeof rule.send.frame !== 'string') {
+      return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define send.frame as ${formatQuotedChoices(options.supportedFrameTypes)}.`;
+    }
+
+    const frame = rule.send.frame as FrameType;
+    if (!options.supportedFrameTypes.includes(frame)) {
+      return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define send.frame as ${formatQuotedChoices(options.supportedFrameTypes)}.`;
+    }
+
+    if (!('body' in rule.send)) {
+      return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define send.body.`;
+    }
+
+    const expressionError = validateScopedExpression(rule.send.body, {
+      providerLabel: options.providerLabel,
+      definitionLabel,
+      supportedPathRoots: options.supportedPathRoots,
+    });
+    if (expressionError) return expressionError;
+
+    try {
+      const rendered = evaluateScopedExpression(
+        rule.send.body,
+        options.validationContexts[packet],
+      );
+      const renderError = validateRenderedRequestBody(
+        rendered,
+        frame,
+        options.providerLabel,
+        `${definitionLabel} rule ${index + 1}`,
+      );
+      if (renderError) return renderError;
+    } catch {
+      return `Please provide valid JSON ${definitionLabel} for ${options.jsonErrorLabel}.`;
+    }
+  }
+
+  return undefined;
+}
+
+export function parseWebsocketDslRequestRules<
+  PacketName extends string,
+  FrameType extends WebsocketDslRequestFrameType,
+>(
+  value: string,
+  options: RequestRuleValidationOptions<PacketName, FrameType>,
+): WebsocketDslRequestRule<PacketName, FrameType>[] {
+  const error = validateWebsocketDslRequestRules(value, options);
+  if (error) {
+    throw new Error(error);
+  }
+
+  return JSON.parse(value) as WebsocketDslRequestRule<PacketName, FrameType>[];
+}
+
+export function validateWebsocketDslResponseRules<
   FrameType extends WebsocketDslResponseFrameType,
   EmitKey extends string,
 >(
   value: string,
   options: ResponseValidationOptions<FrameType, EmitKey>,
 ): string | undefined {
+  const definitionLabel = resolveDefinitionLabel(
+    options.definitionLabel ?? 'response rules',
+  );
   const parsed = parseJsonWithMessage(
     value,
-    `Please provide a valid JSON response parser for ${options.jsonErrorLabel}.`,
+    `Please provide a valid JSON ${definitionLabel} for ${options.jsonErrorLabel}.`,
   );
   if (typeof parsed === 'string') return parsed;
 
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    return `${options.providerLabel} response parser must be a non-empty JSON array of rules.`;
+    return `${options.providerLabel} ${definitionLabel} must be a non-empty JSON array of rules.`;
   }
 
   for (const [index, rule] of parsed.entries()) {
@@ -569,12 +845,12 @@ export function validateWebsocketDslResponseParser<
       !isPlainObject(rule.when) ||
       !isPlainObject(rule.emit)
     ) {
-      return `${options.providerLabel} response parser rule ${index + 1} must define "when" and "emit" objects.`;
+      return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define "when" and "emit" objects.`;
     }
 
     const frame = String(rule.when.frame || '') as FrameType;
     if (!options.supportedFrameTypes.includes(frame)) {
-      return `${options.providerLabel} response parser rule ${index + 1} must define when.frame as ${formatQuotedChoices(options.supportedFrameTypes)}.`;
+      return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define when.frame as ${formatQuotedChoices(options.supportedFrameTypes)}.`;
     }
 
     const hasPath = 'path' in rule.when;
@@ -582,44 +858,43 @@ export function validateWebsocketDslResponseParser<
 
     if (frame === 'binary') {
       if (hasPath || hasEquals) {
-        return `${options.providerLabel} response parser rule ${index + 1} cannot use when.path or when.equals with binary frames.`;
+        return `${options.providerLabel} ${definitionLabel} rule ${index + 1} cannot use when.path or when.equals with binary frames.`;
       }
     } else if (frame === 'json') {
       if (hasPath !== hasEquals) {
-        return `${options.providerLabel} response parser rule ${index + 1} must define both when.path and when.equals together.`;
+        return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define both when.path and when.equals together.`;
       }
       if (
         hasPath &&
         (typeof rule.when.path !== 'string' || !rule.when.path.trim())
       ) {
-        return `${options.providerLabel} response parser rule ${index + 1} must define when.path as a non-empty string.`;
+        return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define when.path as a non-empty string.`;
       }
       if (hasEquals && !isPrimitive(rule.when.equals)) {
-        return `${options.providerLabel} response parser rule ${index + 1} must define when.equals as a primitive JSON value.`;
+        return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define when.equals as a primitive JSON value.`;
       }
     } else if (frame === 'text') {
       if (hasPath) {
-        return `${options.providerLabel} response parser rule ${index + 1} cannot use when.path with text frames.`;
+        return `${options.providerLabel} ${definitionLabel} rule ${index + 1} cannot use when.path with text frames.`;
       }
       if (hasEquals && !isPrimitive(rule.when.equals)) {
-        return `${options.providerLabel} response parser rule ${index + 1} must define when.equals as a primitive JSON value.`;
+        return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must define when.equals as a primitive JSON value.`;
       }
     }
 
     const emitKeys = Object.keys(rule.emit);
     if (emitKeys.length === 0) {
-      return `${options.providerLabel} response parser rule ${index + 1} must emit at least one value.`;
+      return `${options.providerLabel} ${definitionLabel} rule ${index + 1} must emit at least one value.`;
     }
 
     for (const key of emitKeys) {
-      if (
-        !options.supportedEmitKeys.includes(key as EmitKey)
-      ) {
-        return `${options.providerLabel} response parser rule ${index + 1} cannot emit "${key}". Supported keys: ${options.supportedEmitKeys.join(', ')}.`;
+      if (!options.supportedEmitKeys.includes(key as EmitKey)) {
+        return `${options.providerLabel} ${definitionLabel} rule ${index + 1} cannot emit "${key}". Supported keys: ${options.supportedEmitKeys.join(', ')}.`;
       }
 
       const expressionError = validateResponseExpression(rule.emit[key], {
         providerLabel: options.providerLabel,
+        definitionLabel,
         allowedFrameExpressions: options.allowedFrameExpressions,
         allowDecodeBase64: options.allowDecodeBase64,
       });
@@ -630,19 +905,19 @@ export function validateWebsocketDslResponseParser<
   return undefined;
 }
 
-export function parseWebsocketDslResponseParser<
+export function parseWebsocketDslResponseRules<
   FrameType extends WebsocketDslResponseFrameType,
   EmitKey extends string,
 >(
   value: string,
   options: ResponseValidationOptions<FrameType, EmitKey>,
-): WebsocketDslResponseParserRule<FrameType, EmitKey>[] {
-  const error = validateWebsocketDslResponseParser(value, options);
+): WebsocketDslResponseRule<FrameType, EmitKey>[] {
+  const error = validateWebsocketDslResponseRules(value, options);
   if (error) {
     throw new Error(error);
   }
 
-  return JSON.parse(value) as WebsocketDslResponseParserRule<FrameType, EmitKey>[];
+  return JSON.parse(value) as WebsocketDslResponseRule<FrameType, EmitKey>[];
 }
 
 export function parseWebsocketDslResponseFrame<
@@ -650,19 +925,23 @@ export function parseWebsocketDslResponseFrame<
   EmitKey extends string,
 >(
   frame: string | ArrayBuffer | Uint8Array,
-  parser: WebsocketDslResponseParserRule<FrameType, EmitKey>[],
+  rules: WebsocketDslResponseRule<FrameType, EmitKey>[],
   options: ResponseParseOptions<FrameType>,
 ): ParsedWebsocketDslResponseFrame<FrameType> {
   if (typeof frame !== 'string') {
     const payload = normalizeBinaryFrame(frame);
-    const frameType = options.supportedFrameTypes.includes('binary' as FrameType)
+    const frameType = options.supportedFrameTypes.includes(
+      'binary' as FrameType,
+    )
       ? ('binary' as FrameType)
       : undefined;
     if (!frameType) {
       return { payload };
     }
 
-    const rule = parser.find(item => matchesResponseRule(item, frameType, payload));
+    const rule = rules.find(item =>
+      matchesResponseRule(item, frameType, payload),
+    );
     if (!rule) {
       return {
         frameType,
@@ -678,6 +957,7 @@ export function parseWebsocketDslResponseFrame<
           payload,
           {
             providerLabel: options.providerLabel,
+            definitionLabel: 'response rules',
             allowedFrameExpressions: options.allowedFrameExpressions,
             allowDecodeBase64: options.allowDecodeBase64,
           },
@@ -714,7 +994,9 @@ export function parseWebsocketDslResponseFrame<
     return { payload };
   }
 
-  const rule = parser.find(item => matchesResponseRule(item, frameType, payload));
+  const rule = rules.find(item =>
+    matchesResponseRule(item, frameType, payload),
+  );
   if (!rule) {
     return {
       frameType,
@@ -730,6 +1012,7 @@ export function parseWebsocketDslResponseFrame<
         payload,
         {
           providerLabel: options.providerLabel,
+          definitionLabel: 'response rules',
           allowedFrameExpressions: options.allowedFrameExpressions,
           allowDecodeBase64: options.allowDecodeBase64,
         },

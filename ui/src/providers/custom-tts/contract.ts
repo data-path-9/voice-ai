@@ -3,23 +3,24 @@ import {
   WebsocketDslCastTarget,
   WebsocketDslJsonValue,
   WebsocketDslPrimitive,
-  WebsocketDslResponseParserRule,
+  WebsocketDslRequestFrameType,
+  WebsocketDslRequestRule,
+  WebsocketDslResponseRule,
+  parseWebsocketDslRequestRules,
   parseWebsocketDslResponseFrame,
-  parseWebsocketDslResponseParser,
+  parseWebsocketDslResponseRules,
   renderWebsocketDslQueryParams,
-  renderWebsocketDslRequestDefinition,
+  renderWebsocketDslScopedValue,
   validateWebsocketDslQueryParams,
-  validateWebsocketDslRequestDefinition,
-  validateWebsocketDslResponseParser,
+  validateWebsocketDslRequestRules,
+  validateWebsocketDslResponseRules,
 } from '../websocket-dsl/core';
 
 export const CUSTOM_TTS_QUERY_PARAMS_KEY = 'speak.ws.query_params';
-export const CUSTOM_TTS_TEXT_REQUEST_KEY = 'speak.ws.text_request';
-export const CUSTOM_TTS_DONE_REQUEST_KEY = 'speak.ws.done_request';
-export const CUSTOM_TTS_RESPONSE_PARSER_KEY = 'speak.ws.response_parser';
+export const CUSTOM_TTS_REQUEST_RULES_KEY = 'speak.ws.request_rules';
+export const CUSTOM_TTS_RESPONSE_RULES_KEY = 'speak.ws.response_rules';
 
 export const CUSTOM_TTS_DSL_VARIABLES = [
-  'text',
   'message_id',
   'voice_id',
   'model',
@@ -28,16 +29,25 @@ export const CUSTOM_TTS_DSL_VARIABLES = [
   'sample_rate',
 ] as const;
 
+export const CUSTOM_TTS_REQUEST_PACKETS = [
+  'text',
+  'done',
+  'interrupt',
+] as const;
+
 type CustomTtsResponseEmitKey = 'audio' | 'message_id' | 'done' | 'error';
 
 export type CustomTtsDslVariable = (typeof CUSTOM_TTS_DSL_VARIABLES)[number];
+export type CustomTtsRequestPacket =
+  (typeof CUSTOM_TTS_REQUEST_PACKETS)[number];
 export type CustomTtsFlowMode = 'one-shot' | 'two-step';
 export type CustomTtsDslCastTarget = WebsocketDslCastTarget;
+export type CustomTtsRequestFrameType = WebsocketDslRequestFrameType;
 export type CustomTtsResponseFrameType = 'binary' | 'json';
 export type CustomTtsPrimitive = WebsocketDslPrimitive;
 export type CustomTtsJsonValue = WebsocketDslJsonValue;
 
-export interface CustomTtsRequestContext {
+export interface CustomTtsQueryContext {
   text: string;
   message_id: string;
   voice_id: string;
@@ -47,7 +57,31 @@ export interface CustomTtsRequestContext {
   sample_rate: string;
 }
 
-export type CustomTtsResponseParserRule = WebsocketDslResponseParserRule<
+export interface CustomTtsRequestRuleContext {
+  config: {
+    voice: {
+      id: string;
+    };
+    model: string;
+    language: string;
+    audio: {
+      encoding: string;
+      sample_rate: string;
+    };
+  };
+  packet: {
+    kind: CustomTtsRequestPacket;
+    message_id: string;
+    text: string;
+  };
+}
+
+export type CustomTtsRequestRule = WebsocketDslRequestRule<
+  CustomTtsRequestPacket,
+  CustomTtsRequestFrameType
+>;
+
+export type CustomTtsResponseRule = WebsocketDslResponseRule<
   CustomTtsResponseFrameType,
   CustomTtsResponseEmitKey
 >;
@@ -81,6 +115,7 @@ export type CustomTtsParsedResponseFrame =
 
 const RESPONSE_VALIDATION_OPTIONS = {
   providerLabel: 'Custom TTS',
+  definitionLabel: 'response rules',
   jsonErrorLabel: 'custom TTS',
   supportedFrameTypes: ['binary', 'json'] as const,
   supportedEmitKeys: ['audio', 'message_id', 'done', 'error'] as const,
@@ -95,7 +130,7 @@ const RESPONSE_PARSE_OPTIONS = {
   allowDecodeBase64: true,
 };
 
-const VALIDATION_CONTEXT: CustomTtsRequestContext = {
+const QUERY_VALIDATION_CONTEXT: CustomTtsQueryContext = {
   text: 'Hello world',
   message_id: 'msg_123',
   voice_id: 'voice_123',
@@ -103,6 +138,60 @@ const VALIDATION_CONTEXT: CustomTtsRequestContext = {
   language: 'en-US',
   encoding: 'LINEAR16',
   sample_rate: '16000',
+};
+
+const REQUEST_RULE_VALIDATION_CONTEXTS: Record<
+  CustomTtsRequestPacket,
+  CustomTtsRequestRuleContext
+> = {
+  text: {
+    config: {
+      voice: { id: 'voice_123' },
+      model: 'model_123',
+      language: 'en-US',
+      audio: {
+        encoding: 'LINEAR16',
+        sample_rate: '16000',
+      },
+    },
+    packet: {
+      kind: 'text',
+      message_id: 'msg_123',
+      text: 'Hello world',
+    },
+  },
+  done: {
+    config: {
+      voice: { id: 'voice_123' },
+      model: 'model_123',
+      language: 'en-US',
+      audio: {
+        encoding: 'LINEAR16',
+        sample_rate: '16000',
+      },
+    },
+    packet: {
+      kind: 'done',
+      message_id: 'msg_123',
+      text: '',
+    },
+  },
+  interrupt: {
+    config: {
+      voice: { id: 'voice_123' },
+      model: 'model_123',
+      language: 'en-US',
+      audio: {
+        encoding: 'LINEAR16',
+        sample_rate: '16000',
+      },
+    },
+    packet: {
+      kind: 'interrupt',
+      message_id: 'msg_123',
+      text: '',
+    },
+  },
 };
 
 export const CUSTOM_TTS_QUERY_PARAMS_EXAMPLE = `{
@@ -116,27 +205,78 @@ export const CUSTOM_TTS_QUERY_PARAMS_EXAMPLE = `{
   }
 }`;
 
-export const CUSTOM_TTS_TEXT_REQUEST_EXAMPLE = `{
-  "text": { "$var": "text" },
-  "voice_id": { "$var": "voice_id" },
-  "message_id": { "$var": "message_id" },
-  "model": { "$var": "model" },
-  "language": { "$var": "language" },
-  "audio": {
-    "encoding": { "$var": "encoding" },
-    "sample_rate": {
-      "$cast": "number",
-      "value": { "$var": "sample_rate" }
+export const CUSTOM_TTS_DEFAULT_REQUEST_RULES_EXAMPLE = `[
+  {
+    "when": { "packet": "text" },
+    "send": {
+      "frame": "json",
+      "body": {
+        "text": { "$path": "packet.text" },
+        "voice_id": { "$path": "config.voice.id" },
+        "message_id": { "$path": "packet.message_id" },
+        "model": { "$path": "config.model" },
+        "language": { "$path": "config.language" },
+        "audio": {
+          "encoding": { "$path": "config.audio.encoding" },
+          "sample_rate": {
+            "$cast": "number",
+            "value": { "$path": "config.audio.sample_rate" }
+          }
+        }
+      }
     }
   }
-}`;
+]`;
 
-export const CUSTOM_TTS_DONE_REQUEST_EXAMPLE = `{
-  "type": "done",
-  "message_id": { "$var": "message_id" }
-}`;
+export const CUSTOM_TTS_REQUEST_RULES_DONE_EXAMPLE = `[
+  {
+    "when": { "packet": "text" },
+    "send": {
+      "frame": "json",
+      "body": {
+        "text": { "$path": "packet.text" },
+        "voice_id": { "$path": "config.voice.id" },
+        "message_id": { "$path": "packet.message_id" }
+      }
+    }
+  },
+  {
+    "when": { "packet": "done" },
+    "send": {
+      "frame": "json",
+      "body": {
+        "type": "done",
+        "message_id": { "$path": "packet.message_id" }
+      }
+    }
+  }
+]`;
 
-export const CUSTOM_TTS_RESPONSE_PARSER_BINARY_EXAMPLE = `[
+export const CUSTOM_TTS_REQUEST_RULES_INTERRUPT_EXAMPLE = `[
+  {
+    "when": { "packet": "text" },
+    "send": {
+      "frame": "json",
+      "body": {
+        "text": { "$path": "packet.text" },
+        "voice_id": { "$path": "config.voice.id" },
+        "message_id": { "$path": "packet.message_id" }
+      }
+    }
+  },
+  {
+    "when": { "packet": "interrupt" },
+    "send": {
+      "frame": "json",
+      "body": {
+        "type": "interrupt",
+        "message_id": { "$path": "packet.message_id" }
+      }
+    }
+  }
+]`;
+
+export const CUSTOM_TTS_RESPONSE_RULES_BINARY_EXAMPLE = `[
   {
     "when": { "frame": "binary" },
     "emit": {
@@ -160,7 +300,7 @@ export const CUSTOM_TTS_RESPONSE_PARSER_BINARY_EXAMPLE = `[
   }
 ]`;
 
-export const CUSTOM_TTS_RESPONSE_PARSER_JSON_AUDIO_EXAMPLE = `[
+export const CUSTOM_TTS_RESPONSE_RULES_JSON_AUDIO_EXAMPLE = `[
   {
     "when": { "frame": "json", "path": "type", "equals": "chunk" },
     "emit": {
@@ -240,45 +380,51 @@ function classifyEmittedResponse(
   };
 }
 
+function parseRequestRulesForFlow(
+  value?: string | null,
+): CustomTtsRequestRule[] | null {
+  if (!value?.trim()) return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as CustomTtsRequestRule[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function resolveCustomTtsFlowMode(
-  doneRequest?: string | null,
+  requestRules?: string | null,
 ): CustomTtsFlowMode {
-  return doneRequest?.trim() ? 'two-step' : 'one-shot';
+  const rules = parseRequestRulesForFlow(requestRules);
+  if (!rules?.some(rule => rule.when?.packet === 'done')) {
+    return 'one-shot';
+  }
+
+  return 'two-step';
 }
 
 export function getCustomTtsFlowMode(
   metadata: MetadataLike[],
 ): CustomTtsFlowMode {
-  const doneRequest =
-    metadata.find(item => item.getKey() === CUSTOM_TTS_DONE_REQUEST_KEY)?.getValue() ??
-    '';
-  return resolveCustomTtsFlowMode(doneRequest);
-}
-
-export function renderCustomTtsRequestDefinition(
-  definition: string,
-  context: CustomTtsRequestContext,
-): unknown {
-  return renderWebsocketDslRequestDefinition(definition, context);
+  const requestRules = metadata
+    .find(item => item.getKey() === CUSTOM_TTS_REQUEST_RULES_KEY)
+    ?.getValue();
+  return resolveCustomTtsFlowMode(requestRules);
 }
 
 export function renderCustomTtsQueryParams(
   definition: string,
-  context: CustomTtsRequestContext,
+  context: CustomTtsQueryContext,
 ): Record<string, string | number | boolean> {
   return renderWebsocketDslQueryParams(definition, context, 'Custom TTS');
 }
 
-export function validateCustomTtsRequestDefinition(
-  value: string,
-  definitionLabel = 'request definition',
-): string | undefined {
-  return validateWebsocketDslRequestDefinition(value, {
-    providerLabel: 'Custom TTS',
-    definitionLabel,
-    supportedVariables: CUSTOM_TTS_DSL_VARIABLES,
-    validationContext: VALIDATION_CONTEXT,
-  });
+export function renderCustomTtsRequestRuleBody(
+  rule: CustomTtsRequestRule,
+  context: CustomTtsRequestRuleContext,
+): unknown {
+  return renderWebsocketDslScopedValue(JSON.stringify(rule.send.body), context);
 }
 
 export function validateCustomTtsQueryParams(
@@ -289,30 +435,79 @@ export function validateCustomTtsQueryParams(
     providerLabel: 'Custom TTS',
     definitionLabel,
     supportedVariables: CUSTOM_TTS_DSL_VARIABLES,
-    validationContext: VALIDATION_CONTEXT,
+    validationContext: QUERY_VALIDATION_CONTEXT,
   });
 }
 
-export function validateCustomTtsResponseParser(
+export function validateCustomTtsRequestRules(
   value: string,
 ): string | undefined {
-  return validateWebsocketDslResponseParser(value, RESPONSE_VALIDATION_OPTIONS);
+  const error = validateWebsocketDslRequestRules(value, {
+    providerLabel: 'Custom TTS',
+    definitionLabel: 'request rules',
+    jsonErrorLabel: 'custom TTS',
+    supportedPackets: CUSTOM_TTS_REQUEST_PACKETS,
+    supportedFrameTypes: ['binary', 'json', 'text'] as const,
+    supportedPathRoots: ['config', 'packet'] as const,
+    validationContexts: REQUEST_RULE_VALIDATION_CONTEXTS,
+  });
+  if (error) return error;
+
+  try {
+    const rules = JSON.parse(value) as CustomTtsRequestRule[];
+    if (!rules.some(rule => rule.when?.packet === 'text')) {
+      return 'Custom TTS request rules must contain at least one rule with when.packet "text".';
+    }
+  } catch {
+    return 'Please provide valid JSON request rules for custom TTS.';
+  }
+
+  return undefined;
 }
 
-export function parseCustomTtsResponseParser(
+export function parseCustomTtsRequestRules(
   value: string,
-): CustomTtsResponseParserRule[] {
-  return parseWebsocketDslResponseParser(
+): CustomTtsRequestRule[] {
+  const error = validateCustomTtsRequestRules(value);
+  if (error) {
+    throw new Error(error);
+  }
+
+  return parseWebsocketDslRequestRules(value, {
+    providerLabel: 'Custom TTS',
+    definitionLabel: 'request rules',
+    jsonErrorLabel: 'custom TTS',
+    supportedPackets: CUSTOM_TTS_REQUEST_PACKETS,
+    supportedFrameTypes: ['binary', 'json', 'text'] as const,
+    supportedPathRoots: ['config', 'packet'] as const,
+    validationContexts: REQUEST_RULE_VALIDATION_CONTEXTS,
+  }) as CustomTtsRequestRule[];
+}
+
+export function validateCustomTtsResponseRules(
+  value: string,
+): string | undefined {
+  return validateWebsocketDslResponseRules(value, RESPONSE_VALIDATION_OPTIONS);
+}
+
+export function parseCustomTtsResponseRules(
+  value: string,
+): CustomTtsResponseRule[] {
+  return parseWebsocketDslResponseRules(
     value,
     RESPONSE_VALIDATION_OPTIONS,
-  ) as CustomTtsResponseParserRule[];
+  ) as CustomTtsResponseRule[];
 }
 
 export function parseCustomTtsResponseFrame(
   frame: string | ArrayBuffer | Uint8Array,
-  parser: CustomTtsResponseParserRule[],
+  rules: CustomTtsResponseRule[],
 ): CustomTtsParsedResponseFrame {
-  const parsed = parseWebsocketDslResponseFrame(frame, parser, RESPONSE_PARSE_OPTIONS);
+  const parsed = parseWebsocketDslResponseFrame(
+    frame,
+    rules,
+    RESPONSE_PARSE_OPTIONS,
+  );
   if (!parsed.emitted) {
     return {
       kind: 'message',

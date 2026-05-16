@@ -30,18 +30,25 @@ const (
 )
 
 const (
-	optionKeyModel          = "listen.model"
-	optionKeyLanguage       = "listen.language"
-	optionKeyEncoding       = "listen.audio.encoding"
-	optionKeySampleRate     = "listen.audio.sample_rate"
-	optionKeyQueryParams    = "listen.ws.query_params"
-	optionKeyAudioRequest   = "listen.ws.audio_request"
-	optionKeyResponseParser = "listen.ws.response_parser"
+	optionKeyModel         = "listen.model"
+	optionKeyLanguage      = "listen.language"
+	optionKeyEncoding      = "listen.audio.encoding"
+	optionKeySampleRate    = "listen.audio.sample_rate"
+	optionKeyQueryParams   = "listen.ws.query_params"
+	optionKeyRequestRules  = "listen.ws.request_rules"
+	optionKeyResponseRules = "listen.ws.response_rules"
 )
 
 const (
-	frameTypeJSON = "json"
-	frameTypeText = "text"
+	frameTypeJSON   = "json"
+	frameTypeBinary = "binary"
+	frameTypeText   = "text"
+)
+
+const (
+	requestPacketTurnChange = "turn_change"
+	requestPacketAudio      = "audio"
+	requestPacketInterrupt  = "interrupt"
 )
 
 var queryContract = internal_transformer_custom_websocketdsl.Contract{
@@ -53,13 +60,68 @@ var queryContract = internal_transformer_custom_websocketdsl.Contract{
 	},
 }
 
-var audioRequestContract = internal_transformer_custom_websocketdsl.Contract{
-	SupportedVariables: []string{
-		"audio",
-		"model",
-		"language",
-		"encoding",
-		"sample_rate",
+var requestRuleContract = internal_transformer_custom_websocketdsl.Contract{
+	SupportedRequestPackets: []string{
+		requestPacketTurnChange,
+		requestPacketAudio,
+		requestPacketInterrupt,
+	},
+	SupportedRequestFrames: []string{
+		frameTypeBinary,
+		frameTypeJSON,
+		frameTypeText,
+	},
+	SupportedPathRoots: []string{
+		"config",
+		"packet",
+	},
+	RequestValidationScopes: map[string]any{
+		requestPacketTurnChange: map[string]any{
+			"config": map[string]any{
+				"model":    "model-a",
+				"language": "en-US",
+				"audio": map[string]any{
+					"encoding":    defaultEncoding,
+					"sample_rate": defaultSampleRate,
+				},
+			},
+			"packet": map[string]any{
+				"kind":       requestPacketTurnChange,
+				"context_id": "ctx_123",
+			},
+		},
+		requestPacketAudio: map[string]any{
+			"config": map[string]any{
+				"model":    "model-a",
+				"language": "en-US",
+				"audio": map[string]any{
+					"encoding":    defaultEncoding,
+					"sample_rate": defaultSampleRate,
+				},
+			},
+			"packet": map[string]any{
+				"kind":       requestPacketAudio,
+				"context_id": "ctx_123",
+				"audio": map[string]any{
+					"bytes":  []byte{0x00, 0x01},
+					"base64": "AAE=",
+				},
+			},
+		},
+		requestPacketInterrupt: map[string]any{
+			"config": map[string]any{
+				"model":    "model-a",
+				"language": "en-US",
+				"audio": map[string]any{
+					"encoding":    defaultEncoding,
+					"sample_rate": defaultSampleRate,
+				},
+			},
+			"packet": map[string]any{
+				"kind":       requestPacketInterrupt,
+				"context_id": "ctx_123",
+			},
+		},
 	},
 }
 
@@ -89,13 +151,14 @@ type Config struct {
 	Encoding   string
 	SampleRate int
 
-	QueryParams  map[string]any
-	AudioRequest map[string]any
-
-	HasAudioRequest bool
-	ResponseParser  []ResponseRule
+	QueryParams   map[string]any
+	RequestRules  []RequestRule
+	ResponseRules []ResponseRule
 }
 
+type RequestRule = internal_transformer_custom_websocketdsl.RequestRule
+type RequestWhen = internal_transformer_custom_websocketdsl.RequestWhen
+type RequestSend = internal_transformer_custom_websocketdsl.Send
 type ResponseRule = internal_transformer_custom_websocketdsl.ResponseRule
 type ResponseWhen = internal_transformer_custom_websocketdsl.When
 
@@ -186,16 +249,11 @@ func (parser *configParser) loadOptions(config *Config) error {
 		config.QueryParams = map[string]any{}
 	}
 
-	foundAudioRequest, err := parser.decodeJSONObject(optionKeyAudioRequest, false, &config.AudioRequest)
-	if err != nil {
+	if _, err := parser.decodeJSONArray(optionKeyRequestRules, true, &config.RequestRules); err != nil {
 		return err
 	}
-	config.HasAudioRequest = foundAudioRequest
-	if !foundAudioRequest {
-		config.AudioRequest = nil
-	}
 
-	if _, err := parser.decodeJSONArray(optionKeyResponseParser, true, &config.ResponseParser); err != nil {
+	if _, err := parser.decodeJSONArray(optionKeyResponseRules, true, &config.ResponseRules); err != nil {
 		return err
 	}
 
@@ -221,7 +279,7 @@ func (parser *configParser) decodeJSONObject(key string, required bool, destinat
 	return true, nil
 }
 
-func (parser *configParser) decodeJSONArray(key string, required bool, destination *[]ResponseRule) (bool, error) {
+func (parser *configParser) decodeJSONArray(key string, required bool, destination any) (bool, error) {
 	raw, found := parser.opts[key]
 	if !found || raw == nil {
 		if required {
@@ -290,8 +348,11 @@ func (config *Config) validate() error {
 	if config.SampleRate <= 0 {
 		return fmt.Errorf("custom-stt websocket_v1: %s must be positive", optionKeySampleRate)
 	}
-	if len(config.ResponseParser) == 0 {
-		return fmt.Errorf("custom-stt websocket_v1: %s must contain at least one rule", optionKeyResponseParser)
+	if len(config.RequestRules) == 0 {
+		return fmt.Errorf("custom-stt websocket_v1: %s must contain at least one rule", optionKeyRequestRules)
+	}
+	if len(config.ResponseRules) == 0 {
+		return fmt.Errorf("custom-stt websocket_v1: %s must contain at least one rule", optionKeyResponseRules)
 	}
 
 	if len(config.QueryParams) > 0 {
@@ -299,12 +360,24 @@ func (config *Config) validate() error {
 			return err
 		}
 	}
-	if config.HasAudioRequest && config.AudioRequest != nil {
-		if err := core.ValidateRequestObject(config.AudioRequest, audioRequestContract, optionKeyAudioRequest); err != nil {
-			return err
+	if err := core.ValidateRequestRules(config.RequestRules, requestRuleContract, optionKeyRequestRules); err != nil {
+		return err
+	}
+	hasAudioRule := false
+	for _, rule := range config.RequestRules {
+		if strings.TrimSpace(rule.When.Packet) == requestPacketAudio {
+			hasAudioRule = true
+			break
 		}
 	}
-	if err := core.ValidateResponseRules(config.ResponseParser, responseContract, optionKeyResponseParser); err != nil {
+	if !hasAudioRule {
+		return fmt.Errorf(
+			"custom-stt websocket_v1: %s must contain at least one rule with when.packet %q",
+			optionKeyRequestRules,
+			requestPacketAudio,
+		)
+	}
+	if err := core.ValidateResponseRules(config.ResponseRules, responseContract, optionKeyResponseRules); err != nil {
 		return err
 	}
 

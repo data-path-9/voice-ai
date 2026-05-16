@@ -1,41 +1,25 @@
 import {
-  CUSTOM_STT_AUDIO_REQUEST_EXAMPLE,
+  CUSTOM_STT_DEFAULT_REQUEST_RULES_EXAMPLE,
   CUSTOM_STT_DSL_VARIABLES,
   CUSTOM_STT_QUERY_PARAMS_EXAMPLE,
-  CUSTOM_STT_RESPONSE_PARSER_EXAMPLE,
-  CUSTOM_STT_RESPONSE_PARSER_JSON_EXAMPLE,
-  CUSTOM_STT_RESPONSE_PARSER_NESTED_EXAMPLE,
+  CUSTOM_STT_REQUEST_RULES_JSON_AUDIO_EXAMPLE,
+  CUSTOM_STT_RESPONSE_RULES_EXAMPLE,
+  CUSTOM_STT_RESPONSE_RULES_JSON_EXAMPLE,
+  CUSTOM_STT_RESPONSE_RULES_NESTED_EXAMPLE,
+  parseCustomSttRequestRules,
   parseCustomSttResponseFrame,
-  parseCustomSttResponseParser,
+  parseCustomSttResponseRules,
   renderCustomSttQueryParams,
-  renderCustomSttRequestDefinition,
+  renderCustomSttRequestRuleBody,
   validateCustomSttQueryParams,
-  validateCustomSttRequestDefinition,
-  validateCustomSttResponseParser,
+  validateCustomSttRequestRules,
+  validateCustomSttResponseRules,
 } from '../contract';
 
 describe('custom-stt websocket DSL helpers', () => {
-  it('renders request bindings and query params from the shared DSL', () => {
-    const renderedRequest = renderCustomSttRequestDefinition(
-      CUSTOM_STT_AUDIO_REQUEST_EXAMPLE,
-      {
-        audio: 'AAEC',
-        model: 'nova-3',
-        language: 'en-US',
-        encoding: 'LINEAR16',
-        sample_rate: '16000',
-      },
-    );
-
-    expect(renderedRequest).toEqual({
-      audio: 'AAEC',
-      encoding: 'LINEAR16',
-      sample_rate: 16000,
-    });
-
+  it('renders query params from the shared DSL', () => {
     expect(
       renderCustomSttQueryParams(CUSTOM_STT_QUERY_PARAMS_EXAMPLE, {
-        audio: 'AAEC',
         model: 'nova-3',
         language: 'en-US',
         encoding: 'LINEAR16',
@@ -49,20 +33,19 @@ describe('custom-stt websocket DSL helpers', () => {
     });
   });
 
-  it('rejects unsupported DSL variables and query param objects that do not resolve to primitives', () => {
-    const variableResult = validateCustomSttRequestDefinition(
-      '{"audio":{"$var":"chunk"}}',
-      'Audio Request',
+  it('rejects unsupported query-param variables and nested object values', () => {
+    const variableResult = validateCustomSttQueryParams(
+      '{"audio":{"$var":"audio"}}',
+      'Query Parameters',
     );
-
-    expect(variableResult).toContain('"chunk"');
+    expect(variableResult).toContain('"audio"');
     for (const variable of CUSTOM_STT_DSL_VARIABLES) {
       expect(variableResult).toContain(variable);
     }
 
     expect(
       validateCustomSttQueryParams(
-        '{"audio":{"payload":{"$var":"audio"}}}',
+        '{"model":{"payload":{"$var":"model"}}}',
         'Query Parameters',
       ),
     ).toBe(
@@ -70,21 +53,106 @@ describe('custom-stt websocket DSL helpers', () => {
     );
   });
 
-  it('validates and parses plain text transcript parser rules', () => {
+  it('validates and renders binary request rules', () => {
     expect(
-      validateCustomSttResponseParser(CUSTOM_STT_RESPONSE_PARSER_EXAMPLE),
+      validateCustomSttRequestRules(CUSTOM_STT_DEFAULT_REQUEST_RULES_EXAMPLE),
     ).toBeUndefined();
 
-    const parser = parseCustomSttResponseParser(
-      CUSTOM_STT_RESPONSE_PARSER_EXAMPLE,
+    const rules = parseCustomSttRequestRules(
+      CUSTOM_STT_DEFAULT_REQUEST_RULES_EXAMPLE,
+    );
+
+    expect(rules).toHaveLength(1);
+    expect(rules[0].send.frame).toBe('binary');
+    expect(
+      renderCustomSttRequestRuleBody(rules[0], {
+        config: {
+          model: 'nova-3',
+          language: 'en-US',
+          audio: {
+            encoding: 'LINEAR16',
+            sample_rate: '16000',
+          },
+        },
+        packet: {
+          kind: 'audio',
+          context_id: 'ctx_123',
+          audio: {
+            bytes: 'AAEC',
+            base64: 'AAEC',
+          },
+        },
+      }),
+    ).toBe('AAEC');
+  });
+
+  it('validates and renders JSON request rules', () => {
+    expect(
+      validateCustomSttRequestRules(
+        CUSTOM_STT_REQUEST_RULES_JSON_AUDIO_EXAMPLE,
+      ),
+    ).toBeUndefined();
+
+    const rules = parseCustomSttRequestRules(
+      CUSTOM_STT_REQUEST_RULES_JSON_AUDIO_EXAMPLE,
     );
 
     expect(
-      parseCustomSttResponseFrame(
-        'namaste',
-        parser,
-      ),
+      renderCustomSttRequestRuleBody(rules[0], {
+        config: {
+          model: 'nova-3',
+          language: 'en-US',
+          audio: {
+            encoding: 'LINEAR16',
+            sample_rate: '16000',
+          },
+        },
+        packet: {
+          kind: 'audio',
+          context_id: 'ctx_123',
+          audio: {
+            bytes: 'AAEC',
+            base64: 'AAEC',
+          },
+        },
+      }),
     ).toEqual({
+      audio: 'AAEC',
+      encoding: 'LINEAR16',
+      sample_rate: 16000,
+    });
+  });
+
+  it('rejects request rules that use unsupported $path roots', () => {
+    expect(
+      validateCustomSttRequestRules(
+        '[{"when":{"packet":"audio"},"send":{"frame":"binary","body":{"$path":"payload.audio"}}}]',
+      ),
+    ).toBe(
+      'Custom STT request rules only supports "$path" roots of config, packet.',
+    );
+  });
+
+  it('rejects request rules without an audio packet rule', () => {
+    expect(
+      validateCustomSttRequestRules(
+        '[{"when":{"packet":"turn_change"},"send":{"frame":"json","body":{"type":"start"}}}]',
+      ),
+    ).toBe(
+      'Custom STT request rules must contain at least one rule with when.packet "audio".',
+    );
+  });
+
+  it('validates and parses plain text transcript response rules', () => {
+    expect(
+      validateCustomSttResponseRules(CUSTOM_STT_RESPONSE_RULES_EXAMPLE),
+    ).toBeUndefined();
+
+    const parser = parseCustomSttResponseRules(
+      CUSTOM_STT_RESPONSE_RULES_EXAMPLE,
+    );
+
+    expect(parseCustomSttResponseFrame('namaste', parser)).toEqual({
       kind: 'transcript',
       payload: 'namaste',
       script: 'namaste',
@@ -93,13 +161,13 @@ describe('custom-stt websocket DSL helpers', () => {
     });
   });
 
-  it('validates and parses interim/final JSON transcript parser rules', () => {
+  it('validates and parses interim/final JSON transcript response rules', () => {
     expect(
-      validateCustomSttResponseParser(CUSTOM_STT_RESPONSE_PARSER_JSON_EXAMPLE),
+      validateCustomSttResponseRules(CUSTOM_STT_RESPONSE_RULES_JSON_EXAMPLE),
     ).toBeUndefined();
 
-    const parser = parseCustomSttResponseParser(
-      CUSTOM_STT_RESPONSE_PARSER_JSON_EXAMPLE,
+    const parser = parseCustomSttResponseRules(
+      CUSTOM_STT_RESPONSE_RULES_JSON_EXAMPLE,
     );
 
     expect(
@@ -138,9 +206,9 @@ describe('custom-stt websocket DSL helpers', () => {
     });
   });
 
-  it('parses nested transcript payloads from ordered parser rules', () => {
-    const parser = parseCustomSttResponseParser(
-      CUSTOM_STT_RESPONSE_PARSER_NESTED_EXAMPLE,
+  it('parses nested transcript payloads from ordered response rules', () => {
+    const parser = parseCustomSttResponseRules(
+      CUSTOM_STT_RESPONSE_RULES_NESTED_EXAMPLE,
     );
 
     expect(
@@ -165,13 +233,13 @@ describe('custom-stt websocket DSL helpers', () => {
     });
   });
 
-  it('rejects text parser rules that try to use when.path', () => {
+  it('rejects text response rules that try to use when.path', () => {
     expect(
-      validateCustomSttResponseParser(
+      validateCustomSttResponseRules(
         '[{"when":{"frame":"text","path":"type","equals":"partial"},"emit":{"script":{"$frame":"text"},"interim":true}}]',
       ),
     ).toBe(
-      'Custom STT response parser rule 1 cannot use when.path with text frames.',
+      'Custom STT response rules rule 1 cannot use when.path with text frames.',
     );
   });
 });

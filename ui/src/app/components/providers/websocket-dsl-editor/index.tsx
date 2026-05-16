@@ -46,9 +46,11 @@ export const WebsocketDslEditor: React.FC<WebsocketDslEditorProps> = ({
       height={height}
       configureEditor={(editor, monacoInstance) => {
         const modelUri = editor.getModel()?.uri.toString();
+        const triggerCharacters =
+          mode === 'response_rules' || mode === 'request_rules' ? ['['] : ['{'];
         const completionProvider =
           monacoInstance.languages.registerCompletionItemProvider('json', {
-            triggerCharacters: mode === 'response_parser' ? ['['] : ['{'],
+            triggerCharacters,
             provideCompletionItems(model, position) {
               if (model.uri.toString() !== modelUri) {
                 return { suggestions: [] };

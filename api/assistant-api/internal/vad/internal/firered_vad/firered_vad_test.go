@@ -41,7 +41,7 @@ func newFireRedOrSkip(t *testing.T, threshold float64, cb func(ctx context.Conte
 		require.NoError(t, err)
 	}
 	fr := vad.(*FireRedVAD)
-	t.Cleanup(func() { _ = fr.Close() })
+	t.Cleanup(func() { _ = fr.Close(context.Background()) })
 	return fr
 }
 
@@ -100,7 +100,7 @@ func TestFireRedVAD_Process_Silence_NoCallback(t *testing.T) {
 
 	vad := newFireRedOrSkip(t, 0.5, callback)
 
-	err := vad.Process(context.Background(), generateSilence(16000))
+	err := vad.Execute(context.Background(), generateSilence(16000))
 	require.NoError(t, err)
 	assert.False(t, detectionFired, "silence should not trigger a speech detection event")
 }
@@ -118,7 +118,7 @@ func TestFireRedVAD_Process_Speech_AllowsCallback(t *testing.T) {
 
 	vad := newFireRedOrSkip(t, 0.2, callback)
 
-	err := vad.Process(context.Background(), generateSineWave(16000, 440, 0.9))
+	err := vad.Execute(context.Background(), generateSineWave(16000, 440, 0.9))
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, result.EndAt, result.StartAt)
 }
@@ -129,7 +129,7 @@ func TestFireRedVAD_Process_CorruptedData(t *testing.T) {
 	vad := newFireRedOrSkip(t, 0.5, callback)
 
 	corrupted := make([]byte, 999)
-	err := vad.Process(context.Background(), internal_type.UserAudioReceivedPacket{Audio: corrupted})
+	err := vad.Execute(context.Background(), internal_type.UserAudioReceivedPacket{Audio: corrupted})
 	_ = err
 }
 
@@ -142,7 +142,7 @@ func TestFireRedVAD_Process_VerySmallChunks(t *testing.T) {
 	for _, size := range sizes {
 		size := size
 		t.Run(fmt.Sprintf("%d_samples", size), func(t *testing.T) {
-			err := vad.Process(context.Background(), generateSilence(size))
+			err := vad.Execute(context.Background(), generateSilence(size))
 			_ = err
 		})
 	}
@@ -159,7 +159,7 @@ func TestFireRedVAD_Process_Concurrent(t *testing.T) {
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer wg.Done()
-			_ = vad.Process(context.Background(), generateSilence(1600))
+			_ = vad.Execute(context.Background(), generateSilence(1600))
 		}()
 	}
 	wg.Wait()
@@ -178,8 +178,8 @@ func TestFireRedVAD_Close_Idempotent(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	require.NoError(t, vad.Close())
-	err = vad.Close()
+	require.NoError(t, vad.Close(context.Background()))
+	err = vad.Close(context.Background())
 	_ = err
 }
 
@@ -188,7 +188,7 @@ func TestFireRedVAD_Process_NoisePatterns(t *testing.T) {
 
 	vad := newFireRedOrSkip(t, 0.5, callback)
 
-	err := vad.Process(context.Background(), generateNoise(16000))
+	err := vad.Execute(context.Background(), generateNoise(16000))
 	require.NoError(t, err)
 }
 
@@ -209,7 +209,7 @@ func TestFireRedVAD_Process_MaxAmplitude(t *testing.T) {
 		binary.LittleEndian.PutUint16(data[i*2:i*2+2], uint16(val))
 	}
 
-	err := vad.Process(context.Background(), internal_type.UserAudioReceivedPacket{Audio: data})
+	err := vad.Execute(context.Background(), internal_type.UserAudioReceivedPacket{Audio: data})
 	require.NoError(t, err)
 }
 
@@ -220,7 +220,7 @@ func TestFireRedVAD_Process_RepeatedCalls(t *testing.T) {
 
 	chunk := generateSilence(1600)
 	for i := 0; i < 50; i++ {
-		err := vad.Process(context.Background(), chunk)
+		err := vad.Execute(context.Background(), chunk)
 		require.NoError(t, err)
 	}
 }
@@ -235,7 +235,7 @@ func TestFireRedVAD_StatefulProcessing(t *testing.T) {
 	vad := newFireRedOrSkip(t, 0.3, callback)
 
 	for i := 0; i < 10; i++ {
-		err := vad.Process(context.Background(), generateSineWave(1600, 440, 0.8))
+		err := vad.Execute(context.Background(), generateSineWave(1600, 440, 0.8))
 		require.NoError(t, err)
 	}
 
@@ -248,7 +248,7 @@ func TestFireRedVAD_Process_80msChunk(t *testing.T) {
 	vad := newFireRedOrSkip(t, 0.5, callback)
 
 	// 80ms at 16kHz = 1280 samples — production chunk size
-	err := vad.Process(context.Background(), generateSilence(1280))
+	err := vad.Execute(context.Background(), generateSilence(1280))
 	require.NoError(t, err)
 }
 
@@ -256,15 +256,15 @@ func TestFireRedVAD_Process_PartialFrameCarry_NoDrop(t *testing.T) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	vad := newFireRedOrSkip(t, 0.5, callback)
 
-	err := vad.Process(context.Background(), generateSilence(128))
+	err := vad.Execute(context.Background(), generateSilence(128))
 	require.NoError(t, err)
 	assert.Equal(t, 128, len(vad.audioBuf))
 
-	err = vad.Process(context.Background(), generateSilence(200))
+	err = vad.Execute(context.Background(), generateSilence(200))
 	require.NoError(t, err)
 	assert.Equal(t, 328, len(vad.audioBuf))
 
-	err = vad.Process(context.Background(), generateSilence(100))
+	err = vad.Execute(context.Background(), generateSilence(100))
 	require.NoError(t, err)
 	// 428 total samples buffered -> one frame processed, shift by 160 samples -> 268 retained.
 	assert.Equal(t, 268, len(vad.audioBuf))

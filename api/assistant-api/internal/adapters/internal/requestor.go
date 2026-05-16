@@ -106,7 +106,7 @@ type genericRequestor struct {
 
 	// audio intelligence
 
-	vad      internal_type.Vad
+	vad      internal_type.VoiceActivityDetectorExecutor
 	denoiser internal_type.Denoiser
 
 	// output preprocessor + TTS

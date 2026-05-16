@@ -1,19 +1,22 @@
 import {
-  CUSTOM_TTS_DONE_REQUEST_KEY,
+  CUSTOM_TTS_DEFAULT_REQUEST_RULES_EXAMPLE,
   CUSTOM_TTS_DSL_VARIABLES,
   CUSTOM_TTS_QUERY_PARAMS_EXAMPLE,
-  CUSTOM_TTS_RESPONSE_PARSER_BINARY_EXAMPLE,
-  CUSTOM_TTS_RESPONSE_PARSER_JSON_AUDIO_EXAMPLE,
-  CUSTOM_TTS_TEXT_REQUEST_EXAMPLE,
+  CUSTOM_TTS_REQUEST_RULES_DONE_EXAMPLE,
+  CUSTOM_TTS_REQUEST_RULES_INTERRUPT_EXAMPLE,
+  CUSTOM_TTS_REQUEST_RULES_KEY,
+  CUSTOM_TTS_RESPONSE_RULES_BINARY_EXAMPLE,
+  CUSTOM_TTS_RESPONSE_RULES_JSON_AUDIO_EXAMPLE,
   getCustomTtsFlowMode,
+  parseCustomTtsRequestRules,
   parseCustomTtsResponseFrame,
-  parseCustomTtsResponseParser,
+  parseCustomTtsResponseRules,
   renderCustomTtsQueryParams,
-  renderCustomTtsRequestDefinition,
+  renderCustomTtsRequestRuleBody,
   resolveCustomTtsFlowMode,
   validateCustomTtsQueryParams,
-  validateCustomTtsRequestDefinition,
-  validateCustomTtsResponseParser,
+  validateCustomTtsRequestRules,
+  validateCustomTtsResponseRules,
 } from '../contract';
 
 const metadata = (key: string, value: string) => ({
@@ -22,21 +25,28 @@ const metadata = (key: string, value: string) => ({
 });
 
 describe('custom-tts websocket DSL helpers', () => {
-  it('renders request bindings and query params from the shared DSL', () => {
-    const renderedRequest = renderCustomTtsRequestDefinition(
-      CUSTOM_TTS_TEXT_REQUEST_EXAMPLE,
-      {
-        text: 'Hello "world"',
-        message_id: 'msg-7',
-        voice_id: 'voice-9',
+  it('renders query params and request rule bodies from the shared DSL', () => {
+    const [textRule] = parseCustomTtsRequestRules(
+      CUSTOM_TTS_DEFAULT_REQUEST_RULES_EXAMPLE,
+    );
+    const renderedRequestBody = renderCustomTtsRequestRuleBody(textRule, {
+      config: {
+        voice: { id: 'voice-9' },
         model: 'sonic-2',
         language: 'en-US',
-        encoding: 'LINEAR16',
-        sample_rate: '16000',
+        audio: {
+          encoding: 'LINEAR16',
+          sample_rate: '16000',
+        },
       },
-    );
+      packet: {
+        kind: 'text',
+        message_id: 'msg-7',
+        text: 'Hello "world"',
+      },
+    });
 
-    expect(renderedRequest).toEqual({
+    expect(renderedRequestBody).toEqual({
       text: 'Hello "world"',
       voice_id: 'voice-9',
       message_id: 'msg-7',
@@ -67,22 +77,38 @@ describe('custom-tts websocket DSL helpers', () => {
     });
   });
 
-  it('selects one-shot vs two-step mode from the done request', () => {
+  it('selects one-shot vs two-step mode from request rules', () => {
     expect(resolveCustomTtsFlowMode('')).toBe('one-shot');
     expect(resolveCustomTtsFlowMode('  ')).toBe('one-shot');
-    expect(resolveCustomTtsFlowMode('{"type":"done"}')).toBe('two-step');
+    expect(
+      resolveCustomTtsFlowMode(CUSTOM_TTS_DEFAULT_REQUEST_RULES_EXAMPLE),
+    ).toBe('one-shot');
+    expect(
+      resolveCustomTtsFlowMode(CUSTOM_TTS_REQUEST_RULES_DONE_EXAMPLE),
+    ).toBe('two-step');
 
     expect(
       getCustomTtsFlowMode([
-        metadata(CUSTOM_TTS_DONE_REQUEST_KEY, '{"type":"done"}'),
+        metadata(
+          CUSTOM_TTS_REQUEST_RULES_KEY,
+          CUSTOM_TTS_REQUEST_RULES_DONE_EXAMPLE,
+        ),
       ]),
     ).toBe('two-step');
   });
 
-  it('rejects unsupported DSL variables and query param objects that do not resolve to primitives', () => {
-    const variableResult = validateCustomTtsRequestDefinition(
+  it('rejects unsupported DSL variables, bad query param values, and request rules without text', () => {
+    const queryTextResult = validateCustomTtsQueryParams(
+      '{"text":{"$var":"text"}}',
+      'Query Parameters',
+    );
+    expect(queryTextResult).toContain(
+      'Unsupported custom tts variable "text"',
+    );
+
+    const variableResult = validateCustomTtsQueryParams(
       '{"message_id":{"$var":"request_id"}}',
-      'Text Request',
+      'Query Parameters',
     );
 
     expect(variableResult).toContain('"request_id"');
@@ -98,17 +124,38 @@ describe('custom-tts websocket DSL helpers', () => {
     ).toBe(
       'Custom TTS query parameters values must resolve to strings, numbers, or booleans.',
     );
+
+    expect(
+      validateCustomTtsRequestRules(
+        '[{"when":{"packet":"done"},"send":{"frame":"json","body":{"type":"done"}}}]',
+      ),
+    ).toBe(
+      'Custom TTS request rules must contain at least one rule with when.packet "text".',
+    );
   });
 
-  it('validates and parses the binary-audio response parser contract', () => {
+  it('parses text, done, and interrupt request rule snippets', () => {
+    const doneRules = parseCustomTtsRequestRules(
+      CUSTOM_TTS_REQUEST_RULES_DONE_EXAMPLE,
+    );
+    expect(doneRules.map(rule => rule.when.packet)).toEqual(['text', 'done']);
+
+    const interruptRules = parseCustomTtsRequestRules(
+      CUSTOM_TTS_REQUEST_RULES_INTERRUPT_EXAMPLE,
+    );
+    expect(interruptRules.map(rule => rule.when.packet)).toEqual([
+      'text',
+      'interrupt',
+    ]);
+  });
+
+  it('validates and parses the binary-audio response rules contract', () => {
     expect(
-      validateCustomTtsResponseParser(
-        CUSTOM_TTS_RESPONSE_PARSER_BINARY_EXAMPLE,
-      ),
+      validateCustomTtsResponseRules(CUSTOM_TTS_RESPONSE_RULES_BINARY_EXAMPLE),
     ).toBeUndefined();
 
-    const parser = parseCustomTtsResponseParser(
-      CUSTOM_TTS_RESPONSE_PARSER_BINARY_EXAMPLE,
+    const parser = parseCustomTtsResponseRules(
+      CUSTOM_TTS_RESPONSE_RULES_BINARY_EXAMPLE,
     );
 
     expect(
@@ -135,9 +182,9 @@ describe('custom-tts websocket DSL helpers', () => {
     });
   });
 
-  it('parses JSON audio frames and error frames from ordered parser rules', () => {
-    const parser = parseCustomTtsResponseParser(
-      CUSTOM_TTS_RESPONSE_PARSER_JSON_AUDIO_EXAMPLE,
+  it('parses JSON audio frames and error frames from ordered response rules', () => {
+    const parser = parseCustomTtsResponseRules(
+      CUSTOM_TTS_RESPONSE_RULES_JSON_AUDIO_EXAMPLE,
     );
 
     expect(

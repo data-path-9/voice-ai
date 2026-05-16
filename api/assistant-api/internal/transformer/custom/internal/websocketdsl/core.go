@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/url"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -39,6 +40,20 @@ type When struct {
 	Equals any    `json:"equals,omitempty"`
 }
 
+type RequestWhen struct {
+	Packet string `json:"packet"`
+}
+
+type Send struct {
+	Frame string `json:"frame"`
+	Body  any    `json:"body"`
+}
+
+type RequestRule struct {
+	When RequestWhen `json:"when"`
+	Send Send        `json:"send"`
+}
+
 type ResponseRule struct {
 	When When           `json:"when"`
 	Emit map[string]any `json:"emit"`
@@ -46,6 +61,10 @@ type ResponseRule struct {
 
 type Contract struct {
 	SupportedVariables      []string
+	SupportedRequestPackets []string
+	SupportedRequestFrames  []string
+	SupportedPathRoots      []string
+	RequestValidationScopes map[string]any
 	SupportedResponseFrames []string
 	SupportedEmitKeys       []string
 	AllowedFrameSelectors   []string
@@ -126,6 +145,64 @@ func (core *Core) ValidateQueryParams(template map[string]any, contract Contract
 	return nil
 }
 
+func (core *Core) ValidateRequestRules(rules []RequestRule, contract Contract, field string) error {
+	if len(rules) == 0 {
+		return core.Errorf("%s must contain at least one rule", field)
+	}
+
+	allowedPackets := toStringSet(contract.SupportedRequestPackets)
+	allowedFrames := toStringSet(contract.SupportedRequestFrames)
+	allowedRoots := toStringSet(contract.SupportedPathRoots)
+
+	for index, rule := range rules {
+		packet := strings.TrimSpace(rule.When.Packet)
+		if packet == "" || !allowedPackets[packet] {
+			return core.Errorf(
+				"%s[%d].when.packet must be %s",
+				field,
+				index,
+				formatQuotedChoices(contract.SupportedRequestPackets),
+			)
+		}
+
+		frame := strings.TrimSpace(rule.Send.Frame)
+		if frame == "" || !allowedFrames[frame] {
+			return core.Errorf(
+				"%s[%d].send.frame must be %s",
+				field,
+				index,
+				formatQuotedChoices(contract.SupportedRequestFrames),
+			)
+		}
+		if rule.Send.Body == nil {
+			return core.Errorf("%s[%d].send.body is required", field, index)
+		}
+		if err := core.validateScopedNode(
+			rule.Send.Body,
+			allowedRoots,
+			fmt.Sprintf("%s[%d].send.body", field, index),
+		); err != nil {
+			return err
+		}
+
+		if scope, found := contract.RequestValidationScopes[packet]; found && scope != nil {
+			rendered, err := core.evalScopedNode(rule.Send.Body, scope)
+			if err != nil {
+				return err
+			}
+			if err := core.validateRenderedRequestBody(
+				rendered,
+				frame,
+				fmt.Sprintf("%s[%d].send.body", field, index),
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func (core *Core) ValidateResponseRules(rules []ResponseRule, contract Contract, field string) error {
 	if len(rules) == 0 {
 		return core.Errorf("%s must contain at least one rule", field)
@@ -184,6 +261,14 @@ func (core *Core) ValidateResponseRules(rules []ResponseRule, contract Contract,
 	}
 
 	return nil
+}
+
+func (core *Core) MatchRequestWhen(when RequestWhen, packet string) bool {
+	return strings.TrimSpace(when.Packet) == strings.TrimSpace(packet)
+}
+
+func (core *Core) EvalRequestRuleBody(expr any, scope any) (any, error) {
+	return core.evalScopedNode(expr, scope)
 }
 
 func (core *Core) renderNode(node any, resolve VariableResolver) (any, error) {
@@ -582,6 +667,152 @@ func (core *Core) validateRequestNode(node any, allowedVariables map[string]bool
 	}
 }
 
+func (core *Core) validateScopedNode(node any, allowedRoots map[string]bool, field string) error {
+	switch typed := node.(type) {
+	case map[string]any:
+		if rawPath, ok := typed["$path"]; ok {
+			if len(typed) != 1 {
+				return core.Errorf("%s $path expression must only include $path", field)
+			}
+			path, ok := rawPath.(string)
+			if !ok || strings.TrimSpace(path) == "" {
+				return core.Errorf("%s $path must be non-empty string", field)
+			}
+			root := getPathRoot(path)
+			if !allowedRoots[root] {
+				return core.Errorf(
+					"%s $path root must be %s",
+					field,
+					formatQuotedChoices(sortedKeys(allowedRoots)),
+				)
+			}
+			return nil
+		}
+		if rawCast, ok := typed["$cast"]; ok {
+			if len(typed) != 2 {
+				return core.Errorf("%s $cast expression must include only $cast and value", field)
+			}
+			castKind, ok := rawCast.(string)
+			if !ok || strings.TrimSpace(castKind) == "" {
+				return core.Errorf("%s $cast must be non-empty string", field)
+			}
+			if !isSupportedCast(castKind) {
+				return core.Errorf("%s uses unsupported cast %q", field, castKind)
+			}
+			valueExpr, found := typed["value"]
+			if !found {
+				return core.Errorf("%s $cast requires value", field)
+			}
+			return core.validateScopedNode(valueExpr, allowedRoots, field)
+		}
+		for key, value := range typed {
+			if strings.HasPrefix(key, "$") {
+				return core.Errorf("%s uses unsupported operator %q", field, key)
+			}
+			if err := core.validateScopedNode(value, allowedRoots, field); err != nil {
+				return err
+			}
+		}
+		return nil
+	case []any:
+		for _, item := range typed {
+			if err := core.validateScopedNode(item, allowedRoots, field); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (core *Core) evalScopedNode(node any, scope any) (any, error) {
+	switch typed := node.(type) {
+	case map[string]any:
+		if rawPath, ok := typed["$path"]; ok {
+			if len(typed) != 1 {
+				return nil, core.Errorf("$path expression must only include $path")
+			}
+			path, ok := rawPath.(string)
+			if !ok || strings.TrimSpace(path) == "" {
+				return nil, core.Errorf("$path must be non-empty string")
+			}
+			value, found := core.LookupJSONPath(scope, path)
+			if !found {
+				return nil, core.Errorf("request path %q not found", path)
+			}
+			return value, nil
+		}
+		if rawCast, ok := typed["$cast"]; ok {
+			if len(typed) != 2 {
+				return nil, core.Errorf("$cast expression must include only $cast and value")
+			}
+			castKind, ok := rawCast.(string)
+			if !ok || strings.TrimSpace(castKind) == "" {
+				return nil, core.Errorf("$cast must be non-empty string")
+			}
+			valueExpr, found := typed["value"]
+			if !found {
+				return nil, core.Errorf("$cast requires value")
+			}
+			value, err := core.evalScopedNode(valueExpr, scope)
+			if err != nil {
+				return nil, err
+			}
+			return core.CastValue(castKind, value)
+		}
+		out := make(map[string]any, len(typed))
+		for key, value := range typed {
+			resolved, err := core.evalScopedNode(value, scope)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = resolved
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			resolved, err := core.evalScopedNode(item, scope)
+			if err != nil {
+				return nil, err
+			}
+			out[index] = resolved
+		}
+		return out, nil
+	default:
+		return node, nil
+	}
+}
+
+func (core *Core) validateRenderedRequestBody(rendered any, frame string, field string) error {
+	if rendered == nil {
+		return core.Errorf("%s must resolve to a value", field)
+	}
+
+	switch frame {
+	case FrameBinary:
+		switch rendered.(type) {
+		case []byte, string:
+			return nil
+		default:
+			return core.Errorf("%s must resolve to bytes or string for %q frames", field, FrameBinary)
+		}
+	case FrameText:
+		if _, err := core.ToString(rendered); err != nil {
+			return core.Errorf("%s must resolve to string for %q frames: %w", field, FrameText, err)
+		}
+		return nil
+	case FrameJSON:
+		if !isJSONValue(rendered) {
+			return core.Errorf("%s must resolve to JSON value for %q frames", field, FrameJSON)
+		}
+		return nil
+	default:
+		return core.Errorf("%s uses unsupported frame %q", field, frame)
+	}
+}
+
 func (core *Core) validateQueryValue(node any, allowedVariables map[string]bool, field string) error {
 	switch typed := node.(type) {
 	case map[string]any:
@@ -871,6 +1102,50 @@ func isPrimitiveValue(value any) bool {
 	default:
 		return false
 	}
+}
+
+func isJSONValue(value any) bool {
+	switch typed := value.(type) {
+	case nil, string, bool, float32, float64, int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, json.Number:
+		return true
+	case []byte:
+		return false
+	case []any:
+		for _, item := range typed {
+			if !isJSONValue(item) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		for _, item := range typed {
+			if !isJSONValue(item) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func getPathRoot(path string) string {
+	for _, part := range strings.Split(path, ".") {
+		if strings.TrimSpace(part) != "" {
+			return part
+		}
+	}
+	return ""
+}
+
+func sortedKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func formatQuotedChoices(values []string) string {

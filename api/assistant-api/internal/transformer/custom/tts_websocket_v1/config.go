@@ -30,25 +30,30 @@ const (
 )
 
 const (
-	optionKeyVoiceID        = "speak.voice.id"
-	optionKeyModel          = "speak.model"
-	optionKeyLanguage       = "speak.language"
-	optionKeyEncoding       = "speak.audio.encoding"
-	optionKeySampleRate     = "speak.audio.sample_rate"
-	optionKeyQueryParams    = "speak.ws.query_params"
-	optionKeyTextRequest    = "speak.ws.text_request"
-	optionKeyDoneRequest    = "speak.ws.done_request"
-	optionKeyResponseParser = "speak.ws.response_parser"
+	optionKeyVoiceID       = "speak.voice.id"
+	optionKeyModel         = "speak.model"
+	optionKeyLanguage      = "speak.language"
+	optionKeyEncoding      = "speak.audio.encoding"
+	optionKeySampleRate    = "speak.audio.sample_rate"
+	optionKeyQueryParams   = "speak.ws.query_params"
+	optionKeyRequestRules  = "speak.ws.request_rules"
+	optionKeyResponseRules = "speak.ws.response_rules"
 )
 
 const (
 	frameTypeBinary = "binary"
 	frameTypeJSON   = "json"
+	frameTypeText   = "text"
+)
+
+const (
+	requestPacketText      = "text"
+	requestPacketDone      = "done"
+	requestPacketInterrupt = "interrupt"
 )
 
 var queryContract = internal_transformer_custom_websocketdsl.Contract{
 	SupportedVariables: []string{
-		"text",
 		"message_id",
 		"voice_id",
 		"model",
@@ -58,15 +63,76 @@ var queryContract = internal_transformer_custom_websocketdsl.Contract{
 	},
 }
 
-var requestContract = internal_transformer_custom_websocketdsl.Contract{
-	SupportedVariables: []string{
-		"text",
-		"message_id",
-		"voice_id",
-		"model",
-		"language",
-		"encoding",
-		"sample_rate",
+var requestRuleContract = internal_transformer_custom_websocketdsl.Contract{
+	SupportedRequestPackets: []string{
+		requestPacketText,
+		requestPacketDone,
+		requestPacketInterrupt,
+	},
+	SupportedRequestFrames: []string{
+		frameTypeBinary,
+		frameTypeJSON,
+		frameTypeText,
+	},
+	SupportedPathRoots: []string{
+		"config",
+		"packet",
+	},
+	RequestValidationScopes: map[string]any{
+		requestPacketText: map[string]any{
+			"config": map[string]any{
+				"voice": map[string]any{
+					"id": "voice_123",
+				},
+				"model":    "model_123",
+				"language": "en-US",
+				"audio": map[string]any{
+					"encoding":    defaultEncoding,
+					"sample_rate": defaultSampleRate,
+				},
+			},
+			"packet": map[string]any{
+				"kind":       requestPacketText,
+				"message_id": "msg_123",
+				"text":       "Hello world",
+			},
+		},
+		requestPacketDone: map[string]any{
+			"config": map[string]any{
+				"voice": map[string]any{
+					"id": "voice_123",
+				},
+				"model":    "model_123",
+				"language": "en-US",
+				"audio": map[string]any{
+					"encoding":    defaultEncoding,
+					"sample_rate": defaultSampleRate,
+				},
+			},
+			"packet": map[string]any{
+				"kind":       requestPacketDone,
+				"message_id": "msg_123",
+				"text":       "",
+			},
+		},
+		requestPacketInterrupt: map[string]any{
+			"config": map[string]any{
+				"voice": map[string]any{
+					"id": "voice_123",
+				},
+				"model":    "model_123",
+				"language": "en-US",
+				"audio": map[string]any{
+					"encoding":    defaultEncoding,
+					"sample_rate": defaultSampleRate,
+				},
+			},
+			"packet": map[string]any{
+				"kind":       requestPacketInterrupt,
+				"message_id": "msg_123",
+				"text":       "",
+			},
+		},
 	},
 }
 
@@ -97,14 +163,14 @@ type Config struct {
 	Encoding   string
 	SampleRate int
 
-	QueryParams map[string]any
-	TextRequest map[string]any
-	DoneRequest map[string]any
-
-	HasDoneRequest bool
-	ResponseParser []ResponseRule
+	QueryParams   map[string]any
+	RequestRules  []RequestRule
+	ResponseRules []ResponseRule
 }
 
+type RequestRule = internal_transformer_custom_websocketdsl.RequestRule
+type RequestWhen = internal_transformer_custom_websocketdsl.RequestWhen
+type RequestSend = internal_transformer_custom_websocketdsl.Send
 type ResponseRule = internal_transformer_custom_websocketdsl.ResponseRule
 type ResponseWhen = internal_transformer_custom_websocketdsl.When
 
@@ -201,18 +267,10 @@ func (parser *configParser) loadOptions(config *Config) error {
 	} else if found && config.QueryParams == nil {
 		config.QueryParams = map[string]any{}
 	}
-	if _, err := parser.decodeJSONObject(optionKeyTextRequest, true, &config.TextRequest); err != nil {
+	if _, err := parser.decodeJSONArray(optionKeyRequestRules, true, &config.RequestRules); err != nil {
 		return err
 	}
-	foundDone, err := parser.decodeJSONObject(optionKeyDoneRequest, false, &config.DoneRequest)
-	if err != nil {
-		return err
-	}
-	config.HasDoneRequest = foundDone
-	if !foundDone {
-		config.DoneRequest = nil
-	}
-	if _, err := parser.decodeJSONArray(optionKeyResponseParser, true, &config.ResponseParser); err != nil {
+	if _, err := parser.decodeJSONArray(optionKeyResponseRules, true, &config.ResponseRules); err != nil {
 		return err
 	}
 
@@ -238,7 +296,7 @@ func (parser *configParser) decodeJSONObject(key string, required bool, destinat
 	return true, nil
 }
 
-func (parser *configParser) decodeJSONArray(key string, required bool, destination *[]ResponseRule) (bool, error) {
+func (parser *configParser) decodeJSONArray(key string, required bool, destination any) (bool, error) {
 	raw, found := parser.opts[key]
 	if !found || raw == nil {
 		if required {
@@ -298,17 +356,23 @@ func (parser *configParser) decodeJSON(payload []byte, destination any, key stri
 
 func (config *Config) validate() error {
 	core := internal_transformer_custom_websocketdsl.NewCore("custom-tts websocket_v1")
-	if config.BaseURL == "" {
+	if strings.TrimSpace(config.BaseURL) == "" {
 		return fmt.Errorf("custom-tts websocket_v1: base url must be specified in credentials")
 	}
-	if config.VoiceID == "" {
+	if strings.TrimSpace(config.VoiceID) == "" {
 		return fmt.Errorf("custom-tts websocket_v1: %s is required", optionKeyVoiceID)
 	}
-	if config.TextRequest == nil {
-		return fmt.Errorf("custom-tts websocket_v1: %s is required", optionKeyTextRequest)
+	if strings.TrimSpace(config.Encoding) == "" {
+		return fmt.Errorf("custom-tts websocket_v1: %s must not be empty", optionKeyEncoding)
 	}
-	if len(config.ResponseParser) == 0 {
-		return fmt.Errorf("custom-tts websocket_v1: %s must contain at least one rule", optionKeyResponseParser)
+	if config.SampleRate <= 0 {
+		return fmt.Errorf("custom-tts websocket_v1: %s must be positive", optionKeySampleRate)
+	}
+	if len(config.RequestRules) == 0 {
+		return fmt.Errorf("custom-tts websocket_v1: %s must contain at least one rule", optionKeyRequestRules)
+	}
+	if len(config.ResponseRules) == 0 {
+		return fmt.Errorf("custom-tts websocket_v1: %s must contain at least one rule", optionKeyResponseRules)
 	}
 
 	if len(config.QueryParams) > 0 {
@@ -316,15 +380,24 @@ func (config *Config) validate() error {
 			return err
 		}
 	}
-	if err := core.ValidateRequestObject(config.TextRequest, requestContract, optionKeyTextRequest); err != nil {
+	if err := core.ValidateRequestRules(config.RequestRules, requestRuleContract, optionKeyRequestRules); err != nil {
 		return err
 	}
-	if config.HasDoneRequest && config.DoneRequest != nil {
-		if err := core.ValidateRequestObject(config.DoneRequest, requestContract, optionKeyDoneRequest); err != nil {
-			return err
+	hasTextRule := false
+	for _, rule := range config.RequestRules {
+		if strings.TrimSpace(rule.When.Packet) == requestPacketText {
+			hasTextRule = true
+			break
 		}
 	}
-	if err := core.ValidateResponseRules(config.ResponseParser, responseContract, optionKeyResponseParser); err != nil {
+	if !hasTextRule {
+		return fmt.Errorf(
+			"custom-tts websocket_v1: %s must contain at least one rule with when.packet %q",
+			optionKeyRequestRules,
+			requestPacketText,
+		)
+	}
+	if err := core.ValidateResponseRules(config.ResponseRules, responseContract, optionKeyResponseRules); err != nil {
 		return err
 	}
 

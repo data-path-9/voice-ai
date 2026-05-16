@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -23,6 +24,7 @@ import (
 	transformer_testutil "github.com/rapidaai/api/assistant-api/internal/transformer/internal/testutil"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,6 +49,29 @@ func (collector *sttPacketCollector) all() []internal_type.Packet {
 	return out
 }
 
+func (collector *sttPacketCollector) hasSTTError() bool {
+	for _, packet := range collector.all() {
+		if _, ok := packet.(internal_type.SpeechToTextErrorPacket); ok {
+			return true
+		}
+	}
+	return false
+}
+
+type blockingResampler struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (resampler *blockingResampler) Resample(data []byte, _, _ *protos.AudioConfig) ([]byte, error) {
+	select {
+	case resampler.started <- struct{}{}:
+	default:
+	}
+	<-resampler.release
+	return append([]byte(nil), data...), nil
+}
+
 func waitForCondition(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -59,10 +84,12 @@ func waitForCondition(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Fatalf("timed out waiting for condition")
 }
 
-func TestSpeechToText_WebsocketFlow_JSONAudioRequest(t *testing.T) {
+func TestSpeechToText_WebsocketFlow_JSONRequestRules(t *testing.T) {
 	var (
 		gotAuthHeader string
 		gotModel      string
+		gotStartReq   map[string]any
+		gotFlushReq   map[string]any
 		gotAudioReq   map[string]any
 	)
 
@@ -76,6 +103,16 @@ func TestSpeechToText_WebsocketFlow_JSONAudioRequest(t *testing.T) {
 		defer conn.Close()
 
 		messageType, payload, err := conn.ReadMessage()
+		require.NoError(t, err)
+		require.Equal(t, websocket.TextMessage, messageType)
+		require.NoError(t, json.Unmarshal(payload, &gotStartReq))
+
+		messageType, payload, err = conn.ReadMessage()
+		require.NoError(t, err)
+		require.Equal(t, websocket.TextMessage, messageType)
+		require.NoError(t, json.Unmarshal(payload, &gotFlushReq))
+
+		messageType, payload, err = conn.ReadMessage()
 		require.NoError(t, err)
 		require.Equal(t, websocket.TextMessage, messageType)
 		require.NoError(t, json.Unmarshal(payload, &gotAudioReq))
@@ -103,13 +140,14 @@ func TestSpeechToText_WebsocketFlow_JSONAudioRequest(t *testing.T) {
 		collector.onPacket,
 		utils.Option{
 			optionKeyModel:       "model-a",
+			optionKeyLanguage:    "en-US",
 			optionKeyQueryParams: `{"model":{"$var":"model"}}`,
-			optionKeyAudioRequest: `{
-				"audio":{"$var":"audio"},
-				"encoding":{"$var":"encoding"},
-				"sample_rate":{"$cast":"number","value":{"$var":"sample_rate"}}
-			}`,
-			optionKeyResponseParser: `[
+			optionKeyRequestRules: `[
+				{"when":{"packet":"turn_change"},"send":{"frame":"json","body":{"type":"start","language":{"$path":"config.language"}}}},
+				{"when":{"packet":"interrupt"},"send":{"frame":"json","body":{"type":"flush"}}},
+				{"when":{"packet":"audio"},"send":{"frame":"json","body":{"audio":{"$path":"packet.audio.base64"},"encoding":{"$path":"config.audio.encoding"},"sample_rate":{"$cast":"number","value":{"$path":"config.audio.sample_rate"}}}}}
+			]`,
+			optionKeyResponseRules: `[
 				{"when":{"frame":"json","path":"type","equals":"partial"},"emit":{"script":{"$path":"text"},"confidence":{"$cast":"number","value":{"$path":"confidence"}},"language":{"$path":"language"},"interim":true}},
 				{"when":{"frame":"json","path":"type","equals":"final"},"emit":{"script":{"$path":"text"},"confidence":{"$cast":"number","value":{"$path":"confidence"}},"language":{"$path":"language"},"interim":false}}
 			]`,
@@ -140,6 +178,11 @@ func TestSpeechToText_WebsocketFlow_JSONAudioRequest(t *testing.T) {
 
 	assert.Equal(t, "Bearer abc", gotAuthHeader)
 	assert.Equal(t, "model-a", gotModel)
+	require.NotEmpty(t, gotStartReq)
+	assert.Equal(t, "start", gotStartReq["type"])
+	assert.Equal(t, "en-US", gotStartReq["language"])
+	require.NotEmpty(t, gotFlushReq)
+	assert.Equal(t, "flush", gotFlushReq["type"])
 	require.NotEmpty(t, gotAudioReq)
 	assert.Equal(t, "LINEAR16", gotAudioReq["encoding"])
 	assert.Equal(t, float64(16000), gotAudioReq["sample_rate"])
@@ -190,7 +233,7 @@ func TestSpeechToText_WebsocketFlow_JSONAudioRequest(t *testing.T) {
 	assert.False(t, hasSpeechToTextError, "did not expect stt error packet")
 }
 
-func TestSpeechToText_BinaryAudioResampledWithoutAudioRequest(t *testing.T) {
+func TestSpeechToText_BinaryAudioResampledWithBinaryRequestRule(t *testing.T) {
 	var (
 		gotMessageType int
 		gotAudioChunk  []byte
@@ -227,9 +270,10 @@ func TestSpeechToText_BinaryAudioResampledWithoutAudioRequest(t *testing.T) {
 		}),
 		collector.onPacket,
 		utils.Option{
-			optionKeyEncoding:   "MuLaw8",
-			optionKeySampleRate: "8000",
-			optionKeyResponseParser: `[
+			optionKeyEncoding:     "MuLaw8",
+			optionKeySampleRate:   "8000",
+			optionKeyRequestRules: `[{"when":{"packet":"audio"},"send":{"frame":"binary","body":{"$path":"packet.audio.bytes"}}}]`,
+			optionKeyResponseRules: `[
 				{"when":{"frame":"json","path":"type","equals":"final"},"emit":{"script":{"$path":"text"},"confidence":{"$cast":"number","value":{"$path":"confidence"}},"language":{"$path":"language"},"interim":false}}
 			]`,
 		},
@@ -299,7 +343,8 @@ func TestSpeechToText_WebsocketFlow_TextTranscriptFrames(t *testing.T) {
 		}),
 		collector.onPacket,
 		utils.Option{
-			optionKeyResponseParser: `[
+			optionKeyRequestRules: `[{"when":{"packet":"audio"},"send":{"frame":"binary","body":{"$path":"packet.audio.bytes"}}}]`,
+			optionKeyResponseRules: `[
 				{"when":{"frame":"text"},"emit":{"script":{"$frame":"text"},"language":"hi","interim":false}}
 			]`,
 		},
@@ -382,7 +427,8 @@ func TestSpeechToText_DoesNotEmitLatencyMetricWithoutInterruption(t *testing.T) 
 		}),
 		collector.onPacket,
 		utils.Option{
-			optionKeyResponseParser: `[
+			optionKeyRequestRules: `[{"when":{"packet":"audio"},"send":{"frame":"binary","body":{"$path":"packet.audio.bytes"}}}]`,
+			optionKeyResponseRules: `[
 				{"when":{"frame":"json","path":"type","equals":"final"},"emit":{"script":{"$path":"text"},"confidence":{"$cast":"number","value":{"$path":"confidence"}},"language":{"$path":"language"},"interim":false}}
 			]`,
 		},
@@ -453,7 +499,8 @@ func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
 		}),
 		collector.onPacket,
 		utils.Option{
-			optionKeyResponseParser: `[
+			optionKeyRequestRules: `[{"when":{"packet":"audio"},"send":{"frame":"binary","body":{"$path":"packet.audio.bytes"}}}]`,
+			optionKeyResponseRules: `[
 				{"when":{"frame":"json","path":"type","equals":"final"},"emit":{"script":{"$path":"text"},"confidence":{"$cast":"number","value":{"$path":"confidence"}},"language":{"$path":"language"},"interim":false}}
 			]`,
 		},
@@ -502,4 +549,167 @@ func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
 
 	assert.Equal(t, 1, latencyMetricPacketCount, "expected one latency metric for the interruption window")
 	assert.GreaterOrEqual(t, latencyMilliseconds, int64(100), "expected latency to be measured from the first interrupt in the window")
+}
+
+func TestSpeechToText_CloseUnblocksPendingDial(t *testing.T) {
+	collector := &sttPacketCollector{}
+	transformer, err := NewSpeechToText(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: "wss://example.com/stt",
+		}),
+		collector.onPacket,
+		utils.Option{
+			optionKeyRequestRules:  `[{"when":{"packet":"audio"},"send":{"frame":"binary","body":{"$path":"packet.audio.bytes"}}}]`,
+			optionKeyResponseRules: `[{"when":{"frame":"json","path":"type","equals":"final"},"emit":{"script":{"$path":"text"},"interim":false}}]`,
+		},
+	)
+	require.NoError(t, err)
+
+	typed, ok := transformer.(*speechToText)
+	require.True(t, ok)
+
+	dialStarted := make(chan struct{}, 1)
+	typed.dialWS = func(ctx context.Context, _ string, _ http.Header) (*websocket.Conn, *http.Response, error) {
+		select {
+		case dialStarted <- struct{}{}:
+		default:
+		}
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}
+
+	transformErrCh := make(chan error, 1)
+	go func() {
+		transformErrCh <- transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
+			ContextID: "ctx-blocked",
+			Audio:     []byte{0x01, 0x02},
+		})
+	}()
+
+	select {
+	case <-dialStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for dial to start")
+	}
+
+	closeErrCh := make(chan error, 1)
+	go func() {
+		closeErrCh <- transformer.Close(context.Background())
+	}()
+
+	select {
+	case closeErr := <-closeErrCh:
+		require.NoError(t, closeErr)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Close() timed out while dial was blocked")
+	}
+
+	select {
+	case transformErr := <-transformErrCh:
+		require.NoError(t, transformErr)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Transform() timed out after Close()")
+	}
+
+	assert.False(t, collector.hasSTTError(), "did not expect SpeechToTextErrorPacket on canceled dial during shutdown")
+}
+
+func TestSpeechToText_AudioRequestContextStaysBoundToAudioPacket(t *testing.T) {
+	var (
+		gotAudioContextID string
+		serverErr         error
+	)
+
+	audioWritten := make(chan struct{}, 1)
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		conn, err := upgrader.Upgrade(writer, request, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		_, payload, err := conn.ReadMessage()
+		if err != nil {
+			serverErr = err
+			return
+		}
+
+		var body map[string]any
+		if err := json.Unmarshal(payload, &body); err != nil {
+			serverErr = err
+			return
+		}
+
+		contextValue, ok := body["context_id"].(string)
+		if !ok {
+			serverErr = fmt.Errorf("context_id missing or not string in request body")
+			return
+		}
+		gotAudioContextID = contextValue
+		select {
+		case audioWritten <- struct{}{}:
+		default:
+		}
+	}))
+	defer server.Close()
+
+	baseURL := strings.Replace(server.URL, "http://", "ws://", 1)
+	collector := &sttPacketCollector{}
+	transformer, err := NewSpeechToText(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: baseURL,
+		}),
+		collector.onPacket,
+		utils.Option{
+			optionKeyRequestRules:  `[{"when":{"packet":"audio"},"send":{"frame":"json","body":{"context_id":{"$path":"packet.context_id"}}}}]`,
+			optionKeyResponseRules: `[{"when":{"frame":"json","path":"type","equals":"final"},"emit":{"script":{"$path":"text"},"interim":false}}]`,
+		},
+	)
+	require.NoError(t, err)
+
+	typed, ok := transformer.(*speechToText)
+	require.True(t, ok)
+	blocker := &blockingResampler{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	typed.resampler = blocker
+
+	audioErrCh := make(chan error, 1)
+	go func() {
+		audioErrCh <- transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
+			ContextID: "ctx-a",
+			Audio:     []byte{0x01, 0x02, 0x03},
+		})
+	}()
+
+	select {
+	case <-blocker.started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for audio resampler")
+	}
+
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-b"}))
+	close(blocker.release)
+
+	select {
+	case audioErr := <-audioErrCh:
+		require.NoError(t, audioErr)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for audio transform")
+	}
+
+	select {
+	case <-audioWritten:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for audio request")
+	}
+
+	require.NoError(t, transformer.Close(context.Background()))
+	require.NoError(t, serverErr)
+	assert.Equal(t, "ctx-a", gotAudioContextID, "audio request scope must use the originating audio packet context")
+	assert.False(t, collector.hasSTTError(), "did not expect stt error packet")
 }

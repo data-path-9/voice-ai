@@ -60,12 +60,7 @@ export interface ParameterConfig {
   choices?: ParameterChoice[];
   // custom editor rendering
   editor?: 'websocket_dsl_json';
-  editorMode?:
-    | 'query_params'
-    | 'text_request'
-    | 'audio_request'
-    | 'done_request'
-    | 'response_parser';
+  editorMode?: 'query_params' | 'request_rules' | 'response_rules';
 }
 
 export interface CategoryConfig {

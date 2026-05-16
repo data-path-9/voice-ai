@@ -114,7 +114,7 @@ export function AssistantPage() {
         <div className="h-full flex justify-center items-center">
           <EmptyState
             title="No Assistant"
-            subtitle="There are no assistant matching with your criteria."
+            subtitle="No assistants match your current filters."
             action="Create new Assistant"
             onAction={() =>
               navigate('/deployment/assistant/create-assistant')
@@ -125,7 +125,7 @@ export function AssistantPage() {
         <div className="h-full flex justify-center items-center">
           <EmptyState
             title="No Assistant"
-            subtitle="There are no Assistants to display"
+            subtitle="Create assistants for each client, brand, or business unit from one controlled platform."
             action="Create new Assistant"
             onAction={() =>
               navigate('/deployment/assistant/create-assistant')

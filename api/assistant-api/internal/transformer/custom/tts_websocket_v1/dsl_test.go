@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDSLEngine_RenderRequestAndURL(t *testing.T) {
+func TestDSLEngine_BuildConnectionURLAndEvaluateRequestRules(t *testing.T) {
 	config := &Config{
 		BaseURL:    "wss://example.com/tts?tenant=test",
 		VoiceID:    "voice-a",
@@ -29,26 +29,78 @@ func TestDSLEngine_RenderRequestAndURL(t *testing.T) {
 				"value": map[string]any{"$var": "sample_rate"},
 			},
 		},
-		TextRequest: map[string]any{
-			"text":       map[string]any{"$var": "text"},
-			"voice_id":   map[string]any{"$var": "voice_id"},
-			"request_id": map[string]any{"$var": "message_id"},
+		RequestRules: []RequestRule{
+			{
+				When: RequestWhen{Packet: requestPacketText},
+				Send: RequestSend{
+					Frame: frameTypeJSON,
+					Body: map[string]any{
+						"text":       map[string]any{"$path": "packet.text"},
+						"voice_id":   map[string]any{"$path": "config.voice.id"},
+						"request_id": map[string]any{"$path": "packet.message_id"},
+					},
+				},
+			},
+			{
+				When: RequestWhen{Packet: requestPacketDone},
+				Send: RequestSend{
+					Frame: frameTypeJSON,
+					Body: map[string]any{
+						"type":       "done",
+						"request_id": map[string]any{"$path": "packet.message_id"},
+					},
+				},
+			},
+			{
+				When: RequestWhen{Packet: requestPacketInterrupt},
+				Send: RequestSend{
+					Frame: frameTypeText,
+					Body:  "interrupt",
+				},
+			},
 		},
 	}
 	engine := config.newEngine()
-	scope := config.newScope("ctx-1", "hello")
+	queryScope := config.newQueryScope("ctx-1", "hello")
 
-	url, err := engine.BuildConnectionURL(scope)
+	url, err := engine.BuildConnectionURL(queryScope)
 	require.NoError(t, err)
 	assert.Contains(t, url, "tenant=test")
 	assert.Contains(t, url, "message_id=ctx-1")
 	assert.Contains(t, url, "sample_rate=16000")
 
-	request, err := engine.RenderTextRequest(scope)
+	textRequests, err := engine.EvaluateRequestRules(
+		requestPacketText,
+		config.newRequestScope(requestPacketText, "ctx-1", "hello"),
+	)
 	require.NoError(t, err)
-	assert.Equal(t, "hello", request["text"])
-	assert.Equal(t, "voice-a", request["voice_id"])
-	assert.Equal(t, "ctx-1", request["request_id"])
+	require.Len(t, textRequests, 1)
+	assert.Equal(t, frameTypeJSON, textRequests[0].Frame)
+	assert.Equal(t, map[string]any{
+		"text":       "hello",
+		"voice_id":   "voice-a",
+		"request_id": "ctx-1",
+	}, textRequests[0].Body)
+
+	doneRequests, err := engine.EvaluateRequestRules(
+		requestPacketDone,
+		config.newRequestScope(requestPacketDone, "ctx-1", ""),
+	)
+	require.NoError(t, err)
+	require.Len(t, doneRequests, 1)
+	assert.Equal(t, map[string]any{
+		"type":       "done",
+		"request_id": "ctx-1",
+	}, doneRequests[0].Body)
+
+	interruptRequests, err := engine.EvaluateRequestRules(
+		requestPacketInterrupt,
+		config.newRequestScope(requestPacketInterrupt, "ctx-1", ""),
+	)
+	require.NoError(t, err)
+	require.Len(t, interruptRequests, 1)
+	assert.Equal(t, frameTypeText, interruptRequests[0].Frame)
+	assert.Equal(t, "interrupt", interruptRequests[0].Body)
 }
 
 func TestDSLEngine_ParseAndEvaluateResponse(t *testing.T) {
@@ -56,7 +108,7 @@ func TestDSLEngine_ParseAndEvaluateResponse(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString(audioPayload)
 
 	config := &Config{
-		ResponseParser: []ResponseRule{
+		ResponseRules: []ResponseRule{
 			{
 				When: ResponseWhen{Frame: frameTypeBinary},
 				Emit: map[string]any{"audio": map[string]any{"$frame": "binary"}},
@@ -111,7 +163,7 @@ func TestDSLEngine_InvalidVariable(t *testing.T) {
 		},
 	}
 	engine := config.newEngine()
-	_, err := engine.BuildConnectionURL(config.newScope("ctx-1", "hello"))
+	_, err := engine.BuildConnectionURL(config.newQueryScope("ctx-1", "hello"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown variable")
 }
@@ -127,14 +179,14 @@ func TestDSLEngine_CastSampleRateFromString(t *testing.T) {
 		},
 	}
 	engine := config.newEngine()
-	url, err := engine.BuildConnectionURL(config.newScope("ctx-1", "hello"))
+	url, err := engine.BuildConnectionURL(config.newQueryScope("ctx-1", "hello"))
 	require.NoError(t, err)
 	assert.Contains(t, url, "sample_rate=16000")
 }
 
 func TestDSLEngine_UsesNumbersFromJSON(t *testing.T) {
 	config := &Config{
-		ResponseParser: []ResponseRule{
+		ResponseRules: []ResponseRule{
 			{
 				When: ResponseWhen{Frame: frameTypeJSON, Path: "event", Equals: "done"},
 				Emit: map[string]any{
@@ -153,7 +205,7 @@ func TestDSLEngine_UsesNumbersFromJSON(t *testing.T) {
 
 func TestDSLEngine_NoMatch(t *testing.T) {
 	config := &Config{
-		ResponseParser: []ResponseRule{
+		ResponseRules: []ResponseRule{
 			{
 				When: ResponseWhen{Frame: frameTypeJSON, Path: "type", Equals: "done"},
 				Emit: map[string]any{"done": true},

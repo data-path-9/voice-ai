@@ -8,12 +8,10 @@ import { TertiaryButton } from '@/app/components/carbon/button';
 import {
   Select as CarbonSelect,
   SelectItem,
-  NumberInput,
   Slider,
   Button,
   Dropdown as CarbonDropdown,
   ComboBox,
-  ButtonSet,
   ComposedModal,
   ModalHeader,
   ModalBody,
@@ -313,7 +311,7 @@ export const ConfigRenderer: React.FC<{
                   provider={
                     provider === 'custom-stt' ? 'custom-stt' : 'custom-tts'
                   }
-                  mode={param.editorMode ?? 'text_request'}
+                  mode={param.editorMode ?? 'query_params'}
                   value={getParamValue(param.key)}
                   placeholder={param.placeholder ?? 'Enter as JSON'}
                   onChange={value => updateParameter(param.key, value)}

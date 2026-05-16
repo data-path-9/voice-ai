@@ -27,7 +27,7 @@ const (
 
 // GetVAD creates a VAD instance based on the provider option.
 // Input audio is always 16 kHz LINEAR16 mono (platform internal format).
-func GetVAD(ctx context.Context, logger commons.Logger, callback func(context.Context, ...internal_type.Packet) error, options utils.Option) (internal_type.Vad, error) {
+func GetVAD(ctx context.Context, logger commons.Logger, callback func(context.Context, ...internal_type.Packet) error, options utils.Option) (internal_type.VoiceActivityDetectorExecutor, error) {
 	typ, _ := options.GetString(OptionsKeyVadProvider)
 	switch VADIdentifier(typ) {
 	case FIRERED_VAD:

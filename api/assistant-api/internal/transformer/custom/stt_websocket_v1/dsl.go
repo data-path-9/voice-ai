@@ -7,15 +7,21 @@
 package internal_transformer_custom_stt_websocket_v1
 
 import (
+	"encoding/base64"
+
 	internal_transformer_custom_websocketdsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/websocketdsl"
 )
 
-type requestScope struct {
-	Audio      string
+type queryScope struct {
 	Model      string
 	Language   string
 	Encoding   string
 	SampleRate int
+}
+
+type outboundRequest struct {
+	Frame string
+	Body  any
 }
 
 type responseFrame = internal_transformer_custom_websocketdsl.Frame
@@ -42,9 +48,8 @@ func (config *Config) newEngine() *dslEngine {
 	}
 }
 
-func (config *Config) newScope(audioBase64 string) requestScope {
-	return requestScope{
-		Audio:      audioBase64,
+func (config *Config) newQueryScope() queryScope {
+	return queryScope{
 		Model:      config.Model,
 		Language:   config.Language,
 		Encoding:   config.Encoding,
@@ -52,25 +57,93 @@ func (config *Config) newScope(audioBase64 string) requestScope {
 	}
 }
 
-func (engine *dslEngine) BuildConnectionURL(scope requestScope) (string, error) {
-	return engine.core.BuildConnectionURL(engine.config.BaseURL, engine.config.QueryParams, func(name string) (any, error) {
-		return engine.resolveVariable(name, scope)
-	})
-}
-
-func (engine *dslEngine) RenderAudioRequest(scope requestScope) (map[string]any, error) {
-	if !engine.config.HasAudioRequest || engine.config.AudioRequest == nil {
-		return nil, nil
+func (config *Config) newRequestScope(packet string, contextID string, audio []byte) map[string]any {
+	scope := map[string]any{
+		"config": map[string]any{
+			"model":    config.Model,
+			"language": config.Language,
+			"audio": map[string]any{
+				"encoding":    config.Encoding,
+				"sample_rate": config.SampleRate,
+			},
+		},
+		"packet": map[string]any{
+			"kind":       packet,
+			"context_id": contextID,
+		},
 	}
-	return engine.core.RenderObject(engine.config.AudioRequest, func(name string) (any, error) {
-		return engine.resolveVariable(name, scope)
+
+	if len(audio) > 0 {
+		scope["packet"].(map[string]any)["audio"] = map[string]any{
+			"bytes":  append([]byte(nil), audio...),
+			"base64": base64.StdEncoding.EncodeToString(audio),
+		}
+	}
+
+	return scope
+}
+
+func (engine *dslEngine) BuildConnectionURL(scope queryScope) (string, error) {
+	return engine.core.BuildConnectionURL(engine.config.BaseURL, engine.config.QueryParams, func(name string) (any, error) {
+		return engine.resolveQueryVariable(name, scope)
 	})
 }
 
-func (engine *dslEngine) resolveVariable(name string, scope requestScope) (any, error) {
+func (engine *dslEngine) EvaluateRequestRules(packet string, scope map[string]any) ([]outboundRequest, error) {
+	requests := make([]outboundRequest, 0, len(engine.config.RequestRules))
+	for _, rule := range engine.config.RequestRules {
+		if !engine.core.MatchRequestWhen(rule.When, packet) {
+			continue
+		}
+
+		body, err := engine.core.EvalRequestRuleBody(rule.Send.Body, scope)
+		if err != nil {
+			return nil, err
+		}
+
+		switch rule.Send.Frame {
+		case frameTypeBinary:
+			payload, err := engine.core.ToBytes(body)
+			if err != nil {
+				return nil, err
+			}
+			requests = append(requests, outboundRequest{
+				Frame: frameTypeBinary,
+				Body:  payload,
+			})
+		case frameTypeText:
+			payload, err := engine.core.ToString(body)
+			if err != nil {
+				return nil, err
+			}
+			requests = append(requests, outboundRequest{
+				Frame: frameTypeText,
+				Body:  payload,
+			})
+		case frameTypeJSON:
+			requests = append(requests, outboundRequest{
+				Frame: frameTypeJSON,
+				Body:  body,
+			})
+		default:
+			return nil, engine.core.Errorf("unsupported request frame %q", rule.Send.Frame)
+		}
+	}
+
+	return requests, nil
+}
+
+func (engine *dslEngine) HasRequestRules(packet string) bool {
+	for _, rule := range engine.config.RequestRules {
+		if engine.core.MatchRequestWhen(rule.When, packet) {
+			return true
+		}
+	}
+	return false
+}
+
+func (engine *dslEngine) resolveQueryVariable(name string, scope queryScope) (any, error) {
 	switch name {
-	case "audio":
-		return scope.Audio, nil
 	case "model":
 		return scope.Model, nil
 	case "language":
@@ -91,7 +164,7 @@ func (engine *dslEngine) ParseFrame(messageType int, payload []byte) (responseFr
 }
 
 func (engine *dslEngine) EvaluateResponse(frame responseFrame) (responseOutcome, error) {
-	for _, rule := range engine.config.ResponseParser {
+	for _, rule := range engine.config.ResponseRules {
 		matched, err := engine.core.MatchWhen(
 			internal_transformer_custom_websocketdsl.When{
 				Frame:  rule.When.Frame,

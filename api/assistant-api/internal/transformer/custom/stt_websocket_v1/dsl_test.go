@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDSLEngine_RenderRequestAndURL(t *testing.T) {
+func TestDSLEngine_BuildConnectionURLAndEvaluateRequestRules(t *testing.T) {
 	config := &Config{
 		BaseURL:    "wss://example.com/stt?tenant=test",
 		Model:      "model-a",
@@ -27,30 +27,73 @@ func TestDSLEngine_RenderRequestAndURL(t *testing.T) {
 				"value": map[string]any{"$var": "sample_rate"},
 			},
 		},
-		AudioRequest: map[string]any{
-			"audio":    map[string]any{"$var": "audio"},
-			"encoding": map[string]any{"$var": "encoding"},
+		RequestRules: []RequestRule{
+			{
+				When: RequestWhen{Packet: requestPacketTurnChange},
+				Send: RequestSend{
+					Frame: frameTypeJSON,
+					Body: map[string]any{
+						"type":     "start",
+						"language": map[string]any{"$path": "config.language"},
+					},
+				},
+			},
+			{
+				When: RequestWhen{Packet: requestPacketAudio},
+				Send: RequestSend{
+					Frame: frameTypeJSON,
+					Body: map[string]any{
+						"audio":    map[string]any{"$path": "packet.audio.base64"},
+						"encoding": map[string]any{"$path": "config.audio.encoding"},
+					},
+				},
+			},
+			{
+				When: RequestWhen{Packet: requestPacketAudio},
+				Send: RequestSend{
+					Frame: frameTypeBinary,
+					Body:  map[string]any{"$path": "packet.audio.bytes"},
+				},
+			},
 		},
-		HasAudioRequest: true,
 	}
 	engine := config.newEngine()
-	scope := config.newScope("AAEC")
+	queryScope := config.newQueryScope()
 
-	url, err := engine.BuildConnectionURL(scope)
+	url, err := engine.BuildConnectionURL(queryScope)
 	require.NoError(t, err)
 	assert.Contains(t, url, "tenant=test")
 	assert.Contains(t, url, "model=model-a")
 	assert.Contains(t, url, "sample_rate=16000")
 
-	request, err := engine.RenderAudioRequest(scope)
+	turnChangeRequests, err := engine.EvaluateRequestRules(
+		requestPacketTurnChange,
+		config.newRequestScope(requestPacketTurnChange, "ctx_1", nil),
+	)
 	require.NoError(t, err)
-	assert.Equal(t, "AAEC", request["audio"])
-	assert.Equal(t, "LINEAR16", request["encoding"])
+	require.Len(t, turnChangeRequests, 1)
+	assert.Equal(t, frameTypeJSON, turnChangeRequests[0].Frame)
+	assert.Equal(t, map[string]any{
+		"type":     "start",
+		"language": "en-US",
+	}, turnChangeRequests[0].Body)
+
+	audioRequests, err := engine.EvaluateRequestRules(
+		requestPacketAudio,
+		config.newRequestScope(requestPacketAudio, "ctx_1", []byte{0x00, 0x01}),
+	)
+	require.NoError(t, err)
+	require.Len(t, audioRequests, 2)
+	assert.Equal(t, frameTypeJSON, audioRequests[0].Frame)
+	assert.Equal(t, "AAE=", audioRequests[0].Body.(map[string]any)["audio"])
+	assert.Equal(t, "LINEAR16", audioRequests[0].Body.(map[string]any)["encoding"])
+	assert.Equal(t, frameTypeBinary, audioRequests[1].Frame)
+	assert.Equal(t, []byte{0x00, 0x01}, audioRequests[1].Body)
 }
 
 func TestDSLEngine_ParseAndEvaluateResponse(t *testing.T) {
 	config := &Config{
-		ResponseParser: []ResponseRule{
+		ResponseRules: []ResponseRule{
 			{
 				When: ResponseWhen{Frame: frameTypeJSON, Path: "type", Equals: "partial"},
 				Emit: map[string]any{
@@ -105,7 +148,7 @@ func TestDSLEngine_ParseAndEvaluateResponse(t *testing.T) {
 
 func TestDSLEngine_ParseAndEvaluateTextResponse(t *testing.T) {
 	config := &Config{
-		ResponseParser: []ResponseRule{
+		ResponseRules: []ResponseRule{
 			{
 				When: ResponseWhen{Frame: frameTypeText},
 				Emit: map[string]any{
@@ -136,14 +179,14 @@ func TestDSLEngine_InvalidVariable(t *testing.T) {
 		},
 	}
 	engine := config.newEngine()
-	_, err := engine.BuildConnectionURL(config.newScope("AAEC"))
+	_, err := engine.BuildConnectionURL(config.newQueryScope())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown variable")
 }
 
 func TestDSLEngine_NoMatch(t *testing.T) {
 	config := &Config{
-		ResponseParser: []ResponseRule{
+		ResponseRules: []ResponseRule{
 			{
 				When: ResponseWhen{Frame: frameTypeJSON, Path: "type", Equals: "final"},
 				Emit: map[string]any{"script": map[string]any{"$path": "text"}, "interim": false},

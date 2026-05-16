@@ -6,14 +6,14 @@
 
 # Rapida: End-to-End Voice Orchestration Platform
 
-[Rapida](https://rapida.ai) is an open-source platform for designing, building, and deploying voice agents at scale.  
+[Rapida](https://rapida.ai) is an open-source voice AI orchestration platform for agencies that need ownership and enterprises that need scale, control, and deploy-anywhere flexibility.  
 It’s built around three core principles:
 
-- **Reliable** — designed for production workloads, real-time audio, and fault-tolerant execution
-- **Observable** — deep visibility into calls, latency, metrics, and tool usage
-- **Customizable** — flexible architecture that adapts to any LLM, workflow, or enterprise stack
+- **Ownership** — run managed or self-hosted while keeping control of data, credentials, branding, and deployment boundaries
+- **Control** — choose your models, prompts, tools, and integrations without vendor lock-in
+- **Scale** — operate real-time voice workloads with observability, governance, and production-grade reliability
 
-Rapida provides both a **platform** and a **framework** for building real-world voice agents—from low-latency audio streaming to orchestration, monitoring, and integrations.
+Rapida provides both a **platform** and a **framework** for teams building white-label client deployments, internal AI operations, and enterprise voice infrastructure.
 
 Rapida is written in **Go**, using the highly optimized [gRPC](https://github.com/grpc/grpc-go) protocol for fast, efficient, bidirectional communication.
 
@@ -36,9 +36,12 @@ Rapida is written in **Go**, using the highly optimized [gRPC](https://github.co
 ## Features
 
 - **Real-time Voice Orchestration**  
-  Stream and process audio with low latency using GRPC.
+  Stream and process audio with low latency using gRPC.
 
-- **LLM-Agnostic Architecture**  
+- **Ownership by Default**  
+  Self-host or run managed while keeping control of infrastructure, credentials, and runtime behavior.
+
+- **Provider and Model Control**  
   Bring your own model—OpenAI, Anthropic, open-source models, or custom inference.
 
 - **Production-grade Reliability**  
@@ -47,14 +50,11 @@ Rapida is written in **Go**, using the highly optimized [gRPC](https://github.co
 - **Full Observability**  
   Call logs, streaming events, tool traces, latency breakdowns, metrics, and dashboards.
 
-- **Flexible Tooling System**  
-  Build custom tools and actions for your agents, or integrate with any backend.
+- **Governance-ready Tooling**  
+  Build custom tools, lock down API surfaces, and manage deployments with audit-friendly controls.
 
-- **Developer-friendly**  
-  Clear APIs, modular components, and simple configuration.
-
-- **Enterprise-ready**  
-  Scalable design, efficient protocol, and predictable performance.
+- **Built for Agencies and Enterprise**  
+  Support multi-client delivery, private deployments, and large-scale internal operations from the same platform.
 
 ## Documentation & Guides
 
@@ -153,12 +153,12 @@ make rebuild-all
 
 ### Configure Services
 
-Edit environment files before starting:
+Edit YAML config files before starting:
 
-- `docker/web-api/.web.env` - Web API (port 9001)
-- `docker/assistant-api/.assistant.env` - Assistant API (port 9007)
-- `docker/endpoint-api/.endpoint.env` - Endpoint API (port 9005)
-- `docker/integration-api/.integration.env` - Integration API (port 9004)
+- `docker/web-api/web.yml` - Web API (port 9001)
+- `docker/assistant-api/assistant.yml` - Assistant API (port 9007)
+- `docker/endpoint-api/endpoint.yml` - Endpoint API (port 9005)
+- `docker/integration-api/integration.yml` - Integration API (port 9004)
 - `docker/document-api/config.yaml` - Document API (port 9010)
 
 Add your API keys (OpenAI, Anthropic, Deepgram, Twilio, etc.) in these files.

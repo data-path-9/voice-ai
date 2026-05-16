@@ -6,37 +6,38 @@ import { PrimaryButton } from '@/app/components/carbon/button';
 
 const quickStart = [
   {
-    title: 'Build',
-    description: 'Explore Rapida with easy starter tutorials and services.',
-    tag: 'Getting started',
+    title: 'Own the stack',
+    description:
+      'Start with a deployment pattern built for agencies, client ownership, and enterprise control.',
+    tag: 'Recommended',
     route: '/deployment/assistant/create-assistant',
     featured: true,
   },
   {
     title: 'AI Assistants',
     description:
-      'Build conversational AI agents with custom skills, tools, and multi-step reasoning for any channel.',
+      'Design branded voice agents with versioned prompts, tools, and guardrails for every client or business unit.',
     tag: 'Popular',
     route: '/deployment/assistant',
   },
   {
     title: 'Model Integration',
     description:
-      'Connect OpenAI, Anthropic, Google, and custom LLMs. Manage credentials and model configuration.',
+      'Bring your own models, credentials, and routing policies across providers and regions.',
     tag: 'Popular',
     route: '/integration/models',
   },
   {
     title: 'Knowledge Hub',
     description:
-      'Upload documents, manage training data, and build RAG-powered knowledge bases for your assistants.',
+      'Connect private documents and client-specific knowledge without giving up operational control.',
     tag: 'Getting started',
     route: '/knowledge',
   },
   {
     title: 'Endpoints & Governance',
     description:
-      'Secure API endpoints with fine-grained governance, audit trails, and enterprise access control.',
+      'Protect APIs with approvals, audit history, and access controls built for scaled operations.',
     tag: 'Advanced',
     route: '/deployment/endpoint',
   },
@@ -76,7 +77,13 @@ export const HomePage = () => {
     <div className="flex-1 overflow-auto flex flex-col min-h-0">
       {/* ── Page header — IBM Dashboard style ── */}
       <div className="px-6 pt-6 pb-6 flex items-start justify-between">
-        <h1 className="text-2xl font-light tracking-tight">Dashboard</h1>
+        <div>
+          <h1 className="text-2xl font-light tracking-tight">Operations Dashboard</h1>
+          <p className="mt-2 max-w-3xl text-sm text-gray-600 dark:text-gray-400">
+            Built for agencies that need ownership and enterprise teams that
+            need scale, governance, and control.
+          </p>
+        </div>
         <PrimaryButton
           size="md"
           onClick={() => navigation.goToCreateAssistant()}

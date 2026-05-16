@@ -71,7 +71,7 @@ services:
     environment:
       ENV_PATH: /opt/apps/env/assistant.knowledge.yml
     volumes:
-      - ./docker/assistant-api/config.knowledge.yml:/opt/apps/env/assistant.knowledge.yml:ro
+      - ./docker/assistant-api/assistant.knowledge.yml:/opt/apps/env/assistant.knowledge.yml:ro
     depends_on:
       opensearch:
         condition: service_healthy

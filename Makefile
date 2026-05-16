@@ -44,7 +44,7 @@ help:
 	@echo "  make up-all-with-knowledge     - Start all services including knowledge"
 	@echo "  make build-all-with-knowledge  - Build all images including document-api"
 	@echo "  make rebuild-all-with-knowledge- Rebuild all including document-api (no cache)"
-	@echo "  Note: docker-compose.knowledge.yml switches assistant-api to docker/assistant-api/config.knowledge.yml"
+	@echo "  Note: docker-compose.knowledge.yml switches assistant-api to docker/assistant-api/assistant.knowledge.yml"
 	@echo ""
 	@echo "SHUTDOWN COMMANDS:"
 	@echo "  make down-all            - Stop all services"
