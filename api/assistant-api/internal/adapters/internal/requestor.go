@@ -105,9 +105,9 @@ type genericRequestor struct {
 	textToSpeechTransformer internal_type.TextToSpeechTransformer
 
 	// audio intelligence
-	endOfSpeech internal_type.EndOfSpeech
-	vad         internal_type.Vad
-	denoiser    internal_type.Denoiser
+
+	vad      internal_type.Vad
+	denoiser internal_type.Denoiser
 
 	// output preprocessor + TTS
 	inputNormalizer  internal_type.PacketNormalizer
@@ -116,11 +116,11 @@ type genericRequestor struct {
 	recorder internal_type.Recorder
 
 	// executor
-	assistantAnalyses      []internal_type.AnalysisExecutor
-	assistantWebhooks      []internal_type.WebhookExecutor
-	authenticationExecutor internal_type.AuthenticationExecutor
-	assistantExecutor      internal_llm.AssistantExecutor
-
+	assistantAnalyseExecutors []internal_type.AnalysisExecutor
+	assistantWebhookExecutors []internal_type.WebhookExecutor
+	authenticationExecutor    internal_type.AuthenticationExecutor
+	assistantExecutor         internal_llm.AssistantExecutor
+	endOfSpeechExecutor       internal_type.EndOfSpeechExecutor
 	// states
 	assistant             *internal_assistant_entity.Assistant
 	assistantConversation *internal_conversation_entity.AssistantConversation
@@ -186,15 +186,15 @@ func NewGenericRequestor(
 		outputNormalizer: internal_output_normalizer.NewOutputNormalizer(logger),
 
 		//
-		histories:         make([]internal_type.MessagePacket, 0),
-		metadata:          make(map[string]interface{}),
-		args:              make(map[string]interface{}),
-		options:           make(map[string]interface{}),
-		assistantAnalyses: make([]internal_type.AnalysisExecutor, 0),
-		assistantWebhooks: make([]internal_type.WebhookExecutor, 0),
-		sessionCtx:        sessionCtx,
-		cancelSession:     cancelSession,
-		channels:          adapter_channel.NewRequestorChannels(),
+		histories:                 make([]internal_type.MessagePacket, 0),
+		metadata:                  make(map[string]interface{}),
+		args:                      make(map[string]interface{}),
+		options:                   make(map[string]interface{}),
+		assistantAnalyseExecutors: make([]internal_type.AnalysisExecutor, 0),
+		assistantWebhookExecutors: make([]internal_type.WebhookExecutor, 0),
+		sessionCtx:                sessionCtx,
+		cancelSession:             cancelSession,
+		channels:                  adapter_channel.NewRequestorChannels(),
 	}
 
 	go gr.runBootstrapDispatcher(sessionCtx)
@@ -498,12 +498,12 @@ func (r *genericRequestor) shutdownCollectors(ctx context.Context) {
 		defer cancel()
 		r.observer.Shutdown(shutdownCtx)
 	}
-	for _, analysis := range r.assistantAnalyses {
+	for _, analysis := range r.assistantAnalyseExecutors {
 		if err := analysis.Close(ctx); err != nil {
 			r.logger.Errorf("close analysis executor: %v", err)
 		}
 	}
-	for _, webhook := range r.assistantWebhooks {
+	for _, webhook := range r.assistantWebhookExecutors {
 		if err := webhook.Close(ctx); err != nil {
 			r.logger.Errorf("close webhook executor: %v", err)
 		}

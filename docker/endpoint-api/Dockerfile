@@ -32,8 +32,8 @@ COPY --from=builder /app/endpoint-api .
 # Copy migrations directory
 COPY api/endpoint-api/migrations/ ./api/endpoint-api/migrations/
 
-# Copy environment file from docker/endpoint-api
-COPY docker/endpoint-api/.endpoint.env ./env/.endpoint.env
+# Copy default YAML config for standalone container runs
+COPY docker/endpoint-api/config.yml ./env/endpoint.yml
 
 # Switch to rapida-app user
 USER rapida-app

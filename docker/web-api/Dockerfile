@@ -32,8 +32,8 @@ COPY --from=builder /app/web-api .
 # Copy migrations directory
 COPY api/web-api/migrations/ ./api/web-api/migrations/
 
-# Copy environment file from docker/web-api
-COPY docker/web-api/.web.env ./env/.web.env
+# Copy default YAML config for standalone container runs
+COPY docker/web-api/config.yml ./env/web.yml
 
 # Switch to rapida-app user
 USER rapida-app

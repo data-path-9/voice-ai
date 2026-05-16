@@ -22,27 +22,38 @@ var mockCallback = func(ctx context.Context, result ...internal_type.Packet) err
 	return nil
 }
 
-func TestGetEndOfSpeech_SilenceBasedIdentifier(t *testing.T) {
+func TestGetEndOfSpeech_ReturnsPipecat(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	endOfSpeech, err := GetEndOfSpeech(context.Background(), logger, mockCallback, utils.Option{EndOfSpeechOptionsKeyProvider: SilenceBasedEndOfSpeech})
+	endOfSpeech, err := GetEndOfSpeech(context.Background(), logger, mockCallback, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, endOfSpeech)
-	assert.IsType(t, endOfSpeech, endOfSpeech)
+	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
 }
 
-// func TestGetEndOfSpeech_LiveKitIdentifier(t *testing.T) {
-// 	logger, _ := commons.NewApplicationLogger()
+func TestGetEndOfSpeech_IgnoresConfiguredProvider(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
 
-// 	endOfSpeech, err := GetEndOfSpeech(t.Context(), logger, mockCallback, utils.Option{EndOfSpeechOptionsKeyProvider: LiveKitEndOfSpeech})
+	providers := []EndOfSpeechIdentifier{
+		SilenceBasedEndOfSpeech,
+		LiveKitEndOfSpeech,
+		PipecatSmartTurnEndOfSpeech,
+	}
 
-// 	require.NoError(t, err)
-// 	assert.NotNil(t, endOfSpeech)
-// 	if endOfSpeech != nil {
-// 		defer endOfSpeech.Close()
-// 	}
-// }
+	for _, provider := range providers {
+		endOfSpeech, err := GetEndOfSpeech(
+			t.Context(),
+			logger,
+			mockCallback,
+			utils.Option{EndOfSpeechOptionsKeyProvider: provider},
+		)
+
+		require.NoError(t, err)
+		require.NotNil(t, endOfSpeech)
+		assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
+	}
+}
 
 func TestEndOfSpeechIdentifier_Constants(t *testing.T) {
 	assert.Equal(t, EndOfSpeechIdentifier("silence_based_eos"), SilenceBasedEndOfSpeech)
@@ -51,46 +62,31 @@ func TestEndOfSpeechIdentifier_Constants(t *testing.T) {
 }
 
 func TestGetEndOfSpeech_WithNilLogger(t *testing.T) {
+	endOfSpeech, err := GetEndOfSpeech(t.Context(), nil, mockCallback, nil)
 
-	// This test validates that the function passes nil logger to NewSilenceBasedEndOfSpeech
-	// which should handle it appropriately or fail gracefully
-	endOfSpeech, err := GetEndOfSpeech(t.Context(), nil, mockCallback, utils.Option{EndOfSpeechOptionsKeyProvider: SilenceBasedEndOfSpeech})
-
-	// The behavior depends on internal_silence_based_end_of_speech implementation
-	// Either it should error or handle nil logger gracefully
-	if err == nil {
-		assert.NotNil(t, endOfSpeech)
-	} else {
-		assert.Nil(t, endOfSpeech)
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, endOfSpeech)
+	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
 }
 
 func TestGetEndOfSpeech_WithNilCallback(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	// Test with nil callback
-	endOfSpeech, err := GetEndOfSpeech(t.Context(), logger, nil, utils.Option{EndOfSpeechOptionsKeyProvider: SilenceBasedEndOfSpeech})
+	endOfSpeech, err := GetEndOfSpeech(t.Context(), logger, nil, nil)
 
-	// The behavior depends on internal_silence_based_end_of_speech implementation
-	if err == nil {
-		assert.NotNil(t, endOfSpeech)
-	} else {
-		assert.Nil(t, endOfSpeech)
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, endOfSpeech)
+	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
 }
 
 func TestGetEndOfSpeech_WithNilOptions(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	// Test with nil options
 	endOfSpeech, err := GetEndOfSpeech(t.Context(), logger, mockCallback, nil)
 
-	// The behavior depends on internal_silence_based_end_of_speech implementation
-	if err == nil {
-		assert.NotNil(t, endOfSpeech)
-	} else {
-		assert.Nil(t, endOfSpeech)
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, endOfSpeech)
+	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
 }
 
 func TestResolveEndOfSpeechProvider_DefaultsToPipecat(t *testing.T) {

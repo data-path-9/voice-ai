@@ -40,3 +40,7 @@ type WebhookExecutor interface {
 type AuthenticationExecutor interface {
 	Executor[ExecuteSessionAuthenticationPacket]
 }
+
+type EndOfSpeechExecutor interface {
+	Executor[Packet]
+}

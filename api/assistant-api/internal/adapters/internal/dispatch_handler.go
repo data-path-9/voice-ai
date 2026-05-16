@@ -17,8 +17,8 @@ import (
 	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_analysis "github.com/rapidaai/api/assistant-api/internal/analysis"
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
-	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
 	internal_audio_recorder "github.com/rapidaai/api/assistant-api/internal/audio/recorder"
+	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
 	internal_authentication "github.com/rapidaai/api/assistant-api/internal/authentication"
 	internal_condition "github.com/rapidaai/api/assistant-api/internal/condition"
 	internal_denoiser "github.com/rapidaai/api/assistant-api/internal/denoiser"
@@ -190,8 +190,8 @@ func (h requestorDispatchHandler) HandleUserAudio(ctx context.Context, vl intern
 }
 
 func (h requestorDispatchHandler) HandleEndOfSpeechAudio(ctx context.Context, vl internal_type.EndOfSpeechAudioPacket) {
-	if h.r.endOfSpeech != nil {
-		if err := h.r.endOfSpeech.Analyze(ctx, vl); err != nil {
+	if h.r.endOfSpeechExecutor != nil {
+		if err := h.r.endOfSpeechExecutor.Execute(ctx, vl); err != nil {
 			h.r.logger.Errorf("end of speech analyze error: %v", err)
 		}
 	}
@@ -228,25 +228,29 @@ func (h requestorDispatchHandler) HandleVadAudio(ctx context.Context, vl interna
 	}
 }
 func (h requestorDispatchHandler) HandleVadSpeechActivity(ctx context.Context, vl internal_type.VadSpeechActivityPacket) {
-	if h.r.endOfSpeech != nil {
-		utils.Go(ctx, func() {
-			if err := h.r.endOfSpeech.Analyze(ctx, vl); err != nil {
-				h.r.logger.Errorf("end of speech analyze error: %v", err)
-			}
-		})
+	if h.r.endOfSpeechExecutor != nil {
+		if err := h.r.endOfSpeechExecutor.Execute(ctx, vl); err != nil {
+			h.r.logger.Errorf("end of speech analyze error: %v", err)
+		}
 	}
 }
 func (h requestorDispatchHandler) HandleSpeechToText(ctx context.Context, p internal_type.SpeechToTextPacket) {
 	p.ContextID = h.r.GetID()
-	if err := h.callEndOfSpeech(ctx, p); err != nil {
-		if !p.Interim {
-			h.r.OnPacket(ctx, internal_type.EndOfSpeechPacket{
-				ContextID: p.ContextID,
-				Speech:    p.Script,
-				Speechs:   []internal_type.SpeechToTextPacket{p},
-			})
+	if h.r.endOfSpeechExecutor != nil {
+		if err := h.r.endOfSpeechExecutor.Execute(ctx, p); err != nil {
+			h.r.logger.Errorf("end of speech analyze error: %v", err)
 		}
+		return
 	}
+	// just a fallback to trigger the end of speech event in case endOfSpeechExecutor is not configured.
+	if !p.Interim {
+		h.r.OnPacket(ctx, internal_type.EndOfSpeechPacket{
+			ContextID: p.ContextID,
+			Speech:    p.Script,
+			Speechs:   []internal_type.SpeechToTextPacket{p},
+		})
+	}
+
 }
 func (h requestorDispatchHandler) HandleInterimEndOfSpeech(ctx context.Context, p internal_type.InterimEndOfSpeechPacket) {
 	h.r.Notify(ctx, &protos.ConversationUserMessage{
@@ -355,8 +359,8 @@ func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context
 }
 
 func (h requestorDispatchHandler) HandleEndOfSpeechInterruption(ctx context.Context, p internal_type.EndOfSpeechInterruptionPacket) {
-	if h.r.endOfSpeech != nil {
-		if err := h.r.endOfSpeech.Analyze(ctx, p); err != nil {
+	if h.r.endOfSpeechExecutor != nil {
+		if err := h.r.endOfSpeechExecutor.Execute(ctx, p); err != nil {
 			h.r.logger.Errorf("end of speech analyze error: %v", err)
 		}
 	}
@@ -1116,7 +1120,7 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 			})
 			return
 		}
-		h.r.assistantAnalyses = append(h.r.assistantAnalyses, exec)
+		h.r.assistantAnalyseExecutors = append(h.r.assistantAnalyseExecutors, exec)
 	}
 
 	for _, webhook := range h.r.assistant.AssistantWebhooks {
@@ -1129,7 +1133,7 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 			})
 			return
 		}
-		h.r.assistantWebhooks = append(h.r.assistantWebhooks, exec)
+		h.r.assistantWebhookExecutors = append(h.r.assistantWebhookExecutors, exec)
 	}
 
 	if h.r.assistant.AssistantAuthentication != nil && h.r.IsConditionAllowed(h.r.assistant.AssistantAuthentication.GetOptions(), "authentication.condition") {
@@ -1477,9 +1481,14 @@ func (h requestorDispatchHandler) HandleInitializeEndOfSpeech(ctx context.Contex
 		h.r.OnPacket,
 		options)
 	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageEndOfSpeech,
+			Error:     err,
+		})
 		return
 	}
-	h.r.endOfSpeech = endOfSpeech
+	h.r.endOfSpeechExecutor = endOfSpeech
 }
 func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, p internal_type.InitializeBehaviorPacket) {
 	h.r.initializeBehavior(ctx)
@@ -1766,10 +1775,15 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeEndOfSpeech(ctx cont
 		h.r.OnPacket,
 		options)
 	if err != nil {
-		h.r.logger.Warnf("unable to initialize text analyzer %+v", err)
+		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+			ContextID:  p.ContextID,
+			StreamMode: p.StreamMode,
+			Type:       internal_type.ModeSwitchErrorTypeInitializeEndOfSpeech,
+			Error:      err,
+		})
 		return
 	}
-	h.r.endOfSpeech = endOfSpeech
+	h.r.endOfSpeechExecutor = endOfSpeech
 
 }
 
@@ -1805,11 +1819,11 @@ func (h requestorDispatchHandler) HandleModeSwitchFinalizeVoiceActivityDetection
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeEndOfSpeech(ctx context.Context, p internal_type.ModeSwitchFinalizeEndOfSpeechPacket) {
-	if h.r.endOfSpeech != nil {
-		if err := h.r.endOfSpeech.Close(); err != nil {
+	if h.r.endOfSpeechExecutor != nil {
+		if err := h.r.endOfSpeechExecutor.Close(ctx); err != nil {
 			h.r.logger.Warnf("cancel end of speech with error %v", err)
 		}
-		h.r.endOfSpeech = nil
+		h.r.endOfSpeechExecutor = nil
 	}
 }
 
@@ -1908,14 +1922,15 @@ func (h requestorDispatchHandler) HandleFinalizeBehavior(ctx context.Context, p 
 	h.r.OnPacket(ctx, internal_type.FinalizeEndOfSpeechPacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizeEndOfSpeech(ctx context.Context, p internal_type.FinalizeEndOfSpeechPacket) {
-	if h.r.endOfSpeech != nil {
-		if err := h.r.endOfSpeech.Close(); err != nil {
+	if h.r.endOfSpeechExecutor != nil {
+		if err := h.r.endOfSpeechExecutor.Close(ctx); err != nil {
 			h.r.logger.Tracef(ctx, "failed to close end of speech: %+v", err)
 		}
-		h.r.endOfSpeech = nil
+		h.r.endOfSpeechExecutor = nil
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizeVoiceActivityDetectionPacket{ContextID: p.ContextID})
 }
+
 func (h requestorDispatchHandler) HandleFinalizeVoiceActivityDetection(ctx context.Context, p internal_type.FinalizeVoiceActivityDetectionPacket) {
 	if h.r.vad != nil {
 		if err := h.r.vad.Close(); err != nil {
@@ -1925,6 +1940,7 @@ func (h requestorDispatchHandler) HandleFinalizeVoiceActivityDetection(ctx conte
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizeTextToSpeechPacket{ContextID: p.ContextID})
 }
+
 func (h requestorDispatchHandler) HandleFinalizeTextToSpeech(ctx context.Context, p internal_type.FinalizeTextToSpeechPacket) {
 	if h.r.textToSpeechTransformer != nil {
 		if err := h.r.textToSpeechTransformer.Close(ctx); err != nil {
@@ -1934,6 +1950,7 @@ func (h requestorDispatchHandler) HandleFinalizeTextToSpeech(ctx context.Context
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizeSpeechToTextPacket{ContextID: p.ContextID})
 }
+
 func (h requestorDispatchHandler) HandleFinalizeSpeechToText(ctx context.Context, p internal_type.FinalizeSpeechToTextPacket) {
 	if h.r.speechToTextTransformer != nil {
 		if err := h.r.speechToTextTransformer.Close(ctx); err != nil {
@@ -2014,12 +2031,12 @@ func (h requestorDispatchHandler) HandleFinalizationCompleted(ctx context.Contex
 }
 
 func (h requestorDispatchHandler) HandleExecuteAnalysis(ctx context.Context, p internal_type.ExecuteAnalysisPacket) {
-	if len(h.r.assistantAnalyses) == 0 {
+	if len(h.r.assistantAnalyseExecutors) == 0 {
 		return
 	}
 	source := variable.NewCommunicationSource(h.r)
 	registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
-	for _, initializedAnalysis := range h.r.assistantAnalyses {
+	for _, initializedAnalysis := range h.r.assistantAnalyseExecutors {
 		if !h.r.IsConditionAllowed(initializedAnalysis.Options(), "analysis.condition") {
 			arguments, err := initializedAnalysis.Arguments()
 			if err != nil {
@@ -2036,12 +2053,12 @@ func (h requestorDispatchHandler) HandleExecuteAnalysis(ctx context.Context, p i
 }
 
 func (h requestorDispatchHandler) HandleExecuteWebhook(ctx context.Context, p internal_type.ExecuteWebhookPacket) {
-	if len(h.r.assistantWebhooks) == 0 {
+	if len(h.r.assistantWebhookExecutors) == 0 {
 		return
 	}
 	source := variable.NewCommunicationSource(h.r)
 	registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
-	for _, initializedWebhook := range h.r.assistantWebhooks {
+	for _, initializedWebhook := range h.r.assistantWebhookExecutors {
 		if h.r.IsConditionAllowed(initializedWebhook.Options(), "webhook.condition") {
 			arguments, err := initializedWebhook.Arguments()
 			if err != nil {
@@ -2054,18 +2071,6 @@ func (h requestorDispatchHandler) HandleExecuteWebhook(ctx context.Context, p in
 			}
 		}
 	}
-}
-
-func (h requestorDispatchHandler) callEndOfSpeech(ctx context.Context, vl internal_type.Packet) error {
-	if h.r.endOfSpeech != nil {
-		utils.Go(ctx, func() {
-			if err := h.r.endOfSpeech.Analyze(ctx, vl); err != nil {
-				h.r.logger.Errorf("end of speech analyze error: %v", err)
-			}
-		})
-		return nil
-	}
-	return errors.New("end of speech analyzer not configured")
 }
 
 func (h requestorDispatchHandler) callInputNormalizer(ctx context.Context, vl internal_type.EndOfSpeechPacket) error {

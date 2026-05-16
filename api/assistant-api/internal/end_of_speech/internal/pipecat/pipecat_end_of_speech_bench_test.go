@@ -140,8 +140,8 @@ func BenchmarkFFT_1024(b *testing.B) {
 
 // BenchmarkAppendAudio_SmallChunk measures appending a typical audio chunk (20ms at 16kHz).
 func BenchmarkAppendAudio_SmallChunk(b *testing.B) {
-	eos := &PipecatEOS{
-		audioBuf: make([]float32, 0, maxAudioSamples),
+	eos := &pipecatEndOfSpeech{
+		audioBuffer: make([]float32, 0, maxAudioSamples),
 	}
 	pcm := make([]byte, 320*2) // 20ms at 16kHz = 320 samples
 
@@ -150,16 +150,16 @@ func BenchmarkAppendAudio_SmallChunk(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		eos.appendAudio(pcm)
 		// Periodically reset to avoid growing beyond cap
-		if len(eos.audioBuf) > maxAudioSamples-1000 {
-			eos.audioBuf = eos.audioBuf[:0]
+		if len(eos.audioBuffer) > maxAudioSamples-1000 {
+			eos.audioBuffer = eos.audioBuffer[:0]
 		}
 	}
 }
 
 // BenchmarkAppendAudio_WithEviction measures appending when the buffer is full.
 func BenchmarkAppendAudio_WithEviction(b *testing.B) {
-	eos := &PipecatEOS{
-		audioBuf: make([]float32, maxAudioSamples, maxAudioSamples),
+	eos := &pipecatEndOfSpeech{
+		audioBuffer: make([]float32, maxAudioSamples, maxAudioSamples),
 	}
 	pcm := make([]byte, 320*2)
 
@@ -221,26 +221,26 @@ func BenchmarkPrepareAudio_Pad(b *testing.B) {
 // EOS INPUT BENCHMARKS (without ONNX model — fallback path)
 // ============================================================================
 
-// BenchmarkAnalyze_UserInput measures the fast path (immediate fire).
-func BenchmarkAnalyze_UserInput(b *testing.B) {
+// BenchmarkExecute_UserInput measures the fast path (immediate fire).
+func BenchmarkExecute_UserInput(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	eos := newTestEOS(callback, newTestOpts(map[string]any{}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_ = eos.Analyze(ctx, userInput("hello"))
+		_ = eos.Execute(ctx, userInput("hello"))
 	}
 }
 
-// BenchmarkAnalyze_STTInput measures STT processing with timer scheduling.
-func BenchmarkAnalyze_STTInput(b *testing.B) {
+// BenchmarkExecute_STTInput measures STT processing with timer scheduling.
+func BenchmarkExecute_STTInput(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	eos := newTestEOS(callback, newTestOpts(map[string]any{"microphone.eos.fallback_timeout": 100.0}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -248,15 +248,15 @@ func BenchmarkAnalyze_STTInput(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = eos.Analyze(ctx, sttInput("transcription", i%5 == 0))
+		_ = eos.Execute(ctx, sttInput("transcription", i%5 == 0))
 	}
 }
 
-// BenchmarkAnalyze_AudioInput measures the audio accumulation path.
-func BenchmarkAnalyze_AudioInput(b *testing.B) {
+// BenchmarkExecute_AudioInput measures the audio accumulation path.
+func BenchmarkExecute_AudioInput(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	eos := newTestEOS(callback, newTestOpts(map[string]any{}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	pkt := audioInput(320) // 20ms chunk
 	ctx, cancel := context.WithCancel(context.Background())
@@ -265,15 +265,15 @@ func BenchmarkAnalyze_AudioInput(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = eos.Analyze(ctx, pkt)
+		_ = eos.Execute(ctx, pkt)
 	}
 }
 
-// BenchmarkAnalyze_EmptyInput measures the fast rejection path.
-func BenchmarkAnalyze_EmptyInput(b *testing.B) {
+// BenchmarkExecute_EmptyInput measures the fast rejection path.
+func BenchmarkExecute_EmptyInput(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	eos := newTestEOS(callback, newTestOpts(map[string]any{}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -281,7 +281,7 @@ func BenchmarkAnalyze_EmptyInput(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = eos.Analyze(ctx, userInput(""))
+		_ = eos.Execute(ctx, userInput(""))
 	}
 }
 
@@ -289,11 +289,11 @@ func BenchmarkAnalyze_EmptyInput(b *testing.B) {
 // CONCURRENT BENCHMARKS
 // ============================================================================
 
-// BenchmarkAnalyze_Concurrent measures thread-safe access under load.
-func BenchmarkAnalyze_Concurrent(b *testing.B) {
+// BenchmarkExecute_Concurrent measures thread-safe access under load.
+func BenchmarkExecute_Concurrent(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	eos := newTestEOS(callback, newTestOpts(map[string]any{"microphone.eos.fallback_timeout": 100.0}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -301,16 +301,16 @@ func BenchmarkAnalyze_Concurrent(b *testing.B) {
 		for pb.Next() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
-			_ = eos.Analyze(ctx, userInput("bench"))
+			_ = eos.Execute(ctx, userInput("bench"))
 		}
 	})
 }
 
-// BenchmarkAnalyze_ConcurrentMixed measures concurrent performance with all packet types.
-func BenchmarkAnalyze_ConcurrentMixed(b *testing.B) {
+// BenchmarkExecute_ConcurrentMixed measures concurrent performance with all packet types.
+func BenchmarkExecute_ConcurrentMixed(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	eos := newTestEOS(callback, newTestOpts(map[string]any{"microphone.eos.fallback_timeout": 100.0}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -323,23 +323,23 @@ func BenchmarkAnalyze_ConcurrentMixed(b *testing.B) {
 			c := atomic.AddInt64(&counter, 1)
 			switch c % 4 {
 			case 0:
-				_ = eos.Analyze(ctx, userInput("user"))
+				_ = eos.Execute(ctx, userInput("user"))
 			case 1:
-				_ = eos.Analyze(ctx, interruptInput())
+				_ = eos.Execute(ctx, interruptInput())
 			case 2:
-				_ = eos.Analyze(ctx, sttInput("stt", c%5 == 0))
+				_ = eos.Execute(ctx, sttInput("stt", c%5 == 0))
 			case 3:
-				_ = eos.Analyze(ctx, audioInput(160))
+				_ = eos.Execute(ctx, audioInput(160))
 			}
 		}
 	})
 }
 
-// BenchmarkAnalyze_ConcurrentAudioOnly measures high-frequency audio packet ingestion.
-func BenchmarkAnalyze_ConcurrentAudioOnly(b *testing.B) {
+// BenchmarkExecute_ConcurrentAudioOnly measures high-frequency audio packet ingestion.
+func BenchmarkExecute_ConcurrentAudioOnly(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	eos := newTestEOS(callback, newTestOpts(map[string]any{}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -349,7 +349,7 @@ func BenchmarkAnalyze_ConcurrentAudioOnly(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = eos.Analyze(ctx, pkt)
+			_ = eos.Execute(ctx, pkt)
 		}
 	})
 }
@@ -371,16 +371,16 @@ func BenchmarkMemory_MelExtraction(b *testing.B) {
 
 // BenchmarkMemory_AudioAppend measures allocations in the audio accumulation path.
 func BenchmarkMemory_AudioAppend(b *testing.B) {
-	eos := &PipecatEOS{
-		audioBuf: make([]float32, 0, maxAudioSamples),
+	eos := &pipecatEndOfSpeech{
+		audioBuffer: make([]float32, 0, maxAudioSamples),
 	}
 	pcm := make([]byte, 640) // 320 samples
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		eos.appendAudio(pcm)
-		if len(eos.audioBuf) > maxAudioSamples-1000 {
-			eos.audioBuf = eos.audioBuf[:0]
+		if len(eos.audioBuffer) > maxAudioSamples-1000 {
+			eos.audioBuffer = eos.audioBuffer[:0]
 		}
 	}
 }
@@ -399,11 +399,11 @@ func BenchmarkMemory_ReflectPad(b *testing.B) {
 // SCALE BENCHMARKS
 // ============================================================================
 
-// BenchmarkAnalyze_HighThroughput measures sustained mixed-input throughput.
-func BenchmarkAnalyze_HighThroughput(b *testing.B) {
+// BenchmarkExecute_HighThroughput measures sustained mixed-input throughput.
+func BenchmarkExecute_HighThroughput(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	eos := newTestEOS(callback, newTestOpts(map[string]any{"microphone.eos.fallback_timeout": 100.0}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -413,22 +413,22 @@ func BenchmarkAnalyze_HighThroughput(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		switch i % 4 {
 		case 0:
-			_ = eos.Analyze(ctx, userInput(fmt.Sprintf("msg %d", i)))
+			_ = eos.Execute(ctx, userInput(fmt.Sprintf("msg %d", i)))
 		case 1:
-			_ = eos.Analyze(ctx, interruptInput())
+			_ = eos.Execute(ctx, interruptInput())
 		case 2:
-			_ = eos.Analyze(ctx, sttInput(fmt.Sprintf("stt %d", i), i%7 == 0))
+			_ = eos.Execute(ctx, sttInput(fmt.Sprintf("stt %d", i), i%7 == 0))
 		case 3:
-			_ = eos.Analyze(ctx, audioInput(320))
+			_ = eos.Execute(ctx, audioInput(320))
 		}
 	}
 }
 
-// BenchmarkAnalyze_RapidFireInputs measures generation counter efficiency.
-func BenchmarkAnalyze_RapidFireInputs(b *testing.B) {
+// BenchmarkExecute_RapidFireInputs measures generation counter efficiency.
+func BenchmarkExecute_RapidFireInputs(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	eos := newTestEOS(callback, newTestOpts(map[string]any{"microphone.eos.fallback_timeout": 100.0}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -436,7 +436,7 @@ func BenchmarkAnalyze_RapidFireInputs(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = eos.Analyze(ctx, userInput(fmt.Sprintf("input %d", i)))
+		_ = eos.Execute(ctx, userInput(fmt.Sprintf("input %d", i)))
 	}
 }
 
@@ -444,15 +444,15 @@ func BenchmarkAnalyze_RapidFireInputs(b *testing.B) {
 // RACE DETECTION BENCHMARKS
 // ============================================================================
 
-// BenchmarkAnalyze_RaceDetection should pass with `go test -bench=. -race`.
-func BenchmarkAnalyze_RaceDetection(b *testing.B) {
+// BenchmarkExecute_RaceDetection should pass with `go test -bench=. -race`.
+func BenchmarkExecute_RaceDetection(b *testing.B) {
 	var callCount int64
 	callback := func(context.Context, ...internal_type.Packet) error {
 		atomic.AddInt64(&callCount, 1)
 		return nil
 	}
 	eos := newTestEOS(callback, newTestOpts(map[string]any{"microphone.eos.fallback_timeout": 50.0}))
-	defer eos.Close()
+	defer closeTestEndOfSpeech(eos)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -463,13 +463,13 @@ func BenchmarkAnalyze_RaceDetection(b *testing.B) {
 		for pb.Next() {
 			switch idx % 4 {
 			case 0:
-				_ = eos.Analyze(ctx, userInput(fmt.Sprintf("race %d", idx)))
+				_ = eos.Execute(ctx, userInput(fmt.Sprintf("race %d", idx)))
 			case 1:
-				_ = eos.Analyze(ctx, interruptInput())
+				_ = eos.Execute(ctx, interruptInput())
 			case 2:
-				_ = eos.Analyze(ctx, sttInput(fmt.Sprintf("race %d", idx), idx%5 == 0))
+				_ = eos.Execute(ctx, sttInput(fmt.Sprintf("race %d", idx), idx%5 == 0))
 			case 3:
-				_ = eos.Analyze(ctx, audioInput(160))
+				_ = eos.Execute(ctx, audioInput(160))
 			}
 			idx++
 		}
