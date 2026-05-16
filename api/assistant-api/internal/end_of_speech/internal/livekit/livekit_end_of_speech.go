@@ -45,12 +45,11 @@ const (
 	// defaultMaxHistory matches LiveKit's MAX_HISTORY_TURNS = 6.
 	defaultMaxHistory = 6.0
 
-	// defaultFallbackMs is the silence timeout for interim STT and inference failures.
-	defaultFallbackMs = 500.0
+	// defaultFallbackTimeout is the silence timeout for interim STT and inference failures.
+	defaultFallbackTimeout = 500.0
 )
 
-// SpeechSegment represents accumulated speech with metadata.
-type SpeechSegment struct {
+type speechSegment struct {
 	ContextID string
 	Committed string // accumulated final transcripts
 	Pending   string // latest interim transcript (not yet finalized)
@@ -58,72 +57,75 @@ type SpeechSegment struct {
 	Chunks    []internal_type.SpeechToTextPacket
 }
 
-// FullText returns the complete transcript including any pending interim text.
-func (s SpeechSegment) FullText() string {
-	if s.Pending == "" {
-		return s.Committed
+func (segment speechSegment) FullText() string {
+	if segment.Pending == "" {
+		return segment.Committed
 	}
-	if s.Committed == "" {
-		return s.Pending
+	if segment.Committed == "" {
+		return segment.Pending
 	}
-	return s.Committed + " " + s.Pending
+	return segment.Committed + " " + segment.Pending
 }
 
-// command defines operations for the worker goroutine.
-type command struct {
-	ctx     context.Context
-	timeout time.Duration
-	segment SpeechSegment
-	fireNow bool
-	reset   bool
+type workerCommand struct {
+	ctx             context.Context
+	timeout         time.Duration
+	segment         speechSegment
+	confidence      float64
+	fireImmediately bool
 }
 
-// eosState holds protected state for end-of-speech detection.
-type eosState struct {
-	segment       SpeechSegment
+type endOfSpeechState struct {
+	segment       speechSegment
+	confidence    float64
 	callbackFired bool
 	generation    uint64
 }
 
-// LivekitEOS detects end-of-speech using the LiveKit turn detector model
+type turnPredictor interface {
+	Predict(string) (float64, error)
+}
+
+// livekitEndOfSpeech detects end-of-speech using the LiveKit turn detector model
 // with a hybrid approach: ONNX inference determines whether to use a quick
 // or extended silence timeout, with fallback to standard silence on failure.
 //
 // Conversation history is built internally from packets flowing through
-// Analyze — user turns are recorded when EOS fires, and assistant turns
+// Execute — user turns are recorded when EOS fires, and assistant turns
 // are recorded from LLMResponseDonePacket.
-type LivekitEOS struct {
+type livekitEndOfSpeech struct {
 	logger   commons.Logger
-	callback func(context.Context, ...internal_type.Packet) error
+	onPacket func(context.Context, ...internal_type.Packet) error
+	opts     utils.Option
 
 	// Model-based turn detection
-	detector *TurnDetector
+	predictor   turnPredictor
+	predictorMu sync.Mutex
 
 	// Conversation history built from packets (protected by mu)
 	history []chatMessage
 
 	// Configuration
-	threshold      float64
-	quickTimeout   time.Duration
-	silenceTimeout time.Duration
-	fallbackMs     time.Duration
-	maxHistory     int
+	threshold       float64
+	quickTimeout    time.Duration
+	silenceTimeout  time.Duration
+	fallbackTimeout time.Duration
+	maxHistory      int
 
 	// Worker orchestration
-	cmdCh  chan command
-	stopCh chan struct{}
+	commandCh chan workerCommand
+	stopCh    chan struct{}
 
 	// State
 	mu    sync.RWMutex
-	state *eosState
+	state *endOfSpeechState
 }
 
-// NewLivekitEndOfSpeech creates a new LiveKit model-based end-of-speech detector.
 func NewLivekitEndOfSpeech(
 	logger commons.Logger,
-	onCallback func(context.Context, ...internal_type.Packet) error,
+	onPacket func(context.Context, ...internal_type.Packet) error,
 	opts utils.Option,
-) (internal_type.EndOfSpeech, error) {
+) (internal_type.EndOfSpeechExecutor, error) {
 	start := time.Now()
 
 	cfg := TurnDetectorConfig{ModelType: "en"}
@@ -142,44 +144,45 @@ func NewLivekitEndOfSpeech(
 		return nil, fmt.Errorf("livekit_eos: init turn detector: %w", err)
 	}
 
-	eos := &LivekitEOS{
-		logger:         logger,
-		callback:       onCallback,
-		detector:       detector,
-		threshold:      defaultThreshold,
-		quickTimeout:   time.Duration(defaultQuickTimeout) * time.Millisecond,
-		silenceTimeout: time.Duration(defaultSilenceTimeout) * time.Millisecond,
-		fallbackMs:     time.Duration(defaultFallbackMs) * time.Millisecond,
-		maxHistory:     int(defaultMaxHistory),
-		cmdCh:          make(chan command, 32),
-		stopCh:         make(chan struct{}),
-		state:          &eosState{segment: SpeechSegment{}},
+	endOfSpeech := &livekitEndOfSpeech{
+		logger:          logger,
+		onPacket:        onPacket,
+		opts:            opts,
+		predictor:       detector,
+		threshold:       defaultThreshold,
+		quickTimeout:    time.Duration(defaultQuickTimeout) * time.Millisecond,
+		silenceTimeout:  time.Duration(defaultSilenceTimeout) * time.Millisecond,
+		fallbackTimeout: time.Duration(defaultFallbackTimeout) * time.Millisecond,
+		maxHistory:      int(defaultMaxHistory),
+		commandCh:       make(chan workerCommand, 32),
+		stopCh:          make(chan struct{}),
+		state:           &endOfSpeechState{segment: speechSegment{}},
 	}
 
 	if v, err := opts.GetFloat64(optKeyThreshold); err == nil {
-		eos.threshold = v
+		endOfSpeech.threshold = v
 	}
 	if v, err := opts.GetFloat64(optKeyExtendedTimeout); err == nil {
-		eos.silenceTimeout = time.Duration(v) * time.Millisecond
+		endOfSpeech.silenceTimeout = time.Duration(v) * time.Millisecond
 	} else if v, err := opts.GetFloat64(optKeyLegacySilenceTimeout); err == nil {
-		eos.silenceTimeout = time.Duration(v) * time.Millisecond
+		endOfSpeech.silenceTimeout = time.Duration(v) * time.Millisecond
 	}
 	if v, err := opts.GetFloat64(optKeyQuickTimeout); err == nil {
-		eos.quickTimeout = time.Duration(v) * time.Millisecond
+		endOfSpeech.quickTimeout = time.Duration(v) * time.Millisecond
 	}
 	if v, err := opts.GetFloat64(optKeyMaxHistory); err == nil {
-		eos.maxHistory = int(v)
+		endOfSpeech.maxHistory = int(v)
 	}
 	if v, err := opts.GetFloat64(optKeyFallbackTimeout); err == nil {
-		eos.fallbackMs = time.Duration(v) * time.Millisecond
+		endOfSpeech.fallbackTimeout = time.Duration(v) * time.Millisecond
 	} else if v, err := opts.GetFloat64(optKeyLegacyTimeout); err == nil {
-		eos.fallbackMs = time.Duration(v) * time.Millisecond
+		endOfSpeech.fallbackTimeout = time.Duration(v) * time.Millisecond
 	}
 
-	go eos.worker()
+	go endOfSpeech.worker()
 
-	if onCallback != nil {
-		_ = onCallback(context.Background(), internal_type.ConversationEventPacket{
+	if onPacket != nil {
+		_ = onPacket(context.Background(), internal_type.ConversationEventPacket{
 			Name: "eos",
 			Data: map[string]string{
 				"type":     "initialized",
@@ -190,106 +193,173 @@ func NewLivekitEndOfSpeech(
 		})
 	}
 
-	return eos, nil
+	return endOfSpeech, nil
 }
 
-// Name returns the component name.
-func (eos *LivekitEOS) Name() string {
+func (endOfSpeech *livekitEndOfSpeech) Name() string {
 	return eosName
 }
 
-// Analyze processes incoming packets using the hybrid turn detection model.
-// In addition to the standard EOS packet types (UserTextReceivedPacket, EndOfSpeechInterruptionPacket,
-// SpeechToTextPacket), it also observes LLMResponseDonePacket to build
-// conversation history for context-aware turn prediction.
-func (eos *LivekitEOS) Analyze(ctx context.Context, pkt internal_type.Packet) error {
-	switch p := pkt.(type) {
+func (endOfSpeech *livekitEndOfSpeech) Options() utils.Option {
+	return endOfSpeech.opts
+}
+
+func (endOfSpeech *livekitEndOfSpeech) Arguments() (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (endOfSpeech *livekitEndOfSpeech) Execute(ctx context.Context, packet internal_type.Packet) error {
+	switch packet := packet.(type) {
 	case internal_type.EndOfSpeechAudioPacket:
 		return nil
 	case internal_type.UserTextReceivedPacket:
-		if p.Text == "" {
+		if packet.Text == "" {
 			return nil
 		}
-		eos.mu.Lock()
-		seg := SpeechSegment{ContextID: p.ContextId(), Committed: p.Text, Timestamp: time.Now()}
-		eos.state.segment = seg
-		eos.mu.Unlock()
+		endOfSpeech.mu.Lock()
+		segment := speechSegment{ContextID: packet.ContextId(), Committed: packet.Text, Timestamp: time.Now()}
+		endOfSpeech.state.segment = segment
+		endOfSpeech.state.confidence = 0
+		endOfSpeech.mu.Unlock()
 
-		eos.callback(ctx,
-			internal_type.InterimEndOfSpeechPacket{Speech: seg.Committed, ContextID: seg.ContextID},
-			internal_type.ConversationEventPacket{Name: "eos", Data: map[string]string{"type": "interim", "speech": seg.Committed}},
+		emittedAt := time.Now()
+		_ = endOfSpeech.onPacket(ctx,
+			internal_type.InterimEndOfSpeechPacket{Speech: segment.Committed, ContextID: segment.ContextID},
+			internal_type.ConversationEventPacket{
+				ContextID: segment.ContextID,
+				Name:      "eos",
+				Data: map[string]string{
+					"type":       "interim",
+					"provider":   endOfSpeech.Name(),
+					"context_id": segment.ContextID,
+					"speech":     segment.Committed,
+				},
+				Time: emittedAt,
+			},
 		)
-		eos.send(command{
-			ctx:     ctx,
-			segment: seg,
-			fireNow: true,
+		endOfSpeech.enqueueCommand(workerCommand{
+			ctx:             ctx,
+			segment:         segment,
+			fireImmediately: true,
 		})
 
 	case internal_type.EndOfSpeechInterruptionPacket:
-		eos.mu.RLock()
-		seg := eos.state.segment
-		eos.mu.RUnlock()
-		if seg.FullText() == "" {
+		endOfSpeech.mu.RLock()
+		segment := endOfSpeech.state.segment
+		confidence := endOfSpeech.state.confidence
+		endOfSpeech.mu.RUnlock()
+		if segment.FullText() == "" {
 			return nil
 		}
-		eos.send(command{ctx: ctx, segment: seg, timeout: eos.silenceTimeout})
+		endOfSpeech.enqueueCommand(workerCommand{
+			ctx:        ctx,
+			segment:    segment,
+			confidence: confidence,
+			timeout:    endOfSpeech.silenceTimeout,
+		})
+
+	case internal_type.VadSpeechActivityPacket:
+		endOfSpeech.mu.RLock()
+		segment := endOfSpeech.state.segment
+		confidence := endOfSpeech.state.confidence
+		endOfSpeech.mu.RUnlock()
+		if segment.FullText() == "" {
+			return nil
+		}
+		endOfSpeech.enqueueCommand(workerCommand{
+			ctx:        ctx,
+			segment:    segment,
+			confidence: confidence,
+			timeout:    endOfSpeech.silenceTimeout,
+		})
 
 	case internal_type.SpeechToTextPacket:
-		eos.mu.Lock()
-		if p.Interim {
+		endOfSpeech.mu.Lock()
+		if packet.Interim {
 			// Interim: just reset timer, no text accumulation, no interim packet.
 			// Matches silence-based behavior.
-			seg := eos.state.segment
-			eos.mu.Unlock()
-			if seg.FullText() == "" {
+			segment := endOfSpeech.state.segment
+			confidence := endOfSpeech.state.confidence
+			endOfSpeech.mu.Unlock()
+			if segment.FullText() == "" {
 				return nil
 			}
-			eos.send(command{ctx: ctx, segment: seg, timeout: eos.fallbackMs})
+			endOfSpeech.enqueueCommand(workerCommand{
+				ctx:        ctx,
+				segment:    segment,
+				confidence: confidence,
+				timeout:    endOfSpeech.fallbackTimeout,
+			})
 			return nil
 		}
 
 		// Final transcript: accumulate text
-		newSeg := SpeechSegment{
-			ContextID: p.ContextId(),
+		segment := speechSegment{
+			ContextID: packet.ContextId(),
 			Timestamp: time.Now(),
-			Committed: eos.state.segment.Committed,
-			Chunks:    append([]internal_type.SpeechToTextPacket(nil), eos.state.segment.Chunks...),
+			Committed: endOfSpeech.state.segment.Committed,
+			Chunks:    append([]internal_type.SpeechToTextPacket(nil), endOfSpeech.state.segment.Chunks...),
 		}
-		if newSeg.Committed != "" {
-			newSeg.Committed = fmt.Sprintf("%s %s", newSeg.Committed, p.Script)
+		if segment.Committed != "" {
+			segment.Committed = fmt.Sprintf("%s %s", segment.Committed, packet.Script)
 		} else {
-			newSeg.Committed = p.Script
+			segment.Committed = packet.Script
 		}
-		newSeg.Chunks = append(newSeg.Chunks, p)
-		eos.state.segment = newSeg
-		fullText := newSeg.FullText()
-		eos.mu.Unlock()
+		segment.Chunks = append(segment.Chunks, packet)
+		endOfSpeech.state.segment = segment
+		endOfSpeech.state.confidence = 0
+		fullText := segment.FullText()
+		endOfSpeech.mu.Unlock()
 
 		if fullText == "" {
 			return nil
 		}
 
 		// Emit interim update (same as silence-based on final STT)
-		eos.callback(ctx,
-			internal_type.InterimEndOfSpeechPacket{Speech: fullText, ContextID: newSeg.ContextID},
-			internal_type.ConversationEventPacket{Name: "eos", Data: map[string]string{"type": "interim", "speech": fullText}},
+		emittedAt := time.Now()
+		_ = endOfSpeech.onPacket(ctx,
+			internal_type.InterimEndOfSpeechPacket{Speech: fullText, ContextID: segment.ContextID},
+			internal_type.ConversationEventPacket{
+				ContextID: segment.ContextID,
+				Name:      "eos",
+				Data: map[string]string{
+					"type":       "interim",
+					"provider":   endOfSpeech.Name(),
+					"context_id": segment.ContextID,
+					"speech":     fullText,
+				},
+				Time: emittedAt,
+			},
 		)
 
 		// Run model inference on accumulated final text.
 		// YES (prob >= threshold) → quick_timeout buffer, then fire.
 		// NO  (prob <  threshold) → keep accumulating, safety timer as fallback.
-		prob := eos.predictEOU(fullText)
-		if prob >= eos.threshold {
-			eos.send(command{ctx: ctx, segment: newSeg, timeout: eos.quickTimeout})
-		} else {
-			eos.send(command{ctx: ctx, segment: newSeg, timeout: eos.silenceTimeout})
+		probability := endOfSpeech.predictEOU(fullText)
+		command := workerCommand{
+			ctx:     ctx,
+			segment: segment,
 		}
+		if probability < 0 {
+			command.timeout = endOfSpeech.fallbackTimeout
+		} else {
+			command.confidence = probability
+			endOfSpeech.mu.Lock()
+			endOfSpeech.state.confidence = probability
+			endOfSpeech.mu.Unlock()
+			if probability >= endOfSpeech.threshold {
+				command.timeout = endOfSpeech.quickTimeout
+			} else {
+				command.timeout = endOfSpeech.silenceTimeout
+			}
+		}
+		endOfSpeech.enqueueCommand(command)
 
 	case internal_type.LLMResponseDonePacket:
-		if p.Text != "" {
-			eos.mu.Lock()
-			eos.history = append(eos.history, chatMessage{Role: "assistant", Content: p.Text})
-			eos.mu.Unlock()
+		if packet.Text != "" {
+			endOfSpeech.mu.Lock()
+			endOfSpeech.history = append(endOfSpeech.history, chatMessage{Role: "assistant", Content: packet.Text})
+			endOfSpeech.mu.Unlock()
 		}
 	}
 
@@ -298,185 +368,187 @@ func (eos *LivekitEOS) Analyze(ctx context.Context, pkt internal_type.Packet) er
 
 // predictEOU runs the turn detection model and returns the end-of-utterance
 // probability. Returns -1 on failure (caller should treat as "not done").
-func (eos *LivekitEOS) predictEOU(currentText string) float64 {
-	eos.mu.RLock()
-	history := make([]chatMessage, len(eos.history))
-	copy(history, eos.history)
-	eos.mu.RUnlock()
+func (endOfSpeech *livekitEndOfSpeech) predictEOU(currentText string) float64 {
+	endOfSpeech.mu.RLock()
+	history := make([]chatMessage, len(endOfSpeech.history))
+	copy(history, endOfSpeech.history)
+	endOfSpeech.mu.RUnlock()
 
-	chatText := formatChatTemplateFromHistory(history, currentText, eos.maxHistory)
+	chatText := formatChatTemplateFromHistory(history, currentText, endOfSpeech.maxHistory)
 	if chatText == "" {
 		return -1
 	}
 
-	prob, err := eos.detector.Predict(chatText)
+	endOfSpeech.predictorMu.Lock()
+	defer endOfSpeech.predictorMu.Unlock()
+
+	if endOfSpeech.predictor == nil {
+		return -1
+	}
+
+	probability, err := endOfSpeech.predictor.Predict(chatText)
 	if err != nil {
-		if eos.logger != nil {
-			eos.logger.Debugf("livekit_eos: inference failed: %v", err)
+		if endOfSpeech.logger != nil {
+			endOfSpeech.logger.Debugf("livekit_eos: inference failed: %v", err)
 		}
 		return -1
 	}
 
-	if eos.logger != nil {
-		eos.logger.Debugf("livekit_eos: P(eou)=%.4f threshold=%.4f text=%q", prob, eos.threshold, currentText)
+	if endOfSpeech.logger != nil {
+		endOfSpeech.logger.Debugf("livekit_eos: P(eou)=%.4f threshold=%.4f text=%q", probability, endOfSpeech.threshold, currentText)
 	}
 
-	return prob
+	return probability
 }
 
-// send dispatches a command to the worker.
-func (eos *LivekitEOS) send(cmd command) {
+func (endOfSpeech *livekitEndOfSpeech) enqueueCommand(command workerCommand) {
 	select {
-	case <-eos.stopCh:
+	case <-endOfSpeech.stopCh:
 		return
 	default:
 	}
 
 	select {
-	case eos.cmdCh <- cmd:
-	default:
-		go func() {
-			select {
-			case eos.cmdCh <- cmd:
-			case <-eos.stopCh:
-			}
-		}()
+	case endOfSpeech.commandCh <- command:
+	case <-endOfSpeech.stopCh:
 	}
 }
 
-// worker manages silence detection and callback invocation.
-// Same pattern as the silence-based EOS: single goroutine, timer, generation counter.
-func (eos *LivekitEOS) worker() {
+func (endOfSpeech *livekitEndOfSpeech) worker() {
 	var (
-		timer   *time.Timer
-		timerC  <-chan time.Time
-		gen     uint64
-		ctx     context.Context
-		segment SpeechSegment
+		timer          *time.Timer
+		timerCh        <-chan time.Time
+		generation     uint64
+		currentCommand workerCommand
 	)
 
-	cleanup := func() {
+	stopTimer := func() {
 		if timer != nil {
 			timer.Stop()
 			timer = nil
-			timerC = nil
+			timerCh = nil
 		}
+	}
+	resetState := func() {
+		endOfSpeech.state.callbackFired = false
+		endOfSpeech.state.generation++
+		endOfSpeech.state.segment = speechSegment{}
+		endOfSpeech.state.confidence = 0
 	}
 
 	for {
 		select {
-		case <-eos.stopCh:
-			cleanup()
+		case <-endOfSpeech.stopCh:
+			stopTimer()
 			return
 
-		case cmd := <-eos.cmdCh:
-			eos.mu.Lock()
+		case command := <-endOfSpeech.commandCh:
+			endOfSpeech.mu.Lock()
 
-			if cmd.reset {
-				eos.state.callbackFired = false
-				eos.state.generation++
-				eos.state.segment = SpeechSegment{}
-				eos.mu.Unlock()
+			if endOfSpeech.state.callbackFired {
+				endOfSpeech.mu.Unlock()
 				continue
 			}
 
-			if eos.state.callbackFired {
-				eos.mu.Unlock()
+			if command.fireImmediately {
+				endOfSpeech.state.callbackFired = true
+				currentCommand = command
+				stopTimer()
+				endOfSpeech.mu.Unlock()
+				endOfSpeech.fire(currentCommand.ctx, currentCommand.segment, currentCommand.confidence)
+				endOfSpeech.mu.Lock()
+				resetState()
+				endOfSpeech.mu.Unlock()
 				continue
 			}
 
-			if cmd.fireNow {
-				eos.state.callbackFired = true
-				seg := eos.state.segment
-				cbCtx := cmd.ctx
-				cleanup()
-				eos.mu.Unlock()
-				eos.fire(cbCtx, seg)
+			generation = endOfSpeech.state.generation + 1
+			endOfSpeech.state.generation = generation
+			currentCommand = command
+			stopTimer()
+			timer = time.NewTimer(command.timeout)
+			timerCh = timer.C
+			endOfSpeech.mu.Unlock()
+
+		case <-timerCh:
+			endOfSpeech.mu.Lock()
+			if endOfSpeech.state.callbackFired || generation != endOfSpeech.state.generation {
+				endOfSpeech.mu.Unlock()
 				continue
 			}
 
-			gen = eos.state.generation + 1
-			eos.state.generation = gen
-			ctx = cmd.ctx
-			segment = cmd.segment
-			cleanup()
-			timer = time.NewTimer(cmd.timeout)
-			timerC = timer.C
-			eos.mu.Unlock()
-
-		case <-timerC:
-			eos.mu.Lock()
-			if eos.state.callbackFired || gen != eos.state.generation {
-				eos.mu.Unlock()
-				continue
-			}
-
-			eos.state.callbackFired = true
-			seg := segment
-			cbCtx := ctx
-			cleanup()
-			eos.mu.Unlock()
-			eos.fire(cbCtx, seg)
+			endOfSpeech.state.callbackFired = true
+			command := currentCommand
+			stopTimer()
+			endOfSpeech.mu.Unlock()
+			endOfSpeech.fire(command.ctx, command.segment, command.confidence)
+			endOfSpeech.mu.Lock()
+			resetState()
+			endOfSpeech.mu.Unlock()
 		}
 	}
 }
 
-// fire triggers the callback, records the user turn in history, and enqueues reset.
-// Matches silence-based behavior: always emits one EndOfSpeechPacket + event, then resets.
-func (eos *LivekitEOS) fire(ctx context.Context, seg SpeechSegment) {
-	speech := seg.FullText()
+func (endOfSpeech *livekitEndOfSpeech) fire(ctx context.Context, segment speechSegment, confidence float64) {
+	speech := segment.FullText()
 	if speech == "" {
 		return
 	}
 
 	// Record user turn in conversation history
-	eos.mu.Lock()
-	eos.history = append(eos.history, chatMessage{Role: "user", Content: speech})
-	eos.mu.Unlock()
+	endOfSpeech.mu.Lock()
+	endOfSpeech.history = append(endOfSpeech.history, chatMessage{Role: "user", Content: speech})
+	endOfSpeech.mu.Unlock()
 
-	if ctx.Err() != nil {
+	if confidence < 0 {
+		confidence = 0
+	}
+	if ctx != nil && ctx.Err() != nil {
 		ctx = context.Background()
 	}
 
 	wordCount := len(strings.Fields(speech))
 	triggerAt := time.Now()
-	_ = eos.callback(ctx,
+	_ = endOfSpeech.onPacket(ctx,
 		internal_type.EndOfSpeechPacket{
 			Speech:    speech,
-			ContextID: seg.ContextID,
-			Speechs:   append([]internal_type.SpeechToTextPacket(nil), seg.Chunks...),
+			ContextID: segment.ContextID,
+			Speechs:   append([]internal_type.SpeechToTextPacket(nil), segment.Chunks...),
 		},
 		internal_type.UserMessageMetricPacket{
-			ContextID: seg.ContextID,
+			ContextID: segment.ContextID,
 			Metrics: []*protos.Metric{{
 				Name:  "eos_latency_ms",
-				Value: fmt.Sprintf("%d", triggerAt.Sub(seg.Timestamp).Milliseconds()),
+				Value: fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
 			}},
 		},
 		internal_type.ConversationEventPacket{
-			Name: "eos",
+			ContextID: segment.ContextID,
+			Name:      "eos",
 			Data: map[string]string{
 				"type":               "detected",
 				"provider":           eosName,
-				"context_id":         seg.ContextID,
+				"context_id":         segment.ContextID,
 				"speech":             speech,
+				"confidence":         fmt.Sprintf("%.4f", confidence),
 				"word_count":         fmt.Sprintf("%d", wordCount),
 				"char_count":         fmt.Sprintf("%d", len(speech)),
-				"text_to_trigger_ms": fmt.Sprintf("%d", triggerAt.Sub(seg.Timestamp).Milliseconds()),
+				"text_to_trigger_ms": fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
 			},
 			Time: triggerAt,
 		},
 	)
-
-	eos.send(command{reset: true})
 }
 
-// Close shuts down the detector and releases ONNX resources.
-func (eos *LivekitEOS) Close() error {
-	close(eos.stopCh)
-	if eos.detector != nil {
-		eos.detector.Destroy()
-		eos.detector = nil
+func (endOfSpeech *livekitEndOfSpeech) Close(_ context.Context) error {
+	close(endOfSpeech.stopCh)
+
+	endOfSpeech.predictorMu.Lock()
+	if predictor, ok := endOfSpeech.predictor.(interface{ Destroy() }); ok {
+		predictor.Destroy()
 	}
+	endOfSpeech.predictor = nil
+	endOfSpeech.predictorMu.Unlock()
+
 	return nil
 }

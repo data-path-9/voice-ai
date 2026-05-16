@@ -8,6 +8,7 @@ package internal_silence_based
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func TestTimerFiresAndCallbackCalled(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := svcIface.Analyze(ctx, userInput("hello")); err != nil {
+	if err := svcIface.Execute(ctx, userInput("hello")); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -106,10 +107,10 @@ func TestSystemInputTriggersTimer(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := svcIface.Analyze(ctx, userInput("sys")); err != nil {
+	if err := svcIface.Execute(ctx, userInput("sys")); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
-	if err := svcIface.Analyze(ctx, systemInput("sys")); err != nil {
+	if err := svcIface.Execute(ctx, systemInput("sys")); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -146,7 +147,7 @@ func TestEmptySpeechIgnored(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := svcIface.Analyze(ctx, userInput("")); err != nil {
+	if err := svcIface.Execute(ctx, userInput("")); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -154,6 +155,82 @@ func TestEmptySpeechIgnored(t *testing.T) {
 	case <-called:
 		t.Fatal("callback should not be called for empty speech")
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func TestSilenceBasedEndOfSpeech_ConversationEventShape(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	events := make(chan internal_type.ConversationEventPacket, 4)
+	callback := func(ctx context.Context, packets ...internal_type.Packet) error {
+		for _, packet := range packets {
+			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
+				select {
+				case events <- event:
+				default:
+				}
+			}
+		}
+		return nil
+	}
+
+	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{}))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	if err := svcIface.Execute(context.Background(), internal_type.UserTextReceivedPacket{
+		ContextID: "ctx-events",
+		Text:      "hello world",
+	}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	timeout := time.After(500 * time.Millisecond)
+	var sawInterim, sawDetected bool
+	for !sawInterim || !sawDetected {
+		select {
+		case event := <-events:
+			switch event.Data["type"] {
+			case "initialized":
+				continue
+			case "interim":
+				if event.ContextID != "ctx-events" {
+					t.Fatalf("unexpected interim context: %+v", event)
+				}
+				if event.Data["provider"] != silenceBasedEndOfSpeechName {
+					t.Fatalf("unexpected interim provider: %+v", event)
+				}
+				if event.Data["context_id"] != "ctx-events" || event.Data["speech"] != "hello world" {
+					t.Fatalf("unexpected interim data: %+v", event)
+				}
+				if event.Time.IsZero() {
+					t.Fatalf("expected interim time: %+v", event)
+				}
+				sawInterim = true
+			case "detected":
+				if event.ContextID != "ctx-events" {
+					t.Fatalf("unexpected detected context: %+v", event)
+				}
+				if event.Data["provider"] != silenceBasedEndOfSpeechName {
+					t.Fatalf("unexpected detected provider: %+v", event)
+				}
+				if event.Data["context_id"] != "ctx-events" || event.Data["speech"] != "hello world" {
+					t.Fatalf("unexpected detected data: %+v", event)
+				}
+				if event.Data["confidence"] != "0.0000" {
+					t.Fatalf("unexpected detected confidence: %+v", event)
+				}
+				if _, parseErr := strconv.Atoi(event.Data["text_to_trigger_ms"]); parseErr != nil {
+					t.Fatalf("invalid detected timing: %+v", event)
+				}
+				if event.Time.IsZero() {
+					t.Fatalf("expected detected time: %+v", event)
+				}
+				sawDetected = true
+			}
+		case <-timeout:
+			t.Fatal("timeout waiting for eos conversation events")
+		}
 	}
 }
 
@@ -204,7 +281,7 @@ func TestConcurrentAnalyze(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_ = svcIface.Analyze(ctx, userInput("u"))
+			_ = svcIface.Execute(ctx, userInput("u"))
 		}(i)
 	}
 	wg.Wait()
@@ -238,7 +315,7 @@ func TestContextCancelStillFiresCallback(t *testing.T) {
 
 	parentCtx, cancel := context.WithCancel(context.Background())
 	// Send an STT packet (timer-based, not fireNow) so the timer must fire after cancel
-	if err := svcIface.Analyze(parentCtx, sttInput("bye", true)); err != nil {
+	if err := svcIface.Execute(parentCtx, sttInput("bye", true)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 	// Cancel the context before the silence timer fires
@@ -277,7 +354,7 @@ func TestSTTLanguagePreservedInEndOfSpeechPacket(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := svcIface.Analyze(ctx, sttInputWithLanguage("hola", "es-ES", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInputWithLanguage("hola", "es-ES", true)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -321,9 +398,9 @@ func TestSTTLanguage_UsesLatestNonEmptyAcrossChunks(t *testing.T) {
 			t.Fatalf("analyze: %v", err)
 		}
 	}
-	requireNoError(svcIface.Analyze(ctx, sttInputWithLanguage("hello", "en-US", true)))
-	requireNoError(svcIface.Analyze(ctx, sttInputWithLanguage("bonjour", "fr-FR", true)))
-	requireNoError(svcIface.Analyze(ctx, sttInputWithLanguage("hallo", "de-DE", true)))
+	requireNoError(svcIface.Execute(ctx, sttInputWithLanguage("hello", "en-US", true)))
+	requireNoError(svcIface.Execute(ctx, sttInputWithLanguage("bonjour", "fr-FR", true)))
+	requireNoError(svcIface.Execute(ctx, sttInputWithLanguage("hallo", "de-DE", true)))
 
 	select {
 	case res := <-called:
@@ -363,10 +440,10 @@ func TestSTTLanguage_LastChunkWithoutLanguageRetainsPrevious(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := svcIface.Analyze(ctx, sttInputWithLanguage("hola", "es-ES", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInputWithLanguage("hola", "es-ES", true)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
-	if err := svcIface.Analyze(ctx, sttInputWithLanguage("mundo", "", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInputWithLanguage("mundo", "", true)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -416,11 +493,11 @@ func TestHandleSTTInput_IncompleteSTT(t *testing.T) {
 	startTime := time.Now()
 
 	// Send incomplete STT - should trigger normal timeout
-	if err := svcIface.Analyze(ctx, sttInput("hello world", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("hello world", true)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
-	if err := svcIface.Analyze(ctx, sttInput("hello world", false)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("hello world", false)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -470,7 +547,7 @@ func TestHandleSTTInput_CompleteSTTNoActivity(t *testing.T) {
 	startTime := time.Now()
 
 	// Send complete STT with no prior activity - should trigger normal timeout
-	if err := svcIface.Analyze(ctx, sttInput("complete message", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("complete message", true)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -519,13 +596,13 @@ func TestHandleSTTInput_DifferentTextCompleteSTT(t *testing.T) {
 	ctx := context.Background()
 
 	// First STT with "hello"
-	if err := svcIface.Analyze(ctx, sttInput("hello", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("hello", true)); err != nil {
 		t.Fatalf("analyze first: %v", err)
 	}
 
 	// Second STT with "goodbye" - different text, should trigger normal timeout
 	startTime := time.Now()
-	if err := svcIface.Analyze(ctx, sttInput("goodbye", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("goodbye", true)); err != nil {
 		t.Fatalf("analyze second: %v", err)
 	}
 
@@ -574,13 +651,13 @@ func TestHandleSTTInput_ActivityAfterUserInput(t *testing.T) {
 	ctx := context.Background()
 
 	// Add system input activity (not user input, not STT)
-	if err := svcIface.Analyze(ctx, systemInput("system activity")); err != nil {
+	if err := svcIface.Execute(ctx, systemInput("system activity")); err != nil {
 		t.Fatalf("analyze system input: %v", err)
 	}
 
 	// Complete STT - recent activity is system, so normal threshold applies
 	startTime := time.Now()
-	if err := svcIface.Analyze(ctx, sttInput("stt text", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("stt text", true)); err != nil {
 		t.Fatalf("analyze stt: %v", err)
 	}
 
@@ -631,7 +708,7 @@ func TestCallbackFiresOnlyOnce(t *testing.T) {
 	ctx := context.Background()
 
 	// Send system input - starts timer for utterance 1
-	if err := svcIface.Analyze(ctx, sttInput("activity", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("activity", true)); err != nil {
 		t.Fatalf("analyze system 1: %v", err)
 	}
 
@@ -653,7 +730,7 @@ func TestCallbackFiresOnlyOnce(t *testing.T) {
 	// OR we should wait long enough to verify the callback doesn't fire again from utterance 1.
 
 	// Instead, we'll verify that the service is reusable by sending a user input which triggers immediately
-	if err := svcIface.Analyze(ctx, userInput("new utterance")); err != nil {
+	if err := svcIface.Execute(ctx, userInput("new utterance")); err != nil {
 		t.Fatalf("analyze user: %v", err)
 	}
 
@@ -697,24 +774,24 @@ func TestNewInputInvalidatesPreviousCallback(t *testing.T) {
 	ctx := context.Background()
 
 	// activity
-	if err := svcIface.Analyze(ctx, sttInput("activity1", false)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("activity1", false)); err != nil {
 		t.Fatalf("analyze 1: %v", err)
 	}
 
 	// Send system input - starts 300ms timer
 	// here the timer is started for generation 1
-	if err := svcIface.Analyze(ctx, sttInput("activity1.", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("activity1.", true)); err != nil {
 		t.Fatalf("analyze 1: %v", err)
 	}
 
 	// Wait 150ms, then send another system input - resets timer
 	time.Sleep(150 * time.Millisecond)
-	if err := svcIface.Analyze(ctx, sttInput("activity2", false)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("activity2", false)); err != nil {
 		t.Fatalf("analyze 2: %v", err)
 	}
 
 	time.Sleep(150 * time.Millisecond)
-	if err := svcIface.Analyze(ctx, sttInput("activity2!", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("activity2!", true)); err != nil {
 		t.Fatalf("analyze 2: %v", err)
 	}
 
@@ -770,7 +847,7 @@ func TestUserInputImmediateTrigger(t *testing.T) {
 	startTime := time.Now()
 
 	// Send user input - should trigger immediately
-	if err := svcIface.Analyze(ctx, userInput("user said something")); err != nil {
+	if err := svcIface.Execute(ctx, userInput("user said something")); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -782,6 +859,58 @@ func TestUserInputImmediateTrigger(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("timeout waiting for callback on user input")
+	}
+}
+
+func TestUserInputImmediateTriggerUsesQueuedSegmentSnapshot(t *testing.T) {
+	called := make(chan internal_type.EndOfSpeechPacket, 2)
+	eos := &silenceBasedEndOfSpeech{
+		onPacket: func(ctx context.Context, res ...internal_type.Packet) error {
+			for _, packet := range res {
+				if endOfSpeech, ok := packet.(internal_type.EndOfSpeechPacket); ok {
+					called <- endOfSpeech
+				}
+			}
+			return nil
+		},
+		commandCh: make(chan workerCommand, 4),
+		stopCh:    make(chan struct{}),
+		state:     &endOfSpeechState{segment: speechSegment{}},
+	}
+	go eos.worker()
+	defer func() { _ = eos.Close(context.Background()) }()
+
+	requireNoError := func(err error) {
+		if err != nil {
+			t.Fatalf("execute failed: %v", err)
+		}
+	}
+
+	requireNoError(eos.handleUserTextPacket(context.Background(), internal_type.UserTextReceivedPacket{
+		ContextID: "ctx-first",
+		Text:      "first",
+	}))
+	requireNoError(eos.handleUserTextPacket(context.Background(), internal_type.UserTextReceivedPacket{
+		ContextID: "ctx-second",
+		Text:      "second",
+	}))
+
+	select {
+	case packet := <-called:
+		if packet.ContextID != "ctx-first" || packet.Speech != "first" {
+			t.Fatalf("unexpected first packet: %+v", packet)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timeout waiting for first immediate callback")
+	}
+
+	select {
+	case packet := <-called:
+		if packet.ContextID != "ctx-second" || packet.Speech != "second" {
+			t.Fatalf("unexpected second packet: %+v", packet)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timeout waiting for second immediate callback")
 	}
 }
 
@@ -813,7 +942,7 @@ func TestSystemInputExtendsTimer(t *testing.T) {
 	ctx := context.Background()
 
 	// Send initial system input (NOT user input, which fires immediately)
-	if err := svcIface.Analyze(ctx, sttInput("activity", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("activity", true)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -821,7 +950,7 @@ func TestSystemInputExtendsTimer(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	startTime := time.Now()
 
-	if err := svcIface.Analyze(ctx, systemInput("more activity")); err != nil {
+	if err := svcIface.Execute(ctx, systemInput("more activity")); err != nil {
 		t.Fatalf("analyze 2: %v", err)
 	}
 
@@ -867,7 +996,7 @@ func TestSTTInputExtendsTimer(t *testing.T) {
 	ctx := context.Background()
 
 	// Send STT input
-	if err := svcIface.Analyze(ctx, sttInput("incomplete message", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("incomplete message", true)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -914,13 +1043,13 @@ func TestGenerationInvalidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Send first system input - starts timer for generation 1
-	if err := svcIface.Analyze(ctx, sttInput("activity1", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("activity1", true)); err != nil {
 		t.Fatalf("analyze 1: %v", err)
 	}
 
 	// Wait 200ms and send second input - increments generation, invalidates gen1 timer
 	time.Sleep(200 * time.Millisecond)
-	if err := svcIface.Analyze(ctx, sttInput("activity2", true)); err != nil {
+	if err := svcIface.Execute(ctx, sttInput("activity2", true)); err != nil {
 		t.Fatalf("analyze 2: %v", err)
 	}
 
@@ -974,7 +1103,7 @@ func TestContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Send system input with cancellable context
-	if err := svcIface.Analyze(ctx, systemInput("activity")); err != nil {
+	if err := svcIface.Execute(ctx, systemInput("activity")); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -1020,7 +1149,7 @@ func TestCallbackReceivesCorrectData(t *testing.T) {
 	ctx := context.Background()
 	speechText := "hello there"
 
-	if err := svcIface.Analyze(ctx, userInput(speechText)); err != nil {
+	if err := svcIface.Execute(ctx, userInput(speechText)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
@@ -1058,11 +1187,11 @@ func TestRaceConditionUnderConcurrentInput(t *testing.T) {
 			defer wg.Done()
 			switch i % 3 {
 			case 0:
-				_ = svcIface.Analyze(ctx, userInput("user"))
+				_ = svcIface.Execute(ctx, userInput("user"))
 			case 1:
-				_ = svcIface.Analyze(ctx, systemInput("system"))
+				_ = svcIface.Execute(ctx, systemInput("system"))
 			case 2:
-				_ = svcIface.Analyze(ctx, sttInput("stt", i%2 == 0))
+				_ = svcIface.Execute(ctx, sttInput("stt", i%2 == 0))
 			}
 		}(i)
 	}
@@ -1107,23 +1236,63 @@ func TestServiceClose(t *testing.T) {
 	}
 
 	// Close should not panic
-	if err := svcIface.Close(); err != nil {
+	if err := svcIface.Close(context.Background()); err != nil {
 		t.Fatalf("close failed: %v", err)
 	}
 }
 
-func TestSilenceBasedEOS_SendAfterClose_DoesNotEnqueueCommand(t *testing.T) {
-	eos := &SilenceBasedEOS{
-		cmdCh:  make(chan command, 1),
-		stopCh: make(chan struct{}),
-		state:  &eosState{segment: SpeechSegment{}},
+func TestSilenceBasedEndOfSpeech_EnqueueAfterClose_DoesNotEnqueueCommand(t *testing.T) {
+	eos := &silenceBasedEndOfSpeech{
+		commandCh: make(chan workerCommand, 1),
+		stopCh:    make(chan struct{}),
+		state:     &endOfSpeechState{segment: speechSegment{}},
 	}
 	close(eos.stopCh)
 
-	eos.send(command{fireNow: true})
+	eos.enqueueCommand(workerCommand{fireImmediately: true})
 
-	if got := len(eos.cmdCh); got != 0 {
+	if got := len(eos.commandCh); got != 0 {
 		t.Fatalf("expected no enqueued commands after close, got=%d", got)
+	}
+}
+
+func TestSilenceBasedEndOfSpeech_EnqueueCommandBlocksUntilChannelHasSpace(t *testing.T) {
+	eos := &silenceBasedEndOfSpeech{
+		commandCh: make(chan workerCommand, 1),
+		stopCh:    make(chan struct{}),
+		state:     &endOfSpeechState{segment: speechSegment{}},
+	}
+	eos.commandCh <- workerCommand{segment: speechSegment{Text: "first"}}
+
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		eos.enqueueCommand(workerCommand{segment: speechSegment{Text: "second"}})
+		close(done)
+	}()
+
+	<-started
+	select {
+	case <-done:
+		t.Fatal("enqueueCommand should wait while channel is full")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	first := <-eos.commandCh
+	if first.segment.Text != "first" {
+		t.Fatalf("unexpected first command: %+v", first)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("enqueueCommand should resume after channel space is available")
+	}
+
+	second := <-eos.commandCh
+	if second.segment.Text != "second" {
+		t.Fatalf("unexpected second command: %+v", second)
 	}
 }
 
@@ -1161,7 +1330,7 @@ func TestConcurrentMixedInputTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 	wg := sync.WaitGroup{}
@@ -1175,17 +1344,17 @@ func TestConcurrentMixedInputTypes(t *testing.T) {
 			// Each goroutine sends: STT -> System -> User
 			switch id % 3 {
 			case 0:
-				_ = svcIface.Analyze(ctx, sttInput("concurrent stt", false))
+				_ = svcIface.Execute(ctx, sttInput("concurrent stt", false))
 				time.Sleep(10 * time.Millisecond)
-				_ = svcIface.Analyze(ctx, systemInput("activity"))
+				_ = svcIface.Execute(ctx, systemInput("activity"))
 			case 1:
-				_ = svcIface.Analyze(ctx, systemInput("system1"))
+				_ = svcIface.Execute(ctx, systemInput("system1"))
 				time.Sleep(15 * time.Millisecond)
-				_ = svcIface.Analyze(ctx, sttInput("concurrent speech", true))
+				_ = svcIface.Execute(ctx, sttInput("concurrent speech", true))
 			case 2:
-				_ = svcIface.Analyze(ctx, sttInput("incomplete", false))
+				_ = svcIface.Execute(ctx, sttInput("incomplete", false))
 				time.Sleep(20 * time.Millisecond)
-				_ = svcIface.Analyze(ctx, userInput("user interrupts"))
+				_ = svcIface.Execute(ctx, userInput("user interrupts"))
 			}
 		}(i)
 	}
@@ -1223,7 +1392,7 @@ func TestHighFrequencySTTUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 	startTime := time.Now()
@@ -1231,7 +1400,7 @@ func TestHighFrequencySTTUpdates(t *testing.T) {
 	// Rapid-fire 20 STT updates (2ms interval = 10 updates/sec)
 	for i := 0; i < 20; i++ {
 		interim := i < 19 // Last one is complete
-		_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("word%d", i), !interim))
+		_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("word%d", i), !interim))
 		time.Sleep(2 * time.Millisecond)
 	}
 
@@ -1281,19 +1450,19 @@ func TestUserInputInterruptsActiveSTT(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
 	// Start STT updates
 	for i := 0; i < 5; i++ {
-		_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("stt update %d", i), false))
+		_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("stt update %d", i), false))
 		time.Sleep(50 * time.Millisecond)
 	}
 
 	// User interrupts mid-stream
 	startTime := time.Now()
-	_ = svcIface.Analyze(ctx, userInput("stop, I want to say something else"))
+	_ = svcIface.Execute(ctx, userInput("stop, I want to say something else"))
 
 	// Callback should fire immediately
 	select {
@@ -1335,12 +1504,12 @@ func TestMultipleUtteranceSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
 	// === UTTERANCE 1 ===
-	_ = svcIface.Analyze(ctx, sttInput("first utterance", true))
+	_ = svcIface.Execute(ctx, sttInput("first utterance", true))
 	select {
 	case res := <-callbacks:
 		if res.Speech != "first utterance" {
@@ -1352,7 +1521,7 @@ func TestMultipleUtteranceSequence(t *testing.T) {
 
 	// === UTTERANCE 2 ===
 	time.Sleep(50 * time.Millisecond) // Small gap between utterances
-	_ = svcIface.Analyze(ctx, sttInput("second utterance", true))
+	_ = svcIface.Execute(ctx, sttInput("second utterance", true))
 	select {
 	case res := <-callbacks:
 		if res.Speech != "second utterance" {
@@ -1364,9 +1533,9 @@ func TestMultipleUtteranceSequence(t *testing.T) {
 
 	// === UTTERANCE 3 ===
 	time.Sleep(50 * time.Millisecond)
-	_ = svcIface.Analyze(ctx, systemInput("activity"))
+	_ = svcIface.Execute(ctx, systemInput("activity"))
 	time.Sleep(50 * time.Millisecond)
-	_ = svcIface.Analyze(ctx, sttInput("third utterance", true))
+	_ = svcIface.Execute(ctx, sttInput("third utterance", true))
 
 	select {
 	case res := <-callbacks:
@@ -1400,14 +1569,14 @@ func TestConcurrentUtterancesRapid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
 	// Fire off 5 utterances in rapid succession (< 10ms apart)
 	expectedTexts := []string{"first", "second", "third", "fourth", "fifth"}
 	for i, text := range expectedTexts {
-		_ = svcIface.Analyze(ctx, userInput(text))
+		_ = svcIface.Execute(ctx, userInput(text))
 		if i < len(expectedTexts)-1 {
 			time.Sleep(5 * time.Millisecond)
 		}
@@ -1455,12 +1624,12 @@ func TestConcurrentInputsDuringReset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
 	// First utterance
-	_ = svcIface.Analyze(ctx, userInput("first"))
+	_ = svcIface.Execute(ctx, userInput("first"))
 
 	select {
 	case <-callbacks:
@@ -1474,16 +1643,16 @@ func TestConcurrentInputsDuringReset(t *testing.T) {
 	inputCount := 0
 	for i := 0; i < 10; i++ {
 		if i%2 == 0 {
-			_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("stt%d", i), false))
+			_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("stt%d", i), false))
 		} else {
-			_ = svcIface.Analyze(ctx, systemInput("activity"))
+			_ = svcIface.Execute(ctx, systemInput("activity"))
 		}
 		inputCount++
 		time.Sleep(5 * time.Millisecond)
 	}
 
 	// Final input triggers second callback
-	_ = svcIface.Analyze(ctx, userInput("second"))
+	_ = svcIface.Execute(ctx, userInput("second"))
 
 	select {
 	case <-callbacks:
@@ -1520,7 +1689,7 @@ func TestStressLoadWithManyInputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 	wg := sync.WaitGroup{}
@@ -1534,12 +1703,12 @@ func TestStressLoadWithManyInputs(t *testing.T) {
 				inputType := (goroutineID*50 + i) % 3
 				switch inputType {
 				case 0:
-					_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("g%d_i%d", goroutineID, i), i%7 == 6))
+					_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("g%d_i%d", goroutineID, i), i%7 == 6))
 				case 1:
-					_ = svcIface.Analyze(ctx, systemInput("activity"))
+					_ = svcIface.Execute(ctx, systemInput("activity"))
 				case 2:
 					if i%10 == 0 { // Occasional user inputs
-						_ = svcIface.Analyze(ctx, userInput(fmt.Sprintf("user_g%d", goroutineID)))
+						_ = svcIface.Execute(ctx, userInput(fmt.Sprintf("user_g%d", goroutineID)))
 					}
 				}
 				time.Sleep(1 * time.Millisecond)
@@ -1584,7 +1753,7 @@ func TestContextCancellationUnderConcurrentLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
@@ -1595,7 +1764,7 @@ func TestContextCancellationUnderConcurrentLoad(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("g%d_i%d", id, j), false))
+				_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("g%d_i%d", id, j), false))
 				time.Sleep(5 * time.Millisecond)
 			}
 		}(i)
@@ -1639,7 +1808,7 @@ func TestFormattedTextOptimizationUnderConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
@@ -1683,7 +1852,7 @@ func TestFormattedTextOptimizationUnderConcurrency(t *testing.T) {
 		startTime := time.Now()
 
 		for i, step := range tc.sequence {
-			_ = svcIface.Analyze(ctx, sttInput(step.text, step.final))
+			_ = svcIface.Execute(ctx, sttInput(step.text, step.final))
 			if i < len(tc.sequence)-1 && step.delay > 0 {
 				time.Sleep(step.delay)
 			}
@@ -1730,18 +1899,18 @@ func TestGenerationCounterPreventsStaleCallbacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
 	// Start a timer that will eventually fire
-	_ = svcIface.Analyze(ctx, sttInput("gen1", true))
+	_ = svcIface.Execute(ctx, sttInput("gen1", true))
 
 	// Wait 30ms
 	time.Sleep(30 * time.Millisecond)
 
 	// Before old timer fires, send new input (invalidates old generation)
-	_ = svcIface.Analyze(ctx, sttInput("gen2", true))
+	_ = svcIface.Execute(ctx, sttInput("gen2", true))
 
 	// Wait 30ms more (total 60ms from first, 30ms from second)
 	time.Sleep(30 * time.Millisecond)
@@ -1781,7 +1950,7 @@ func TestNormalizationConsistency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
@@ -1800,11 +1969,11 @@ func TestNormalizationConsistency(t *testing.T) {
 
 	for _, test := range testTexts {
 		// Send first text
-		_ = svcIface.Analyze(ctx, sttInput(test.text1, true))
+		_ = svcIface.Execute(ctx, sttInput(test.text1, true))
 		time.Sleep(30 * time.Millisecond)
 
 		// Send second text and check if it uses optimization
-		_ = svcIface.Analyze(ctx, sttInput(test.text2, true))
+		_ = svcIface.Execute(ctx, sttInput(test.text2, true))
 
 		// The optimization affects timing; we just verify no panic
 		time.Sleep(150 * time.Millisecond)
@@ -1836,13 +2005,13 @@ func TestEdgeCaseRapidResetCycles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
 	// Rapid user inputs (each fires immediately and triggers reset)
 	for i := 0; i < 20; i++ {
-		_ = svcIface.Analyze(ctx, userInput(fmt.Sprintf("utterance_%d", i)))
+		_ = svcIface.Execute(ctx, userInput(fmt.Sprintf("utterance_%d", i)))
 		time.Sleep(2 * time.Millisecond)
 	}
 
@@ -1887,7 +2056,7 @@ func TestSingleCallbackForContinuousSpeechWithInterimAndFinal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
@@ -1908,7 +2077,7 @@ func TestSingleCallbackForContinuousSpeechWithInterimAndFinal(t *testing.T) {
 
 	// Send packets with small delays (simulating real-time speech < silence timeout)
 	for _, pkt := range packets {
-		if err := svcIface.Analyze(ctx, pkt); err != nil {
+		if err := svcIface.Execute(ctx, pkt); err != nil {
 			t.Fatalf("Analyze failed: %v", err)
 		}
 		time.Sleep(100 * time.Millisecond) // Packets arrive faster than 500ms timeout
@@ -1968,7 +2137,7 @@ func TestInterimPacketsOnlyExtendTimer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
@@ -1977,7 +2146,7 @@ func TestInterimPacketsOnlyExtendTimer(t *testing.T) {
 		Script:  "This is interim only text",
 		Interim: true,
 	}
-	if err := svcIface.Analyze(ctx, pkt); err != nil {
+	if err := svcIface.Execute(ctx, pkt); err != nil {
 		t.Fatalf("Analyze failed: %v", err)
 	}
 
@@ -2017,7 +2186,7 @@ func TestInterimPacketsResetTimerContinuously(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	defer svcIface.Close()
+	defer svcIface.Close(context.Background())
 
 	ctx := context.Background()
 
@@ -2028,7 +2197,7 @@ func TestInterimPacketsResetTimerContinuously(t *testing.T) {
 			Script:  fmt.Sprintf("Interim part %d", i+1),
 			Interim: false,
 		}
-		if err := svcIface.Analyze(ctx, pkt); err != nil {
+		if err := svcIface.Execute(ctx, pkt); err != nil {
 			t.Fatalf("Analyze failed: %v", err)
 		}
 		time.Sleep(200 * time.Millisecond)

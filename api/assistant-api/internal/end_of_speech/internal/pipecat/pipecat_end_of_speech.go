@@ -38,6 +38,7 @@ const (
 )
 
 type speechSegment struct {
+	Revision  uint64
 	ContextID string
 	Text      string
 	Timestamp time.Time
@@ -48,14 +49,19 @@ type workerCommand struct {
 	ctx             context.Context
 	timeout         time.Duration
 	segment         speechSegment
+	confidence      float64
 	fireImmediately bool
-	resetState      bool
 }
 
 type endOfSpeechState struct {
 	segment       speechSegment
+	confidence    float64
 	callbackFired bool
 	generation    uint64
+}
+
+type turnPredictor interface {
+	Predict([]float32) (float64, error)
 }
 
 type pipecatEndOfSpeech struct {
@@ -63,9 +69,8 @@ type pipecatEndOfSpeech struct {
 	onPacket func(context.Context, ...internal_type.Packet) error
 	opts     utils.Option
 
-	detector   *PipecatDetector
-	predictor  func([]float32) (float64, error)
-	detectorMu sync.Mutex
+	predictor   turnPredictor
+	predictorMu sync.Mutex
 
 	threshold       float64
 	quickTimeout    time.Duration
@@ -73,6 +78,11 @@ type pipecatEndOfSpeech struct {
 	fallbackTimeout time.Duration
 
 	audioBuffer []float32
+
+	audioGeneration      uint64
+	predictedGeneration  uint64
+	predictedProbability float64
+	hasPredictedResult   bool
 
 	commandCh chan workerCommand
 	stopCh    chan struct{}
@@ -102,7 +112,7 @@ func NewPipecatEndOfSpeech(
 		logger:          logger,
 		onPacket:        onPacket,
 		opts:            opts,
-		detector:        detector,
+		predictor:       detector,
 		threshold:       defaultPctThreshold,
 		quickTimeout:    time.Duration(defaultPctQuickTimeout) * time.Millisecond,
 		extendedTimeout: time.Duration(defaultPctExtendedTimeout) * time.Millisecond,
@@ -187,11 +197,13 @@ func (endOfSpeech *pipecatEndOfSpeech) handleUserTextPacket(ctx context.Context,
 
 	endOfSpeech.mu.Lock()
 	segment := speechSegment{
+		Revision:  endOfSpeech.state.segment.Revision + 1,
 		ContextID: packet.ContextId(),
 		Text:      packet.Text,
 		Timestamp: time.Now(),
 	}
 	endOfSpeech.state.segment = segment
+	endOfSpeech.state.confidence = 0
 	endOfSpeech.mu.Unlock()
 
 	endOfSpeech.emitInterimSpeech(ctx, segment)
@@ -216,20 +228,23 @@ func (endOfSpeech *pipecatEndOfSpeech) handleSpeechToTextPacket(ctx context.Cont
 	endOfSpeech.mu.Lock()
 	if packet.Interim {
 		segment := endOfSpeech.state.segment
+		confidence := endOfSpeech.state.confidence
 		endOfSpeech.mu.Unlock()
 		if segment.Text == "" {
 			return nil
 		}
 
 		endOfSpeech.enqueueCommand(workerCommand{
-			ctx:     ctx,
-			segment: segment,
-			timeout: endOfSpeech.fallbackTimeout,
+			ctx:        ctx,
+			segment:    segment,
+			confidence: confidence,
+			timeout:    endOfSpeech.fallbackTimeout,
 		})
 		return nil
 	}
 
 	segment := speechSegment{
+		Revision:  endOfSpeech.state.segment.Revision + 1,
 		ContextID: packet.ContextId(),
 		Timestamp: time.Now(),
 		Text:      endOfSpeech.state.segment.Text,
@@ -242,6 +257,7 @@ func (endOfSpeech *pipecatEndOfSpeech) handleSpeechToTextPacket(ctx context.Cont
 	}
 	segment.Chunks = append(segment.Chunks, packet)
 	endOfSpeech.state.segment = segment
+	endOfSpeech.state.confidence = 0
 	endOfSpeech.mu.Unlock()
 
 	if segment.Text == "" {
@@ -250,24 +266,38 @@ func (endOfSpeech *pipecatEndOfSpeech) handleSpeechToTextPacket(ctx context.Cont
 
 	endOfSpeech.emitInterimSpeech(ctx, segment)
 
-	switch probability := endOfSpeech.predictEOU(); {
+	probability := endOfSpeech.predictEOU()
+	confidence := 0.0
+	if probability >= 0 {
+		confidence = probability
+		endOfSpeech.mu.Lock()
+		if endOfSpeech.state.segment.Revision == segment.Revision {
+			endOfSpeech.state.confidence = confidence
+		}
+		endOfSpeech.mu.Unlock()
+	}
+
+	switch {
 	case probability < 0:
 		endOfSpeech.enqueueCommand(workerCommand{
-			ctx:     ctx,
-			segment: segment,
-			timeout: endOfSpeech.fallbackTimeout,
+			ctx:        ctx,
+			segment:    segment,
+			confidence: confidence,
+			timeout:    endOfSpeech.fallbackTimeout,
 		})
 	case probability >= endOfSpeech.threshold:
 		endOfSpeech.enqueueCommand(workerCommand{
-			ctx:     ctx,
-			segment: segment,
-			timeout: endOfSpeech.quickTimeout,
+			ctx:        ctx,
+			segment:    segment,
+			confidence: confidence,
+			timeout:    endOfSpeech.quickTimeout,
 		})
 	default:
 		endOfSpeech.enqueueCommand(workerCommand{
-			ctx:     ctx,
-			segment: segment,
-			timeout: endOfSpeech.extendedTimeout,
+			ctx:        ctx,
+			segment:    segment,
+			confidence: confidence,
+			timeout:    endOfSpeech.extendedTimeout,
 		})
 	}
 
@@ -277,6 +307,7 @@ func (endOfSpeech *pipecatEndOfSpeech) handleSpeechToTextPacket(ctx context.Cont
 func (endOfSpeech *pipecatEndOfSpeech) extendCurrentSegment(ctx context.Context, timeout time.Duration) error {
 	endOfSpeech.mu.RLock()
 	segment := endOfSpeech.state.segment
+	confidence := endOfSpeech.state.confidence
 	endOfSpeech.mu.RUnlock()
 
 	if segment.Text == "" {
@@ -284,26 +315,32 @@ func (endOfSpeech *pipecatEndOfSpeech) extendCurrentSegment(ctx context.Context,
 	}
 
 	endOfSpeech.enqueueCommand(workerCommand{
-		ctx:     ctx,
-		segment: segment,
-		timeout: timeout,
+		ctx:        ctx,
+		segment:    segment,
+		confidence: confidence,
+		timeout:    timeout,
 	})
 
 	return nil
 }
 
 func (endOfSpeech *pipecatEndOfSpeech) emitInterimSpeech(ctx context.Context, segment speechSegment) {
+	emittedAt := time.Now()
 	_ = endOfSpeech.onPacket(ctx,
 		internal_type.InterimEndOfSpeechPacket{
 			Speech:    segment.Text,
 			ContextID: segment.ContextID,
 		},
 		internal_type.ConversationEventPacket{
-			Name: "eos",
+			ContextID: segment.ContextID,
+			Name:      "eos",
 			Data: map[string]string{
-				"type":   "interim",
-				"speech": segment.Text,
+				"type":       "interim",
+				"provider":   endOfSpeech.Name(),
+				"context_id": segment.ContextID,
+				"speech":     segment.Text,
 			},
+			Time: emittedAt,
 		},
 	)
 }
@@ -326,11 +363,18 @@ func (endOfSpeech *pipecatEndOfSpeech) appendAudio(pcm16 []byte) {
 		excess := len(endOfSpeech.audioBuffer) - maxAudioSamples
 		endOfSpeech.audioBuffer = endOfSpeech.audioBuffer[excess:]
 	}
+	endOfSpeech.audioGeneration++
 	endOfSpeech.mu.Unlock()
 }
 
 func (endOfSpeech *pipecatEndOfSpeech) predictEOU() float64 {
 	endOfSpeech.mu.RLock()
+	generation := endOfSpeech.audioGeneration
+	if endOfSpeech.hasPredictedResult && endOfSpeech.predictedGeneration == generation {
+		probability := endOfSpeech.predictedProbability
+		endOfSpeech.mu.RUnlock()
+		return probability
+	}
 	audio := make([]float32, len(endOfSpeech.audioBuffer))
 	copy(audio, endOfSpeech.audioBuffer)
 	endOfSpeech.mu.RUnlock()
@@ -340,23 +384,15 @@ func (endOfSpeech *pipecatEndOfSpeech) predictEOU() float64 {
 		return -1
 	}
 
-	endOfSpeech.detectorMu.Lock()
-	defer endOfSpeech.detectorMu.Unlock()
+	endOfSpeech.predictorMu.Lock()
+	defer endOfSpeech.predictorMu.Unlock()
 
-	if endOfSpeech.predictor == nil && endOfSpeech.detector == nil {
+	if endOfSpeech.predictor == nil {
 		endOfSpeech.debugf("pipecat_eos: inference skipped: detector unavailable")
 		return -1
 	}
 
-	var (
-		probability float64
-		err         error
-	)
-	if endOfSpeech.predictor != nil {
-		probability, err = endOfSpeech.predictor(audio)
-	} else {
-		probability, err = endOfSpeech.detector.Predict(audio)
-	}
+	probability, err := endOfSpeech.predictor.Predict(audio)
 	if err != nil {
 		endOfSpeech.debugf("pipecat_eos: inference failed: %v", err)
 		return -1
@@ -368,6 +404,14 @@ func (endOfSpeech *pipecatEndOfSpeech) predictEOU() float64 {
 		endOfSpeech.threshold,
 		len(audio),
 	)
+
+	endOfSpeech.mu.Lock()
+	if endOfSpeech.audioGeneration == generation {
+		endOfSpeech.predictedGeneration = generation
+		endOfSpeech.predictedProbability = probability
+		endOfSpeech.hasPredictedResult = true
+	}
+	endOfSpeech.mu.Unlock()
 
 	return probability
 }
@@ -388,23 +432,16 @@ func (endOfSpeech *pipecatEndOfSpeech) enqueueCommand(command workerCommand) {
 
 	select {
 	case endOfSpeech.commandCh <- command:
-	default:
-		go func() {
-			select {
-			case endOfSpeech.commandCh <- command:
-			case <-endOfSpeech.stopCh:
-			}
-		}()
+	case <-endOfSpeech.stopCh:
 	}
 }
 
 func (endOfSpeech *pipecatEndOfSpeech) worker() {
 	var (
-		timer      *time.Timer
-		timerCh    <-chan time.Time
-		generation uint64
-		ctx        context.Context
-		segment    speechSegment
+		timer          *time.Timer
+		timerCh        <-chan time.Time
+		generation     uint64
+		currentCommand workerCommand
 	)
 
 	stopTimer := func() {
@@ -413,6 +450,17 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 			timer = nil
 			timerCh = nil
 		}
+	}
+	resetState := func() {
+		endOfSpeech.state.callbackFired = false
+		endOfSpeech.state.generation++
+		endOfSpeech.state.segment = speechSegment{}
+		endOfSpeech.state.confidence = 0
+		endOfSpeech.audioBuffer = endOfSpeech.audioBuffer[:0]
+		endOfSpeech.audioGeneration++
+		endOfSpeech.predictedGeneration = 0
+		endOfSpeech.predictedProbability = 0
+		endOfSpeech.hasPredictedResult = false
 	}
 
 	for {
@@ -424,15 +472,6 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 		case command := <-endOfSpeech.commandCh:
 			endOfSpeech.mu.Lock()
 
-			if command.resetState {
-				endOfSpeech.state.callbackFired = false
-				endOfSpeech.state.generation++
-				endOfSpeech.state.segment = speechSegment{}
-				endOfSpeech.audioBuffer = endOfSpeech.audioBuffer[:0]
-				endOfSpeech.mu.Unlock()
-				continue
-			}
-
 			if endOfSpeech.state.callbackFired {
 				endOfSpeech.mu.Unlock()
 				continue
@@ -440,18 +479,19 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 
 			if command.fireImmediately {
 				endOfSpeech.state.callbackFired = true
-				segment = endOfSpeech.state.segment
-				ctx = command.ctx
+				currentCommand = command
 				stopTimer()
 				endOfSpeech.mu.Unlock()
-				endOfSpeech.emitEndOfSpeech(ctx, segment)
+				endOfSpeech.emitEndOfSpeech(currentCommand)
+				endOfSpeech.mu.Lock()
+				resetState()
+				endOfSpeech.mu.Unlock()
 				continue
 			}
 
 			generation = endOfSpeech.state.generation + 1
 			endOfSpeech.state.generation = generation
-			ctx = command.ctx
-			segment = command.segment
+			currentCommand = command
 			stopTimer()
 			timer = time.NewTimer(command.timeout)
 			timerCh = timer.C
@@ -465,22 +505,36 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 			}
 
 			endOfSpeech.state.callbackFired = true
-			currentSegment := segment
-			currentContext := ctx
+			command := currentCommand
 			stopTimer()
 			endOfSpeech.mu.Unlock()
-			endOfSpeech.emitEndOfSpeech(currentContext, currentSegment)
+			endOfSpeech.emitEndOfSpeech(command)
+			endOfSpeech.mu.Lock()
+			resetState()
+			endOfSpeech.mu.Unlock()
 		}
 	}
 }
 
-func (endOfSpeech *pipecatEndOfSpeech) emitEndOfSpeech(ctx context.Context, segment speechSegment) {
+func (endOfSpeech *pipecatEndOfSpeech) emitEndOfSpeech(command workerCommand) {
+	ctx := command.ctx
+	segment := command.segment
 	if ctx != nil && ctx.Err() != nil {
 		ctx = context.Background()
 	}
 
 	wordCount := len(strings.Fields(segment.Text))
 	triggerAt := time.Now()
+	eventData := map[string]string{
+		"type":               "detected",
+		"provider":           endOfSpeech.Name(),
+		"context_id":         segment.ContextID,
+		"speech":             segment.Text,
+		"confidence":         fmt.Sprintf("%.4f", command.confidence),
+		"word_count":         fmt.Sprintf("%d", wordCount),
+		"char_count":         fmt.Sprintf("%d", len(segment.Text)),
+		"text_to_trigger_ms": fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
+	}
 	_ = endOfSpeech.onPacket(ctx,
 		internal_type.EndOfSpeechPacket{
 			Speech:    segment.Text,
@@ -495,32 +549,23 @@ func (endOfSpeech *pipecatEndOfSpeech) emitEndOfSpeech(ctx context.Context, segm
 			}},
 		},
 		internal_type.ConversationEventPacket{
-			Name: "eos",
-			Data: map[string]string{
-				"type":               "detected",
-				"provider":           pipecatEndOfSpeechName,
-				"context_id":         segment.ContextID,
-				"speech":             segment.Text,
-				"word_count":         fmt.Sprintf("%d", wordCount),
-				"char_count":         fmt.Sprintf("%d", len(segment.Text)),
-				"text_to_trigger_ms": fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
-			},
-			Time: triggerAt,
+			ContextID: segment.ContextID,
+			Name:      "eos",
+			Data:      eventData,
+			Time:      triggerAt,
 		},
 	)
-
-	endOfSpeech.enqueueCommand(workerCommand{resetState: true})
 }
 
 func (endOfSpeech *pipecatEndOfSpeech) Close(ctx context.Context) error {
 	close(endOfSpeech.stopCh)
 
-	endOfSpeech.detectorMu.Lock()
-	if endOfSpeech.detector != nil {
-		endOfSpeech.detector.Destroy()
-		endOfSpeech.detector = nil
+	endOfSpeech.predictorMu.Lock()
+	if predictor, ok := endOfSpeech.predictor.(interface{ Destroy() }); ok {
+		predictor.Destroy()
 	}
-	endOfSpeech.detectorMu.Unlock()
+	endOfSpeech.predictor = nil
+	endOfSpeech.predictorMu.Unlock()
 
 	return nil
 }

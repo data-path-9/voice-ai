@@ -448,6 +448,11 @@ func (h requestorDispatchHandler) HandleLLMResponseDone(ctx context.Context, p i
 		})
 		return
 	}
+	if h.r.endOfSpeechExecutor != nil {
+		if err := h.r.endOfSpeechExecutor.Execute(ctx, p); err != nil {
+			h.r.logger.Errorf("end of speech analyze error: %v", err)
+		}
+	}
 	h.r.OnPacket(ctx, internal_type.StartIdleTimeoutPacket{ContextID: p.ContextID})
 	if err := h.r.Transition(LLMGenerated); err != nil {
 		h.r.logger.Errorf("messaging transition error: %v", err)
