@@ -131,7 +131,9 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		return nil
 	case internal_type.SpeechToTextInterruptPacket:
 		transformer.mu.Lock()
-		transformer.interruptionStartedAt = time.Now()
+		if transformer.interruptionStartedAt.IsZero() {
+			transformer.interruptionStartedAt = time.Now()
+		}
 		if input.ContextID != "" {
 			transformer.contextID = input.ContextID
 		}
@@ -378,11 +380,10 @@ func (transformer *speechToText) emitTranscript(outcome responseOutcome) {
 		eventData["char_count"] = fmt.Sprintf("%d", len(outcome.Script))
 	}
 
-	packets := []internal_type.Packet{
-		internal_type.InterruptionDetectedPacket{
-			ContextID: contextID,
-			Source:    internal_type.InterruptionSourceWord,
-		},
+	transformer.emitPackets(internal_type.InterruptionDetectedPacket{
+		ContextID: contextID,
+		Source:    internal_type.InterruptionSourceWord,
+	},
 		internal_type.SpeechToTextPacket{
 			ContextID:  contextID,
 			Script:     outcome.Script,
@@ -395,32 +396,25 @@ func (transformer *speechToText) emitTranscript(outcome responseOutcome) {
 			Name:      "stt",
 			Data:      eventData,
 			Time:      now,
-		},
-	}
+		})
 
-	latencyMilliseconds, shouldEmitLatencyMetric := transformer.consumeInterruptionLatencyMilliseconds(now)
-	if shouldEmitLatencyMetric {
-		packets = append(packets, internal_type.UserMessageMetricPacket{
+	var interruptionStartedAt time.Time
+	transformer.mu.Lock()
+	if !transformer.interruptionStartedAt.IsZero() {
+		interruptionStartedAt = transformer.interruptionStartedAt
+		transformer.interruptionStartedAt = time.Time{}
+	}
+	transformer.mu.Unlock()
+
+	if !interruptionStartedAt.IsZero() {
+		transformer.emitPackets(internal_type.UserMessageMetricPacket{
 			ContextID: contextID,
 			Metrics: []*protos.Metric{{
 				Name:  "stt_latency_ms",
-				Value: fmt.Sprintf("%d", latencyMilliseconds),
+				Value: fmt.Sprintf("%d", now.Sub(interruptionStartedAt).Milliseconds()),
 			}},
 		})
 	}
-
-	transformer.emitPackets(packets...)
-}
-
-func (transformer *speechToText) consumeInterruptionLatencyMilliseconds(measuredAt time.Time) (int64, bool) {
-	transformer.mu.Lock()
-	defer transformer.mu.Unlock()
-	if transformer.interruptionStartedAt.IsZero() {
-		return 0, false
-	}
-	latencyMilliseconds := measuredAt.Sub(transformer.interruptionStartedAt).Milliseconds()
-	transformer.interruptionStartedAt = time.Time{}
-	return latencyMilliseconds, true
 }
 
 func (transformer *speechToText) prepareAudioPayload(audio []byte) (any, error) {
@@ -456,9 +450,6 @@ func (transformer *speechToText) emitSTTError(contextID string, err error, error
 }
 
 func (transformer *speechToText) emitPackets(packets ...internal_type.Packet) {
-	if transformer.onPacket == nil || len(packets) == 0 {
-		return
-	}
 	if err := transformer.onPacket(packets...); err != nil {
 		transformer.logger.Errorf("custom-stt websocket_v1: onPacket failed: %v", err)
 	}
