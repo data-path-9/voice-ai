@@ -32,27 +32,17 @@ func TestGetEndOfSpeech_ReturnsPipecat(t *testing.T) {
 	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
 }
 
-func TestGetEndOfSpeech_IgnoresConfiguredProvider(t *testing.T) {
-	logger, _ := commons.NewApplicationLogger()
+func TestGetEndOfSpeech_ReturnsErrorForUnsupportedProvider(t *testing.T) {
+	endOfSpeech, err := GetEndOfSpeech(
+		t.Context(),
+		nil,
+		mockCallback,
+		utils.Option{EndOfSpeechOptionsKeyProvider: EndOfSpeechIdentifier("unsupported")},
+	)
 
-	providers := []EndOfSpeechIdentifier{
-		SilenceBasedEndOfSpeech,
-		LiveKitEndOfSpeech,
-		PipecatSmartTurnEndOfSpeech,
-	}
-
-	for _, provider := range providers {
-		endOfSpeech, err := GetEndOfSpeech(
-			t.Context(),
-			logger,
-			mockCallback,
-			utils.Option{EndOfSpeechOptionsKeyProvider: provider},
-		)
-
-		require.NoError(t, err)
-		require.NotNil(t, endOfSpeech)
-		assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
-	}
+	require.Error(t, err)
+	assert.Nil(t, endOfSpeech)
+	assert.EqualError(t, err, `end_of_speech: unsupported provider "unsupported"`)
 }
 
 func TestEndOfSpeechIdentifier_Constants(t *testing.T) {
