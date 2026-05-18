@@ -86,7 +86,7 @@ func (r *genericRequestor) runLowDispatcher(ctx context.Context) {
 // =============================================================================
 
 func (r *genericRequestor) dispatch(ctx context.Context, p internal_type.Packet) {
-	defer r.benchmarkDispatch(p)()
+	// defer r.benchmarkDispatch(p)()
 	switch p.(type) {
 	case internal_type.AsyncPacket:
 		utils.Go(ctx, func() {

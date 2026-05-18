@@ -28,6 +28,7 @@ type speechSegment struct {
 	ContextID string
 	Text      string
 	Chunks    []internal_type.SpeechToTextPacket
+	// Timestamp tracks the last text-bearing update for this segment.
 	Timestamp time.Time
 }
 
@@ -226,23 +227,22 @@ func (endOfSpeech *silenceBasedEndOfSpeech) extendCurrentSegment(
 }
 
 func (endOfSpeech *silenceBasedEndOfSpeech) emitInterimSpeech(ctx context.Context, segment speechSegment) {
-	emittedAt := time.Now()
 	_ = endOfSpeech.onPacket(ctx,
 		internal_type.InterimEndOfSpeechPacket{
 			Speech:    segment.Text,
 			ContextID: segment.ContextID,
 		},
-		internal_type.ConversationEventPacket{
-			ContextID: segment.ContextID,
-			Name:      "eos",
-			Data: map[string]string{
-				"type":       "interim",
-				"provider":   endOfSpeech.Name(),
-				"context_id": segment.ContextID,
-				"speech":     segment.Text,
-			},
-			Time: emittedAt,
-		},
+		// internal_type.ConversationEventPacket{
+		// 	ContextID: segment.ContextID,
+		// 	Name:      "eos",
+		// 	Data: map[string]string{
+		// 		"type":       "interim",
+		// 		"provider":   endOfSpeech.Name(),
+		// 		"context_id": segment.ContextID,
+		// 		"speech":     segment.Text,
+		// 	},
+		// 	Time: time.Now(),
+		// },
 	)
 }
 
@@ -263,6 +263,7 @@ func (endOfSpeech *silenceBasedEndOfSpeech) worker() {
 	var (
 		timer          *time.Timer
 		timerCh        <-chan time.Time
+		timerArmedAt   time.Time
 		generation     uint64
 		currentCommand workerCommand
 	)
@@ -273,6 +274,7 @@ func (endOfSpeech *silenceBasedEndOfSpeech) worker() {
 			timer = nil
 			timerCh = nil
 		}
+		timerArmedAt = time.Time{}
 	}
 	resetState := func() {
 		endOfSpeech.state.callbackFired = false
@@ -299,7 +301,7 @@ func (endOfSpeech *silenceBasedEndOfSpeech) worker() {
 				currentCommand = command
 				stopTimer()
 				endOfSpeech.mu.Unlock()
-				endOfSpeech.emitEndOfSpeech(currentCommand.ctx, currentCommand.segment)
+				endOfSpeech.emitEndOfSpeech(currentCommand, time.Now())
 				endOfSpeech.mu.Lock()
 				resetState()
 				endOfSpeech.mu.Unlock()
@@ -310,6 +312,7 @@ func (endOfSpeech *silenceBasedEndOfSpeech) worker() {
 			endOfSpeech.state.generation = generation
 			currentCommand = command
 			stopTimer()
+			timerArmedAt = time.Now()
 			timer = time.NewTimer(command.timeout)
 			timerCh = timer.C
 			endOfSpeech.mu.Unlock()
@@ -323,9 +326,10 @@ func (endOfSpeech *silenceBasedEndOfSpeech) worker() {
 
 			endOfSpeech.state.callbackFired = true
 			command := currentCommand
+			armedAt := timerArmedAt
 			stopTimer()
 			endOfSpeech.mu.Unlock()
-			endOfSpeech.emitEndOfSpeech(command.ctx, command.segment)
+			endOfSpeech.emitEndOfSpeech(command, armedAt)
 			endOfSpeech.mu.Lock()
 			resetState()
 			endOfSpeech.mu.Unlock()
@@ -333,7 +337,9 @@ func (endOfSpeech *silenceBasedEndOfSpeech) worker() {
 	}
 }
 
-func (endOfSpeech *silenceBasedEndOfSpeech) emitEndOfSpeech(ctx context.Context, segment speechSegment) {
+func (endOfSpeech *silenceBasedEndOfSpeech) emitEndOfSpeech(command workerCommand, timerArmedAt time.Time) {
+	ctx := command.ctx
+	segment := command.segment
 	if segment.Text == "" {
 		return
 	}
@@ -343,6 +349,11 @@ func (endOfSpeech *silenceBasedEndOfSpeech) emitEndOfSpeech(ctx context.Context,
 
 	wordCount := len(strings.Fields(segment.Text))
 	triggerAt := time.Now()
+	textToTriggerMs := triggerAt.Sub(segment.Timestamp).Milliseconds()
+	waitToTriggerMs := textToTriggerMs
+	if !timerArmedAt.IsZero() {
+		waitToTriggerMs = triggerAt.Sub(timerArmedAt).Milliseconds()
+	}
 	_ = endOfSpeech.onPacket(ctx,
 		internal_type.EndOfSpeechPacket{
 			Speech:    segment.Text,
@@ -353,7 +364,7 @@ func (endOfSpeech *silenceBasedEndOfSpeech) emitEndOfSpeech(ctx context.Context,
 			ContextID: segment.ContextID,
 			Metrics: []*protos.Metric{{
 				Name:  "eos_latency_ms",
-				Value: fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
+				Value: fmt.Sprintf("%d", waitToTriggerMs),
 			}},
 		},
 		internal_type.ConversationEventPacket{
@@ -367,7 +378,8 @@ func (endOfSpeech *silenceBasedEndOfSpeech) emitEndOfSpeech(ctx context.Context,
 				"confidence":         "0.0000",
 				"word_count":         fmt.Sprintf("%d", wordCount),
 				"char_count":         fmt.Sprintf("%d", len(segment.Text)),
-				"text_to_trigger_ms": fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
+				"text_to_trigger_ms": fmt.Sprintf("%d", textToTriggerMs),
+				"wait_to_trigger_ms": fmt.Sprintf("%d", waitToTriggerMs),
 			},
 			Time: triggerAt,
 		},

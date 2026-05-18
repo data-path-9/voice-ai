@@ -426,11 +426,18 @@ func TestLivekitEndOfSpeech_DetectedEventIncludesModelConfidence(t *testing.T) {
 func TestLivekitEndOfSpeech_ConversationEventShape(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 	events := make(chan internal_type.ConversationEventPacket, 4)
+	metrics := make(chan internal_type.UserMessageMetricPacket, 2)
 	callback := func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
 			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
 				select {
 				case events <- event:
+				default:
+				}
+			}
+			if metric, ok := packet.(internal_type.UserMessageMetricPacket); ok {
+				select {
+				case metrics <- metric:
 				default:
 				}
 			}
@@ -452,20 +459,13 @@ func TestLivekitEndOfSpeech_ConversationEventShape(t *testing.T) {
 	}
 
 	timeout := time.After(500 * time.Millisecond)
-	var sawInterim, sawDetected bool
-	for !sawInterim || !sawDetected {
+	var sawDetected, sawMetric bool
+	for !sawDetected || !sawMetric {
 		select {
 		case event := <-events:
 			switch event.Data["type"] {
 			case "initialized":
 				continue
-			case "interim":
-				assert.Equal(t, "ctx-events", event.ContextID)
-				assert.Equal(t, eosName, event.Data["provider"])
-				assert.Equal(t, "ctx-events", event.Data["context_id"])
-				assert.Equal(t, "hello world", event.Data["speech"])
-				assert.False(t, event.Time.IsZero())
-				sawInterim = true
 			case "detected":
 				assert.Equal(t, "ctx-events", event.ContextID)
 				assert.Equal(t, eosName, event.Data["provider"])
@@ -474,11 +474,102 @@ func TestLivekitEndOfSpeech_ConversationEventShape(t *testing.T) {
 				assert.Equal(t, "0.0000", event.Data["confidence"])
 				_, parseErr := strconv.Atoi(event.Data["text_to_trigger_ms"])
 				assert.NoError(t, parseErr)
+				_, parseErr = strconv.Atoi(event.Data["wait_to_trigger_ms"])
+				assert.NoError(t, parseErr)
 				assert.False(t, event.Time.IsZero())
 				sawDetected = true
 			}
+		case metric := <-metrics:
+			if len(metric.Metrics) != 1 {
+				continue
+			}
+			if metric.Metrics[0].Name != "eos_latency_ms" {
+				continue
+			}
+			_, parseErr := strconv.Atoi(metric.Metrics[0].Value)
+			assert.NoError(t, parseErr)
+			sawMetric = true
 		case <-timeout:
 			t.Fatal("timeout waiting for eos conversation events")
 		}
 	}
+}
+
+func TestLivekitEndOfSpeech_MetricUsesLastTimerArm(t *testing.T) {
+	events := make(chan internal_type.ConversationEventPacket, 2)
+	metrics := make(chan internal_type.UserMessageMetricPacket, 1)
+	endOfSpeech := &livekitEndOfSpeech{
+		onPacket: func(ctx context.Context, packets ...internal_type.Packet) error {
+			for _, packet := range packets {
+				switch typed := packet.(type) {
+				case internal_type.ConversationEventPacket:
+					if typed.Data["type"] != "detected" {
+						continue
+					}
+					select {
+					case events <- typed:
+					default:
+					}
+				case internal_type.UserMessageMetricPacket:
+					select {
+					case metrics <- typed:
+					default:
+					}
+				}
+			}
+			return nil
+		},
+		predictor: testPredictor{
+			predict: func(string) (float64, error) {
+				return 0, errors.New("predict failed")
+			},
+		},
+		threshold:       defaultThreshold,
+		quickTimeout:    20 * time.Millisecond,
+		silenceTimeout:  900 * time.Millisecond,
+		fallbackTimeout: 120 * time.Millisecond,
+		maxHistory:      int(defaultMaxHistory),
+		commandCh:       make(chan workerCommand, 8),
+		stopCh:          make(chan struct{}),
+		state:           &endOfSpeechState{segment: speechSegment{}},
+	}
+	go endOfSpeech.worker()
+	defer func() { _ = endOfSpeech.Close(context.Background()) }()
+
+	ctx := context.Background()
+	require.NoError(t, endOfSpeech.Execute(ctx, internal_type.SpeechToTextPacket{
+		ContextID: "ctx-reset",
+		Script:    "hello",
+		Interim:   false,
+	}))
+	time.Sleep(80 * time.Millisecond)
+	require.NoError(t, endOfSpeech.Execute(ctx, internal_type.SpeechToTextPacket{
+		ContextID: "ctx-reset",
+		Script:    "...",
+		Interim:   true,
+	}))
+
+	timeout := time.After(800 * time.Millisecond)
+	var detected internal_type.ConversationEventPacket
+	var metric internal_type.UserMessageMetricPacket
+	for detected.Name == "" || len(metric.Metrics) == 0 {
+		select {
+		case detected = <-events:
+		case metric = <-metrics:
+		case <-timeout:
+			t.Fatal("timeout waiting for detected eos packets")
+		}
+	}
+
+	textMs, err := strconv.Atoi(detected.Data["text_to_trigger_ms"])
+	require.NoError(t, err)
+	waitMs, err := strconv.Atoi(detected.Data["wait_to_trigger_ms"])
+	require.NoError(t, err)
+	require.Len(t, metric.Metrics, 1)
+	assert.Equal(t, "eos_latency_ms", metric.Metrics[0].Name)
+	metricMs, err := strconv.Atoi(metric.Metrics[0].Value)
+	require.NoError(t, err)
+
+	assert.InDelta(t, waitMs, metricMs, 30)
+	assert.Greater(t, textMs, waitMs+40)
 }

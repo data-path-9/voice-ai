@@ -41,6 +41,7 @@ type speechSegment struct {
 	Revision  uint64
 	ContextID string
 	Text      string
+	// Timestamp tracks the last text-bearing update for this segment.
 	Timestamp time.Time
 	Chunks    []internal_type.SpeechToTextPacket
 }
@@ -328,23 +329,22 @@ func (endOfSpeech *pipecatEndOfSpeech) extendCurrentSegment(ctx context.Context,
 }
 
 func (endOfSpeech *pipecatEndOfSpeech) emitInterimSpeech(ctx context.Context, segment speechSegment) {
-	emittedAt := time.Now()
 	_ = endOfSpeech.onPacket(ctx,
 		internal_type.InterimEndOfSpeechPacket{
 			Speech:    segment.Text,
 			ContextID: segment.ContextID,
 		},
-		internal_type.ConversationEventPacket{
-			ContextID: segment.ContextID,
-			Name:      "eos",
-			Data: map[string]string{
-				"type":       "interim",
-				"provider":   endOfSpeech.Name(),
-				"context_id": segment.ContextID,
-				"speech":     segment.Text,
-			},
-			Time: emittedAt,
-		},
+		// internal_type.ConversationEventPacket{
+		// 	ContextID: segment.ContextID,
+		// 	Name:      "eos",
+		// 	Data: map[string]string{
+		// 		"type":       "interim",
+		// 		"provider":   endOfSpeech.Name(),
+		// 		"context_id": segment.ContextID,
+		// 		"speech":     segment.Text,
+		// 	},
+		// 	Time: time.Now(),
+		// },
 	)
 }
 
@@ -443,6 +443,7 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 	var (
 		timer          *time.Timer
 		timerCh        <-chan time.Time
+		timerArmedAt   time.Time
 		generation     uint64
 		currentCommand workerCommand
 	)
@@ -453,6 +454,7 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 			timer = nil
 			timerCh = nil
 		}
+		timerArmedAt = time.Time{}
 	}
 	resetState := func() {
 		endOfSpeech.state.callbackFired = false
@@ -485,7 +487,7 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 				currentCommand = command
 				stopTimer()
 				endOfSpeech.mu.Unlock()
-				endOfSpeech.emitEndOfSpeech(currentCommand)
+				endOfSpeech.emitEndOfSpeech(currentCommand, time.Now())
 				endOfSpeech.mu.Lock()
 				resetState()
 				endOfSpeech.mu.Unlock()
@@ -496,6 +498,7 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 			endOfSpeech.state.generation = generation
 			currentCommand = command
 			stopTimer()
+			timerArmedAt = time.Now()
 			timer = time.NewTimer(command.timeout)
 			timerCh = timer.C
 			endOfSpeech.mu.Unlock()
@@ -509,9 +512,10 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 
 			endOfSpeech.state.callbackFired = true
 			command := currentCommand
+			armedAt := timerArmedAt
 			stopTimer()
 			endOfSpeech.mu.Unlock()
-			endOfSpeech.emitEndOfSpeech(command)
+			endOfSpeech.emitEndOfSpeech(command, armedAt)
 			endOfSpeech.mu.Lock()
 			resetState()
 			endOfSpeech.mu.Unlock()
@@ -519,7 +523,7 @@ func (endOfSpeech *pipecatEndOfSpeech) worker() {
 	}
 }
 
-func (endOfSpeech *pipecatEndOfSpeech) emitEndOfSpeech(command workerCommand) {
+func (endOfSpeech *pipecatEndOfSpeech) emitEndOfSpeech(command workerCommand, timerArmedAt time.Time) {
 	ctx := command.ctx
 	segment := command.segment
 	if ctx != nil && ctx.Err() != nil {
@@ -528,6 +532,11 @@ func (endOfSpeech *pipecatEndOfSpeech) emitEndOfSpeech(command workerCommand) {
 
 	wordCount := len(strings.Fields(segment.Text))
 	triggerAt := time.Now()
+	textToTriggerMs := triggerAt.Sub(segment.Timestamp).Milliseconds()
+	waitToTriggerMs := textToTriggerMs
+	if !timerArmedAt.IsZero() {
+		waitToTriggerMs = triggerAt.Sub(timerArmedAt).Milliseconds()
+	}
 	eventData := map[string]string{
 		"type":               "detected",
 		"provider":           endOfSpeech.Name(),
@@ -536,7 +545,8 @@ func (endOfSpeech *pipecatEndOfSpeech) emitEndOfSpeech(command workerCommand) {
 		"confidence":         fmt.Sprintf("%.4f", command.confidence),
 		"word_count":         fmt.Sprintf("%d", wordCount),
 		"char_count":         fmt.Sprintf("%d", len(segment.Text)),
-		"text_to_trigger_ms": fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
+		"text_to_trigger_ms": fmt.Sprintf("%d", textToTriggerMs),
+		"wait_to_trigger_ms": fmt.Sprintf("%d", waitToTriggerMs),
 	}
 	_ = endOfSpeech.onPacket(ctx,
 		internal_type.EndOfSpeechPacket{
@@ -548,7 +558,7 @@ func (endOfSpeech *pipecatEndOfSpeech) emitEndOfSpeech(command workerCommand) {
 			ContextID: segment.ContextID,
 			Metrics: []*protos.Metric{{
 				Name:  "eos_latency_ms",
-				Value: fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
+				Value: fmt.Sprintf("%d", waitToTriggerMs),
 			}},
 		},
 		internal_type.ConversationEventPacket{

@@ -1031,7 +1031,7 @@ func TestEOS_ConversationEvent_Initialized(t *testing.T) {
 	}
 }
 
-func TestEOS_ConversationEvent_Interim(t *testing.T) {
+func TestEOS_ConversationEvent_UserTextDetected(t *testing.T) {
 	events := make(chan internal_type.ConversationEventPacket, 2)
 	eos := newTestEOS(func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
@@ -1055,23 +1055,30 @@ func TestEOS_ConversationEvent_Interim(t *testing.T) {
 	case event := <-events:
 		assert.Equal(t, "eos", event.Name)
 		assert.Equal(t, "ctx-interim", event.ContextID)
-		assert.Equal(t, "interim", event.Data["type"])
+		assert.Equal(t, "detected", event.Data["type"])
 		assert.Equal(t, pipecatEndOfSpeechName, event.Data["provider"])
 		assert.Equal(t, "ctx-interim", event.Data["context_id"])
 		assert.Equal(t, "hello", event.Data["speech"])
 		assert.False(t, event.Time.IsZero())
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timeout waiting for interim conversation event")
+		t.Fatal("timeout waiting for detected conversation event")
 	}
 }
 
 func TestEOS_ConversationEvent_Detected(t *testing.T) {
 	events := make(chan internal_type.ConversationEventPacket, 4)
+	metrics := make(chan internal_type.UserMessageMetricPacket, 2)
 	eos := newTestEOS(func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
 			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
 				select {
 				case events <- event:
+				default:
+				}
+			}
+			if metric, ok := packet.(internal_type.UserMessageMetricPacket); ok {
+				select {
+				case metrics <- metric:
 				default:
 				}
 			}
@@ -1086,6 +1093,7 @@ func TestEOS_ConversationEvent_Detected(t *testing.T) {
 	}))
 
 	timeout := time.After(500 * time.Millisecond)
+	var sawMetric bool
 	for {
 		select {
 		case event := <-events:
@@ -1102,14 +1110,85 @@ func TestEOS_ConversationEvent_Detected(t *testing.T) {
 			assert.Equal(t, "2", event.Data["word_count"])
 			assert.Equal(t, "11", event.Data["char_count"])
 			assert.NotEmpty(t, event.Data["text_to_trigger_ms"])
+			assert.NotEmpty(t, event.Data["wait_to_trigger_ms"])
 			assert.False(t, event.Time.IsZero())
 			_, parseErr := strconv.Atoi(event.Data["text_to_trigger_ms"])
 			assert.NoError(t, parseErr)
-			return
+			_, parseErr = strconv.Atoi(event.Data["wait_to_trigger_ms"])
+			assert.NoError(t, parseErr)
+			if sawMetric {
+				return
+			}
+		case metric := <-metrics:
+			require.Len(t, metric.Metrics, 1)
+			if metric.Metrics[0].Name != "eos_latency_ms" {
+				continue
+			}
+			_, parseErr := strconv.Atoi(metric.Metrics[0].Value)
+			assert.NoError(t, parseErr)
+			sawMetric = true
 		case <-timeout:
 			t.Fatal("timeout waiting for detected conversation event")
 		}
 	}
+}
+
+func TestEOS_MetricUsesLastTimerArm(t *testing.T) {
+	events := make(chan internal_type.ConversationEventPacket, 2)
+	metrics := make(chan internal_type.UserMessageMetricPacket, 1)
+	eos := newTestEOS(func(ctx context.Context, packets ...internal_type.Packet) error {
+		for _, packet := range packets {
+			switch typed := packet.(type) {
+			case internal_type.ConversationEventPacket:
+				if typed.Data["type"] != "detected" {
+					continue
+				}
+				select {
+				case events <- typed:
+				default:
+				}
+			case internal_type.UserMessageMetricPacket:
+				select {
+				case metrics <- typed:
+				default:
+				}
+			}
+		}
+		return nil
+	}, newTestOpts(map[string]any{
+		"microphone.eos.fallback_timeout": 120.0,
+		"microphone.eos.extended_timeout": 900.0,
+	}))
+	defer closeTestEndOfSpeech(eos)
+
+	ctx := context.Background()
+	require.NoError(t, eos.Execute(ctx, sttInput("hello", true)))
+	time.Sleep(80 * time.Millisecond)
+	require.NoError(t, eos.Execute(ctx, sttInput("...", false)))
+
+	timeout := time.After(800 * time.Millisecond)
+	var detected internal_type.ConversationEventPacket
+	var metric internal_type.UserMessageMetricPacket
+	for detected.Name == "" || len(metric.Metrics) == 0 {
+		select {
+		case detected = <-events:
+		case metric = <-metrics:
+		case <-timeout:
+			t.Fatal("timeout waiting for detected eos packets")
+		}
+	}
+
+	textMs, err := strconv.Atoi(detected.Data["text_to_trigger_ms"])
+	require.NoError(t, err)
+	waitMs, err := strconv.Atoi(detected.Data["wait_to_trigger_ms"])
+	require.NoError(t, err)
+	require.Len(t, metric.Metrics, 1)
+	assert.Equal(t, "eos_latency_ms", metric.Metrics[0].Name)
+	metricMs, err := strconv.Atoi(metric.Metrics[0].Value)
+	require.NoError(t, err)
+
+	assert.InDelta(t, waitMs, metricMs, 30)
+	assert.Greater(t, textMs, waitMs+40)
 }
 
 func TestEOS_ConversationEvent_DetectedConfidence(t *testing.T) {

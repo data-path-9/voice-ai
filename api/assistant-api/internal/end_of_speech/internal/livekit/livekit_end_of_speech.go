@@ -53,6 +53,7 @@ type speechSegment struct {
 	ContextID string
 	Committed string // accumulated final transcripts
 	Pending   string // latest interim transcript (not yet finalized)
+	// Timestamp tracks the last text-bearing update for this segment.
 	Timestamp time.Time
 	Chunks    []internal_type.SpeechToTextPacket
 }
@@ -225,20 +226,19 @@ func (endOfSpeech *livekitEndOfSpeech) Execute(ctx context.Context, packet inter
 		endOfSpeech.state.confidence = 0
 		endOfSpeech.mu.Unlock()
 
-		emittedAt := time.Now()
 		_ = endOfSpeech.onPacket(ctx,
 			internal_type.InterimEndOfSpeechPacket{Speech: segment.Committed, ContextID: segment.ContextID},
-			internal_type.ConversationEventPacket{
-				ContextID: segment.ContextID,
-				Name:      "eos",
-				Data: map[string]string{
-					"type":       "interim",
-					"provider":   endOfSpeech.Name(),
-					"context_id": segment.ContextID,
-					"speech":     segment.Committed,
-				},
-				Time: emittedAt,
-			},
+			// internal_type.ConversationEventPacket{
+			// 	ContextID: segment.ContextID,
+			// 	Name:      "eos",
+			// 	Data: map[string]string{
+			// 		"type":       "interim",
+			// 		"provider":   endOfSpeech.Name(),
+			// 		"context_id": segment.ContextID,
+			// 		"speech":     segment.Committed,
+			// 	},
+			// 	Time: time.Now(),
+			// },
 		)
 		endOfSpeech.enqueueCommand(workerCommand{
 			ctx:             ctx,
@@ -424,6 +424,7 @@ func (endOfSpeech *livekitEndOfSpeech) worker() {
 	var (
 		timer          *time.Timer
 		timerCh        <-chan time.Time
+		timerArmedAt   time.Time
 		generation     uint64
 		currentCommand workerCommand
 	)
@@ -434,6 +435,7 @@ func (endOfSpeech *livekitEndOfSpeech) worker() {
 			timer = nil
 			timerCh = nil
 		}
+		timerArmedAt = time.Time{}
 	}
 	resetState := func() {
 		endOfSpeech.state.callbackFired = false
@@ -461,7 +463,7 @@ func (endOfSpeech *livekitEndOfSpeech) worker() {
 				currentCommand = command
 				stopTimer()
 				endOfSpeech.mu.Unlock()
-				endOfSpeech.fire(currentCommand.ctx, currentCommand.segment, currentCommand.confidence)
+				endOfSpeech.fire(currentCommand, time.Now())
 				endOfSpeech.mu.Lock()
 				resetState()
 				endOfSpeech.mu.Unlock()
@@ -472,6 +474,7 @@ func (endOfSpeech *livekitEndOfSpeech) worker() {
 			endOfSpeech.state.generation = generation
 			currentCommand = command
 			stopTimer()
+			timerArmedAt = time.Now()
 			timer = time.NewTimer(command.timeout)
 			timerCh = timer.C
 			endOfSpeech.mu.Unlock()
@@ -485,9 +488,10 @@ func (endOfSpeech *livekitEndOfSpeech) worker() {
 
 			endOfSpeech.state.callbackFired = true
 			command := currentCommand
+			armedAt := timerArmedAt
 			stopTimer()
 			endOfSpeech.mu.Unlock()
-			endOfSpeech.fire(command.ctx, command.segment, command.confidence)
+			endOfSpeech.fire(command, armedAt)
 			endOfSpeech.mu.Lock()
 			resetState()
 			endOfSpeech.mu.Unlock()
@@ -495,7 +499,10 @@ func (endOfSpeech *livekitEndOfSpeech) worker() {
 	}
 }
 
-func (endOfSpeech *livekitEndOfSpeech) fire(ctx context.Context, segment speechSegment, confidence float64) {
+func (endOfSpeech *livekitEndOfSpeech) fire(command workerCommand, timerArmedAt time.Time) {
+	ctx := command.ctx
+	segment := command.segment
+	confidence := command.confidence
 	speech := segment.FullText()
 	if speech == "" {
 		return
@@ -515,6 +522,11 @@ func (endOfSpeech *livekitEndOfSpeech) fire(ctx context.Context, segment speechS
 
 	wordCount := len(strings.Fields(speech))
 	triggerAt := time.Now()
+	textToTriggerMs := triggerAt.Sub(segment.Timestamp).Milliseconds()
+	waitToTriggerMs := textToTriggerMs
+	if !timerArmedAt.IsZero() {
+		waitToTriggerMs = triggerAt.Sub(timerArmedAt).Milliseconds()
+	}
 	_ = endOfSpeech.onPacket(ctx,
 		internal_type.EndOfSpeechPacket{
 			Speech:    speech,
@@ -525,7 +537,7 @@ func (endOfSpeech *livekitEndOfSpeech) fire(ctx context.Context, segment speechS
 			ContextID: segment.ContextID,
 			Metrics: []*protos.Metric{{
 				Name:  "eos_latency_ms",
-				Value: fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
+				Value: fmt.Sprintf("%d", waitToTriggerMs),
 			}},
 		},
 		internal_type.ConversationEventPacket{
@@ -539,7 +551,8 @@ func (endOfSpeech *livekitEndOfSpeech) fire(ctx context.Context, segment speechS
 				"confidence":         fmt.Sprintf("%.4f", confidence),
 				"word_count":         fmt.Sprintf("%d", wordCount),
 				"char_count":         fmt.Sprintf("%d", len(speech)),
-				"text_to_trigger_ms": fmt.Sprintf("%d", triggerAt.Sub(segment.Timestamp).Milliseconds()),
+				"text_to_trigger_ms": fmt.Sprintf("%d", textToTriggerMs),
+				"wait_to_trigger_ms": fmt.Sprintf("%d", waitToTriggerMs),
 			},
 			Time: triggerAt,
 		},

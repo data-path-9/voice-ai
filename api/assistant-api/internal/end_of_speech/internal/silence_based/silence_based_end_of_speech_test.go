@@ -161,11 +161,18 @@ func TestEmptySpeechIgnored(t *testing.T) {
 func TestSilenceBasedEndOfSpeech_ConversationEventShape(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 	events := make(chan internal_type.ConversationEventPacket, 4)
+	metrics := make(chan internal_type.UserMessageMetricPacket, 2)
 	callback := func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
 			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
 				select {
 				case events <- event:
+				default:
+				}
+			}
+			if metric, ok := packet.(internal_type.UserMessageMetricPacket); ok {
+				select {
+				case metrics <- metric:
 				default:
 				}
 			}
@@ -186,27 +193,13 @@ func TestSilenceBasedEndOfSpeech_ConversationEventShape(t *testing.T) {
 	}
 
 	timeout := time.After(500 * time.Millisecond)
-	var sawInterim, sawDetected bool
-	for !sawInterim || !sawDetected {
+	var sawDetected, sawMetric bool
+	for !sawDetected || !sawMetric {
 		select {
 		case event := <-events:
 			switch event.Data["type"] {
 			case "initialized":
 				continue
-			case "interim":
-				if event.ContextID != "ctx-events" {
-					t.Fatalf("unexpected interim context: %+v", event)
-				}
-				if event.Data["provider"] != silenceBasedEndOfSpeechName {
-					t.Fatalf("unexpected interim provider: %+v", event)
-				}
-				if event.Data["context_id"] != "ctx-events" || event.Data["speech"] != "hello world" {
-					t.Fatalf("unexpected interim data: %+v", event)
-				}
-				if event.Time.IsZero() {
-					t.Fatalf("expected interim time: %+v", event)
-				}
-				sawInterim = true
 			case "detected":
 				if event.ContextID != "ctx-events" {
 					t.Fatalf("unexpected detected context: %+v", event)
@@ -223,14 +216,105 @@ func TestSilenceBasedEndOfSpeech_ConversationEventShape(t *testing.T) {
 				if _, parseErr := strconv.Atoi(event.Data["text_to_trigger_ms"]); parseErr != nil {
 					t.Fatalf("invalid detected timing: %+v", event)
 				}
+				if _, parseErr := strconv.Atoi(event.Data["wait_to_trigger_ms"]); parseErr != nil {
+					t.Fatalf("invalid detected wait timing: %+v", event)
+				}
 				if event.Time.IsZero() {
 					t.Fatalf("expected detected time: %+v", event)
 				}
 				sawDetected = true
 			}
+		case metric := <-metrics:
+			if len(metric.Metrics) != 1 {
+				continue
+			}
+			if metric.Metrics[0].Name != "eos_latency_ms" {
+				continue
+			}
+			if _, parseErr := strconv.Atoi(metric.Metrics[0].Value); parseErr != nil {
+				t.Fatalf("invalid eos metric: %+v", metric)
+			}
+			sawMetric = true
 		case <-timeout:
 			t.Fatal("timeout waiting for eos conversation events")
 		}
+	}
+}
+
+func TestSilenceBasedEndOfSpeech_MetricUsesLastTimerArm(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	events := make(chan internal_type.ConversationEventPacket, 2)
+	metrics := make(chan internal_type.UserMessageMetricPacket, 1)
+	callback := func(ctx context.Context, packets ...internal_type.Packet) error {
+		for _, packet := range packets {
+			switch typed := packet.(type) {
+			case internal_type.ConversationEventPacket:
+				if typed.Data["type"] != "detected" {
+					continue
+				}
+				select {
+				case events <- typed:
+				default:
+				}
+			case internal_type.UserMessageMetricPacket:
+				select {
+				case metrics <- typed:
+				default:
+				}
+			}
+		}
+		return nil
+	}
+
+	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{
+		"microphone.eos.timeout": 120.0,
+	}))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := svcIface.Execute(ctx, sttInput("hello", true)); err != nil {
+		t.Fatalf("execute final stt: %v", err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if err := svcIface.Execute(ctx, systemInput("activity")); err != nil {
+		t.Fatalf("execute activity: %v", err)
+	}
+
+	timeout := time.After(800 * time.Millisecond)
+	var detected internal_type.ConversationEventPacket
+	var metric internal_type.UserMessageMetricPacket
+	for detected.Name == "" || len(metric.Metrics) == 0 {
+		select {
+		case detected = <-events:
+		case metric = <-metrics:
+		case <-timeout:
+			t.Fatal("timeout waiting for detected eos packets")
+		}
+	}
+
+	textMs, err := strconv.Atoi(detected.Data["text_to_trigger_ms"])
+	if err != nil {
+		t.Fatalf("parse text_to_trigger_ms: %v", err)
+	}
+	waitMs, err := strconv.Atoi(detected.Data["wait_to_trigger_ms"])
+	if err != nil {
+		t.Fatalf("parse wait_to_trigger_ms: %v", err)
+	}
+	metricMs, err := strconv.Atoi(metric.Metrics[0].Value)
+	if err != nil {
+		t.Fatalf("parse eos_latency_ms: %v", err)
+	}
+
+	if metric.Metrics[0].Name != "eos_latency_ms" {
+		t.Fatalf("unexpected metric packet: %+v", metric)
+	}
+	if diff := metricMs - waitMs; diff < -30 || diff > 30 {
+		t.Fatalf("metric and wait timing diverged: metric=%d wait=%d", metricMs, waitMs)
+	}
+	if textMs <= waitMs+40 {
+		t.Fatalf("expected text timing to include pre-reset time: text=%d wait=%d", textMs, waitMs)
 	}
 }
 
