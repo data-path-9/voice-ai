@@ -129,7 +129,7 @@ export function KnowledgePage() {
         <div className="flex flex-col h-full flex-1 items-center justify-center">
           <EmptyState
             title="No knowledge bases found"
-            subtitle="No knowledge bases match your search criteria."
+            subtitle="No knowledge bases match your current filters."
             action="Create new knowledge"
             onAction={goToCreateKnowledge}
           />
@@ -138,7 +138,7 @@ export function KnowledgePage() {
         <div className="flex flex-col h-full flex-1 items-center justify-center">
           <EmptyState
             title="No knowledge bases"
-            subtitle="You haven't created any knowledge bases yet."
+            subtitle="Create a private knowledge base for a client, brand, or internal team."
             action="Create new knowledge"
             onAction={goToCreateKnowledge}
           />

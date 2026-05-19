@@ -81,7 +81,7 @@ export const ProviderContextProvider = ({
     GetAllOrganizationCredential(
       connectionConfig,
       1,
-      50,
+      100,
       [],
       afterGettingAllCredential,
       ConnectionConfig.WithDebugger({

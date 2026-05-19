@@ -56,7 +56,7 @@ services:
       opensearch:
         condition: service_healthy
     volumes:
-      - ./docker/document-api/config.yaml:/opt/apps/config.yaml:ro
+      - ./docker/document-api/config.yaml:/app/env/document.yaml:ro
       - ${HOME}/rapida-data/assets:/app/rapida-data/assets
     networks:
       - api-network
@@ -69,11 +69,9 @@ services:
   # Override assistant-api to inject OpenSearch connection config
   assistant-api:
     environment:
-      - OPENSEARCH__SCHEMA=http
-      - OPENSEARCH__HOST=opensearch
-      - OPENSEARCH__PORT=9200
-      - OPENSEARCH__MAX_RETRIES=3
-      - OPENSEARCH__MAX_CONNECTION=10
+      ENV_PATH: /opt/apps/env/assistant.knowledge.yml
+    volumes:
+      - ./docker/assistant-api/assistant.knowledge.yml:/opt/apps/env/assistant.knowledge.yml:ro
     depends_on:
       opensearch:
         condition: service_healthy

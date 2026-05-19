@@ -1,0 +1,127 @@
+{
+  "preservePrefix": "speaker.",
+  "parameters": [
+    {
+      "key": "speak.model",
+      "label": "Model",
+      "type": "input",
+      "required": false,
+      "placeholder": "e.g. sonic-2",
+      "helpText": "Optional provider-defined model identifier that can be referenced from websocket query params and request packets.",
+      "errorMessage": "Please provide a valid model for custom TTS."
+    },
+    {
+      "key": "speak.language",
+      "label": "Language",
+      "type": "input",
+      "required": false,
+      "placeholder": "e.g. en-US",
+      "helpText": "Optional provider-defined language code that can be referenced from websocket query params and request packets.",
+      "errorMessage": "Please provide a valid language for custom TTS."
+    },
+    {
+      "key": "speak.voice.id",
+      "label": "Voice ID",
+      "type": "input",
+      "required": true,
+      "placeholder": "e.g. narrator-1",
+      "helpText": "Plain voice identifier that can be bound into websocket query params and request packets.",
+      "errorMessage": "Please provide a valid voice ID for custom TTS."
+    },
+    {
+      "key": "speak.audio.encoding",
+      "label": "Audio Encoding",
+      "type": "select",
+      "required": true,
+      "default": "LINEAR16",
+      "choices": [
+        {
+          "label": "LINEAR16",
+          "value": "LINEAR16"
+        },
+        {
+          "label": "MuLaw8",
+          "value": "MuLaw8"
+        }
+      ],
+      "helpText": "Available to websocket DSL bindings as \"encoding\".",
+      "errorMessage": "Please select a valid audio encoding for custom TTS."
+    },
+    {
+      "key": "speak.audio.sample_rate",
+      "label": "Sample Rate",
+      "type": "select",
+      "required": true,
+      "default": "16000",
+      "choices": [
+        {
+          "label": "8000",
+          "value": "8000"
+        },
+        {
+          "label": "16000",
+          "value": "16000"
+        },
+        {
+          "label": "22050",
+          "value": "22050"
+        },
+        {
+          "label": "24000",
+          "value": "24000"
+        },
+        {
+          "label": "32000",
+          "value": "32000"
+        },
+        {
+          "label": "44100",
+          "value": "44100"
+        },
+        {
+          "label": "48000",
+          "value": "48000"
+        }
+      ],
+      "helpText": "Available to websocket DSL bindings as \"sample_rate\".",
+      "errorMessage": "Please select a valid sample rate for custom TTS."
+    },
+    {
+      "key": "speak.ws.query_params",
+      "label": "Query Parameters",
+      "type": "json",
+      "required": false,
+      "colSpan": 2,
+      "editor": "websocket_dsl_json",
+      "editorMode": "query_params",
+      "placeholder": "Type { for DSL snippets",
+      "helpText": "Optional flat JSON object for dynamic websocket query params. Use {\"$var\":\"...\"} and optional {\"$cast\":\"number\",\"value\":...} bindings.",
+      "errorMessage": "Please provide valid query parameters for custom TTS."
+    },
+    {
+      "key": "speak.ws.request_rules",
+      "label": "Request Rules",
+      "type": "json",
+      "required": true,
+      "default": "[\n  {\n    \"when\": { \"packet\": \"text\" },\n    \"send\": {\n      \"frame\": \"json\",\n      \"body\": {\n        \"text\": { \"$path\": \"packet.text\" },\n        \"voice_id\": { \"$path\": \"config.voice.id\" },\n        \"message_id\": { \"$path\": \"packet.message_id\" },\n        \"model\": { \"$path\": \"config.model\" },\n        \"language\": { \"$path\": \"config.language\" },\n        \"audio\": {\n          \"encoding\": { \"$path\": \"config.audio.encoding\" },\n          \"sample_rate\": {\n            \"$cast\": \"number\",\n            \"value\": { \"$path\": \"config.audio.sample_rate\" }\n          }\n        }\n      }\n    }\n  }\n]",
+      "colSpan": 2,
+      "editor": "websocket_dsl_json",
+      "editorMode": "request_rules",
+      "placeholder": "Type [ for rule snippets",
+      "helpText": "Required ordered websocket outbound rules aligned to normalized TTS packets. Each rule defines when.packet plus send.frame/send.body using \"$path\" and optional \"$cast\" expressions over config.* and packet.*.",
+      "errorMessage": "Please provide valid request rules for custom TTS."
+    },
+    {
+      "key": "speak.ws.response_rules",
+      "label": "Response Rules",
+      "type": "json",
+      "required": true,
+      "colSpan": 2,
+      "editor": "websocket_dsl_json",
+      "editorMode": "response_rules",
+      "placeholder": "Type [ for rule snippets",
+      "helpText": "Required JSON rule list for websocket responses. Each rule defines a binary or JSON frame match and emit expressions for audio, message_id, done, and error.",
+      "errorMessage": "Please provide valid response rules for custom TTS."
+    }
+  ]
+}

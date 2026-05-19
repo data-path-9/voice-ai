@@ -88,9 +88,8 @@ export const ConfigureAssistantDeploymentPage = () => {
   const [isPhoneExpanded, setIsPhoneExpanded] = useState(false);
   const [isWidgetExpanded, setIsWidgetExpanded] = useState(false);
   const [isVersionsOpen, setIsVersionsOpen] = useState(false);
-  const [versionType, setVersionType] = useState<AssistantDeploymentType | null>(
-    null,
-  );
+  const [versionType, setVersionType] =
+    useState<AssistantDeploymentType | null>(null);
   const [openActionMenuType, setOpenActionMenuType] =
     useState<DeploymentType | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -543,7 +542,10 @@ export const ConfigureAssistantDeploymentPage = () => {
                       <TableCell className="text-[13px] whitespace-nowrap">
                         {row.updated}
                       </TableCell>
-                      <TableCell className="text-sm" onClick={e => e.stopPropagation()}>
+                      <TableCell
+                        className="text-sm"
+                        onClick={e => e.stopPropagation()}
+                      >
                         <div className="flex items-center gap-0">
                           <IconOnlyButton
                             kind="ghost"
@@ -634,6 +636,8 @@ const providerLabels: Record<string, string> = {
   deepgram: 'Deepgram',
   cartesia: 'Cartesia',
   elevenlabs: 'ElevenLabs',
+  'custom-tts': 'Custom TTS',
+  'custom-stt': 'Custom STT',
 };
 
 function getDeploymentStatus(

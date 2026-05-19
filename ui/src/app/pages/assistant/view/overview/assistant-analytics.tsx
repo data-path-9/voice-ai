@@ -168,20 +168,24 @@ export const AssistantAnalytics: FC<{ assistant: Assistant }> = props => {
   const totalDuration = durations.reduce((sum, d) => sum + d, 0);
   const avgDuration = totalSessions > 0 ? totalDuration / totalSessions : 0;
 
-  // ── Message-level metrics: STT, TTS & LLM latency ──
+  // ── Message-level metrics: STT, EOS, TTS & LLM latency ──
   const sttLatencies: number[] = [];
+  const eosLatencies: number[] = [];
   const ttsLatencies: number[] = [];
   const llmLatencies: number[] = [];
   assistantTraceAction.assistantMessages.forEach(m => {
     const metrics = m.getMetricsList();
     const stt = findMetricByName(metrics, 'stt_latency_ms');
     if (stt) sttLatencies.push(Number(stt));
+    const eos = findMetricByName(metrics, 'eos_latency_ms');
+    if (eos) eosLatencies.push(Number(eos));
     const tts = findMetricByName(metrics, 'tts_latency_ms');
     if (tts) ttsLatencies.push(Number(tts));
     const llm = findMetricByName(metrics, 'llm_latency_ms');
     if (llm) llmLatencies.push(Number(llm));
   });
   const avgSttLatency = sttLatencies.length > 0 ? sttLatencies.reduce((a, b) => a + b, 0) / sttLatencies.length : 0;
+  const avgEosLatency = eosLatencies.length > 0 ? eosLatencies.reduce((a, b) => a + b, 0) / eosLatencies.length : 0;
   const avgTtsLatency = ttsLatencies.length > 0 ? ttsLatencies.reduce((a, b) => a + b, 0) / ttsLatencies.length : 0;
   const avgLlmLatency = llmLatencies.length > 0 ? llmLatencies.reduce((a, b) => a + b, 0) / llmLatencies.length : 0;
   const totalSttDurationSec = convList.reduce((sum, conv) => {
@@ -242,9 +246,31 @@ export const AssistantAnalytics: FC<{ assistant: Assistant }> = props => {
       case 'last_7_days': startTime.setTime(startTime.getTime() - 7 * 24 * 60 * 60 * 1000); break;
       default: startTime.setTime(startTime.getTime() - 30 * 24 * 60 * 60 * 1000);
     }
-    const buckets: Array<{ date: Date; total: number; sttMs: number; ttsMs: number; llmMs: number; sttCount: number; ttsCount: number; llmCount: number }> = [];
+    const buckets: Array<{
+      date: Date;
+      total: number;
+      sttMs: number;
+      eosMs: number;
+      ttsMs: number;
+      llmMs: number;
+      sttCount: number;
+      eosCount: number;
+      ttsCount: number;
+      llmCount: number;
+    }> = [];
     for (let t = startTime.getTime(); t < now.getTime(); t += interval * 60 * 1000)
-      buckets.push({ date: new Date(t), total: 0, sttMs: 0, ttsMs: 0, llmMs: 0, sttCount: 0, ttsCount: 0, llmCount: 0 });
+      buckets.push({
+        date: new Date(t),
+        total: 0,
+        sttMs: 0,
+        eosMs: 0,
+        ttsMs: 0,
+        llmMs: 0,
+        sttCount: 0,
+        eosCount: 0,
+        ttsCount: 0,
+        llmCount: 0,
+      });
 
     assistantTraceAction.assistantMessages.forEach(m => {
       const idx = Math.floor((toDate(m.getCreateddate()!).getTime() - startTime.getTime()) / (interval * 60 * 1000));
@@ -252,6 +278,8 @@ export const AssistantAnalytics: FC<{ assistant: Assistant }> = props => {
         buckets[idx].total += 1;
         const stt = findMetricByName(m.getMetricsList(), 'stt_latency_ms');
         if (stt) { buckets[idx].sttMs += Number(stt); buckets[idx].sttCount += 1; }
+        const eos = findMetricByName(m.getMetricsList(), 'eos_latency_ms');
+        if (eos) { buckets[idx].eosMs += Number(eos); buckets[idx].eosCount += 1; }
         const tts = findMetricByName(m.getMetricsList(), 'tts_latency_ms');
         if (tts) { buckets[idx].ttsMs += Number(tts); buckets[idx].ttsCount += 1; }
         const llm = findMetricByName(m.getMetricsList(), 'llm_latency_ms');
@@ -262,6 +290,7 @@ export const AssistantAnalytics: FC<{ assistant: Assistant }> = props => {
       dateHour: formatLabel(b.date),
       total: b.total,
       sttLatency: b.sttCount > 0 ? Math.round(b.sttMs / b.sttCount) : 0,
+      eosLatency: b.eosCount > 0 ? Math.round(b.eosMs / b.eosCount) : 0,
       ttsLatency: b.ttsCount > 0 ? Math.round(b.ttsMs / b.ttsCount) : 0,
       llmLatency: b.llmCount > 0 ? Math.round(b.llmMs / b.llmCount) : 0,
       label: `From: ${b.date.toISOString().split('.')[0].replace('T', ' ')}`,
@@ -355,9 +384,10 @@ export const AssistantAnalytics: FC<{ assistant: Assistant }> = props => {
                 <div className="px-4 pt-4 pb-1">
                   <h3 className="text-sm font-semibold">Average Latency</h3>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4">
+                <div className="grid grid-cols-2 md:grid-cols-5">
                   <MetricCell label="Duration" value={Math.round(avgDuration)} unit="s" />
                   <MetricCell label="STT" value={Math.round(avgSttLatency)} unit="ms" />
+                  <MetricCell label="EOS" value={Math.round(avgEosLatency)} unit="ms" />
                   <MetricCell label="TTS" value={Math.round(avgTtsLatency)} unit="ms" />
                   <MetricCell label="LLM" value={Math.round(avgLlmLatency)} unit="ms" />
                 </div>
@@ -417,12 +447,16 @@ export const AssistantAnalytics: FC<{ assistant: Assistant }> = props => {
               </div>
             </ChartTile>
 
-            {/* Latency sparkline — STT, TTS & LLM */}
+            {/* Latency sparkline — STT, EOS, TTS & LLM */}
             <ChartTile title="Latency" isLoading={loading}>
-              <div className="flex items-center gap-6 px-4 pt-2 pb-1">
+              <div className="flex items-center gap-6 px-4 pt-2 pb-1 flex-wrap">
                 <div>
                   <p className="text-[10px] text-gray-400 uppercase">STT</p>
                   <p className="text-xl font-light tabular-nums">{Math.round(avgSttLatency)} <span className="text-xs text-gray-500">ms</span></p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-400 uppercase">EOS</p>
+                  <p className="text-xl font-light tabular-nums">{Math.round(avgEosLatency)} <span className="text-xs text-gray-500">ms</span></p>
                 </div>
                 <div>
                   <p className="text-[10px] text-gray-400 uppercase">TTS</p>
@@ -441,6 +475,10 @@ export const AssistantAnalytics: FC<{ assistant: Assistant }> = props => {
                         <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.3} />
                         <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.02} />
                       </linearGradient>
+                      <linearGradient id="eosGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.02} />
+                      </linearGradient>
                       <linearGradient id="ttsGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="var(--cds-interactive, #1e40af)" stopOpacity={0.3} />
                         <stop offset="100%" stopColor="var(--cds-interactive, #1e40af)" stopOpacity={0.02} />
@@ -451,12 +489,13 @@ export const AssistantAnalytics: FC<{ assistant: Assistant }> = props => {
                       </linearGradient>
                     </defs>
                     <Area type="monotone" dataKey="sttLatency" stroke="#f59e0b" strokeWidth={1.5} fill="url(#sttGradient)" dot={false} activeDot={{ r: 3 }} />
+                    <Area type="monotone" dataKey="eosLatency" stroke="#06b6d4" strokeWidth={1.5} fill="url(#eosGradient)" dot={false} activeDot={{ r: 3 }} />
                     <Area type="monotone" dataKey="ttsLatency" stroke="var(--cds-interactive, #1e40af)" strokeWidth={1.5} fill="url(#ttsGradient)" dot={false} activeDot={{ r: 3 }} />
                     <Area type="monotone" dataKey="llmLatency" stroke="#10b981" strokeWidth={1.5} fill="url(#llmGradient)" dot={false} activeDot={{ r: 3 }} />
                     <Tooltip
                       content={(({ active, payload }) => {
                         if (!active || !payload?.length) return null;
-                        const labelMap: Record<string, string> = { sttLatency: 'STT', ttsLatency: 'TTS', llmLatency: 'LLM' };
+                        const labelMap: Record<string, string> = { sttLatency: 'STT', eosLatency: 'EOS', ttsLatency: 'TTS', llmLatency: 'LLM' };
                         return (
                           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg px-3 py-2 text-sm min-w-[140px]">
                             <p className="text-gray-400 text-xs mb-1.5">{payload[0]?.payload?.label}</p>
@@ -476,6 +515,7 @@ export const AssistantAnalytics: FC<{ assistant: Assistant }> = props => {
               </div>
               <div className="flex justify-center gap-4 px-4 pb-3 text-xs">
                 <div className="flex items-center gap-1.5"><div className="w-3 h-0.5 bg-amber-500" /> STT</div>
+                <div className="flex items-center gap-1.5"><div className="w-3 h-0.5 bg-cyan-500" /> EOS</div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-0.5 bg-blue-700" /> TTS</div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-0.5 bg-emerald-500" /> LLM</div>
               </div>

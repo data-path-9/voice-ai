@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+	configs "github.com/rapidaai/config"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
@@ -215,7 +216,7 @@ func TestReceiveCall(t *testing.T) {
 			c.Request = req
 
 			// Create telephony instance with config (needed for CustomField path)
-			telephony := &exotelTelephony{appCfg: &config.AssistantConfig{PublicAssistantHost: "test.example.com"}}
+			telephony := &exotelTelephony{appCfg: &config.AssistantConfig{AppConfig: configs.AppConfig{Assistant: configs.ServiceHostConfig{Public: "test.example.com"}}}}
 
 			// Call ReceiveCall
 			callInfo, err := telephony.ReceiveCall(c)
@@ -296,7 +297,7 @@ func TestReceiveCall_OutboundRedirect(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/?"+queryValues.Encode(), nil)
 	c.Request = req
 
-	telephony := &exotelTelephony{appCfg: &config.AssistantConfig{PublicAssistantHost: "test.example.com"}}
+	telephony := &exotelTelephony{appCfg: &config.AssistantConfig{AppConfig: configs.AppConfig{Assistant: configs.ServiceHostConfig{Public: "test.example.com"}}}}
 	callInfo, err := telephony.ReceiveCall(c)
 
 	assert.NoError(t, err)

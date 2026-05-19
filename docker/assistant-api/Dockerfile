@@ -79,9 +79,9 @@ COPY --from=builder /app/api/assistant-api/internal/vad/internal/firered_vad/mod
 COPY --from=builder /app/api/assistant-api/internal/end_of_speech/internal/livekit/models/ ./models/livekit_turn/
 COPY --from=builder /app/api/assistant-api/internal/end_of_speech/internal/pipecat/models/ ./models/pipecat_turn/
 
-# Copy migrations and env
+# Copy migrations and default YAML config
 COPY api/assistant-api/migrations/ ./api/assistant-api/migrations/
-COPY docker/assistant-api/.assistant.env ./env/.assistant.env
+COPY docker/assistant-api/assistant.yml ./env/assistant.yml
 
 USER rapida-app
 

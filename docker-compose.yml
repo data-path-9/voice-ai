@@ -4,6 +4,8 @@ services:
     platform: linux/amd64
     image: postgres:15-alpine
     container_name: rapida__postgres
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: rapida_user
       POSTGRES_PASSWORD: rapida_db_password
@@ -25,6 +27,8 @@ services:
     platform: linux/amd64
     image: redis:7-alpine
     container_name: rapida__redis
+    ports:
+      - "6379:6379"
     volumes:
       - ${HOME}/rapida-data/assets/redis:/data
     networks:
@@ -77,23 +81,21 @@ services:
       context: .
       dockerfile: docker/web-api/Dockerfile
     container_name: rapida__web-api
-    # ports:
-    #   - "9001:9001"
-    env_file:
-      - ./docker/web-api/.web.env
+    ports:
+      - "9001:9001"
+    environment:
+      ENV_PATH: /opt/apps/env/web.yml
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
-      - ./docker/web-api/.web.env:/opt/apps/env/.web.env:ro
+      - ./docker/web-api/web.yml:/opt/apps/env/web.yml:ro
       - ${HOME}/rapida-data/assets:/app/rapida-data/assets
       - go-mod-cache:/go/pkg/mod
-
     networks:
       - api-network
-
     healthcheck:
       test: [ "CMD", "wget", "--quiet", "--tries=1", "--method=GET", "-O", "/dev/null",  "http://localhost:9001/readiness/" ]
       interval: 10s
@@ -114,22 +116,19 @@ services:
       - "5090:5090/udp"                      # SIP signaling
       - "10000-10199:10000-10199/udp"        # RTP media (100 concurrent calls)
       - "20000-20100:20000-20100/udp"        # WebRTC ICE/media
-    env_file:
-      - ./docker/assistant-api/.assistant.env
+    environment:
+      ENV_PATH: /opt/apps/env/assistant.yml
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-
     volumes:
-      - ./docker/assistant-api/.assistant.env:/opt/apps/env/.assistant.env:ro
+      - ./docker/assistant-api/assistant.yml:/opt/apps/env/assistant.yml:ro
       - ${HOME}/rapida-data/assets:/app/rapida-data/assets
       - go-mod-cache:/go/pkg/mod
-
     networks:
       - api-network
-
     healthcheck:
       test: [ "CMD", "wget", "--quiet", "--tries=1", "--method=GET", "-O", "/dev/null",  "http://localhost:9007/readiness/" ]
       interval: 10s
@@ -146,22 +145,19 @@ services:
     container_name: rapida__integration-api
     ports:
       - "9004:9004"
-    env_file:
-      - ./docker/integration-api/.integration.env
+    environment:
+      ENV_PATH: /opt/apps/env/integration.yml
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-
     volumes:
-      - ./docker/integration-api/.integration.env:/opt/apps/env/.integration.env:ro
+      - ./docker/integration-api/integration.yml:/opt/apps/env/integration.yml:ro
       - ${HOME}/rapida-data/assets:/app/rapida-data/assets
       - go-mod-cache:/go/pkg/mod
-
     networks:
       - api-network
-
     healthcheck:
       test: [ "CMD", "wget", "--quiet", "--tries=1", "--method=GET", "-O", "/dev/null",  "http://localhost:9004/readiness/" ]
       interval: 10s
@@ -178,22 +174,19 @@ services:
     container_name: rapida__endpoint-api
     ports:
       - "9005:9005"
-    env_file:
-      - ./docker/endpoint-api/.endpoint.env
+    environment:
+      ENV_PATH: /opt/apps/env/endpoint.yml
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-
     volumes:
-      - ./docker/endpoint-api/.endpoint.env:/opt/apps/env/.endpoint.env:ro
+      - ./docker/endpoint-api/endpoint.yml:/opt/apps/env/endpoint.yml:ro
       - ${HOME}/rapida-data/assets:/app/rapida-data/assets
       - go-mod-cache:/go/pkg/mod
-
     networks:
       - api-network
-
     healthcheck:
       test: [ "CMD", "wget", "--quiet", "--tries=1", "--method=GET", "-O", "/dev/null",  "http://localhost:9005/readiness/" ]
       interval: 10s

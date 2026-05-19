@@ -78,7 +78,7 @@ func (m *Manager) handleRegister(ctx context.Context, s RegisterPipeline) Pipeli
 		"transport", sipConfig.Transport,
 		"port", sipConfig.Port,
 		"username", sipConfig.Username,
-		"owner", m.externalIP)
+		"owner", m.instanceID)
 
 	regErr := m.regClient.Register(ctx, &sip_infra.Registration{
 		DID:         rec.DID,
@@ -91,7 +91,7 @@ func (m *Manager) handleRegister(ctx context.Context, s RegisterPipeline) Pipeli
 			"did", rec.DID,
 			"assistant_id", rec.AssistantID,
 			"server", sipConfig.Server,
-			"owner", m.externalIP)
+			"owner", m.instanceID)
 		return MarkActivePipeline{Record: rec}
 	}
 

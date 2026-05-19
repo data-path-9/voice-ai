@@ -70,7 +70,11 @@ export function CreateOrganizationPage() {
     <>
       <Helmet title="Onboarding: Create an organization" />
       <div className="mb-4">
-        <h1 className="text-xl font-light tracking-tight">Create your organization</h1>
+        <h1 className="text-xl font-light tracking-tight">Set up your organization</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          Create the top-level workspace that owns assistants, credentials,
+          client programs, and governance settings.
+        </p>
       </div>
 
       <form onSubmit={handleSubmit(onCreateOrganization)}>
@@ -81,28 +85,28 @@ export function CreateOrganizationPage() {
             type="text"
             required
             defaultValue={`${user?.name}'s Organization`}
-            placeholder="eg: Lexatic Inc"
-            helperText="This will be the public display name of your organization."
+            placeholder="eg: Acme Voice Studio"
+            helperText="Use your agency, brand, or operating company name."
             {...register('organizationName', { required: 'Please enter the organization name.' })}
           />
           <Select
             id="org-size"
-            labelText="Company Size"
-            helperText="Helps us tailor your onboarding experience."
+            labelText="Operating Model"
+            helperText="Helps tailor onboarding for agency delivery, internal platform teams, and enterprise programs."
             {...register('organizationSize')}
           >
-            <SelectItem value="" text="Select your organization size" />
-            <SelectItem value="startup" text="Startup (1–50)" />
-            <SelectItem value="late-stage" text="Growing (51–500)" />
-            <SelectItem value="enterprise" text="Enterprise (500+)" />
+            <SelectItem value="" text="Select your operating model" />
+            <SelectItem value="agency" text="Agency / system integrator" />
+            <SelectItem value="in-house" text="In-house product team" />
+            <SelectItem value="enterprise" text="Enterprise / multi-team org" />
           </Select>
           <TextInput
             id="org-industry"
             labelText="Industry"
             type="text"
             required
-            placeholder="eg: Software, Healthcare, Finance"
-            helperText="We'll suggest relevant integrations and assistant templates for your sector."
+            placeholder="eg: Agency services, healthcare, finance"
+            helperText="Used to suggest integrations and assistant templates for your market."
             {...register('organizationIndustry', { required: 'Please provide an industry.' })}
           />
           {formError && (

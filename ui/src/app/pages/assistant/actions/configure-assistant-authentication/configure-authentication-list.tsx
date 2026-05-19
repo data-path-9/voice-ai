@@ -26,6 +26,7 @@ import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
 import { connectionConfig } from '@/configs';
 import { PrimaryButton, IconOnlyButton } from '@/app/components/carbon/button';
+import { UrlTableCell } from '@/app/components/carbon/url-table-cell';
 import { SectionLoader } from '@/app/components/loader/section-loader';
 import { TableSection } from '@/app/components/sections/table-section';
 import { EmptyState } from '@/app/components/carbon/empty-state';
@@ -187,9 +188,7 @@ export const ConfigureAuthenticationList: FC<
                 <TableCell className="text-sm whitespace-nowrap">
                   {optionMap[AUTH_OPTION_METHOD] || '-'}
                 </TableCell>
-                <TableCell className="text-sm max-w-[360px] truncate">
-                  {optionMap[AUTH_OPTION_ENDPOINT] || '-'}
-                </TableCell>
+                <UrlTableCell url={optionMap[AUTH_OPTION_ENDPOINT]} />
                 <TableCell className="text-sm whitespace-nowrap">
                   <CarbonShapeIndicator
                     state={authentication.getStatus()}

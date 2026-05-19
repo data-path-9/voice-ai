@@ -4,7 +4,10 @@ import {
   ValidateSpeechToTextIfInvalid,
 } from '../provider';
 import { SPEECH_TO_TEXT_PROVIDER } from '@/providers';
-import { loadProviderConfig, loadProviderData } from '@/providers/config-loader';
+import {
+  loadProviderConfig,
+  loadProviderData,
+} from '@/providers/config-loader';
 
 jest.mock('@/app/components/providers', () => ({}));
 jest.mock('@/app/components/providers/config-renderer', () => ({
@@ -61,6 +64,9 @@ describe('Speech-to-text provider runtime standard', () => {
   const configuredSttProviders = SPEECH_TO_TEXT_PROVIDER.filter(p =>
     Boolean(loadProviderConfig(p.code)?.stt),
   );
+  const modelDrivenSttProviders = configuredSttProviders.filter(
+    provider => provider.code !== 'custom-stt',
+  );
 
   it('all active speech-to-text providers are config-driven', () => {
     expect(configuredSttProviders.length).toBeGreaterThan(0);
@@ -69,7 +75,7 @@ describe('Speech-to-text provider runtime standard', () => {
     }
   });
 
-  it.each(configuredSttProviders.map(p => p.code))(
+  it.each(modelDrivenSttProviders.map(p => p.code))(
     '%s stt config is model-driven with speech-to-text-models catalog',
     provider => {
       const sttConfig = loadProviderConfig(provider)?.stt;
@@ -81,7 +87,7 @@ describe('Speech-to-text provider runtime standard', () => {
     },
   );
 
-  it.each(configuredSttProviders.map(p => p.code))(
+  it.each(modelDrivenSttProviders.map(p => p.code))(
     '%s model catalog carries per-model stt parameter config',
     provider => {
       const sttConfig = loadProviderConfig(provider)?.stt;
@@ -97,14 +103,17 @@ describe('Speech-to-text provider runtime standard', () => {
     },
   );
 
-  it.each(configuredSttProviders.map(p => p.code))(
+  it.each(modelDrivenSttProviders.map(p => p.code))(
     '%s defaults + validation are stable with model-level parameters',
     provider => {
       const seed = [
         createMetadata('custom.key', 'custom'),
         createMetadata('rapida.credential_id', 'seed-cred'),
       ];
-      const defaults = GetDefaultSpeechToTextIfInvalid(provider, cloneMetadata(seed));
+      const defaults = GetDefaultSpeechToTextIfInvalid(
+        provider,
+        cloneMetadata(seed),
+      );
 
       expect(defaults.some(m => m.getKey() === 'listen.model')).toBe(true);
       expect(defaults.some(m => m.getKey() === 'rapida.credential_id')).toBe(
@@ -119,6 +128,23 @@ describe('Speech-to-text provider runtime standard', () => {
       expect(validated).toBeUndefined();
     },
   );
+
+  it('custom-stt uses websocket contract fields instead of model catalog wiring', () => {
+    const sttConfig = loadProviderConfig('custom-stt')?.stt;
+    expect(sttConfig).toBeDefined();
+    const keys = sttConfig?.parameters.map(param => param.key) ?? [];
+
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'listen.audio.encoding',
+        'listen.audio.sample_rate',
+        'listen.ws.query_params',
+        'listen.ws.request_rules',
+        'listen.ws.response_rules',
+      ]),
+    );
+    expect(sttConfig?.parameters[0].data).toBeUndefined();
+  });
 
   it('rejects stale credential ids that do not belong to selected provider', () => {
     const defaults = GetDefaultSpeechToTextIfInvalid('deepgram', [
@@ -145,7 +171,9 @@ describe('Speech-to-text provider runtime standard', () => {
       'cred-deepgram',
     ]);
 
-    expect(err).toBe('Please provide a valid deepgram model for speech to text.');
+    expect(err).toBe(
+      'Please provide a valid deepgram model for speech to text.',
+    );
   });
 
   it('supports deepgram model switch with parameter changes', () => {
@@ -154,7 +182,10 @@ describe('Speech-to-text provider runtime standard', () => {
     ]);
     const defaultModel = getMetadataValue(defaults, 'listen.model');
 
-    const modelCatalog = loadProviderData('deepgram', 'speech-to-text-models.json');
+    const modelCatalog = loadProviderData(
+      'deepgram',
+      'speech-to-text-models.json',
+    );
     const alternateModel = modelCatalog.find(
       m => m?.id && m.id !== defaultModel,
     )?.id as string | undefined;
@@ -182,9 +213,14 @@ describe('Speech-to-text provider runtime standard', () => {
     const seed = [createMetadata('custom.key', 'custom')];
     expect(
       normalizeMetadata(
-        GetDefaultSpeechToTextIfInvalid('unknown-provider', cloneMetadata(seed)),
+        GetDefaultSpeechToTextIfInvalid(
+          'unknown-provider',
+          cloneMetadata(seed),
+        ),
       ),
     ).toEqual(normalizeMetadata(seed));
-    expect(ValidateSpeechToTextIfInvalid('unknown-provider', [])).toBeUndefined();
+    expect(
+      ValidateSpeechToTextIfInvalid('unknown-provider', []),
+    ).toBeUndefined();
   });
 });

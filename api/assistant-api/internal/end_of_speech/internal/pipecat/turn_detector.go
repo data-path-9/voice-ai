@@ -23,10 +23,6 @@ const (
 
 	envPctModelPathKey = "PIPECAT_TURN_MODEL_PATH"
 	defaultPctModel    = "models/smart-turn-v3.2-cpu.onnx"
-
-	// melFeatureLen is the total number of float32 elements in the input tensor.
-	// Shape: [1, 80, 800] = 64000 elements.
-	melFeatureLen = whisperNMels * whisperMaxFrames
 )
 
 // PipecatDetectorConfig holds configuration for the Pipecat Smart Turn ONNX model.
@@ -49,6 +45,7 @@ type PipecatDetector struct {
 	cStrings map[string]*C.char
 
 	features *whisperFeatures
+	scratch  *whisperFeatureScratch
 }
 
 // NewPipecatDetector loads the ONNX model, initializes the inference session,
@@ -59,6 +56,7 @@ func NewPipecatDetector(cfg PipecatDetectorConfig) (*PipecatDetector, error) {
 	pd := &PipecatDetector{
 		cStrings: map[string]*C.char{},
 		features: newWhisperFeatures(),
+		scratch:  newWhisperFeatureScratch(),
 	}
 
 	pd.api = C.PctOrtGetApi()
@@ -136,7 +134,7 @@ func (pd *PipecatDetector) Predict(audio []float32) (float64, error) {
 	}
 
 	// Extract mel spectrogram features [80 * 800]
-	features := pd.features.Extract(audio)
+	features := pd.features.extractInto(audio, pd.scratch.output[:], pd.scratch)
 
 	// Run ONNX inference
 	prob, err := pd.infer(features)

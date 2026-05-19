@@ -10,12 +10,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/openai/openai-go/v3/responses"
 
 	internal_caller_metrics "github.com/rapidaai/api/integration-api/internal/caller/metrics"
 	internal_openai_common "github.com/rapidaai/api/integration-api/internal/caller/openai/common"
@@ -31,6 +29,28 @@ type streamCaller struct {
 	credential *protos.Credential
 	client     *openai.Client
 	httpClient *http.Client
+}
+
+func (s *streamCaller) handleStreamFailure(
+	requestID string,
+	options *internal_callers.ChatStreamCompletionOptions,
+	metrics *internal_caller_metrics.MetricBuilder,
+	err error,
+	result interface{},
+	onError func(string, error),
+) error {
+	failure := metrics.OnFailure().Build()
+	if options != nil && options.PostHook != nil {
+		payload := map[string]interface{}{"error": err}
+		if result != nil {
+			payload["result"] = result
+		}
+		options.PostHook(payload, failure)
+	}
+	if onError != nil {
+		onError(requestID, err)
+	}
+	return err
 }
 
 func NewStream(logger commons.Logger, credential *protos.Credential) (internal_callers.ChatStream, error) {
@@ -92,132 +112,98 @@ func (s *streamCaller) Chat(
 	onMetrics func(string, *protos.Message, []*protos.Metric) error,
 	onError func(string, error),
 ) error {
+	requestID := ""
+	if options != nil && options.Request != nil {
+		requestID = options.Request.GetRequestId()
+	}
+
+	metrics := internal_caller_metrics.NewMetricBuilder(options.RequestId)
+	metrics.OnStart()
+
 	if err := s.Connect(ctx, nil); err != nil {
-		onError(options.Request.GetRequestId(), err)
-		return err
+		return s.handleStreamFailure(requestID, options, metrics, err, nil, onError)
 	}
 
 	client := s.client
 	if client == nil {
 		err := fmt.Errorf("stream client not connected")
-		onError(options.Request.GetRequestId(), err)
-		return err
+		return s.handleStreamFailure(requestID, options, metrics, err, nil, onError)
 	}
 
 	start := time.Now()
-	metrics := internal_caller_metrics.NewMetricBuilder(options.RequestId)
-	metrics.OnStart()
 	var firstTokenTime *time.Time
 
 	request := &protos.ChatRequest{}
 	if options.Request != nil {
 		request.AdditionalData = options.Request.GetAdditionalData()
 	}
-	streamOptions := buildStreamResponseOptions(&internal_callers.ChatCompletionOptions{
+	streamOptions := buildStreamCompletionOptions(&internal_callers.ChatCompletionOptions{
 		AIOptions:       options.AIOptions,
 		Request:         request,
 		ToolDefinitions: options.ToolDefinitions,
 	})
-	streamOptions.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: buildHistory(allMessages)}
+	streamOptions.Messages = buildHistory(allMessages)
 	if options.PreHook != nil {
 		options.PreHook(utils.ToJson(streamOptions))
 	}
 	s.logger.Benchmark("Openai.chat_complete.Stream.llmRequestPrepare", time.Since(start))
 
-	resp := client.Responses.NewStreaming(ctx, streamOptions)
+	resp := client.Chat.Completions.NewStreaming(ctx, streamOptions)
 	if resp.Err() != nil {
 		s.logger.Errorf("Failed to get responses stream: %v", resp.Err())
-		if options.PostHook != nil {
-			options.PostHook(map[string]interface{}{"result": utils.ToJson(resp), "error": resp.Err()}, metrics.Build())
-		}
-		onError(options.Request.GetRequestId(), resp.Err())
-		return resp.Err()
+		return s.handleStreamFailure(requestID, options, metrics, resp.Err(), utils.ToJson(resp), onError)
 	}
 	defer resp.Close()
 
-	assistantMsg := &protos.AssistantMessage{Contents: make([]string, 0), ToolCalls: make([]*protos.ToolCall, 0)}
-	var contentBuffer strings.Builder
-	hasToolCalls := false
-	var finalResponse *responses.Response
+	contentBuffer := make(map[int64]string)
+	toolCallChoices := make(map[int64]struct{})
+	accumulate := openai.ChatCompletionAccumulator{}
 
 	for resp.Next() {
-		event := resp.Current()
-		switch e := event.AsAny().(type) {
-		case responses.ResponseTextDeltaEvent:
-			if e.Delta == "" {
+		chunk := resp.Current()
+		accumulate.AddChunk(chunk)
+
+		for _, choice := range chunk.Choices {
+			if len(choice.Delta.ToolCalls) > 0 {
+				toolCallChoices[choice.Index] = struct{}{}
+			}
+			content := choice.Delta.Content
+			if content == "" {
 				continue
 			}
-			contentBuffer.WriteString(e.Delta)
-			if !hasToolCalls {
-				if firstTokenTime == nil {
-					now := time.Now()
-					firstTokenTime = &now
-				}
-				tokenMsg := &protos.Message{
-					Role: chatRoleAssistant,
-					Message: &protos.Message_Assistant{
-						Assistant: &protos.AssistantMessage{Contents: []string{e.Delta}},
-					},
-				}
-				if err := onStream(options.Request.GetRequestId(), tokenMsg); err != nil {
+			contentBuffer[choice.Index] += content
+			if _, hasToolCalls := toolCallChoices[choice.Index]; hasToolCalls {
+				continue
+			}
+			if firstTokenTime == nil {
+				now := time.Now()
+				firstTokenTime = &now
+			}
+			tokenMsg := &protos.Message{
+				Role: chatRoleAssistant,
+				Message: &protos.Message_Assistant{
+					Assistant: &protos.AssistantMessage{Contents: []string{content}},
+				},
+			}
+			if onStream != nil {
+				if err := onStream(requestID, tokenMsg); err != nil {
 					s.logger.Warnf("error streaming token: %v", err)
 				}
-			}
-		case responses.ResponseFunctionCallArgumentsDeltaEvent, responses.ResponseFunctionCallArgumentsDoneEvent:
-			hasToolCalls = true
-		case responses.ResponseOutputItemAddedEvent:
-			if e.Item.Type == "function_call" {
-				hasToolCalls = true
-			}
-		case responses.ResponseOutputItemDoneEvent:
-			if e.Item.Type == "function_call" {
-				hasToolCalls = true
-			}
-		case responses.ResponseCompletedEvent:
-			finalResponse = &e.Response
-			if hasFunctionCall(e.Response.Output) {
-				hasToolCalls = true
 			}
 		}
 	}
 
 	if resp.Err() != nil {
 		s.logger.Errorf("Failed while reading responses stream: %v", resp.Err())
-		if options.PostHook != nil {
-			options.PostHook(map[string]interface{}{"result": utils.ToJson(resp), "error": resp.Err()}, metrics.OnFailure().Build())
-		}
-		onError(options.Request.GetRequestId(), resp.Err())
-		return resp.Err()
+		return s.handleStreamFailure(requestID, options, metrics, resp.Err(), utils.ToJson(resp), onError)
 	}
 
-	if finalResponse != nil {
-		if outputText := finalResponse.OutputText(); outputText != "" {
-			assistantMsg.Contents = append(assistantMsg.Contents, outputText)
-		}
-		for _, item := range finalResponse.Output {
-			if item.Type != "function_call" {
-				continue
-			}
-			fnCall := item.AsFunctionCall()
-			id := fnCall.CallID
-			if id == "" {
-				id = fnCall.ID
-			}
-			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, &protos.ToolCall{
-				Id:   id,
-				Type: "function",
-				Function: &protos.FunctionCall{
-					Name:      fnCall.Name,
-					Arguments: fnCall.Arguments,
-				},
-			})
-		}
-		metrics.OnAddMetrics(internal_openai_common.ResponseUsageMetrics(finalResponse.Usage)...)
-	} else if contentBuffer.Len() > 0 {
-		assistantMsg.Contents = append(assistantMsg.Contents, contentBuffer.String())
+	assistantMsg := buildAssistantMessageFromChoices(accumulate.Choices)
+	if len(assistantMsg.Contents) == 0 {
+		assistantMsg.Contents = finalizeStreamContentsByChoiceIndex(contentBuffer)
 	}
-
 	protoMsg := &protos.Message{Role: chatRoleAssistant, Message: &protos.Message_Assistant{Assistant: assistantMsg}}
+	metrics.OnAddMetrics(completionUsageMetrics(accumulate.Usage)...)
 	if firstTokenTime != nil {
 		metrics.OnAddMetrics(&protos.Metric{
 			Name:        type_enums.TIME_TO_FIRST_TOKEN.String(),
@@ -226,11 +212,10 @@ func (s *streamCaller) Chat(
 		})
 	}
 	metrics.OnSuccess()
-	onMetrics(options.Request.GetRequestId(), protoMsg, metrics.Build())
-	result := utils.ToJson(resp)
-	if finalResponse != nil {
-		result = utils.ToJson(finalResponse)
+	if onMetrics != nil {
+		onMetrics(requestID, protoMsg, metrics.Build())
 	}
+	result := utils.ToJson(accumulate)
 	if options.PostHook != nil {
 		options.PostHook(map[string]interface{}{"result": result}, metrics.Build())
 	}

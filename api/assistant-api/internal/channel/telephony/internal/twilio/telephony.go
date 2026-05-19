@@ -118,7 +118,7 @@ func (tpc *twilioTelephony) OutboundCall(auth types.SimplePrinciple, toPhone str
 	callParams.SetTo(toPhone)
 	callParams.SetFrom(fromPhone)
 	callParams.SetStatusCallback(
-		fmt.Sprintf("https://%s/%s", tpc.appCfg.PublicAssistantHost, internal_type.GetContextEventPath(twilioProvider, contextID)),
+		fmt.Sprintf("https://%s/%s", tpc.appCfg.Assistant.Public, internal_type.GetContextEventPath(twilioProvider, contextID)),
 	)
 	callParams.SetStatusCallbackEvent([]string{
 		"initiated", "ringing", "answered", "completed",
@@ -126,10 +126,10 @@ func (tpc *twilioTelephony) OutboundCall(auth types.SimplePrinciple, toPhone str
 	callParams.SetStatusCallbackMethod("POST")
 	callParams.SetTwiml(
 		tpc.CreateTwinML(
-			tpc.appCfg.PublicAssistantHost,
+			tpc.appCfg.Assistant.Public,
 			fmt.Sprintf("%d__%d", assistant.Id, assistantConversationId),
 			internal_type.GetContextAnswerPath(twilioProvider, contextID),
-			fmt.Sprintf("https://%s/%s", tpc.appCfg.PublicAssistantHost, internal_type.GetContextEventPath(twilioProvider, contextID)),
+			fmt.Sprintf("https://%s/%s", tpc.appCfg.Assistant.Public, internal_type.GetContextEventPath(twilioProvider, contextID)),
 			assistant.Id,
 			toPhone),
 	)
@@ -172,10 +172,10 @@ func (tpc *twilioTelephony) InboundCall(c *gin.Context, auth types.SimplePrincip
 
 	c.Data(http.StatusOK, "text/xml", []byte(
 		tpc.CreateTwinML(
-			tpc.appCfg.PublicAssistantHost,
+			tpc.appCfg.Assistant.Public,
 			fmt.Sprintf("%d__%d", assistantId, assistantConversationId),
 			internal_type.GetContextAnswerPath("twilio", ctxID),
-			fmt.Sprintf("https://%s/%s", tpc.appCfg.PublicAssistantHost, internal_type.GetContextEventPath("twilio", ctxID)),
+			fmt.Sprintf("https://%s/%s", tpc.appCfg.Assistant.Public, internal_type.GetContextEventPath("twilio", ctxID)),
 			assistantId, clientNumber),
 	))
 	return nil

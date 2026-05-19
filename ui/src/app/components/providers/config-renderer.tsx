@@ -8,12 +8,10 @@ import { TertiaryButton } from '@/app/components/carbon/button';
 import {
   Select as CarbonSelect,
   SelectItem,
-  NumberInput,
   Slider,
   Button,
   Dropdown as CarbonDropdown,
   ComboBox,
-  ButtonSet,
   ComposedModal,
   ModalHeader,
   ModalBody,
@@ -29,6 +27,7 @@ import {
 } from '@/providers/config-loader';
 import { getDefaultsFromConfig } from '@/providers/config-defaults';
 import { JsonEditor } from '@/app/components/json-editor';
+import { WebsocketDslEditor } from '@/app/components/providers/websocket-dsl-editor';
 
 export const ConfigRenderer: React.FC<{
   provider: string;
@@ -98,7 +97,10 @@ export const ConfigRenderer: React.FC<{
       const valueField = sourceParam.valueField || 'id';
       const hasCatalogMatch = data.some((item: any) => {
         const catalogValue = item?.[valueField];
-        if (catalogValue !== undefined && String(catalogValue) === nextModelValue) {
+        if (
+          catalogValue !== undefined &&
+          String(catalogValue) === nextModelValue
+        ) {
           return true;
         }
         return (
@@ -304,13 +306,27 @@ export const ConfigRenderer: React.FC<{
               {param.label}
             </label>
             <div className="mt-1 w-full min-w-0 overflow-hidden bg-[var(--cds-field)] border-b-2 border-b-[var(--cds-border-strong)] p-2">
-              <JsonEditor
-                value={getParamValue(param.key)}
-                placeholder="Enter as JSON"
-                onChange={value => updateParameter(param.key, value)}
-                height="160px"
-                className="w-full"
-              />
+              {param.editor === 'websocket_dsl_json' ? (
+                <WebsocketDslEditor
+                  provider={
+                    provider === 'custom-stt' ? 'custom-stt' : 'custom-tts'
+                  }
+                  mode={param.editorMode ?? 'query_params'}
+                  value={getParamValue(param.key)}
+                  placeholder={param.placeholder ?? 'Enter as JSON'}
+                  onChange={value => updateParameter(param.key, value)}
+                  height="160px"
+                  className="w-full"
+                />
+              ) : (
+                <JsonEditor
+                  value={getParamValue(param.key)}
+                  placeholder={param.placeholder ?? 'Enter as JSON'}
+                  onChange={value => updateParameter(param.key, value)}
+                  height="160px"
+                  className="w-full"
+                />
+              )}
             </div>
             {param.helpText && (
               <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>
@@ -461,9 +477,7 @@ const DropdownField: React.FC<{
   const valueField = param.valueField || 'id';
   const selectedItem =
     data.find((item: any) => item[valueField] === value) ||
-    (param.customValue && value
-      ? { [valueField]: value, name: value }
-      : null);
+    (param.customValue && value ? { [valueField]: value, name: value } : null);
   const commitCustomValue = (rawInput: string) => {
     const inputValue = rawInput?.trim();
     if (!param.customValue || !inputValue) return;
@@ -695,9 +709,7 @@ function renderTextMainDropdown(
           { key: param.key, value: String(selectedValue) },
           {
             key: param.linkedField.key,
-            value:
-              item[param.linkedField.sourceField] ??
-              String(selectedValue),
+            value: item[param.linkedField.sourceField] ?? String(selectedValue),
           },
         ],
         param,

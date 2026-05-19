@@ -123,7 +123,6 @@ func (m *SIPEngine) listenConfig() *sip_infra.ListenConfig {
 //	routingMiddleware (DID lookup) -> assistantMiddleware -> vaultConfigResolver
 func (m *SIPEngine) Connect(ctx context.Context) error {
 	m.ctx, m.cancel = context.WithCancel(ctx)
-
 	server, err := sip_infra.NewServer(m.ctx, &sip_infra.ServerConfig{
 		ListenConfig:      m.listenConfig(),
 		Logger:            m.logger,
@@ -134,7 +133,6 @@ func (m *SIPEngine) Connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create SIP server: %w", err)
 	}
-
 	server.SetMiddlewares(
 		[]sip_infra.Middleware{
 			m.routingMiddleware,   // Resolve assistant by DID
@@ -142,22 +140,20 @@ func (m *SIPEngine) Connect(ctx context.Context) error {
 		},
 		m.vaultConfigResolver, // Fetch SIP config from vault
 	)
-
 	server.SetOnInvite(m.onInvite)
 	server.SetOnBye(m.onBye)
 	server.SetOnCancel(m.onCancel)
 	server.SetOnError(m.onError)
-
 	m.registrationClient = sip_infra.NewRegistrationClient(server.Client(), server.GetListenConfig(), m.logger)
-
 	m.regManager = sip_registration.NewManager(sip_registration.Config{
 		Logger:             m.logger,
 		Postgres:           m.postgres,
 		Redis:              m.redis,
 		Vault:              m.vaultClient,
 		RegistrationClient: m.registrationClient,
-		ExternalIP:         server.GetListenConfig().GetExternalIP(),
-		ApplyOpDefaults:    m.applySIPOperationalDefaults,
+		// ExternalIP:         server.GetListenConfig().GetExternalIP(),
+		Sip:             m.cfg.SIPConfig,
+		ApplyOpDefaults: m.applySIPOperationalDefaults,
 	})
 
 	m.dispatcher = sip_pipeline.NewDispatcher(&sip_pipeline.DispatcherConfig{

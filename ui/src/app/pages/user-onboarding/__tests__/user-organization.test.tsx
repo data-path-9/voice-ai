@@ -92,7 +92,7 @@ describe('CreateOrganizationPage', () => {
   it('shows validation error when required industry is missing', async () => {
     renderWithAuth();
 
-    fireEvent.change(screen.getByPlaceholderText('eg: Lexatic Inc'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Acme Voice Studio'), {
       target: { value: 'My Org' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -111,14 +111,14 @@ describe('CreateOrganizationPage', () => {
 
     renderWithAuth(authorize);
 
-    fireEvent.change(screen.getByPlaceholderText('eg: Lexatic Inc'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Acme Voice Studio'), {
       target: { value: 'My Org' },
     });
-    fireEvent.change(screen.getByPlaceholderText('eg: Software, Healthcare, Finance'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Agency services, healthcare, finance'), {
       target: { value: 'Software' },
     });
     fireEvent.change(screen.getByRole('combobox'), {
-      target: { value: 'startup' },
+      target: { value: 'agency' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
@@ -141,10 +141,10 @@ describe('CreateOrganizationPage', () => {
 
     renderWithAuth();
 
-    fireEvent.change(screen.getByPlaceholderText('eg: Lexatic Inc'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Acme Voice Studio'), {
       target: { value: 'My Org' },
     });
-    fireEvent.change(screen.getByPlaceholderText('eg: Software, Healthcare, Finance'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Agency services, healthcare, finance'), {
       target: { value: 'Software' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -163,10 +163,10 @@ describe('CreateOrganizationPage', () => {
 
     renderWithAuth();
 
-    fireEvent.change(screen.getByPlaceholderText('eg: Lexatic Inc'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Acme Voice Studio'), {
       target: { value: 'My Org' },
     });
-    fireEvent.change(screen.getByPlaceholderText('eg: Software, Healthcare, Finance'), {
+    fireEvent.change(screen.getByPlaceholderText('eg: Agency services, healthcare, finance'), {
       target: { value: 'Software' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));

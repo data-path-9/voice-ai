@@ -34,13 +34,14 @@ const (
 // FireRedVAD — Voice Activity Detection using FireRedVAD DFSMN model
 // -----------------------------------------------------------------------------
 
-// FireRedVAD implements the Vad interface using the FireRedVAD ONNX streaming
+// FireRedVAD implements the VoiceActivityDetectorExecutor interface using the FireRedVAD ONNX streaming
 // model. It performs Kaldi-compatible fbank feature extraction, CMVN
 // normalisation, ONNX inference, and postprocessing on incoming 16 kHz
 // LINEAR16 mono audio.
 type FireRedVAD struct {
 	logger   commons.Logger
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error
+	opts     utils.Option
 
 	detector      *Detector
 	fbank         *FbankExtractor
@@ -60,7 +61,7 @@ func NewFireRedVAD(
 	logger commons.Logger,
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error,
 	options utils.Option,
-) (internal_type.Vad, error) {
+) (internal_type.VoiceActivityDetectorExecutor, error) {
 	start := time.Now()
 
 	modelPath := resolveModelPath()
@@ -74,6 +75,7 @@ func NewFireRedVAD(
 	vad := &FireRedVAD{
 		logger:        logger,
 		onPacket:      onPacket,
+		opts:          options,
 		detector:      detector,
 		fbank:         NewFbankExtractor(),
 		postprocessor: NewPostprocessor(ppCfg),
@@ -83,7 +85,7 @@ func NewFireRedVAD(
 
 	go func() {
 		<-ctx.Done()
-		_ = vad.Close()
+		_ = vad.Close(context.Background())
 	}()
 
 	if onPacket != nil {
@@ -109,9 +111,17 @@ func (v *FireRedVAD) Name() string {
 	return vadName
 }
 
-// Process analyses an audio packet for voice activity.
+func (v *FireRedVAD) Options() utils.Option {
+	return v.opts
+}
+
+func (v *FireRedVAD) Arguments() (map[string]string, error) {
+	return nil, nil
+}
+
+// Execute analyses an audio packet for voice activity.
 // The packet must contain 16 kHz LINEAR16 mono audio.
-func (v *FireRedVAD) Process(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
+func (v *FireRedVAD) Execute(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
 	if !v.isActive() {
 		return nil
 	}
@@ -206,7 +216,7 @@ func (v *FireRedVAD) Process(ctx context.Context, pkt internal_type.UserAudioRec
 }
 
 // Close terminates the VAD and releases all resources.
-func (v *FireRedVAD) Close() error {
+func (v *FireRedVAD) Close(_ context.Context) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 

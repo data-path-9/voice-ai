@@ -34,7 +34,6 @@ func NewAuditLoggingGRPC(config *config.IntegrationConfig, logger commons.Logger
 }
 
 func (als *auditLoggingGRPCApi) GetAuditLog(c context.Context, ir *integration_api.GetAuditLogRequest) (*integration_api.GetAuditLogResponse, error) {
-	als.logger.Debugf("GetAuditLog %+v", ir)
 	iAuth, isAuthenticated := types.GetSimplePrincipleGRPC(c)
 	if !isAuthenticated || !iAuth.HasProject() {
 		als.logger.Errorf("unauthenticated request for invoke")
@@ -84,7 +83,6 @@ func (als *auditLoggingGRPCApi) GetAuditLog(c context.Context, ir *integration_a
 }
 
 func (als *auditLoggingGRPCApi) GetAllAuditLog(c context.Context, ir *integration_api.GetAllAuditLogRequest) (*integration_api.GetAllAuditLogResponse, error) {
-	als.logger.Debugf("GetAuditLog %+v", ir)
 	iAuth, isAuthenticated := types.GetSimplePrincipleGRPC(c)
 	if !isAuthenticated || !iAuth.HasProject() {
 		als.logger.Errorf("unauthenticated request for invoke")

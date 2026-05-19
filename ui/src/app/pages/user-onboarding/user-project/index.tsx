@@ -58,6 +58,10 @@ export function CreateProjectPage() {
       <Helmet title="Onboarding: Create a Project" />
       <div className="mb-4">
         <h1 className="text-xl font-light tracking-tight">Create your first project</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          Projects help you separate client accounts, brands, regions, or
+          internal product teams.
+        </p>
       </div>
 
       <form onSubmit={handleSubmit(onCreateProject)}>
@@ -68,16 +72,16 @@ export function CreateProjectPage() {
             type="text"
             required
             defaultValue={`${user?.name}'s Workspace`}
-            placeholder="eg: Customer Support Bot"
-            helperText="Choose a name that reflects the purpose or team for this project."
+            placeholder="eg: Acme Support Operations"
+            helperText="Use one project per client, brand, region, or internal team."
             {...register('projectName')}
           />
           <TextArea
             id="project-description"
             labelText="Project Description"
             rows={3}
-            placeholder="eg: Voice assistant for handling customer inquiries 24/7"
-            helperText="Optional — helps your team understand the project's goals at a glance."
+            placeholder="eg: White-label inbound voice agents for healthcare support across US and UK"
+            helperText="Optional — capture ownership, scale target, or governance scope for this program."
             {...register('projectDescription')}
           />
           {error && (

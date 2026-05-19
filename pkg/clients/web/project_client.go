@@ -30,7 +30,7 @@ type projectServiceClient struct {
 }
 
 func NewProjectServiceClientGRPC(config *config.AppConfig, logger commons.Logger, redis connectors.RedisConnector) ProjectClient {
-	conn, err := grpc.NewClient(config.WebHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(config.Web.Host, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		logger.Fatalf("Unable to create connection %v", err)
 	}

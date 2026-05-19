@@ -9,8 +9,6 @@ package sip_registration
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -36,8 +34,8 @@ type Manager struct {
 	redis      *redis.Client
 	vault      web_client.VaultClient
 	regClient  *sip_infra.RegistrationClient
-	externalIP string
 	opDefaults func(*sip_infra.Config)
+	instanceID string
 }
 
 // NewManager wires the dependencies and resolves a stable instance identity
@@ -46,25 +44,17 @@ type Manager struct {
 // fallback can collapse to the same value and mistakenly treat each other's
 // DIDs as self-owned. Combining with hostname always distinguishes pods.
 func NewManager(cfg Config) *Manager {
-	hostname, _ := os.Hostname()
-	ip := strings.TrimSpace(cfg.ExternalIP)
-	if ip == "" && hostname == "" {
-		panic("sip_registration: ExternalIP and Hostname both empty — cannot derive instance identity")
-	}
-	identity := ip + "@" + hostname
-
 	m := &Manager{
 		logger:     cfg.Logger,
 		postgres:   cfg.Postgres,
 		redis:      cfg.Redis.GetConnection(),
 		vault:      cfg.Vault,
 		regClient:  cfg.RegistrationClient,
-		externalIP: identity,
+		instanceID: cfg.Sip.InstanceID,
 		opDefaults: cfg.ApplyOpDefaults,
 	}
 	cfg.Logger.Infow("SIP registration manager initialized",
-		"instance_id", identity,
-		"external_ip", cfg.ExternalIP,
+		"instance_id", cfg.Sip.InstanceID,
 		"poll_interval", PollInterval,
 		"ownership_ttl", OwnershipTTL,
 		"max_concurrent", MaxConcurrent)
@@ -152,7 +142,7 @@ func (m *Manager) Reconcile(ctx context.Context) {
 		"claim_error", counts[OutcomeClaimError],
 		"unregistered", unregistered,
 		"active_local", m.regClient.ActiveCount(),
-		"owner", m.externalIP,
+		"owner", m.instanceID,
 		"duration_ms", time.Since(tickStart).Milliseconds())
 }
 
@@ -166,7 +156,7 @@ func (m *Manager) ReleaseAll(ctx context.Context) {
 		m.releaseOwner(ctx, did)
 	}
 	m.logger.Infow("SIP registration ownership released",
-		"count", len(dids), "owner", m.externalIP)
+		"count", len(dids), "owner", m.instanceID)
 }
 
 // Run drives the typed Pipeline chain for one Record, starting at

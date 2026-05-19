@@ -5,7 +5,7 @@ ENV HOME=/app
 ENV APP_HOME=$HOME
 WORKDIR $APP_HOME
 
-RUN mkdir -p $APP_HOME && chown rapida-app:rapida-app $APP_HOME
+RUN mkdir -p $APP_HOME $APP_HOME/env && chown -R rapida-app:rapida-app $APP_HOME
 
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
@@ -28,7 +28,7 @@ USER rapida-app
 
 # Copy app code
 COPY --chown=rapida-app:rapida-app api/document-api/app ./app
-COPY --chown=rapida-app:rapida-app docker/document-api/config.yaml ./env/config.yaml
+COPY --chown=rapida-app:rapida-app docker/document-api/config.yaml ./env/document.yaml
 
 EXPOSE 9010
 

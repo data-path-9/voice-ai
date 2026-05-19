@@ -45,7 +45,6 @@ type knowledgeServiceClient struct {
 }
 
 func NewKnowledgeServiceClientGRPC(config *config.AppConfig, logger commons.Logger, redis connectors.RedisConnector) KnowledgeServiceClient {
-	logger.Debugf("conntecting to knowledge client with %s", config.AssistantHost)
 	grpcOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
@@ -53,7 +52,7 @@ func NewKnowledgeServiceClientGRPC(config *config.AppConfig, logger commons.Logg
 			grpc.MaxCallSendMsgSize(commons.MaxSendMsgSize),
 		),
 	}
-	conn, err := grpc.NewClient(config.AssistantHost,
+	conn, err := grpc.NewClient(config.Assistant.Host,
 		grpcOpts...)
 
 	if err != nil {

@@ -3,6 +3,8 @@ import Editor, { OnChange, OnMount } from '@monaco-editor/react';
 import { useDarkMode } from '@/context/dark-mode-context';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 
+export type JsonEditorDisposable = { dispose(): void };
+
 export type JsonEditorProps = {
   value?: string;
   onChange?: (value: string) => void;
@@ -12,6 +14,10 @@ export type JsonEditorProps = {
   height?: string;
   className?: string;
   placeholder?: string;
+  configureEditor?: (
+    editor: monaco.editor.IStandaloneCodeEditor,
+    monacoInstance: typeof monaco,
+  ) => JsonEditorDisposable | void;
 };
 
 export const JsonEditor: React.FC<JsonEditorProps> = ({
@@ -23,12 +29,16 @@ export const JsonEditor: React.FC<JsonEditorProps> = ({
   className,
   placeholder = '',
   height = '200px',
+  configureEditor,
 }) => {
   const { isDarkMode } = useDarkMode();
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const disposableRef = useRef<JsonEditorDisposable | null>(null);
 
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    disposableRef.current?.dispose();
+    disposableRef.current = configureEditor?.(editor, monaco) ?? null;
 
     if (placeholder && editor.getValue() === '') {
       new PlaceholderContentWidget(placeholder, editor, monaco);
@@ -47,10 +57,16 @@ export const JsonEditor: React.FC<JsonEditorProps> = ({
       const currentValue = editorRef.current.getValue();
       if (currentValue !== value) {
         editorRef.current.setValue(value);
-        console.log('Value updated in effect:', value);
       }
     }
   }, [value]);
+
+  useEffect(() => {
+    return () => {
+      disposableRef.current?.dispose();
+      disposableRef.current = null;
+    };
+  }, []);
 
   const handleChange: OnChange = newValue => {
     if (onChange && newValue !== undefined) {

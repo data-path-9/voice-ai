@@ -19,16 +19,16 @@ import {
 // ── Step definitions ──────────────────────────────────────────────────────────
 
 const STEPS = [
-  { path: 'organization', label: 'Create organization', description: 'Set up your workspace', step: 1 },
-  { path: 'project', label: 'Create project', description: 'Group your AI resources', step: 2 },
+  { path: 'organization', label: 'Create organization', description: 'Define ownership and access', step: 1 },
+  { path: 'project', label: 'Create project', description: 'Separate clients, brands, or teams', step: 2 },
 ];
 
 // ── Feature highlights ────────────────────────────────────────────────────────
 
 const FEATURES = [
-  { icon: Microphone, text: 'Build voice & text AI assistants' },
-  { icon: Globe,      text: 'Deploy to any channel in minutes' },
-  { icon: ChartLine,  text: 'Monitor quality with real-time analytics' },
+  { icon: Microphone, text: 'Own your stack, credentials, and deployment model' },
+  { icon: Globe, text: 'Run separate brands, clients, or business units' },
+  { icon: ChartLine, text: 'Scale with governance, observability, and audit trails' },
 ];
 
 // ── Layout ────────────────────────────────────────────────────────────────────
@@ -72,14 +72,14 @@ function OnboardingLayout() {
         {/* Tagline + feature highlights */}
         <div className="relative flex-1 flex flex-col justify-center px-10 pb-8">
           <p className="text-[10px] font-semibold tracking-[0.16em] uppercase text-gray-400 mb-4">
-            Getting started
+            Built for control
           </p>
           <h2 className="text-2xl font-light text-white mb-3 leading-snug">
-            Build AI assistants that understand and respond like humans.
+            Build voice operations your agency or enterprise team actually controls.
           </h2>
           <p className="text-sm text-gray-400 leading-relaxed mb-8">
-            rapida.ai helps you create, deploy, and monitor voice AI experiences
-            — powered by the world's best LLMs and speech engines.
+            Use Rapida to run branded assistants, isolate client or business-unit
+            workloads, and scale with governance from day one.
           </p>
 
           {/* Feature list */}

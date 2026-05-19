@@ -9,58 +9,73 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
 )
 
+const baseWebYAML = `
+service_name: "web-api"
+host: "0.0.0.0"
+port: 9001
+log_level: "debug"
+secret: "rpd_pks"
+env: "development"
+
+postgres:
+  host: "localhost"
+  port: 5432
+  db_name: "web_db"
+  auth:
+    user: "rapida_user"
+    password: "rapida_db_password"
+  max_open_connection: 10
+  max_ideal_connection: 10
+  ssl_mode: "disable"
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  max_connection: 5
+  auth:
+    user: ""
+    password: ""
+
+asset_store:
+  storage_type: "local"
+  storage_path_prefix: "/tmp/rapida-data/assets/web"
+
+oauth2:
+  google_client_id: "google-client-id"
+  google_client_secret: "google-client-secret"
+
+integration:
+  host: "localhost:9004"
+endpoint:
+  host: "localhost:9005"
+assistant:
+  host: "localhost:9007"
+web:
+  host: "localhost:9001"
+document:
+  host: "http://localhost:9010"
+ui:
+  host: "http://localhost:3000"
+`
+
 func TestInitConfig(t *testing.T) {
-	// Mock Environment setup
-	envPath := filepath.Join(os.TempDir(), ".webtest.env")
-	err := os.WriteFile(envPath, []byte(`
-        SERVICE_NAME="web-api"
-        HOST="0.0.0.0"
-        PORT=9001
-        LOG_LEVEL="debug"
-        SECRET="rpd_pks"
-        ENV="development"
-
-        POSTGRES__HOST="localhost"
-        POSTGRES__DB_NAME="web_db"
-        POSTGRES__AUTH__USER="rapida_user"
-        POSTGRES__AUTH__PASSWORD="rapida_db_password"
-        POSTGRES__PORT=5432
-        POSTGRES__MAX_OPEN_CONNECTION=10
-        POSTGRES__MAX_IDEAL_CONNECTION=10
-        POSTGRES__SSL_MODE="disable"
-        POSTGRES__SLC_CACHE__HOST=127.0.0.1
-        POSTGRES__SLC_CACHE__PORT=6379
-        POSTGRES__SLC_CACHE__MAX_CONNECTION=10
-        POSTGRES__SLC_CACHE__MAX_DB=1
-
-        REDIS__HOST="localhost"
-        REDIS__PORT="6379"
-        REDIS__MAX_CONNECTION=5
-
-        ASSET_STORE__STORAGE_TYPE="local"
-        ASSET_STORE__STORAGE_PATH_PREFIX=${HOME}/rapida-data/assets/web
-
-        INTEGRATION_HOST=localhost:9004
-        ENDPOINT_HOST=localhost:9005
-        ASSISTANT_HOST=localhost:9007
-        WEB_HOST=localhost:9001
-        DOCUMENT_HOST=http://localhost:9010
-        UI_HOST=http://localhost:3000
-    `), 0644)
+	configPath := filepath.Join(os.TempDir(), "web_test.yaml")
+	err := os.WriteFile(configPath, []byte(baseWebYAML), 0o644)
 	if err != nil {
-		t.Fatalf("Failed to create mock env file: %v", err)
+		t.Fatalf("Failed to create mock config file: %v", err)
 	}
-	defer os.Remove(envPath) // Clean up after test
+	defer os.Remove(configPath)
 
-	os.Setenv("ENV_PATH", envPath)
-	defer os.Unsetenv("ENV_PATH") // Reset ENV_PATH after test
+	os.Setenv("ENV_PATH", configPath)
+	defer os.Unsetenv("ENV_PATH")
 
-	// Test initializing configuration
 	vConfig, err := InitConfig()
 	if err != nil {
 		t.Fatalf("InitConfig returned an error: %v", err)
@@ -68,59 +83,30 @@ func TestInitConfig(t *testing.T) {
 	if vConfig == nil {
 		t.Fatalf("vConfig is nil")
 	}
+	if vConfig.ConfigFileUsed() != configPath {
+		t.Errorf("Expected config file used to be %v, but got %v", configPath, vConfig.ConfigFileUsed())
+	}
 
-	// Validate updated environment variables
-	if vConfig.GetString("SERVICE_NAME") != "web-api" {
-		t.Errorf("Expected SERVICE_NAME to be 'web-api', but got %v", vConfig.GetString("SERVICE_NAME"))
+	appConfig, err := GetApplicationConfig(vConfig)
+	if err != nil {
+		t.Fatalf("GetApplicationConfig returned an error: %v", err)
 	}
-	if vConfig.GetString("POSTGRES__DB_NAME") != "web_db" {
-		t.Errorf("Expected POSTGRES__DB_NAME to be 'web_db', but got %v", vConfig.GetString("POSTGRES__DB_NAME"))
+	if appConfig.PostgresConfig.DBName != "web_db" {
+		t.Errorf("Expected PostgresConfig.DBName to be 'web_db', but got %v", appConfig.PostgresConfig.DBName)
 	}
-	if vConfig.GetInt("POSTGRES__SLC_CACHE__MAX_DB") != 1 {
-		t.Errorf("Expected POSTGRES__SLC_CACHE__MAX_DB to be 1, but got %v", vConfig.GetInt("POSTGRES__SLC_CACHE__MAX_DB"))
+	if appConfig.Assistant.Host != "localhost:9007" {
+		t.Errorf("Expected Assistant.Host to be 'localhost:9007', but got %v", appConfig.Assistant.Host)
 	}
 }
 
 func TestGetApplicationConfig(t *testing.T) {
-	vConfig := viper.NewWithOptions(viper.KeyDelimiter("__"))
+	v := viper.New()
+	v.SetConfigType("yaml")
+	if err := v.ReadConfig(strings.NewReader(baseWebYAML)); err != nil {
+		t.Fatalf("ReadConfig returned an error: %v", err)
+	}
 
-	// Set updated environment variables
-	vConfig.Set("SERVICE_NAME", "web-api")
-	vConfig.Set("HOST", "0.0.0.0")
-	vConfig.Set("PORT", 9001)
-	vConfig.Set("LOG_LEVEL", "debug")
-	vConfig.Set("SECRET", "rpd_pks")
-	vConfig.Set("ENV", "development")
-
-	vConfig.Set("POSTGRES__HOST", "localhost")
-	vConfig.Set("POSTGRES__DB_NAME", "web_db")
-	vConfig.Set("POSTGRES__AUTH__USER", "rapida_user")
-	vConfig.Set("POSTGRES__AUTH__PASSWORD", "rapida_db_password")
-	vConfig.Set("POSTGRES__PORT", 5432)
-	vConfig.Set("POSTGRES__MAX_OPEN_CONNECTION", 10)
-	vConfig.Set("POSTGRES__MAX_IDEAL_CONNECTION", 10)
-	vConfig.Set("POSTGRES__SSL_MODE", "disable")
-	vConfig.Set("POSTGRES__SLC_CACHE__HOST", "127.0.0.1")
-	vConfig.Set("POSTGRES__SLC_CACHE__PORT", 6379)
-	vConfig.Set("POSTGRES__SLC_CACHE__MAX_CONNECTION", 10)
-	vConfig.Set("POSTGRES__SLC_CACHE__MAX_DB", 1)
-
-	vConfig.Set("REDIS__HOST", "localhost")
-	vConfig.Set("REDIS__PORT", "6379")
-	vConfig.Set("REDIS__MAX_CONNECTION", 5)
-
-	vConfig.Set("ASSET_STORE__STORAGE_TYPE", "local")
-	vConfig.Set("ASSET_STORE__STORAGE_PATH_PREFIX", os.Getenv("HOME")+"/rapida-data/assets/web")
-
-	vConfig.Set("INTEGRATION_HOST", "localhost:9004")
-	vConfig.Set("ENDPOINT_HOST", "localhost:9005")
-	vConfig.Set("ASSISTANT_HOST", "localhost:9007")
-	vConfig.Set("WEB_HOST", "localhost:9001")
-	vConfig.Set("DOCUMENT_HOST", "http://localhost:9010")
-	vConfig.Set("UI_HOST", "http://localhost:3000")
-
-	// Fetch application configuration
-	appConfig, err := GetApplicationConfig(vConfig)
+	appConfig, err := GetApplicationConfig(v)
 	if err != nil {
 		t.Fatalf("GetApplicationConfig returned an error: %v", err)
 	}
@@ -128,7 +114,6 @@ func TestGetApplicationConfig(t *testing.T) {
 		t.Fatalf("appConfig is nil")
 	}
 
-	// Validate configurations
 	if appConfig.Name != "web-api" {
 		t.Errorf("Expected ServiceName to be 'web-api', but got %v", appConfig.Name)
 	}
@@ -138,25 +123,26 @@ func TestGetApplicationConfig(t *testing.T) {
 	if appConfig.PostgresConfig.DBName != "web_db" {
 		t.Errorf("Expected PostgresConfig.DBName to be 'web_db', but got %v", appConfig.PostgresConfig.DBName)
 	}
-
 	if appConfig.RedisConfig.Host != "localhost" || appConfig.RedisConfig.Port != 6379 {
 		t.Errorf("Redis Config mismatch: Host=%v, Port=%v", appConfig.RedisConfig.Host, appConfig.RedisConfig.Port)
 	}
-	if appConfig.AssetStoreConfig.StoragePathPrefix != os.Getenv("HOME")+"/rapida-data/assets/web" {
-		t.Errorf("Expected AssetStoreConfig.StoragePathPrefix to be %s, but got %v", os.Getenv("HOME")+"/rapida-data/assets/web", appConfig.AssetStoreConfig.StoragePathPrefix)
-	}
-	if appConfig.DocumentHost != "http://localhost:9010" {
-		t.Errorf("Expected DocumentHost to be 'http://localhost:9010', but got %v", appConfig.DocumentHost)
+	if appConfig.AssetStoreConfig.StoragePathPrefix != "/tmp/rapida-data/assets/web" {
+		t.Errorf("Expected AssetStoreConfig.StoragePathPrefix to be /tmp/rapida-data/assets/web, but got %v", appConfig.AssetStoreConfig.StoragePathPrefix)
 	}
 
-	// Validate other internal configurations
-	if appConfig.IntegrationHost != "localhost:9004" {
-		t.Errorf("Expected IntegrationHost to be 'localhost:9004', but got %v", appConfig.IntegrationHost)
+	if appConfig.Document.Host != "http://localhost:9010" {
+		t.Errorf("Expected Document.Host to be 'http://localhost:9010', but got %v", appConfig.Document.Host)
 	}
-	if appConfig.EndpointHost != "localhost:9005" {
-		t.Errorf("Expected EndpointHost to be 'localhost:9005', but got %v", appConfig.EndpointHost)
+	if appConfig.Integration.Host != "localhost:9004" {
+		t.Errorf("Expected Integration.Host to be 'localhost:9004', but got %v", appConfig.Integration.Host)
 	}
-	if appConfig.AssistantHost != "localhost:9007" {
-		t.Errorf("Expected AssistantHost to be 'localhost:9007', but got %v", appConfig.AssistantHost)
+	if appConfig.Endpoint.Host != "localhost:9005" {
+		t.Errorf("Expected Endpoint.Host to be 'localhost:9005', but got %v", appConfig.Endpoint.Host)
+	}
+	if appConfig.Assistant.Host != "localhost:9007" {
+		t.Errorf("Expected Assistant.Host to be 'localhost:9007', but got %v", appConfig.Assistant.Host)
+	}
+	if appConfig.Ui.Host != "http://localhost:3000" {
+		t.Errorf("Expected Ui.Host to be 'http://localhost:3000', but got %v", appConfig.Ui.Host)
 	}
 }

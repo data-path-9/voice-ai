@@ -26,34 +26,25 @@ type EndpointConfig struct {
 
 // reading config and intializing configs for application
 func InitConfig() (*viper.Viper, error) {
-	vConfig := viper.NewWithOptions(viper.KeyDelimiter("__"))
+	vConfig := viper.New()
 
-	vConfig.AddConfigPath("./env/")
-	vConfig.SetConfigName(".endpoint.env")
 	path := os.Getenv("ENV_PATH")
 	if path != "" {
-		log.Printf("env path %v", path)
+		log.Printf("config path %v", path)
 		vConfig.SetConfigFile(path)
-	}
-	vConfig.SetConfigType("env")
-	vConfig.AutomaticEnv()
-	if err := vConfig.ReadInConfig(); err != nil {
-		log.Printf("Error while reading the config")
+	} else {
+		vConfig.AddConfigPath("./env/")
+		vConfig.SetConfigName("endpoint")
+		vConfig.SetConfigType("yaml")
 	}
 
-	//
-	setDefault(vConfig)
-	if err := vConfig.ReadInConfig(); err != nil && !os.IsNotExist(err) {
-		log.Printf("Reading from env variables.")
+	if err := vConfig.ReadInConfig(); err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("Error while reading the config: %v", err)
+		}
 	}
 
 	return vConfig, nil
-}
-
-func setDefault(v *viper.Viper) {
-	// setting all default values
-	// keeping watch on https://github.com/spf13/viper/issues/188
-
 }
 
 // Getting application config from viper

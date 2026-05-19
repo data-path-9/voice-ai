@@ -40,7 +40,7 @@ const (
 // TenVAD - Voice Activity Detection using TEN Framework
 // -----------------------------------------------------------------------------
 
-// TenVAD implements the Vad interface using the TEN VAD library.
+// TenVAD implements the VoiceActivityDetectorExecutor interface using the TEN VAD library.
 // It provides frame-level speech probability scores with low latency.
 //
 // Input audio must be 16 kHz LINEAR16 mono (the platform's internal format).
@@ -48,6 +48,7 @@ const (
 type TenVAD struct {
 	logger   commons.Logger
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error
+	opts     utils.Option
 
 	// TEN VAD detector instance
 	detector *Detector
@@ -76,7 +77,7 @@ func NewTenVAD(
 	logger commons.Logger,
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error,
 	options utils.Option,
-) (internal_type.Vad, error) {
+) (internal_type.VoiceActivityDetectorExecutor, error) {
 	start := time.Now()
 
 	hopSize := defaultHopSize
@@ -90,6 +91,7 @@ func NewTenVAD(
 	tv := &TenVAD{
 		logger:               logger,
 		onPacket:             onPacket,
+		opts:                 options,
 		detector:             detector,
 		hopSize:              hopSize,
 		threshold:            float32(threshold),
@@ -101,7 +103,7 @@ func NewTenVAD(
 	// Auto-close on context cancellation
 	go func() {
 		<-ctx.Done()
-		tv.Close()
+		_ = tv.Close(context.Background())
 	}()
 
 	if onPacket != nil {
@@ -124,9 +126,17 @@ func (t *TenVAD) Name() string {
 	return vadName
 }
 
-// Process analyzes an audio packet for voice activity.
+func (t *TenVAD) Options() utils.Option {
+	return t.opts
+}
+
+func (t *TenVAD) Arguments() (map[string]string, error) {
+	return nil, nil
+}
+
+// Execute analyzes an audio packet for voice activity.
 // The packet must contain 16 kHz LINEAR16 mono audio.
-func (t *TenVAD) Process(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
+func (t *TenVAD) Execute(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
 	if !t.isActive() {
 		return nil
 	}
@@ -176,7 +186,7 @@ func (t *TenVAD) Process(ctx context.Context, pkt internal_type.UserAudioReceive
 }
 
 // Close releases the TEN VAD resources.
-func (t *TenVAD) Close() error {
+func (t *TenVAD) Close(_ context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

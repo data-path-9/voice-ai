@@ -57,23 +57,22 @@ type WebAppConfig struct {
 
 // reading config and intializing configs for application
 func InitConfig() (*viper.Viper, error) {
-	vConfig := viper.NewWithOptions(viper.KeyDelimiter("__"))
+	vConfig := viper.New()
 
-	vConfig.AddConfigPath("./env/")
-	vConfig.SetConfigName(".web.env")
 	path := os.Getenv("ENV_PATH")
 	if path != "" {
-		log.Printf("env path %v", path)
+		log.Printf("config path %v", path)
 		vConfig.SetConfigFile(path)
-	}
-	vConfig.SetConfigType("env")
-	vConfig.AutomaticEnv()
-	if err := vConfig.ReadInConfig(); err != nil {
-		log.Printf("Error while reading the config")
+	} else {
+		vConfig.AddConfigPath("./env/")
+		vConfig.SetConfigName("web")
+		vConfig.SetConfigType("yaml")
 	}
 
-	if err := vConfig.ReadInConfig(); err != nil && !os.IsNotExist(err) {
-		log.Printf("Reading from env variables.")
+	if err := vConfig.ReadInConfig(); err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("Error while reading the config: %v", err)
+		}
 	}
 
 	return vConfig, nil

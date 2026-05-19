@@ -15,10 +15,7 @@ import { useWebhookLogPage } from '@/hooks/use-webhook-log-page-store';
 import { RequestLogDialog } from '@/app/components/base/modal/webhook-log-modal';
 import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
-import {
-  RetryAssistantHTTPLogRequest,
-  RetryHTTPLog,
-} from '@rapidaai/react';
+import { RetryAssistantHTTPLogRequest, RetryHTTPLog } from '@rapidaai/react';
 import { connectionConfig } from '@/configs';
 
 import {
@@ -37,6 +34,7 @@ import {
 } from '@carbon/react';
 import { Pagination } from '@/app/components/carbon/pagination';
 import { IconOnlyButton } from '@/app/components/carbon/button';
+import { UrlTableCell } from '@/app/components/carbon/url-table-cell';
 import { Renew, View, EventSchedule, Launch } from '@carbon/icons-react';
 import { EmptyState } from '@/app/components/carbon/empty-state';
 import { ScrollableTableSection } from '@/app/components/sections/table-section';
@@ -65,7 +63,6 @@ export function ListingPage() {
     pageSize,
     visibleColumn,
     setPageSize,
-    setColumns,
   } = useWebhookLogPage();
 
   const onDateSelect = (to: Date, from: Date) => {
@@ -169,95 +166,101 @@ export function ListingPage() {
         ) : webhookLogs.length > 0 ? (
           <ScrollableTableSection>
             <Table className="min-w-max">
-            <TableHead>
-              <TableRow>
-                {visibleColumns.map(col => (
-                  <TableHeader key={col.key}>{col.name}</TableHeader>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {webhookLogs.map((at, idx) => (
-                <TableRow key={idx}>
-                  {visibleColumn('sourcerefid') && (
-                  <TableCell className="text-[13px]">
-                      <span className="font-mono">
-                        {at.getSourcerefid()}
-                      </span>
-                  </TableCell>
-                  )}
-                  {visibleColumn('sessionid') && (
-                    <TableCell className="text-sm">
-                      <Link
-                        href={`/deployment/assistant/${at.getAssistantid()}/sessions/${at.getAssistantconversationid()}`}
-                        className="!text-sm !inline-flex !items-center !gap-1"
-                      >
-                        <span>{at.getAssistantconversationid()}</span>
-                        <Launch size={12} />
-                      </Link>
-                    </TableCell>
-                  )}
-                  {visibleColumn('event') && (
-                    <TableCell className="text-sm">
-                      <Tag size="sm" type="blue">
-                        {at.getSourceevent()}
-                      </Tag>
-                    </TableCell>
-                  )}
-                  {visibleColumn('endpoint') && (
-                    <TableCell className="text-sm">
-                      {at.getHttpmethod()}:{at.getHttpurl()}
-                    </TableCell>
-                  )}
-                  {visibleColumn('action') && (
-                    <TableCell className="text-sm">
-                      <IconOnlyButton
-                        kind="ghost"
-                        size="md"
-                        renderIcon={Renew}
-                        iconDescription="Retry request"
-                        onClick={() =>
-                          showDialog(() => retryRequestLog(at.getId()))
-                        }
-                      />
-                      <IconOnlyButton
-                        kind="ghost"
-                        size="md"
-                        renderIcon={View}
-                        iconDescription="View detail"
-                        onClick={() => {
-                          setCurrentActivityId(at.getId());
-                          setShowLogModal(true);
-                        }}
-                      />
-                    </TableCell>
-                  )}
-                  {visibleColumn('responsestatus') && (
-                    <TableCell className="text-sm">
-                      <HttpStatusSpanIndicator
-                        status={Number(at.getResponsestatus())}
-                      />
-                    </TableCell>
-                  )}
-                  {visibleColumn('timetaken') && (
-                    <TableCell className="font-mono text-[13px]">
-                      {formatNanoToReadableMilli(at.getTimetaken())}
-                    </TableCell>
-                  )}
-                  {visibleColumn('retrycount') && (
-                    <TableCell className="text-sm">
-                      {at.getRetrycount()}
-                    </TableCell>
-                  )}
-                  {visibleColumn('created_date') && (
-                    <TableCell className="text-[13px] whitespace-nowrap">
-                      {at.getCreateddate() &&
-                        toHumanReadableDateTime(at.getCreateddate()!)}
-                    </TableCell>
-                  )}
+              <TableHead>
+                <TableRow>
+                  {visibleColumns.map(col => (
+                    <TableHeader key={col.key}>{col.name}</TableHeader>
+                  ))}
                 </TableRow>
-              ))}
-            </TableBody>
+              </TableHead>
+              <TableBody>
+                {webhookLogs.map((at, idx) => (
+                  <TableRow key={idx}>
+                    {visibleColumn('sourcerefid') && (
+                      <TableCell className="text-[13px]">
+                        <span className="font-mono">{at.getSourcerefid()}</span>
+                      </TableCell>
+                    )}
+                    {visibleColumn('sessionid') && (
+                      <TableCell className="text-sm">
+                        <Link
+                          href={`/deployment/assistant/${at.getAssistantid()}/sessions/${at.getAssistantconversationid()}`}
+                          className="!text-sm !inline-flex !items-center !gap-1"
+                        >
+                          <span>{at.getAssistantconversationid()}</span>
+                          <Launch size={12} />
+                        </Link>
+                      </TableCell>
+                    )}
+                    {visibleColumn('event') && (
+                      <TableCell className="text-sm">
+                        <Tag size="sm" type="blue">
+                          {at.getSourceevent()}
+                        </Tag>
+                      </TableCell>
+                    )}
+                    {visibleColumn('endpoint') && (
+                      <UrlTableCell
+                        url={at.getHttpurl()}
+                        prefix={
+                          at.getHttpmethod() ? (
+                            <span className="font-mono text-[13px] shrink-0">
+                              {at.getHttpmethod()}:
+                            </span>
+                          ) : null
+                        }
+                        maxWidthClassName="max-w-[560px]"
+                      />
+                    )}
+                    {visibleColumn('action') && (
+                      <TableCell className="text-sm">
+                        <IconOnlyButton
+                          kind="ghost"
+                          size="md"
+                          renderIcon={Renew}
+                          iconDescription="Retry request"
+                          onClick={() =>
+                            showDialog(() => retryRequestLog(at.getId()))
+                          }
+                        />
+                        <IconOnlyButton
+                          kind="ghost"
+                          size="md"
+                          renderIcon={View}
+                          iconDescription="View detail"
+                          onClick={() => {
+                            setCurrentActivityId(at.getId());
+                            setShowLogModal(true);
+                          }}
+                        />
+                      </TableCell>
+                    )}
+                    {visibleColumn('responsestatus') && (
+                      <TableCell className="text-sm">
+                        <HttpStatusSpanIndicator
+                          status={Number(at.getResponsestatus())}
+                        />
+                      </TableCell>
+                    )}
+                    {visibleColumn('timetaken') && (
+                      <TableCell className="font-mono text-[13px]">
+                        {formatNanoToReadableMilli(at.getTimetaken())}
+                      </TableCell>
+                    )}
+                    {visibleColumn('retrycount') && (
+                      <TableCell className="text-sm">
+                        {at.getRetrycount()}
+                      </TableCell>
+                    )}
+                    {visibleColumn('created_date') && (
+                      <TableCell className="text-[13px] whitespace-nowrap">
+                        {at.getCreateddate() &&
+                          toHumanReadableDateTime(at.getCreateddate()!)}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
             </Table>
           </ScrollableTableSection>
         ) : (
