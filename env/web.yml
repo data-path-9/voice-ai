@@ -49,3 +49,4 @@ document:
   host: "http://localhost:9010"
 ui:
   host: "http://localhost:3000"
+  public: "http://app.rapida.ai"
