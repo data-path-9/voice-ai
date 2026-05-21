@@ -73,7 +73,6 @@ func NewProjectGRPC(config *config.WebAppConfig, logger commons.Logger, postgres
 }
 
 func (wProjectApi *webProjectGRPCApi) CreateProject(ctx context.Context, irRequest *protos.CreateProjectRequest) (*protos.CreateProjectResponse, error) {
-	wProjectApi.logger.Debugf("CreateProject from grpc with requestPayload %v, %v", irRequest, ctx)
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
 		wProjectApi.logger.Errorf("CreateProject from grpc with unauthenticated request")
@@ -113,7 +112,6 @@ func (wProjectApi *webProjectGRPCApi) CreateProject(ctx context.Context, irReque
 update project request
 */
 func (wProjectApi *webProjectGRPCApi) UpdateProject(ctx context.Context, irRequest *protos.UpdateProjectRequest) (*protos.UpdateProjectResponse, error) {
-	wProjectApi.logger.Debugf("UpdateProject from grpc with requestPayload %v, %v", irRequest, ctx)
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
 		wProjectApi.logger.Errorf("UpdateProject from grpc with unauthenticated request")
@@ -144,7 +142,6 @@ func (wProjectApi *webProjectGRPCApi) UpdateProject(ctx context.Context, irReque
 	return utils.Success[protos.UpdateProjectResponse, *protos.Project](ot)
 }
 func (wProjectApi *webProjectGRPCApi) GetAllProject(ctx context.Context, irRequest *protos.GetAllProjectRequest) (*protos.GetAllProjectResponse, error) {
-	wProjectApi.logger.Debugf("GetAllProject from grpc with requestPayload %v, %v", irRequest, ctx)
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
 		wProjectApi.logger.Errorf("GetAllProject from grpc with unauthenticated request")
@@ -195,7 +192,6 @@ func (wProjectApi *webProjectGRPCApi) GetAllProject(ctx context.Context, irReque
 }
 
 func (wProjectApi *webProjectGRPCApi) GetProject(ctx context.Context, irRequest *protos.GetProjectRequest) (*protos.GetProjectResponse, error) {
-	wProjectApi.logger.Debugf("GetProject from grpc with requestPayload %v, %v", irRequest, ctx)
 	iAuth, isAuthenticated := types.GetSimplePrincipleGRPC(ctx)
 	if !isAuthenticated {
 		wProjectApi.logger.Errorf("GetProject from grpc with unauthenticated request")
@@ -282,7 +278,6 @@ func (wProjectApi *webProjectGRPCApi) AddUserToProject(ctx context.Context, auth
 }
 
 func (wProjectApi *webProjectGRPCApi) AddUsersToProject(ctx context.Context, irRequest *protos.AddUsersToProjectRequest) (*protos.AddUsersToProjectResponse, error) {
-	wProjectApi.logger.Debugf("AddUsersToProject from grpc with requestPayload %v, %v", irRequest, ctx)
 	auth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
 		return nil, errors.New("unauthenticated request")

@@ -57,12 +57,13 @@ const PARAM_TYPE_OPTIONS = [
   { value: 'custom', name: 'Custom' },
   { value: 'analysis', name: 'Analysis' },
 ];
+const ANALYSIS_CONDITION_OPTION_KEY = 'analysis.condition';
 
 const RESERVED_OPTION_KEYS = new Set([
   'option.endpoint_id',
   'option.endpoint_version',
   'option.endpoint_parameters',
-  'option.conditions',
+  `option.${ANALYSIS_CONDITION_OPTION_KEY}`,
 ]);
 
 const DEFAULT_CONDITIONS: AssistantConditionEntry[] = [
@@ -161,7 +162,8 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
         setEndpointId(options.get('endpoint_id') || '');
 
         const parsedConditions =
-          parseConditions(options.get('conditions')) || DEFAULT_CONDITIONS;
+          parseConditions(options.get(ANALYSIS_CONDITION_OPTION_KEY)) ||
+          DEFAULT_CONDITIONS;
         setSourceConditions(parsedConditions);
 
         const nextParameters = parseEndpointParameters(
@@ -249,7 +251,7 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
         value: JSON.stringify(endpointParameters),
       },
       {
-        key: 'conditions',
+        key: ANALYSIS_CONDITION_OPTION_KEY,
         value: JSON.stringify(sourceConditions),
       },
     ].forEach(({ key, value }) => {

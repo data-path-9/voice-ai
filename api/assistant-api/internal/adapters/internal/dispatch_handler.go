@@ -11,14 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_analysis "github.com/rapidaai/api/assistant-api/internal/analysis"
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_audio_recorder "github.com/rapidaai/api/assistant-api/internal/audio/recorder"
-	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
 	internal_authentication "github.com/rapidaai/api/assistant-api/internal/authentication"
 	internal_condition "github.com/rapidaai/api/assistant-api/internal/condition"
 	internal_denoiser "github.com/rapidaai/api/assistant-api/internal/denoiser"
@@ -43,105 +41,105 @@ type requestorDispatchHandler struct {
 	r *genericRequestor
 }
 
-func parseTTSAudioFormat(encoding string) (protos.AudioConfig_AudioFormat, bool) {
-	switch strings.ToLower(strings.TrimSpace(encoding)) {
-	case "linear16", "linear_16", "pcm_s16le", "pcm_linear", "linear_pcm", "linear-pcm", "s16le", "pcm16":
-		return protos.AudioConfig_LINEAR16, true
-	case "mulaw", "mu-law", "mulaw8", "mu_law", "ulaw", "u-law", "pcmu", "g711_ulaw":
-		return protos.AudioConfig_MuLaw8, true
-	default:
-		return protos.AudioConfig_LINEAR16, false
-	}
-}
+// func parseTTSAudioFormat(encoding string) (protos.AudioConfig_AudioFormat, bool) {
+// 	switch strings.ToLower(strings.TrimSpace(encoding)) {
+// 	case "linear16", "linear_16", "pcm_s16le", "pcm_linear", "linear_pcm", "linear-pcm", "s16le", "pcm16":
+// 		return protos.AudioConfig_LINEAR16, true
+// 	case "mulaw", "mu-law", "mulaw8", "mu_law", "ulaw", "u-law", "pcmu", "g711_ulaw":
+// 		return protos.AudioConfig_MuLaw8, true
+// 	default:
+// 		return protos.AudioConfig_LINEAR16, false
+// 	}
+// }
 
-func resolveTTSAudioSourceConfig(opts utils.Option) *protos.AudioConfig {
-	sourceConfig := &protos.AudioConfig{
-		SampleRate:  internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG.GetSampleRate(),
-		AudioFormat: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG.GetAudioFormat(),
-		Channels:    1,
-	}
+// func resolveTTSAudioSourceConfig(opts utils.Option) *protos.AudioConfig {
+// 	sourceConfig := &protos.AudioConfig{
+// 		SampleRate:  internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG.GetSampleRate(),
+// 		AudioFormat: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG.GetAudioFormat(),
+// 		Channels:    1,
+// 	}
 
-	for _, sampleRateKey := range []string{"speak.audio.sample_rate", "sample_rate", "audio.sample_rate"} {
-		if sampleRate, err := opts.GetUint32(sampleRateKey); err == nil && sampleRate > 0 {
-			sourceConfig.SampleRate = sampleRate
-			break
-		}
-	}
+// 	for _, sampleRateKey := range []string{"speak.audio.sample_rate", "sample_rate", "audio.sample_rate"} {
+// 		if sampleRate, err := opts.GetUint32(sampleRateKey); err == nil && sampleRate > 0 {
+// 			sourceConfig.SampleRate = sampleRate
+// 			break
+// 		}
+// 	}
 
-	for _, encodingKey := range []string{"speak.audio.encoding", "encoding", "audio.encoding", "output_audio_codec"} {
-		if encoding, err := opts.GetString(encodingKey); err == nil && strings.TrimSpace(encoding) != "" {
-			if format, ok := parseTTSAudioFormat(encoding); ok {
-				sourceConfig.AudioFormat = format
-			}
-			break
-		}
-	}
+// 	for _, encodingKey := range []string{"speak.audio.encoding", "encoding", "audio.encoding", "output_audio_codec"} {
+// 		if encoding, err := opts.GetString(encodingKey); err == nil && strings.TrimSpace(encoding) != "" {
+// 			if format, ok := parseTTSAudioFormat(encoding); ok {
+// 				sourceConfig.AudioFormat = format
+// 			}
+// 			break
+// 		}
+// 	}
 
-	return sourceConfig
-}
+// 	return sourceConfig
+// }
 
-func isSameAudioConfig(left, right *protos.AudioConfig) bool {
-	if left == nil || right == nil {
-		return false
-	}
-	return left.GetSampleRate() == right.GetSampleRate() &&
-		left.GetAudioFormat() == right.GetAudioFormat() &&
-		left.GetChannels() == right.GetChannels()
-}
+// func isSameAudioConfig(left, right *protos.AudioConfig) bool {
+// 	if left == nil || right == nil {
+// 		return false
+// 	}
+// 	return left.GetSampleRate() == right.GetSampleRate() &&
+// 		left.GetAudioFormat() == right.GetAudioFormat() &&
+// 		left.GetChannels() == right.GetChannels()
+// }
 
-func resampleTTSAudioPackets(
-	pkts []internal_type.Packet,
-	resampler internal_type.AudioResampler,
-	sourceConfig *protos.AudioConfig,
-	targetConfig *protos.AudioConfig,
-) ([]internal_type.Packet, error) {
-	if len(pkts) == 0 || resampler == nil || sourceConfig == nil || targetConfig == nil || isSameAudioConfig(sourceConfig, targetConfig) {
-		return pkts, nil
-	}
+// func resampleTTSAudioPackets(
+// 	pkts []internal_type.Packet,
+// 	resampler internal_type.AudioResampler,
+// 	sourceConfig *protos.AudioConfig,
+// 	targetConfig *protos.AudioConfig,
+// ) ([]internal_type.Packet, error) {
+// 	if len(pkts) == 0 || resampler == nil || sourceConfig == nil || targetConfig == nil || isSameAudioConfig(sourceConfig, targetConfig) {
+// 		return pkts, nil
+// 	}
 
-	resampled := make([]internal_type.Packet, 0, len(pkts))
-	for _, pkt := range pkts {
-		audioPkt, ok := pkt.(internal_type.TextToSpeechAudioPacket)
-		if !ok || len(audioPkt.AudioChunk) == 0 {
-			resampled = append(resampled, pkt)
-			continue
-		}
+// 	resampled := make([]internal_type.Packet, 0, len(pkts))
+// 	for _, pkt := range pkts {
+// 		audioPkt, ok := pkt.(internal_type.TextToSpeechAudioPacket)
+// 		if !ok || len(audioPkt.AudioChunk) == 0 {
+// 			resampled = append(resampled, pkt)
+// 			continue
+// 		}
 
-		audioChunk, err := resampler.Resample(audioPkt.AudioChunk, sourceConfig, targetConfig)
-		if err != nil {
-			return nil, err
-		}
-		audioPkt.AudioChunk = audioChunk
-		resampled = append(resampled, audioPkt)
-	}
-	return resampled, nil
-}
+// 		audioChunk, err := resampler.Resample(audioPkt.AudioChunk, sourceConfig, targetConfig)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		audioPkt.AudioChunk = audioChunk
+// 		resampled = append(resampled, audioPkt)
+// 	}
+// 	return resampled, nil
+// }
 
-func (h requestorDispatchHandler) buildTTSOnPacketCallback(
-	ctx context.Context,
-	speakerOpts utils.Option,
-) (func(pkt ...internal_type.Packet) error, error) {
-	sourceConfig := resolveTTSAudioSourceConfig(speakerOpts)
-	targetConfig := internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG
+// func (h requestorDispatchHandler) buildTTSOnPacketCallback(
+// 	ctx context.Context,
+// 	speakerOpts utils.Option,
+// ) (func(pkt ...internal_type.Packet) error, error) {
+// sourceConfig := resolveTTSAudioSourceConfig(speakerOpts)
+// targetConfig := internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG
 
-	if isSameAudioConfig(sourceConfig, targetConfig) {
-		return func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) }, nil
-	}
+// if isSameAudioConfig(sourceConfig, targetConfig) {
+// 	return func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) }, nil
+// }
 
-	resampler, err := internal_audio_resampler.GetResampler(h.r.logger)
-	if err != nil {
-		return nil, err
-	}
+// resampler, err := internal_audio_resampler.GetResampler(h.r.logger)
+// if err != nil {
+// 	return nil, err
+// }
 
-	return func(pkt ...internal_type.Packet) error {
-		resampledPackets, err := resampleTTSAudioPackets(pkt, resampler, sourceConfig, targetConfig)
-		if err != nil {
-			h.r.logger.Warnf("tts: failed to resample chunk to linear16 16kHz: %v", err)
-			return err
-		}
-		return h.r.OnPacket(ctx, resampledPackets...)
-	}, nil
-}
+// 	return func(pkt ...internal_type.Packet) error {
+// 		resampledPackets, err := resampleTTSAudioPackets(pkt, resampler, sourceConfig, targetConfig)
+// 		if err != nil {
+// 			h.r.logger.Warnf("tts: failed to resample chunk to linear16 16kHz: %v", err)
+// 			return err
+// 		}
+// 		return h.r.OnPacket(ctx, resampledPackets...)
+// 	}, nil
+// }
 
 func (h requestorDispatchHandler) HandleUserText(ctx context.Context, vl internal_type.UserTextReceivedPacket) {
 	if !h.r.canAcceptInput() {
@@ -206,7 +204,7 @@ func (h requestorDispatchHandler) HandleSpeechToTextAudio(ctx context.Context, v
 }
 
 func (h requestorDispatchHandler) HandleDenoise(ctx context.Context, vl internal_type.DenoiseAudioPacket) {
-	if err := h.r.denoiser.Denoise(ctx, vl); err != nil {
+	if err := h.r.denoiser.Execute(ctx, vl); err != nil {
 		h.r.logger.Warnf("denoiser returned unexpected error: %+v", err)
 	}
 }
@@ -1115,6 +1113,7 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		})
 	}
 	for _, analysis := range h.r.assistant.AssistantAnalyses {
+		h.r.logger.Tracef(ctx, "initializing analysis: %s %+v", analysis.Id, analysis)
 		exec, err := internal_analysis.NewExecutor(h.r.logger, ctx, analysis, h.r, h.r)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -1361,7 +1360,7 @@ func (h requestorDispatchHandler) HandleInitializeDenoise(ctx context.Context, p
 	}
 	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
 	denoise, err := internal_denoiser.GetDenoiser(
-		ctx, h.r.logger, internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
+		ctx, h.r.logger,
 		h.r.OnPacket,
 		options)
 	if err != nil {
@@ -1385,7 +1384,7 @@ func (h requestorDispatchHandler) HandleInitializeTextToSpeech(ctx context.Conte
 		})
 		return
 	}
-	speakerOpts := utils.MergeMaps(outputTransformer.GetOptions())
+	speakerOpts := utils.MergeMaps(h.r.options, outputTransformer.GetOptions())
 	credentialId, err := speakerOpts.GetUint64("rapida.credential_id")
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -1406,7 +1405,7 @@ func (h requestorDispatchHandler) HandleInitializeTextToSpeech(ctx context.Conte
 	}
 	// Use the session ctx (not errgroup's ectx) so the transformer's stream
 	// lifecycle is tied to the session, not the short-lived errgroup.
-	onPacketCallback, err := h.buildTTSOnPacketCallback(ctx, speakerOpts)
+	// onPacketCallback, err := h.buildTTSOnPacketCallback(ctx, speakerOpts)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -1419,7 +1418,7 @@ func (h requestorDispatchHandler) HandleInitializeTextToSpeech(ctx context.Conte
 		ctx, h.r.logger,
 		outputTransformer.GetName(),
 		credential,
-		onPacketCallback,
+		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
 		speakerOpts)
 	if err != nil {
 		h.r.logger.Errorf("tts: unable to create transformer %v", err)
@@ -1684,19 +1683,19 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeTextToSpeech(ctx con
 	}
 	// Use the session ctx (not errgroup's ectx) so the transformer's stream
 	// lifecycle is tied to the session, not the short-lived errgroup.
-	onPacketCallback, err := h.buildTTSOnPacketCallback(ctx, speakerOpts)
-	if err != nil {
-		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
-			ContextID: p.ContextID, StreamMode: p.StreamMode,
-			Type: internal_type.ModeSwitchErrorTypeInitializeTextToSpeech, Error: err,
-		})
-		return
-	}
+	// onPacketCallback, err := h.buildTTSOnPacketCallback(ctx, speakerOpts)
+	// if err != nil {
+	// 	h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
+	// 		ContextID: p.ContextID, StreamMode: p.StreamMode,
+	// 		Type: internal_type.ModeSwitchErrorTypeInitializeTextToSpeech, Error: err,
+	// 	})
+	// 	return
+	// }
 	atransformer, err := internal_transformer.GetTextToSpeechTransformer(
 		ctx, h.r.logger,
 		outputTransformer.GetName(),
 		credential,
-		onPacketCallback,
+		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
 		speakerOpts)
 	if err != nil {
 		h.r.logger.Errorf("tts: unable to create transformer %v", err)
@@ -1730,7 +1729,6 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeVoiceActivityDetecti
 	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
 	vad, err := internal_vad.GetVAD(ctx, h.r.logger, h.r.OnPacket, options)
 	if err != nil {
-		h.r.logger.Errorf("error while initializing vad %+v", err)
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID:  p.ContextID,
 			StreamMode: p.StreamMode,
@@ -1752,14 +1750,15 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeDenoise(ctx context.
 		return
 	}
 
-	options := utils.MergeMaps(h.r.args, cfg.GetOptions())
-	denoise, err := internal_denoiser.GetDenoiser(ctx, h.r.logger, internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
+	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
+	denoise, err := internal_denoiser.GetDenoiser(ctx, h.r.logger,
 		func(pctx context.Context, pkt ...internal_type.Packet) error { return h.r.OnPacket(pctx, pkt...) },
 		options)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
-			ContextID: p.ContextID, StreamMode: p.StreamMode,
-			Type: internal_type.ModeSwitchErrorTypeInitializeDenoise, Error: err,
+			ContextID:  p.ContextID,
+			StreamMode: p.StreamMode,
+			Type:       internal_type.ModeSwitchErrorTypeInitializeDenoise, Error: err,
 		})
 		return
 	}
@@ -1836,7 +1835,7 @@ func (h requestorDispatchHandler) HandleModeSwitchFinalizeEndOfSpeech(ctx contex
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeDenoise(ctx context.Context, p internal_type.ModeSwitchFinalizeDenoisePacket) {
 	if h.r.denoiser != nil {
-		if err := h.r.denoiser.Close(); err != nil {
+		if err := h.r.denoiser.Close(ctx); err != nil {
 			h.r.logger.Warnf("mode-switch finalize denoiser: %v", err)
 		}
 		h.r.denoiser = nil
