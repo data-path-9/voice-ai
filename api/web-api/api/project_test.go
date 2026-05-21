@@ -190,6 +190,96 @@ func ownerContext(role string) context.Context {
 	})
 }
 
+func TestGetAllUserReturnsActiveAndInvitedOrganizationMembers(t *testing.T) {
+	projectApi, db, _ := newProjectAPITest(t)
+	api := &webAuthGRPCApi{
+		webAuthApi: webAuthApi{
+			logger:      projectApi.logger,
+			postgres:    projectApi.postgres,
+			userService: projectApi.userService,
+		},
+	}
+	require.NoError(t, db.Create(&internal_entity.UserAuth{
+		Audited: gorm_models.Audited{Id: 80},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		Name:     "Active",
+		Email:    "active@example.com",
+		Password: "hash",
+		Source:   "direct",
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserAuth{
+		Audited: gorm_models.Audited{Id: 81},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_INVITED,
+			CreatedBy: 1,
+		},
+		Name:     "Invited",
+		Email:    "invited@example.com",
+		Password: "hash",
+		Source:   "invited-by-other",
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserAuth{
+		Audited: gorm_models.Audited{Id: 82},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		Name:     "Other",
+		Email:    "other@example.com",
+		Password: "hash",
+		Source:   "direct",
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
+		Audited: gorm_models.Audited{Id: 83},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		UserAuthId:     80,
+		OrganizationId: 10,
+		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
+		Audited: gorm_models.Audited{Id: 84},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_INVITED,
+			CreatedBy: 1,
+		},
+		UserAuthId:     81,
+		OrganizationId: 10,
+		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
+		Audited: gorm_models.Audited{Id: 85},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		UserAuthId:     82,
+		OrganizationId: 20,
+		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
+	}).Error)
+
+	res, err := api.GetAllUser(ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()), &protos.GetAllUserRequest{
+		Paginate: &protos.Paginate{Page: 1, PageSize: 10},
+	})
+	require.NoError(t, err)
+	require.True(t, res.GetSuccess())
+	require.EqualValues(t, 2, res.GetPaginated().GetTotalItem())
+
+	members := map[string]string{}
+	for _, member := range res.GetData() {
+		members[member.GetEmail()] = member.GetStatus()
+	}
+	require.Equal(t, map[string]string{
+		"active@example.com":  type_enums.RECORD_ACTIVE.String(),
+		"invited@example.com": type_enums.RECORD_INVITED.String(),
+	}, members)
+}
+
 func TestAddUsersToProjectRejectsAuthAndValidationFailures(t *testing.T) {
 	api, db, _ := newProjectAPITest(t)
 

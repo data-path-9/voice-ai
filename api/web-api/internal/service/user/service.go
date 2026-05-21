@@ -606,7 +606,7 @@ func (aS *userService) GetAllOrganizationMember(ctx context.Context, organizatio
 
 	qry := db.Model(internal_entity.UserOrganizationRole{}).
 		Preload("Member").
-		Where("organization_id = ? AND status = ?", organizationId, type_enums.RECORD_ACTIVE.String())
+		Where("organization_id = ? AND status IN ?", organizationId, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()})
 	for _, ct := range criteria {
 		qry.Where(fmt.Sprintf("%s = ?", ct.GetKey()), ct.GetValue())
 	}
