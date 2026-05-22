@@ -30,6 +30,16 @@ func NotEmpty[T any](values []T) bool {
 	return len(values) > 0
 }
 
+// NonNil returns true when value is not nil.
+func NonNil[T any](value *T) bool {
+	return value != nil
+}
+
+// NotBlank returns true when value has non-whitespace content.
+func NotBlank(value string) bool {
+	return strings.TrimSpace(value) != ""
+}
+
 // Email returns true when value is a valid mailbox exactly as provided.
 func Email(value string) bool {
 	parsedEmail, err := mail.ParseAddress(value)

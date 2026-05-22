@@ -24,30 +24,88 @@ import (
 func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 	auth, isAuthenticated := types.GetAuthPrinciple(c)
 	if !isAuthenticated {
-		c.JSON(http.StatusForbidden, errorResponse(401, fmt.Errorf("unauthenticated request"), "Unauthenticated request, please try again with valid authentication."))
+		c.JSON(http.StatusForbidden, openapi.ErrorResponse{
+			Code:    utils.Ptr(int32(401)),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String("401")),
+				ErrorMessage: utils.Ptr("unauthenticated request"),
+				HumanMessage: utils.Ptr("Unauthenticated request, please try again with valid authentication."),
+			},
+		})
 		return
 	}
 
 	var ir openapi.CreatePhoneCallRequest
 	if err := c.ShouldBindJSON(&ir); err != nil {
-		c.JSON(http.StatusBadRequest, errorResponse(400, err, "Invalid request."))
+		c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
+			Code:    utils.Ptr(int32(400)),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String("400")),
+				ErrorMessage: utils.Ptr(err.Error()),
+				HumanMessage: utils.Ptr("Invalid request."),
+			},
+		})
 		return
 	}
 
-	if ir.ToNumber == nil || utils.IsEmpty(*ir.ToNumber) {
-		c.JSON(http.StatusBadRequest, errorResponse(200, fmt.Errorf("missing to_phone parameter"), "Please provide the required to_phone parameter."))
+	if !validator.NonNil(ir.ToNumber) || !validator.NotBlank(*ir.ToNumber) {
+		c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
+			Code:    utils.Ptr(int32(200)),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String("200")),
+				ErrorMessage: utils.Ptr("missing to_phone parameter"),
+				HumanMessage: utils.Ptr("Please provide the required to_phone parameter."),
+			},
+		})
 		return
 	}
 
-	assistant, err := toProtoAssistantDefinition(ir.Assistant)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, errorResponse(200, err, "Please provide a valid assistant."))
-		return
+	var assistantID uint64
+	version := ""
+	if validator.NonNil(ir.Assistant) {
+		if validator.NonNil(ir.Assistant.AssistantId) {
+			assistantID, _ = strconv.ParseUint(*ir.Assistant.AssistantId, 10, 64)
+		}
+		if validator.NonNil(ir.Assistant.Version) {
+			version = *ir.Assistant.Version
+		}
+	}
+	assistant := &protos.AssistantDefinition{
+		AssistantId: assistantID,
+		Version:     version,
 	}
 	preset.AssistantDefinition(assistant)
 	if !validator.OfAssistantDefinition(assistant) {
-		c.JSON(http.StatusBadRequest, errorResponse(200, fmt.Errorf("invalid assistant"), "Please provide a valid assistant."))
+		c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
+			Code:    utils.Ptr(int32(200)),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String("200")),
+				ErrorMessage: utils.Ptr("invalid assistant"),
+				HumanMessage: utils.Ptr("Please provide a valid assistant."),
+			},
+		})
 		return
+	}
+
+	fromNumber := ""
+	if validator.NonNil(ir.FromNumber) {
+		fromNumber = *ir.FromNumber
+	}
+	var metadata map[string]interface{}
+	if validator.NonNil(ir.Metadata) {
+		metadata = *ir.Metadata
+	}
+	var args map[string]interface{}
+	if validator.NonNil(ir.Args) {
+		args = *ir.Args
+	}
+	var opts map[string]interface{}
+	if validator.NonNil(ir.Options) {
+		opts = *ir.Options
 	}
 
 	result := cApi.channelPipeline.Run(c, channel_pipeline.OutboundRequestedPipeline{
@@ -56,14 +114,22 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 		AssistantID: assistant.GetAssistantId(),
 		Version:     assistant.GetVersion(),
 		ToPhone:     *ir.ToNumber,
-		FromPhone:   stringValue(ir.FromNumber),
-		Metadata:    mapValue(ir.Metadata),
-		Args:        mapValue(ir.Args),
-		Options:     mapValue(ir.Options),
+		FromPhone:   fromNumber,
+		Metadata:    metadata,
+		Args:        args,
+		Options:     opts,
 	})
 	if result.Error != nil {
 		cApi.logger.Errorf("outbound call failed: %v", result.Error)
-		c.JSON(http.StatusInternalServerError, errorResponse(500, result.Error, "Failed to initiate outbound call"))
+		c.JSON(http.StatusInternalServerError, openapi.ErrorResponse{
+			Code:    utils.Ptr(int32(500)),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String("500")),
+				ErrorMessage: utils.Ptr(result.Error.Error()),
+				HumanMessage: utils.Ptr("Failed to initiate outbound call"),
+			},
+		})
 		return
 	}
 
@@ -71,67 +137,10 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 		result.ContextID, result.ConversationID)
 
 	c.JSON(http.StatusOK, openapi.CreatePhoneCallResponse{
-		Code:    int32Ptr(200),
-		Success: boolPtr(true),
+		Code:    utils.Ptr(int32(200)),
+		Success: utils.Ptr(true),
 		Data: &openapi.AssistantConversation{
-			Id: uint64StringPtr(result.ConversationID),
+			Id: utils.Ptr(openapi.Uint64String(strconv.FormatUint(result.ConversationID, 10))),
 		},
 	})
-}
-
-func toProtoAssistantDefinition(assistant *openapi.AssistantDefinition) (*protos.AssistantDefinition, error) {
-	if assistant == nil || assistant.AssistantId == nil {
-		return nil, fmt.Errorf("invalid assistant")
-	}
-	assistantID, err := strconv.ParseUint(string(*assistant.AssistantId), 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	return &protos.AssistantDefinition{
-		AssistantId: assistantID,
-		Version:     stringValue(assistant.Version),
-	}, nil
-}
-
-func errorResponse(code int32, err error, humanMessage string) openapi.ErrorResponse {
-	return openapi.ErrorResponse{
-		Code:    &code,
-		Success: boolPtr(false),
-		Error: &openapi.Error{
-			ErrorCode:    uint64StringPtr(uint64(code)),
-			ErrorMessage: stringPtr(err.Error()),
-			HumanMessage: stringPtr(humanMessage),
-		},
-	}
-}
-
-func mapValue(value *map[string]interface{}) map[string]interface{} {
-	if value == nil {
-		return nil
-	}
-	return *value
-}
-
-func stringValue(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
-func int32Ptr(value int32) *int32 {
-	return &value
-}
-
-func boolPtr(value bool) *bool {
-	return &value
-}
-
-func stringPtr(value string) *string {
-	return &value
-}
-
-func uint64StringPtr(value uint64) *openapi.Uint64String {
-	out := openapi.Uint64String(strconv.FormatUint(value, 10))
-	return &out
 }

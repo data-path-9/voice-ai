@@ -29,6 +29,25 @@ func TestNotEmpty(t *testing.T) {
 	}
 }
 
+func TestNonNil(t *testing.T) {
+	value := "value"
+	if !NonNil(&value) {
+		t.Fatal("expected non-nil pointer to pass validation")
+	}
+	if NonNil[string](nil) {
+		t.Fatal("expected nil pointer to fail validation")
+	}
+}
+
+func TestNotBlank(t *testing.T) {
+	if !NotBlank("value") {
+		t.Fatal("expected non-blank string to pass validation")
+	}
+	if NotBlank(" ") {
+		t.Fatal("expected blank string to fail validation")
+	}
+}
+
 func TestEmail(t *testing.T) {
 	if !Email("user@example.com") {
 		t.Fatal("expected valid email to pass validation")
