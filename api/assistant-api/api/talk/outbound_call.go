@@ -10,8 +10,10 @@ import (
 	"fmt"
 
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
+	"github.com/rapidaai/pkg/preset"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
 
@@ -24,9 +26,13 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 		return utils.AuthenticateError[protos.CreatePhoneCallResponse]()
 	}
 
-	toNumber := ir.GetToNumber()
-	if utils.IsEmpty(toNumber) {
+	if utils.IsEmpty(ir.GetToNumber()) {
 		return utils.ErrorWithCode[protos.CreatePhoneCallResponse](200, fmt.Errorf("missing to_phone parameter"), "Please provide the required to_phone parameter.")
+	}
+
+	preset.AssistantDefinition(ir.GetAssistant())
+	if !validator.OfAssistantDefinition(ir.GetAssistant()) {
+		return utils.ErrorWithCode[protos.CreatePhoneCallResponse](200, fmt.Errorf("invalid assistant"), "Please provide a valid assistant.")
 	}
 
 	mtd, err := utils.AnyMapToInterfaceMap(ir.GetMetadata())
@@ -48,7 +54,7 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 		Auth:        auth,
 		AssistantID: ir.GetAssistant().GetAssistantId(),
 		Version:     ir.GetAssistant().GetVersion(),
-		ToPhone:     toNumber,
+		ToPhone:     ir.GetToNumber(),
 		FromPhone:   ir.GetFromNumber(),
 		Metadata:    mtd,
 		Args:        args,

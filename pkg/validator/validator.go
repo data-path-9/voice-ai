@@ -7,7 +7,13 @@
 // Package validator contains small reusable validation helpers.
 package validator
 
-import "net/mail"
+import (
+	"net/mail"
+	"strconv"
+	"strings"
+
+	"github.com/rapidaai/protos"
+)
 
 // OneOf returns true when value matches one of the provided options.
 func OneOf[T comparable](value T, options ...T) bool {
@@ -39,4 +45,21 @@ func AllNonZero[T comparable](values ...T) bool {
 		}
 	}
 	return true
+}
+
+// OfAssistantDefinition returns true when an assistant definition has a valid
+// assistant ID and version.
+func OfAssistantDefinition(assistant *protos.AssistantDefinition) bool {
+	if assistant == nil || assistant.GetAssistantId() == 0 {
+		return false
+	}
+	version := assistant.GetVersion()
+	if version == "latest" {
+		return true
+	}
+	if !strings.HasPrefix(version, "vrsn_") {
+		return false
+	}
+	versionID, err := strconv.ParseUint(strings.TrimPrefix(version, "vrsn_"), 10, 64)
+	return err == nil && versionID > 0
 }
