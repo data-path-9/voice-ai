@@ -21,7 +21,7 @@ func GetResampler(logger commons.Logger) (internal_type.AudioResampler, error) {
 // GetChunkResampler returns a stateless exact-length resampler for bounded
 // preprocessing stages that must preserve duration per call.
 func GetChunkResampler(logger commons.Logger) (internal_type.AudioResampler, error) {
-	return internal_resampler_default.NewDefaultAudioResampler(logger), nil
+	return internal_resampler_soxr.NewLibsoxrChunkAudioResampler(logger), nil
 }
 
 func GetConverter(logger commons.Logger) (internal_type.AudioConverter, error) {
