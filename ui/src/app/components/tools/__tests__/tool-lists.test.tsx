@@ -150,7 +150,7 @@ describe('Tool list editors', () => {
     fireEvent.change(screen.getByTestId('param-type-0'), {
       target: { value: 'tool' },
     });
-    fireEvent.change(screen.getByTestId('key-tool-'), {
+    fireEvent.change(screen.getByTestId('param-key-0'), {
       target: { value: 'name' },
     });
     fireEvent.change(screen.getByTestId('param-val-0'), {

@@ -12,8 +12,11 @@ import {
 import { HttpStatusSpanIndicator } from '@/app/components/indicators/http-status';
 import { PageTitleWithCount } from '@/app/components/blocks/page-title-with-count';
 import { useWebhookLogPage } from '@/hooks/use-webhook-log-page-store';
-import { WebhookLogDialog } from '@/app/components/base/modal/webhook-log-modal';
+import { RequestLogDialog } from '@/app/components/base/modal/webhook-log-modal';
 import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
+import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
+import { RetryAssistantHTTPLogRequest, RetryHTTPLog } from '@rapidaai/react';
+import { connectionConfig } from '@/configs';
 
 import {
   Table,
@@ -27,18 +30,25 @@ import {
   TableToolbarSearch,
   Loading,
   Tag,
+  Link,
 } from '@carbon/react';
-import { TableLink } from '@/app/components/carbon/table-link';
 import { Pagination } from '@/app/components/carbon/pagination';
 import { IconOnlyButton } from '@/app/components/carbon/button';
-import { Renew, View, EventSchedule } from '@carbon/icons-react';
+import { UrlTableCell } from '@/app/components/carbon/url-table-cell';
+import { Renew, View, EventSchedule, Launch } from '@carbon/icons-react';
 import { EmptyState } from '@/app/components/carbon/empty-state';
+import { ScrollableTableSection } from '@/app/components/sections/table-section';
 
 export function ListingPage() {
   const { loading, showLoader, hideLoader } = useRapidaStore();
   const [userId, token, projectId] = useCredential();
   const [currentActivityId, setCurrentActivityId] = useState('');
   const [showLogModal, setShowLogModal] = useState(false);
+  const { showDialog, ConfirmDialogComponent } = useConfirmDialog({
+    title: 'Retry request?',
+    content:
+      'This will re-run the selected HTTP request. Do you want to continue?',
+  });
 
   const {
     getActivities,
@@ -53,7 +63,6 @@ export function ListingPage() {
     pageSize,
     visibleColumn,
     setPageSize,
-    setColumns,
   } = useWebhookLogPage();
 
   const onDateSelect = (to: Date, from: Date) => {
@@ -84,150 +93,197 @@ export function ListingPage() {
     );
   };
 
+  const retryRequestLog = async (requestLogId: string) => {
+    showLoader();
+    const request = new RetryAssistantHTTPLogRequest();
+    request.setProjectid(projectId);
+    request.setId(requestLogId);
+
+    try {
+      const response = await RetryHTTPLog(connectionConfig, request, {
+        authorization: token,
+        'x-project-id': projectId,
+        'x-auth-id': userId,
+      });
+
+      if (response?.getSuccess()) {
+        toast.success('Request retried successfully.');
+        onGetActivities();
+        return;
+      }
+
+      const message = response?.getError()?.getHumanmessage();
+      toast.error(message || 'Unable to retry the request, please try again.');
+    } catch {
+      toast.error('Unable to retry the request, please try again.');
+    } finally {
+      hideLoader();
+    }
+  };
+
   const visibleColumns = columns.filter(c => c.visible);
 
   return (
     <>
+      <ConfirmDialogComponent />
       {currentActivityId && (
-        <WebhookLogDialog
+        <RequestLogDialog
           modalOpen={showLogModal}
           setModalOpen={setShowLogModal}
-          currentWebhookId={currentActivityId}
+          currentRequestLogId={currentActivityId}
         />
       )}
 
-      <Helmet title="Webhook Logs" />
-      <PageHeaderBlock>
-        <PageTitleWithCount count={webhookLogs.length} total={totalCount}>
-          Webhook Logs
-        </PageTitleWithCount>
-      </PageHeaderBlock>
+      <div className="h-full flex flex-col overflow-hidden">
+        <Helmet title="Request Logs" />
+        <PageHeaderBlock>
+          <PageTitleWithCount count={webhookLogs.length} total={totalCount}>
+            Request Logs
+          </PageTitleWithCount>
+        </PageHeaderBlock>
 
-      <TableToolbar>
-        <TableToolbarContent>
-          <TableToolbarSearch placeholder="Search webhook logs" />
-          <DateFilter
-            onApply={(from, to) => onDateSelect(to, from)}
-            onReset={() => addCriterias([])}
-          />
-          <IconOnlyButton
-            kind="ghost"
-            size="lg"
-            renderIcon={Renew}
-            iconDescription="Refresh"
-            onClick={() => onGetActivities()}
-          />
-        </TableToolbarContent>
-      </TableToolbar>
+        <TableToolbar>
+          <TableToolbarContent>
+            <TableToolbarSearch placeholder="Search request logs" />
+            <DateFilter
+              onApply={(from, to) => onDateSelect(to, from)}
+              onReset={() => addCriterias([])}
+            />
+            <IconOnlyButton
+              kind="ghost"
+              size="lg"
+              renderIcon={Renew}
+              iconDescription="Refresh"
+              onClick={() => onGetActivities()}
+            />
+          </TableToolbarContent>
+        </TableToolbar>
 
-      {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loading withOverlay={false} small />
-        </div>
-      ) : webhookLogs.length > 0 ? (
-        <div className="overflow-auto flex-1">
-          <Table>
-            <TableHead>
-              <TableRow>
-                {visibleColumns.map(col => (
-                  <TableHeader key={col.key}>{col.name}</TableHeader>
-                ))}
-                <TableHeader>Actions</TableHeader>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {webhookLogs.map((at, idx) => (
-                <TableRow key={idx}>
-                  {visibleColumn('webhookid') && (
-                    <TableCell>
-                      <TableLink
-                        href={`/deployment/assistant/${at.getAssistantid()}/manage/configure-webhook`}
-                      >
-                        {at.getWebhookid()}
-                      </TableLink>
-                    </TableCell>
-                  )}
-                  {visibleColumn('sessionid') && (
-                    <TableCell>
-                      <TableLink
-                        href={`/deployment/assistant/${at.getAssistantid()}/sessions/${at.getAssistantconversationid()}`}
-                      >
-                        {at.getAssistantconversationid()}
-                      </TableLink>
-                    </TableCell>
-                  )}
-                  {visibleColumn('event') && (
-                    <TableCell>
-                      <Tag size="sm" type="blue">
-                        {at.getEvent()}
-                      </Tag>
-                    </TableCell>
-                  )}
-                  {visibleColumn('endpoint') && (
-                    <TableCell className="!text-xs">
-                      {at.getHttpmethod()}:{at.getHttpurl()}
-                    </TableCell>
-                  )}
-                  {visibleColumn('responsestatus') && (
-                    <TableCell>
-                      <HttpStatusSpanIndicator
-                        status={Number(at.getResponsestatus())}
-                      />
-                    </TableCell>
-                  )}
-                  {visibleColumn('timetaken') && (
-                    <TableCell className="!font-mono !text-xs">
-                      {formatNanoToReadableMilli(at.getTimetaken())}
-                    </TableCell>
-                  )}
-                  {visibleColumn('retrycount') && (
-                    <TableCell className="!text-xs">
-                      {at.getRetrycount()}
-                    </TableCell>
-                  )}
-                  {visibleColumn('created_date') && (
-                    <TableCell className="!text-xs whitespace-nowrap">
-                      {at.getCreateddate() &&
-                        toHumanReadableDateTime(at.getCreateddate()!)}
-                    </TableCell>
-                  )}
-                  <TableCell>
-                    <IconOnlyButton
-                      kind="ghost"
-                      size="md"
-                      renderIcon={View}
-                      iconDescription="View detail"
-                      onClick={() => {
-                        setCurrentActivityId(at.getId());
-                        setShowLogModal(true);
-                      }}
-                    />
-                  </TableCell>
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loading withOverlay={false} small />
+          </div>
+        ) : webhookLogs.length > 0 ? (
+          <ScrollableTableSection>
+            <Table className="min-w-max">
+              <TableHead>
+                <TableRow>
+                  {visibleColumns.map(col => (
+                    <TableHeader key={col.key}>{col.name}</TableHeader>
+                  ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <EmptyState
-          icon={EventSchedule}
-          title="No webhook logs found"
-          subtitle="Webhook activities triggered by your assistant conversations will appear here once webhooks are configured and events are fired."
-        />
-      )}
+              </TableHead>
+              <TableBody>
+                {webhookLogs.map((at, idx) => (
+                  <TableRow key={idx}>
+                    {visibleColumn('sourcerefid') && (
+                      <TableCell className="text-[13px]">
+                        <span className="font-mono">{at.getSourcerefid()}</span>
+                      </TableCell>
+                    )}
+                    {visibleColumn('sessionid') && (
+                      <TableCell className="text-sm">
+                        <Link
+                          href={`/deployment/assistant/${at.getAssistantid()}/sessions/${at.getAssistantconversationid()}`}
+                          className="!text-sm !inline-flex !items-center !gap-1"
+                        >
+                          <span>{at.getAssistantconversationid()}</span>
+                          <Launch size={12} />
+                        </Link>
+                      </TableCell>
+                    )}
+                    {visibleColumn('event') && (
+                      <TableCell className="text-sm">
+                        <Tag size="sm" type="blue">
+                          {at.getSourceevent()}
+                        </Tag>
+                      </TableCell>
+                    )}
+                    {visibleColumn('endpoint') && (
+                      <UrlTableCell
+                        url={at.getHttpurl()}
+                        prefix={
+                          at.getHttpmethod() ? (
+                            <span className="font-mono text-[13px] shrink-0">
+                              {at.getHttpmethod()}:
+                            </span>
+                          ) : null
+                        }
+                        maxWidthClassName="max-w-[560px]"
+                      />
+                    )}
+                    {visibleColumn('action') && (
+                      <TableCell className="text-sm">
+                        <IconOnlyButton
+                          kind="ghost"
+                          size="md"
+                          renderIcon={Renew}
+                          iconDescription="Retry request"
+                          onClick={() =>
+                            showDialog(() => retryRequestLog(at.getId()))
+                          }
+                        />
+                        <IconOnlyButton
+                          kind="ghost"
+                          size="md"
+                          renderIcon={View}
+                          iconDescription="View detail"
+                          onClick={() => {
+                            setCurrentActivityId(at.getId());
+                            setShowLogModal(true);
+                          }}
+                        />
+                      </TableCell>
+                    )}
+                    {visibleColumn('responsestatus') && (
+                      <TableCell className="text-sm">
+                        <HttpStatusSpanIndicator
+                          status={Number(at.getResponsestatus())}
+                        />
+                      </TableCell>
+                    )}
+                    {visibleColumn('timetaken') && (
+                      <TableCell className="font-mono text-[13px]">
+                        {formatNanoToReadableMilli(at.getTimetaken())}
+                      </TableCell>
+                    )}
+                    {visibleColumn('retrycount') && (
+                      <TableCell className="text-sm">
+                        {at.getRetrycount()}
+                      </TableCell>
+                    )}
+                    {visibleColumn('created_date') && (
+                      <TableCell className="text-[13px] whitespace-nowrap">
+                        {at.getCreateddate() &&
+                          toHumanReadableDateTime(at.getCreateddate()!)}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </ScrollableTableSection>
+        ) : (
+          <EmptyState
+            icon={EventSchedule}
+            title="No request logs found"
+            subtitle="HTTP request logs will appear here once requests are triggered by assistant workflows."
+          />
+        )}
 
-      {webhookLogs.length > 0 && (
-        <Pagination
-          totalItems={totalCount}
-          page={page}
-          pageSize={pageSize}
-          pageSizes={[10, 20, 25, 50, 100]}
-          onChange={({ page: p, pageSize: ps }) => {
-            if (ps !== pageSize) setPageSize(ps);
-            else setPage(p);
-          }}
-        />
-      )}
+        {webhookLogs.length > 0 && (
+          <Pagination
+            totalItems={totalCount}
+            page={page}
+            pageSize={pageSize}
+            pageSizes={[10, 20, 25, 50, 100]}
+            onChange={({ page: p, pageSize: ps }) => {
+              if (ps !== pageSize) setPageSize(ps);
+              else setPage(p);
+            }}
+          />
+        )}
+      </div>
     </>
   );
 }

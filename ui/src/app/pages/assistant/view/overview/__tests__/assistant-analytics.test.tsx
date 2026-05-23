@@ -4,6 +4,7 @@ import '@testing-library/jest-dom';
 
 const mockGoToAssistantSessionList = jest.fn();
 const mockGetAssistantMessages = jest.fn();
+const mockFindMetricByName = jest.fn();
 
 jest.mock('@/hooks/use-global-navigator', () => ({
   useGlobalNavigation: () => ({
@@ -51,7 +52,7 @@ jest.mock('@/hooks/use-assistant-trace-page-store', () => ({
 jest.mock('@/utils/metadata', () => ({
   getStatusMetric: jest.fn(),
   getTotalTokenMetric: () => 0,
-  findMetricByName: () => '',
+  findMetricByName: (...args: any[]) => mockFindMetricByName(...args),
   isConversationCompleted: () => false,
 }));
 
@@ -115,6 +116,7 @@ const { AssistantAnalytics } = require('@/app/pages/assistant/view/overview/assi
 describe('AssistantAnalytics sessions toggletip', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockFindMetricByName.mockReturnValue('');
     mockGetAssistantMessages.mockImplementation(
       (
         _assistantId: string,
@@ -150,5 +152,21 @@ describe('AssistantAnalytics sessions toggletip', () => {
     });
 
     expect(screen.getAllByRole('button', { name: 'Go to sessions' })).toHaveLength(1);
+  });
+
+  it('includes eos latency in the latency summary', async () => {
+    mockFindMetricByName.mockImplementation((_metrics: unknown, name: string) => {
+      if (name === 'eos_latency_ms') return '42';
+      return '';
+    });
+
+    const assistant = { getId: () => 'assistant-1' } as any;
+    render(<AssistantAnalytics assistant={assistant} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('EOS')).toHaveLength(3);
+    });
+
+    expect(screen.getAllByText('42')).toHaveLength(2);
   });
 });

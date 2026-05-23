@@ -32,7 +32,8 @@ const (
 	// OutputPaceInterval is the real-time interval between sending consecutive
 	// audio frames to the WebRTC track. Matches OpusFrameDuration so that
 	// TTS bursts are smoothed to playback rate rather than flooding the client.
-	OutputPaceInterval = OpusFrameDuration // milliseconds (20ms per frame)
+	OutputPaceInterval    = OpusFrameDuration // milliseconds (20ms per frame)
+	PendingAudioMaxFrames = 4000
 )
 
 // Config holds WebRTC configuration

@@ -38,8 +38,8 @@ import {
   TableToolbarSearch,
   Loading,
   Tag,
+  Link,
 } from '@carbon/react';
-import { TableLink } from '@/app/components/carbon/table-link';
 import { Pagination } from '@/app/components/carbon/pagination';
 import { IconOnlyButton } from '@/app/components/carbon/button';
 import {
@@ -53,6 +53,7 @@ import {
   Chat,
 } from '@carbon/icons-react';
 import { EmptyState } from '@/app/components/carbon/empty-state';
+import { ScrollableTableSection } from '@/app/components/sections/table-section';
 
 export const ListingPage: FC<{}> = () => {
   const [userId, token, projectId] = useCredential();
@@ -243,54 +244,55 @@ export const ListingPage: FC<{}> = () => {
           currentAssistantMessage={currentActivity}
         />
       )}
-      <Helmet title="Conversation Logs" />
-      <PageHeaderBlock>
-        <PageTitleWithCount
-          count={conversationLogAction.assistantMessages.length}
-          total={conversationLogAction.totalCount}
-        >
-          Conversation Logs
-        </PageTitleWithCount>
-      </PageHeaderBlock>
+      <div className="h-full flex flex-col overflow-hidden">
+        <Helmet title="Conversation Logs" />
+        <PageHeaderBlock>
+          <PageTitleWithCount
+            count={conversationLogAction.assistantMessages.length}
+            total={conversationLogAction.totalCount}
+          >
+            Conversation Logs
+          </PageTitleWithCount>
+        </PageHeaderBlock>
 
-      {/* ── Carbon Toolbar ── */}
-      <TableToolbar>
-        <TableToolbarContent>
-          <TableToolbarSearch
-            placeholder="Search by id:trace-id, session:session-id"
-            value={searchValue}
-            onChange={(e: any) => applySearch(e.target?.value || '')}
-          />
-          <DateFilter
-            onApply={(from, to) => onDateSelect(to, from)}
-            onReset={() => conversationLogAction.setCriterias([])}
-          />
-          <IconOnlyButton
-            kind="ghost"
-            size="lg"
-            renderIcon={Download}
-            iconDescription="Export as CSV"
-            isLoading={downloading}
-            onClick={() => onDownloadAllTraces()}
-          />
-          <IconOnlyButton
-            kind="ghost"
-            size="lg"
-            renderIcon={Renew}
-            iconDescription="Refresh"
-            onClick={() => get()}
-          />
-        </TableToolbarContent>
-      </TableToolbar>
+        {/* ── Carbon Toolbar ── */}
+        <TableToolbar>
+          <TableToolbarContent>
+            <TableToolbarSearch
+              placeholder="Search by id:trace-id, session:session-id"
+              value={searchValue}
+              onChange={(e: any) => applySearch(e.target?.value || '')}
+            />
+            <DateFilter
+              onApply={(from, to) => onDateSelect(to, from)}
+              onReset={() => conversationLogAction.setCriterias([])}
+            />
+            <IconOnlyButton
+              kind="ghost"
+              size="lg"
+              renderIcon={Download}
+              iconDescription="Export as CSV"
+              isLoading={downloading}
+              onClick={() => onDownloadAllTraces()}
+            />
+            <IconOnlyButton
+              kind="ghost"
+              size="lg"
+              renderIcon={Renew}
+              iconDescription="Refresh"
+              onClick={() => get()}
+            />
+          </TableToolbarContent>
+        </TableToolbar>
 
-      {/* ── Table ── */}
-      {rapidaContext.loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loading withOverlay={false} small />
-        </div>
-      ) : conversationLogAction.assistantMessages.length > 0 ? (
-        <div className="overflow-auto flex-1">
-          <Table>
+        {/* ── Table ── */}
+        {rapidaContext.loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loading withOverlay={false} small />
+          </div>
+        ) : conversationLogAction.assistantMessages.length > 0 ? (
+          <ScrollableTableSection>
+            <Table className="min-w-max">
             <TableHead>
               <TableRow>
                 {visibleColumns.map(col => (
@@ -302,42 +304,46 @@ export const ListingPage: FC<{}> = () => {
               {conversationLogAction.assistantMessages.map((row, idx) => (
                 <TableRow key={idx}>
                   {conversationLogAction.visibleColumn('id') && (
-                    <TableCell className="!font-mono !text-xs">
+                    <TableCell className="font-mono text-[13px]">
                       {row.getMessageid().split('-').pop()}
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('version') && (
-                    <TableCell className="!text-xs">
+                    <TableCell className="text-sm">
                       vrsn_{row.getAssistantprovidermodelid()}
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn(
                     'assistant_conversation_id',
                   ) && (
-                    <TableCell>
-                      <TableLink
+                    <TableCell className="text-sm">
+                      <Link
                         href={`/deployment/assistant/${row.getAssistantid()}/sessions/${row.getAssistantconversationid()}`}
+                        className="!text-sm !inline-flex !items-center !gap-1"
                       >
-                        {row.getAssistantconversationid()}
-                      </TableLink>
+                        <span>{row.getAssistantconversationid()}</span>
+                        <Launch size={12} />
+                      </Link>
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('assistant_id') && (
-                    <TableCell>
-                      <TableLink
+                    <TableCell className="text-sm">
+                      <Link
                         href={`/deployment/assistant/${row.getAssistantid()}`}
+                        className="!text-sm !inline-flex !items-center !gap-1"
                       >
-                        {row.getAssistantid()}
-                      </TableLink>
+                        <span>{row.getAssistantid()}</span>
+                        <Launch size={12} />
+                      </Link>
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('source') && (
-                    <TableCell>
+                    <TableCell className="text-sm">
                       <SourceIndicator source={row.getSource()} />
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('role') && (
-                    <TableCell>
+                    <TableCell className="text-sm">
                       {row.getRole() ? (
                         <Tag
                           size="md"
@@ -347,7 +353,7 @@ export const ListingPage: FC<{}> = () => {
                               : 'cool-gray'
                           }
                         >
-                          <span className="inline-flex items-center gap-1.5 leading-none">
+                          <span className="flex items-center gap-1.5 leading-none">
                             {row.getRole().toLowerCase() === 'assistant' ? (
                               <Bot size={16} />
                             ) : (
@@ -359,27 +365,27 @@ export const ListingPage: FC<{}> = () => {
                           </span>
                         </Tag>
                       ) : (
-                        <span className="text-gray-400 text-xs">N/A</span>
+                        <span className="text-gray-400 text-sm">N/A</span>
                       )}
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('message') && (
-                    <TableCell className="max-w-[300px]">
+                    <TableCell className="max-w-[300px] text-sm">
                       {row.getBody() ? (
                         <p className="line-clamp-2 text-sm">{row.getBody()}</p>
                       ) : (
-                        <span className="text-gray-400 text-xs">N/A</span>
+                        <span className="text-gray-400 text-sm">N/A</span>
                       )}
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('created_date') && (
-                    <TableCell className="!text-xs whitespace-nowrap">
+                    <TableCell className="text-[13px] whitespace-nowrap">
                       {row.getCreateddate() &&
                         toHumanReadableDateTime(row.getCreateddate()!)}
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('action') && (
-                    <TableCell>
+                    <TableCell className="text-sm">
                       <div className="flex items-center gap-0">
                         <IconOnlyButton
                           kind="ghost"
@@ -416,7 +422,7 @@ export const ListingPage: FC<{}> = () => {
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('status') && (
-                    <TableCell>
+                    <TableCell className="text-sm">
                       <CarbonStatusIndicator
                         state={
                           row.getRole()?.toLowerCase() === 'assistant'
@@ -437,19 +443,19 @@ export const ListingPage: FC<{}> = () => {
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('time_taken') && (
-                    <TableCell className="!font-mono !text-xs">
+                    <TableCell className="font-mono text-[13px]">
                       {formatNanoToReadableMilli(
                         getTimeTakenMetric(row.getMetricsList()),
                       )}
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('total_token') && (
-                    <TableCell className="!text-xs tabular-nums">
+                    <TableCell className="text-sm tabular-nums">
                       {getTotalTokenMetric(row.getMetricsList())}
                     </TableCell>
                   )}
                   {conversationLogAction.visibleColumn('user_feedback') && (
-                    <TableCell className="!text-xs">
+                    <TableCell className="text-sm">
                       {getMetricValueOrDefault(
                         row.getMetricsList(),
                         'custom.feedback',
@@ -460,7 +466,7 @@ export const ListingPage: FC<{}> = () => {
                   {conversationLogAction.visibleColumn(
                     'user_text_feedback',
                   ) && (
-                    <TableCell className="!text-xs">
+                    <TableCell className="text-sm">
                       {getMetricValueOrDefault(
                         row.getMetricsList(),
                         'custom.feedback_text',
@@ -471,32 +477,33 @@ export const ListingPage: FC<{}> = () => {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <EmptyState
-          icon={Chat}
-          title="No conversation logs found"
-          subtitle="Messages exchanged between users and your assistants will appear here as conversations take place."
-        />
-      )}
+            </Table>
+          </ScrollableTableSection>
+        ) : (
+          <EmptyState
+            icon={Chat}
+            title="No conversation logs found"
+            subtitle="Messages exchanged between users and your assistants will appear here as conversations take place."
+          />
+        )}
 
-      {/* ── Pagination ── */}
-      {conversationLogAction.assistantMessages.length > 0 && (
-        <Pagination
-          totalItems={conversationLogAction.totalCount}
-          page={conversationLogAction.page}
-          pageSize={conversationLogAction.pageSize}
-          pageSizes={[10, 20, 25, 50, 100]}
-          onChange={({ page: p, pageSize: ps }) => {
-            if (ps !== conversationLogAction.pageSize) {
-              conversationLogAction.setPageSize(ps);
-            } else {
-              conversationLogAction.setPage(p);
-            }
-          }}
-        />
-      )}
+        {/* ── Pagination ── */}
+        {conversationLogAction.assistantMessages.length > 0 && (
+          <Pagination
+            totalItems={conversationLogAction.totalCount}
+            page={conversationLogAction.page}
+            pageSize={conversationLogAction.pageSize}
+            pageSizes={[10, 20, 25, 50, 100]}
+            onChange={({ page: p, pageSize: ps }) => {
+              if (ps !== conversationLogAction.pageSize) {
+                conversationLogAction.setPageSize(ps);
+              } else {
+                conversationLogAction.setPage(p);
+              }
+            }}
+          />
+        )}
+      </div>
     </>
   );
 };

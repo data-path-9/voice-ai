@@ -42,9 +42,7 @@ import {
   GhostButton,
 } from '@/app/components/carbon/button';
 import { InputCheckbox } from '@/app/components/carbon/form/input-checkbox';
-import { InputHelper } from '@/app/components/input-helper';
-import { BaseCard } from '@/app/components/base/cards';
-import { ButtonSet } from '@carbon/react';
+import { ButtonSet, CheckboxGroup } from '@carbon/react';
 
 const STEPS = [
   {
@@ -169,9 +167,7 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
             provider: provider.getAudioprovider() || 'deepgram',
             parameters: GetDefaultSpeechToTextIfInvalid(
               provider.getAudioprovider() || 'deepgram',
-              GetDefaultMicrophoneConfig(
-                provider.getAudiooptionsList() || [],
-              ),
+              GetDefaultMicrophoneConfig(provider.getAudiooptionsList() || []),
             ),
           });
         }
@@ -183,13 +179,10 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
             provider: provider.getAudioprovider() || 'cartesia',
             parameters: GetDefaultTextToSpeechIfInvalid(
               provider.getAudioprovider() || 'cartesia',
-              GetDefaultSpeakerConfig(
-                provider.getAudiooptionsList() || [],
-              ),
+              GetDefaultSpeakerConfig(provider.getAudiooptionsList() || []),
             ),
           });
         }
-
       })
       .catch(err => {
         hideLoader();
@@ -402,14 +395,17 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
               description:
                 'Define the greeting, quick-start questions, and session behaviour.',
               body: (
-                <ConfigureExperience
-                  experienceConfig={experienceConfig}
-                  setExperienceConfig={setExperienceConfig}
-                />
+                <div className="pt-6">
+                  <ConfigureExperience
+                    experienceConfig={experienceConfig}
+                    setExperienceConfig={setExperienceConfig}
+                  />
+                </div>
               ),
               actions: [
                 <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                  <SecondaryButton size="lg"
+                  <SecondaryButton
+                    size="lg"
                     className="w-full h-full"
                     onClick={() =>
                       showDialog(() => goToDeploymentAssistant(assistantId))
@@ -417,7 +413,8 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
                   >
                     Cancel
                   </SecondaryButton>
-                  <PrimaryButton size="lg"
+                  <PrimaryButton
+                    size="lg"
                     type="button"
                     className="w-full h-full"
                     onClick={handleNext}
@@ -433,21 +430,25 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
               description:
                 'Configure the speech-to-text provider for capturing user audio.',
               body: (
-                <div>
-                  <div className="px-6 pt-6 pb-4">
-                    <BaseCard className="p-4 gap-2">
+                <div className="pt-6">
+                  <div className="px-6">
+                    <CheckboxGroup
+                      legendText=""
+                      warn
+                      warnText={
+                        voiceInputEnable
+                          ? 'Assistant can now receive user input via audio and text.'
+                          : 'Assistant will now receive user input via text only.'
+                      }
+                    >
                       <InputCheckbox
                         checked={voiceInputEnable}
                         onChange={e => setVoiceInputEnable(e.target.checked)}
+                        id="voice-input-toggle"
                       >
-                        Enable voice input (Speech-to-Text)
+                        Enable Voice Input (Speech-to-Text)
                       </InputCheckbox>
-                      <InputHelper>
-                        {voiceInputEnable
-                          ? 'Voice input is currently enabled.'
-                          : 'Voice input is disabled. This deployment will not transcribe user speech, and existing STT settings will be removed when you save.'}
-                      </InputHelper>
-                    </BaseCard>
+                    </CheckboxGroup>
                   </div>
                   {voiceInputEnable && (
                     <ConfigureAudioInputProvider
@@ -462,7 +463,8 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
                   <GhostButton size="lg" onClick={handlePrevious}>
                     Previous
                   </GhostButton>
-                  <SecondaryButton size="lg"
+                  <SecondaryButton
+                    size="lg"
                     className="w-full h-full"
                     onClick={() =>
                       showDialog(() => goToDeploymentAssistant(assistantId))
@@ -470,7 +472,8 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
                   >
                     Cancel
                   </SecondaryButton>
-                  <PrimaryButton size="lg"
+                  <PrimaryButton
+                    size="lg"
                     type="button"
                     className="w-full h-full"
                     onClick={handleNext}
@@ -486,21 +489,25 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
               description:
                 'Configure the text-to-speech provider for audio responses.',
               body: (
-                <div>
-                  <div className="px-6 pt-6 pb-4">
-                    <BaseCard className="p-4 gap-2">
+                <div className="pt-6">
+                  <div className="px-6">
+                    <CheckboxGroup
+                      legendText=""
+                      warn
+                      warnText={
+                        voiceOutputEnable
+                          ? 'Assistant responses will now be delivered via audio and text.'
+                          : 'Assistant responses will now be delivered via text.'
+                      }
+                    >
                       <InputCheckbox
                         checked={voiceOutputEnable}
                         onChange={e => setVoiceOutputEnable(e.target.checked)}
+                        id="voice-output-toggle"
                       >
-                        Enable voice output (Text-to-Speech)
+                        Enable Voice Output (Text-to-Speech)
                       </InputCheckbox>
-                      <InputHelper>
-                        {voiceOutputEnable
-                          ? 'Voice output is currently enabled.'
-                          : 'Voice output is disabled. Assistant responses will be text only.'}
-                      </InputHelper>
-                    </BaseCard>
+                    </CheckboxGroup>
                   </div>
                   {voiceOutputEnable && (
                     <ConfigureAudioOutputProvider
@@ -515,7 +522,8 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
                   <GhostButton size="lg" onClick={handlePrevious}>
                     Previous
                   </GhostButton>
-                  <SecondaryButton size="lg"
+                  <SecondaryButton
+                    size="lg"
                     className="w-full h-full"
                     onClick={() =>
                       showDialog(() => goToDeploymentAssistant(assistantId))
@@ -523,7 +531,8 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
                   >
                     Cancel
                   </SecondaryButton>
-                  <PrimaryButton size="lg"
+                  <PrimaryButton
+                    size="lg"
                     type="button"
                     className="w-full h-full"
                     isLoading={isDeploying}

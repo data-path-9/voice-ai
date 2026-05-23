@@ -7,15 +7,15 @@ package internal_silero_vad
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
 
+	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
+	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/utils"
@@ -46,7 +46,7 @@ const (
 // SileroVAD - Voice Activity Detection using Silero
 // -----------------------------------------------------------------------------
 
-// SileroVAD implements the Vad interface using the Silero ONNX model
+// SileroVAD implements the VoiceActivityDetectorExecutor interface using the Silero ONNX model
 // with native ONNX Runtime inference. It provides thread-safe voice
 // activity detection with automatic cleanup on context cancellation.
 //
@@ -56,9 +56,12 @@ type SileroVAD struct {
 	// Core dependencies
 	logger   commons.Logger
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error
+	opts     utils.Option
 
 	// Silero detector (CGO-backed, requires careful lifecycle management)
 	detector *Detector
+	// Shared audio converter for LINEAR16 -> float32 conversion
+	converter internal_type.AudioConverter
 
 	// Thread-safety for CGO resource protection
 	mu           sync.RWMutex
@@ -78,7 +81,7 @@ func NewSileroVAD(
 	logger commons.Logger,
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error,
 	options utils.Option,
-) (internal_type.Vad, error) {
+) (internal_type.VoiceActivityDetectorExecutor, error) {
 	start := time.Now()
 
 	// Initialize detector
@@ -86,16 +89,25 @@ func NewSileroVAD(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create silero detector: %w", err)
 	}
+	converter, err := internal_audio_resampler.GetConverter(logger)
+	if err != nil {
+		detector.Destroy()
+		return nil, fmt.Errorf("failed to create audio converter: %w", err)
+	}
 
 	svad := &SileroVAD{
 		logger:       logger,
 		onPacket:     onPacket,
+		opts:         options,
 		detector:     detector,
+		converter:    converter,
 		isTerminated: false,
 	}
 
-	// Start lifecycle manager for automatic cleanup
-	svad.startLifecycleManager(ctx)
+	go func() {
+		<-ctx.Done()
+		_ = svad.Close(context.Background())
+	}()
 
 	if onPacket != nil {
 		_ = onPacket(ctx, internal_type.ConversationEventPacket{
@@ -121,18 +133,29 @@ func (s *SileroVAD) Name() string {
 	return vadName
 }
 
-// Process analyzes an audio packet for voice activity.
+func (s *SileroVAD) Options() utils.Option {
+	return s.opts
+}
+
+func (s *SileroVAD) Arguments() (map[string]string, error) {
+	return nil, nil
+}
+
+// Execute analyzes an audio packet for voice activity.
 // The packet must contain 16 kHz LINEAR16 mono audio.
 // Returns immediately if the VAD has been terminated.
 // Thread-safe for concurrent calls.
-func (s *SileroVAD) Process(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
+func (s *SileroVAD) Execute(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
 	// Early termination check
 	if !s.isActive() {
 		return nil
 	}
 
-	// Convert LINEAR16 bytes to float32 samples
-	samples := linear16ToFloat32(pkt.Audio)
+	// Convert LINEAR16 bytes to float32 samples via shared audio converter.
+	samples, err := s.converter.ConvertToFloat32Samples(pkt.Audio, internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG)
+	if err != nil {
+		return fmt.Errorf("failed to convert audio to float32: %w", err)
+	}
 
 	// Perform detection with CGO safety
 	segments, isSpeaking, err := s.detectSafely(samples)
@@ -140,10 +163,18 @@ func (s *SileroVAD) Process(ctx context.Context, pkt internal_type.UserAudioRece
 		return err
 	}
 
-	// Emit InterruptionDetectedPacket only on confirmed speech onset — this is the
-	// signal to interrupt assistant TTS/LLM.
-	if hasSpeechStart(segments) {
-		s.notifyActivity(ctx, segments)
+	hasSpeechStart := false
+	hasSpeechEnd := false
+	var speechStartAt, speechEndAt float64
+	for _, seg := range segments {
+		if seg.SpeechStartAt >= 0 && (!hasSpeechStart || seg.SpeechStartAt < speechStartAt) {
+			speechStartAt = seg.SpeechStartAt
+			hasSpeechStart = true
+		}
+		if seg.SpeechEndAt >= 0 && (!hasSpeechEnd || seg.SpeechEndAt > speechEndAt) {
+			speechEndAt = seg.SpeechEndAt
+			hasSpeechEnd = true
+		}
 	}
 
 	// Emit a heartbeat while the user is actively speaking so the EOS
@@ -151,13 +182,15 @@ func (s *SileroVAD) Process(ctx context.Context, pkt internal_type.UserAudioRece
 	if isSpeaking && s.onPacket != nil {
 		_ = s.onPacket(ctx,
 			internal_type.VadSpeechActivityPacket{},
-		// internal_type.ConversationEventPacket{
-		// 	Name: "vad",
-		// 	Data: map[string]string{
-		// 		"type": "heartbeat",
-		// 	},
-		// }
 		)
+	}
+
+	// Emit explicit interruption lifecycle events from VAD transitions.
+	if hasSpeechStart {
+		s.notifyInterruption(ctx, internal_type.InterruptionEventStart, speechStartAt, len(segments))
+	}
+	if hasSpeechEnd {
+		s.notifyInterruption(ctx, internal_type.InterruptionEventEnd, speechEndAt, len(segments))
 	}
 
 	return nil
@@ -166,7 +199,7 @@ func (s *SileroVAD) Process(ctx context.Context, pkt internal_type.UserAudioRece
 // Close terminates the VAD and releases all CGO resources.
 // Safe to call multiple times; subsequent calls are no-ops.
 // Thread-safe.
-func (s *SileroVAD) Close() error {
+func (s *SileroVAD) Close(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -251,29 +284,6 @@ func resolveSpeechPadMs(options utils.Option) int {
 	return defaultSpeechPadMs
 }
 
-// -----------------------------------------------------------------------------
-// Private Helper Methods - Lifecycle
-// -----------------------------------------------------------------------------
-
-// hasSpeechStart returns true if any segment contains a speech onset.
-func hasSpeechStart(segments []Segment) bool {
-	for _, seg := range segments {
-		if seg.SpeechStartAt > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// startLifecycleManager spawns a goroutine that closes the VAD
-// when the context is cancelled.
-func (s *SileroVAD) startLifecycleManager(ctx context.Context) {
-	go func() {
-		<-ctx.Done()
-		s.Close()
-	}()
-}
-
 // isActive checks if the VAD is still operational.
 // Thread-safe.
 func (s *SileroVAD) isActive() bool {
@@ -285,19 +295,6 @@ func (s *SileroVAD) isActive() bool {
 // -----------------------------------------------------------------------------
 // Private Helper Methods - Audio Processing
 // -----------------------------------------------------------------------------
-
-// linear16ToFloat32 converts signed 16-bit little-endian PCM bytes to
-// float32 samples in the range [-1.0, 1.0]. This is the only conversion
-// needed since input is always 16 kHz LINEAR16 mono.
-func linear16ToFloat32(data []byte) []float32 {
-	numSamples := len(data) / 2
-	samples := make([]float32, numSamples)
-	for i := 0; i < numSamples; i++ {
-		sample := int16(binary.LittleEndian.Uint16(data[i*2 : i*2+2]))
-		samples[i] = float32(sample) / 32768.0
-	}
-	return samples
-}
 
 // detectSafely performs voice activity detection with CGO resource protection.
 // Holds the write lock for the duration of the CGO call: Detector
@@ -319,37 +316,24 @@ func (s *SileroVAD) detectSafely(samples []float32) ([]Segment, bool, error) {
 	return segments, s.detector.triggered, nil
 }
 
-// notifyActivity calculates speech boundaries and invokes the callback.
-func (s *SileroVAD) notifyActivity(ctx context.Context, segments []Segment) {
-	minStart := math.MaxFloat64
-	maxEnd := -math.MaxFloat64
-
-	for _, seg := range segments {
-		start := float64(seg.SpeechStartAt)
-		end := float64(seg.SpeechEndAt)
-
-		if start < minStart {
-			minStart = start
-		}
-		if end > maxEnd {
-			maxEnd = end
-		}
-	}
-
+// notifyInterruption emits a VAD interruption lifecycle event packet.
+func (s *SileroVAD) notifyInterruption(ctx context.Context, event internal_type.InterruptionEvent, at float64, segmentCount int) {
 	if s.onPacket != nil {
-		s.onPacket(ctx,
+		_ = s.onPacket(ctx,
 			internal_type.InterruptionDetectedPacket{
 				Source:  internal_type.InterruptionSourceVad,
-				StartAt: minStart,
-				EndAt:   maxEnd,
+				Event:   event,
+				StartAt: at,
+				EndAt:   at,
 			},
 			internal_type.ConversationEventPacket{
 				Name: "vad",
 				Data: map[string]string{
 					"type":          "detected",
-					"start_at":      fmt.Sprintf("%f", minStart),
-					"end_at":        fmt.Sprintf("%f", maxEnd),
-					"segment_count": fmt.Sprintf("%d", len(segments)),
+					"event":         string(event),
+					"start_at":      fmt.Sprintf("%f", at),
+					"end_at":        fmt.Sprintf("%f", at),
+					"segment_count": fmt.Sprintf("%d", segmentCount),
 				},
 			},
 		)

@@ -8,14 +8,15 @@ package type_enums
 type MetricName string
 
 var (
-	TIME_TAKEN   MetricName = "time_taken"
-	STATUS       MetricName = "status"
-	INPUT_TOKEN  MetricName = "input_token"
-	OUTPUT_TOKEN MetricName = "output_token"
-	TOTAL_TOKEN  MetricName = "total_token"
-	COST         MetricName = "cost"
-	INPUT_COST   MetricName = "input_cost"
-	OUTPUT_COST  MetricName = "output_cost"
+	TIME_TAKEN           MetricName = "time_taken"
+	STATUS               MetricName = "status"
+	INPUT_TOKEN          MetricName = "input_token"
+	OUTPUT_TOKEN         MetricName = "output_token"
+	TOTAL_TOKEN          MetricName = "total_token"
+	CACHED_CONTENT_TOKEN MetricName = "cached_content_token"
+	COST                 MetricName = "cost"
+	INPUT_COST           MetricName = "input_cost"
+	OUTPUT_COST          MetricName = "output_cost"
 	//
 	LLM_REQUEST_ID MetricName = "llm_request_id"
 	//

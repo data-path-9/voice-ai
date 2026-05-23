@@ -1,4 +1,4 @@
-import { AssistantWebhookLog } from '@rapidaai/react';
+import { AssistantHTTPLog } from '@rapidaai/react';
 import { ColumnarType } from '@/types/types.columnar';
 import { PaginatedType } from '@/types/types.paginated';
 
@@ -10,7 +10,7 @@ export type AssistantWebhookLogProperty = {
   /**
    * list of activity log
    */
-  webhookLogs: AssistantWebhookLog[];
+  webhookLogs: AssistantHTTPLog[];
 };
 
 /**
@@ -22,7 +22,7 @@ export type AssistantWebhookLogType = {
    * @param ep
    * @returns
    */
-  onChangeAssistantWebhookLogs: (ep: AssistantWebhookLog[]) => void;
+  onChangeAssistantWebhookLogs: (ep: AssistantHTTPLog[]) => void;
   /**
    *
    * @param projectId
@@ -37,7 +37,7 @@ export type AssistantWebhookLogType = {
     token: string,
     userId: string,
     onError: (err: string) => void,
-    onSuccess: (e: AssistantWebhookLog[]) => void,
+    onSuccess: (e: AssistantHTTPLog[]) => void,
   ) => void;
 
   /**

@@ -151,7 +151,7 @@ export function OverviewPage() {
               <Label for="Organization Name" text="Organization Name"></Label>
               <Input
                 type="text"
-                placeholder="eg: Lexatic inc"
+                placeholder="eg: Acme Voice Studio"
                 {...register('organizationName')}
                 value={organization?.name}
                 onChange={e => {
@@ -177,7 +177,7 @@ export function OverviewPage() {
                     industry: e.target.value,
                   });
                 }}
-                placeholder="eg: Software, Engineering"
+                placeholder="eg: Agency services, healthcare, fintech"
               ></Input>
             </div>
           </div>
@@ -187,8 +187,8 @@ export function OverviewPage() {
             Organization Contact
           </h3>
           <p className="text-sm mt-1">
-            All the organization conversation will be send to the given contact
-            email.
+            Organization-level alerts, billing updates, and operational
+            notifications will be sent to this email.
           </p>
           <div className="md:mx-0 m-5 flex space-y-2 w-full flex-col">
             <Label for="Email" text="Email"></Label>
@@ -196,7 +196,7 @@ export function OverviewPage() {
               <div className="w-60">
                 <Input
                   type="email"
-                  placeholder="eg: john@rapida.ai"
+                  placeholder="eg: ops@acmevoice.com"
                   {...register('organizationContact')}
                   value={organization?.contact}
                   onChange={e => {

@@ -1,0 +1,48 @@
+service_name: "Integration_Service"
+host: "0.0.0.0"
+port: 9004
+secret: "rpd_pks"
+log_level: "debug"
+env: "development"
+
+postgres:
+  host: "postgres"
+  port: 5432
+  db_name: "integration_db"
+  auth:
+    user: "rapida_user"
+    password: "rapida_db_password"
+  max_open_connection: 10
+  max_ideal_connection: 10
+  ssl_mode: "disable"
+  slc_cache:
+    host: "redis"
+    port: 6379
+    db: 1
+    max_connection: 10
+
+redis:
+  host: "redis"
+  port: 6379
+  db: 0
+  max_connection: 10
+  auth:
+    user: ""
+    password: ""
+
+asset_store:
+  storage_type: "local"
+  storage_path_prefix: "/app/rapida-data/assets/integration"
+
+integration:
+  host: "integration-api:9004"
+endpoint:
+  host: "endpoint-api:9005"
+assistant:
+  host: "assistant-api:9007"
+web:
+  host: "web-api:9001"
+document:
+  host: "http://document-api:9010"
+ui:
+  host: "https://localhost:3000"

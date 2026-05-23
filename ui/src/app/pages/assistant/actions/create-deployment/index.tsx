@@ -12,8 +12,6 @@ import {
   Checkmark,
   Microphone,
   VolumeUp,
-  Settings,
-  Phone,
   Deploy,
 } from '@carbon/icons-react';
 import {
@@ -28,7 +26,12 @@ import {
   Assistant,
   AssistantDefinition,
   ConnectionConfig,
+  DisableAssistantApiDeployment,
+  DisableAssistantDebuggerDeployment,
+  DisableAssistantPhoneDeployment,
+  DisableAssistantWebpluginDeployment,
   GetAssistant,
+  GetAssistantDeploymentRequest,
   GetAssistantRequest,
 } from '@rapidaai/react';
 import toast from 'react-hot-toast/headless';
@@ -37,15 +40,18 @@ import { useRapidaStore } from '@/hooks';
 import { toHumanReadableDateTime } from '@/utils/date';
 import { AssistantPhoneCallDeploymentDialog } from '@/app/components/base/modal/assistant-phone-call-deployment-modal';
 import { AssistantDebugDeploymentDialog } from '@/app/components/base/modal/assistant-debug-deployment-modal';
-import { DeploymentEditSectionModal } from '@/app/components/base/modal/assistant-debugger-edit-section-modal';
 import { AssistantWebWidgetlDeploymentDialog } from '@/app/components/base/modal/assistant-web-widget-deployment-modal';
 import { AssistantApiDeploymentDialog } from '@/app/components/base/modal/assistant-api-deployment-modal';
+import {
+  AssistantDeploymentType,
+  AssistantDeploymentVersionsModal,
+} from '@/app/components/base/modal/assistant-deployment-versions-modal';
 import SourceIndicator from '@/app/components/indicators/source';
-import { ConfigureExperienceModalForm } from '@/app/components/base/modal/assistant-debugger-edit-section-modal/configure-experience-form';
-import { ConfigureWebExperienceModalForm } from '@/app/components/base/modal/assistant-debugger-edit-section-modal/configure-web-experience-form';
-import { ConfigureAudioInputModalForm } from '@/app/components/base/modal/assistant-debugger-edit-section-modal/configure-audio-input-form';
-import { ConfigureAudioOutputModalForm } from '@/app/components/base/modal/assistant-debugger-edit-section-modal/configure-audio-output-form';
-import { TelephonyProvider } from '@/app/components/providers/telephony';
+import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
+import {
+  OverflowMenu,
+  OverflowMenuItem,
+} from '@/app/components/carbon/overflow-menu';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -53,7 +59,6 @@ import {
   MenuButton,
   MenuItem,
   MenuItemDivider,
-  Checkbox,
   Table,
   TableHead,
   TableRow,
@@ -68,29 +73,8 @@ import {
   RadioButton,
   Tag,
 } from '@carbon/react';
-import { CornerBorderOverlay } from '@/app/components/base/corner-border';
-import { useDeploymentSectionEdit } from './hooks/use-deployment-section-edit';
 
-const DEPLOYMENT_LABELS = {
-  debugger: 'Debugger',
-  api: 'SDK / API',
-  web: 'Web Widget',
-  phone: 'Phone Call',
-} as const;
-
-type DeploymentSection =
-  | 'telephony'
-  | 'experience'
-  | 'voice-input'
-  | 'voice-output';
 type DeploymentType = 'debugger' | 'api' | 'web' | 'phone';
-
-const getSectionIcon = (section: DeploymentSection) => {
-  if (section === 'experience') return Settings;
-  if (section === 'voice-input') return Microphone;
-  if (section === 'voice-output') return VolumeUp;
-  return Phone;
-};
 
 export const ConfigureAssistantDeploymentPage = () => {
   const { assistantId } = useParams();
@@ -103,6 +87,11 @@ export const ConfigureAssistantDeploymentPage = () => {
   const [isApiExpanded, setIsApiExpanded] = useState(false);
   const [isPhoneExpanded, setIsPhoneExpanded] = useState(false);
   const [isWidgetExpanded, setIsWidgetExpanded] = useState(false);
+  const [isVersionsOpen, setIsVersionsOpen] = useState(false);
+  const [versionType, setVersionType] =
+    useState<AssistantDeploymentType | null>(null);
+  const [openActionMenuType, setOpenActionMenuType] =
+    useState<DeploymentType | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedVersion, setCopiedVersion] = useState<string | null>(null);
   const [selectedDeploymentType, setSelectedDeploymentType] =
@@ -148,10 +137,6 @@ export const ConfigureAssistantDeploymentPage = () => {
     get(assistantId);
   }, [assistantId]);
 
-  const sectionEdit = useDeploymentSectionEdit(assistantId, () =>
-    get(assistantId),
-  );
-
   const deploymentCount = [
     assistant?.getApideployment(),
     assistant?.getWebplugindeployment(),
@@ -166,14 +151,64 @@ export const ConfigureAssistantDeploymentPage = () => {
     source: string;
     name: string;
     version: string;
+    status: string;
     sttProvider: string;
     ttsProvider: string;
     updated: string;
     onEdit: () => void;
     onDetails: () => void;
     onPreview?: () => void;
-    sections: Array<{ label: string; value: DeploymentSection }>;
+    onDisable: () => void;
   }> = [];
+
+  const disableDeployment = useCallback(
+    async (type: DeploymentType) => {
+      if (!assistantId) return;
+      const request = new GetAssistantDeploymentRequest();
+      request.setAssistantid(assistantId);
+
+      const auth = ConnectionConfig.WithDebugger({
+        authorization: token,
+        userId: authId,
+        projectId,
+      });
+
+      const disableByType = {
+        api: DisableAssistantApiDeployment,
+        debugger: DisableAssistantDebuggerDeployment,
+        phone: DisableAssistantPhoneDeployment,
+        web: DisableAssistantWebpluginDeployment,
+      } as const;
+
+      const labelByType = {
+        api: 'API',
+        debugger: 'Debugger',
+        phone: 'Phone Call',
+        web: 'Web Widget',
+      } as const;
+
+      try {
+        const response = await disableByType[type](
+          connectionConfig,
+          request,
+          auth,
+        );
+        if (response?.getSuccess()) {
+          toast.success(`${labelByType[type]} deployment disabled.`);
+          setSelectedDeploymentType(null);
+          get(assistantId);
+          return;
+        }
+        toast.error(
+          response?.getError?.()?.getHumanmessage?.() ||
+            `Unable to disable ${labelByType[type]} deployment.`,
+        );
+      } catch {
+        toast.error(`Unable to disable ${labelByType[type]} deployment.`);
+      }
+    },
+    [assistantId, token, authId, projectId, get],
+  );
 
   if (assistant?.hasDebuggerdeployment()) {
     const deployment = assistant.getDebuggerdeployment()!;
@@ -182,19 +217,20 @@ export const ConfigureAssistantDeploymentPage = () => {
       source: 'debugger',
       name: 'Debugger',
       version: deployment.getId() ? `vrsn_${deployment.getId()}` : '—',
+      status: getDeploymentStatus(deployment),
       sttProvider: deployment.getInputaudio()?.getAudioprovider() || '—',
       ttsProvider: deployment.getOutputaudio()?.getAudioprovider() || '—',
       updated: deployment.getCreateddate()
         ? toHumanReadableDateTime(deployment.getCreateddate()!)
         : '—',
-      onEdit: () => sectionEdit.openEditModal('debugger', 'experience'),
+      onEdit: () =>
+        navi.goToEditDebugger(
+          assistantId!,
+          String(deployment.getId() || 'latest'),
+        ),
       onDetails: () => setIsExpanded(true),
       onPreview: () => navi.goToAssistantPreview(assistantId!),
-      sections: [
-        { label: 'Experience', value: 'experience' },
-        { label: 'Voice Input', value: 'voice-input' },
-        { label: 'Voice Output', value: 'voice-output' },
-      ],
+      onDisable: () => void disableDeployment('debugger'),
     });
   }
 
@@ -205,18 +241,16 @@ export const ConfigureAssistantDeploymentPage = () => {
       source: 'sdk',
       name: 'SDK / API',
       version: deployment.getId() ? `vrsn_${deployment.getId()}` : '—',
+      status: getDeploymentStatus(deployment),
       sttProvider: deployment.getInputaudio()?.getAudioprovider() || '—',
       ttsProvider: deployment.getOutputaudio()?.getAudioprovider() || '—',
       updated: deployment.getCreateddate()
         ? toHumanReadableDateTime(deployment.getCreateddate()!)
         : '—',
-      onEdit: () => navi.goToConfigureApi(assistantId!),
+      onEdit: () =>
+        navi.goToEditApi(assistantId!, String(deployment.getId() || 'latest')),
       onDetails: () => setIsApiExpanded(true),
-      sections: [
-        { label: 'Experience', value: 'experience' },
-        { label: 'Voice Input', value: 'voice-input' },
-        { label: 'Voice Output', value: 'voice-output' },
-      ],
+      onDisable: () => void disableDeployment('api'),
     });
   }
 
@@ -227,20 +261,17 @@ export const ConfigureAssistantDeploymentPage = () => {
       source: 'phone-call',
       name: 'Phone Call',
       version: deployment.getId() ? `vrsn_${deployment.getId()}` : '—',
+      status: getDeploymentStatus(deployment),
       sttProvider: deployment.getInputaudio()?.getAudioprovider() || '—',
       ttsProvider: deployment.getOutputaudio()?.getAudioprovider() || '—',
       updated: deployment.getCreateddate()
         ? toHumanReadableDateTime(deployment.getCreateddate()!)
         : '—',
-      onEdit: () => navi.goToConfigureCall(assistantId!),
+      onEdit: () =>
+        navi.goToEditCall(assistantId!, String(deployment.getId() || 'latest')),
       onDetails: () => setIsPhoneExpanded(true),
       onPreview: () => navi.goToAssistantPreviewCall(assistantId!),
-      sections: [
-        { label: 'Telephony', value: 'telephony' },
-        { label: 'Experience', value: 'experience' },
-        { label: 'Voice Input', value: 'voice-input' },
-        { label: 'Voice Output', value: 'voice-output' },
-      ],
+      onDisable: () => void disableDeployment('phone'),
     });
   }
 
@@ -251,18 +282,16 @@ export const ConfigureAssistantDeploymentPage = () => {
       source: 'web-plugin',
       name: 'Web Widget',
       version: deployment.getId() ? `vrsn_${deployment.getId()}` : '—',
+      status: getDeploymentStatus(deployment),
       sttProvider: deployment.getInputaudio()?.getAudioprovider() || '—',
       ttsProvider: deployment.getOutputaudio()?.getAudioprovider() || '—',
       updated: deployment.getCreateddate()
         ? toHumanReadableDateTime(deployment.getCreateddate()!)
         : '—',
-      onEdit: () => navi.goToConfigureWeb(assistantId!),
+      onEdit: () =>
+        navi.goToEditWeb(assistantId!, String(deployment.getId() || 'latest')),
       onDetails: () => setIsWidgetExpanded(true),
-      sections: [
-        { label: 'Experience', value: 'experience' },
-        { label: 'Voice Input', value: 'voice-input' },
-        { label: 'Voice Output', value: 'voice-output' },
-      ],
+      onDisable: () => void disableDeployment('web'),
     });
   }
 
@@ -312,10 +341,10 @@ export const ConfigureAssistantDeploymentPage = () => {
         [
           row.name,
           row.version,
+          row.status,
           row.sttProvider,
           row.ttsProvider,
           row.updated,
-          ...row.sections.map(s => s.label),
         ]
           .join(' ')
           .toLowerCase()
@@ -358,131 +387,17 @@ export const ConfigureAssistantDeploymentPage = () => {
           deployment={assistant.getApideployment()!}
         />
       )}
-      {sectionEdit.activeEdit && (
-        <DeploymentEditSectionModal
-          modalOpen={!!sectionEdit.activeEdit}
-          setModalOpen={isOpen => {
-            if (!isOpen) sectionEdit.closeEditModal();
-          }}
-          section={sectionEdit.activeEdit.section}
-          size={
-            sectionEdit.activeEdit.section === 'experience' ||
-            sectionEdit.activeEdit.section === 'telephony'
-              ? 'md'
-              : 'lg'
-          }
-          label={DEPLOYMENT_LABELS[sectionEdit.activeEdit.type]}
-          errorMessage={sectionEdit.editError}
-          isSaving={sectionEdit.isSaving}
-          onSave={sectionEdit.saveSection}
-        >
-          {sectionEdit.activeEdit.section === 'telephony' && (
-            <TelephonyProvider
-              provider={sectionEdit.telephonyConfig.provider}
-              parameters={sectionEdit.telephonyConfig.parameters}
-              onChangeProvider={provider =>
-                sectionEdit.setTelephonyConfig({ provider, parameters: [] })
-              }
-              onChangeParameter={parameters =>
-                sectionEdit.setTelephonyConfig(c => ({ ...c, parameters }))
-              }
-            />
-          )}
-          {sectionEdit.activeEdit.section === 'experience' &&
-            sectionEdit.activeEdit.type === 'web' && (
-              <ConfigureWebExperienceModalForm
-                experienceConfig={sectionEdit.experienceConfig}
-                setExperienceConfig={sectionEdit.setExperienceConfig}
-              />
-            )}
-          {sectionEdit.activeEdit.section === 'experience' &&
-            sectionEdit.activeEdit.type !== 'web' && (
-              <ConfigureExperienceModalForm
-                experienceConfig={sectionEdit.experienceConfig}
-                setExperienceConfig={sectionEdit.setExperienceConfig}
-              />
-            )}
-          {sectionEdit.activeEdit.section === 'voice-input' && (
-            <div className="space-y-4">
-              <button
-                type="button"
-                onClick={() =>
-                  sectionEdit.setVoiceInputEnable(!sectionEdit.voiceInputEnable)
-                }
-                className="relative group w-full text-left p-4 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950/50 hover:bg-gray-50 dark:hover:bg-gray-900/60 transition-colors"
-              >
-                <CornerBorderOverlay
-                  className={
-                    sectionEdit.voiceInputEnable ? 'opacity-100' : undefined
-                  }
-                />
-                <div onClick={e => e.stopPropagation()}>
-                  <Checkbox
-                    id="deployment-voice-input-toggle"
-                    labelText="Enable voice input (Speech-to-Text)"
-                    checked={sectionEdit.voiceInputEnable}
-                    onChange={(_, { checked }) =>
-                      sectionEdit.setVoiceInputEnable(checked)
-                    }
-                  />
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-                  {sectionEdit.voiceInputEnable
-                    ? 'Voice input is currently enabled.'
-                    : 'Voice input is disabled. This deployment will not transcribe user speech.'}
-                </p>
-              </button>
-              {sectionEdit.voiceInputEnable && (
-                <ConfigureAudioInputModalForm
-                  audioInputConfig={sectionEdit.audioInputConfig}
-                  setAudioInputConfig={sectionEdit.setAudioInputConfig}
-                />
-              )}
-            </div>
-          )}
-          {sectionEdit.activeEdit.section === 'voice-output' && (
-            <div className="space-y-4">
-              <button
-                type="button"
-                onClick={() =>
-                  sectionEdit.setVoiceOutputEnable(
-                    !sectionEdit.voiceOutputEnable,
-                  )
-                }
-                className="relative group w-full text-left p-4 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950/50 hover:bg-gray-50 dark:hover:bg-gray-900/60 transition-colors"
-              >
-                <CornerBorderOverlay
-                  className={
-                    sectionEdit.voiceOutputEnable ? 'opacity-100' : undefined
-                  }
-                />
-                <div onClick={e => e.stopPropagation()}>
-                  <Checkbox
-                    id="deployment-voice-output-toggle"
-                    labelText="Enable voice output (Text-to-Speech)"
-                    checked={sectionEdit.voiceOutputEnable}
-                    onChange={(_, { checked }) =>
-                      sectionEdit.setVoiceOutputEnable(checked)
-                    }
-                  />
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-                  {sectionEdit.voiceOutputEnable
-                    ? 'Voice output is currently enabled.'
-                    : 'Voice output is disabled. Assistant responses will be text only.'}
-                </p>
-              </button>
-              {sectionEdit.voiceOutputEnable && (
-                <ConfigureAudioOutputModalForm
-                  audioOutputConfig={sectionEdit.audioOutputConfig}
-                  setAudioOutputConfig={sectionEdit.setAudioOutputConfig}
-                />
-              )}
-            </div>
-          )}
-        </DeploymentEditSectionModal>
+      {assistantId && (
+        <AssistantDeploymentVersionsModal
+          modalOpen={isVersionsOpen}
+          setModalOpen={setIsVersionsOpen}
+          assistantId={assistantId}
+          deploymentType={versionType}
+          authId={authId}
+          token={token}
+          projectId={projectId}
+        />
       )}
-
       <Helmet title="Assistant deployment" />
 
       {/* Page header */}
@@ -519,22 +434,6 @@ export const ConfigureAssistantDeploymentPage = () => {
               >
                 Edit deployment
               </TableBatchAction>
-              {selectedDeployment.sections.map(item => (
-                <TableBatchAction
-                  key={`batch-${selectedDeployment.type}-${item.value}`}
-                  renderIcon={getSectionIcon(item.value)}
-                  kind="ghost"
-                  onClick={() => {
-                    sectionEdit.openEditModal(
-                      selectedDeployment.type,
-                      item.value,
-                    );
-                    setSelectedDeploymentType(null);
-                  }}
-                >
-                  {`Edit ${item.label}`}
-                </TableBatchAction>
-              ))}
             </>
           )}
         </TableBatchActions>
@@ -564,9 +463,10 @@ export const ConfigureAssistantDeploymentPage = () => {
                     <TableHeader className="!w-12" />
                     <TableHeader>Channel</TableHeader>
                     <TableHeader>Version</TableHeader>
+                    <TableHeader>Status</TableHeader>
                     <TableHeader>STT Provider</TableHeader>
                     <TableHeader>TTS Provider</TableHeader>
-                    <TableHeader>Updated</TableHeader>
+                    <TableHeader>Date</TableHeader>
                     <TableHeader>Actions</TableHeader>
                   </TableRow>
                 </TableHead>
@@ -601,10 +501,10 @@ export const ConfigureAssistantDeploymentPage = () => {
                           }
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-sm">
                         <SourceIndicator source={row.source} />
                       </TableCell>
-                      <TableCell className="!font-mono !text-xs">
+                      <TableCell className="font-mono text-[13px]">
                         {row.version !== '—' ? (
                           <span className="inline-flex items-center gap-1">
                             {row.version}
@@ -624,20 +524,28 @@ export const ConfigureAssistantDeploymentPage = () => {
                           row.version
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-sm">
+                        <CarbonStatusIndicator state={row.status} />
+                      </TableCell>
+                      <TableCell className="text-sm">
                         <AudioProviderTag
                           provider={row.sttProvider}
                           icon={<Microphone size={14} />}
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-sm">
                         <AudioProviderTag
                           provider={row.ttsProvider}
                           icon={<VolumeUp size={14} />}
                         />
                       </TableCell>
-                      <TableCell>{row.updated}</TableCell>
-                      <TableCell onClick={e => e.stopPropagation()}>
+                      <TableCell className="text-[13px] whitespace-nowrap">
+                        {row.updated}
+                      </TableCell>
+                      <TableCell
+                        className="text-sm"
+                        onClick={e => e.stopPropagation()}
+                      >
                         <div className="flex items-center gap-0">
                           <IconOnlyButton
                             kind="ghost"
@@ -662,18 +570,32 @@ export const ConfigureAssistantDeploymentPage = () => {
                               onClick={row.onPreview}
                             />
                           )}
-                          {row.sections.map(item => (
-                            <IconOnlyButton
-                              key={`${row.type}-${item.value}`}
-                              kind="ghost"
-                              size="md"
-                              renderIcon={getSectionIcon(item.value)}
-                              iconDescription={`Edit ${item.label}`}
-                              onClick={() =>
-                                sectionEdit.openEditModal(row.type, item.value)
-                              }
+                          <OverflowMenu
+                            size="md"
+                            flipped
+                            iconDescription="Deployment actions"
+                            open={openActionMenuType === row.type}
+                            onOpen={() => setOpenActionMenuType(row.type)}
+                            onClose={() => setOpenActionMenuType(null)}
+                          >
+                            <OverflowMenuItem
+                              itemText="View all versions"
+                              onClick={() => {
+                                setOpenActionMenuType(null);
+                                setVersionType(row.type);
+                                setIsVersionsOpen(true);
+                              }}
                             />
-                          ))}
+                            <OverflowMenuItem
+                              itemText="Disable deployment"
+                              isDelete
+                              hasDivider
+                              onClick={() => {
+                                setOpenActionMenuType(null);
+                                row.onDisable();
+                              }}
+                            />
+                          </OverflowMenu>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -714,7 +636,18 @@ const providerLabels: Record<string, string> = {
   deepgram: 'Deepgram',
   cartesia: 'Cartesia',
   elevenlabs: 'ElevenLabs',
+  'custom-tts': 'Custom TTS',
+  'custom-stt': 'Custom STT',
 };
+
+function getDeploymentStatus(
+  deployment: { getStatus?: () => string } | null | undefined,
+) {
+  if (!deployment || typeof deployment.getStatus !== 'function') {
+    return 'unknown';
+  }
+  return deployment.getStatus() || 'unknown';
+}
 
 function AudioProviderTag({
   provider,
@@ -730,8 +663,8 @@ function AudioProviderTag({
       : 'Unavailable';
 
   return (
-    <Tag size="md" type="cool-gray">
-      <span className="inline-flex items-center gap-1.5 leading-none">
+    <Tag size="sm" type="cool-gray">
+      <span className="flex items-center gap-1.5 leading-none">
         {icon}
         {label}
       </span>

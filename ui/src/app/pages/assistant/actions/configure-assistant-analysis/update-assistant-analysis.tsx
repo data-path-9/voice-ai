@@ -1,30 +1,45 @@
 import React, { FC, useEffect, useState } from 'react';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
-import {
-  PrimaryButton,
-  SecondaryButton,
-  TertiaryButton,
-} from '@/app/components/carbon/button';
+import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import { Stack, TextInput, TextArea } from '@/app/components/carbon/form';
-import { ButtonSet, Select, SelectItem, Button, NumberInput } from '@carbon/react';
-import { Add, TrashCan, ArrowRight } from '@carbon/icons-react';
+import { ButtonSet, NumberInput } from '@carbon/react';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import { randomMeaningfullName } from '@/utils';
 import { EndpointDropdown } from '@/app/components/dropdown/endpoint-dropdown';
 import {
   Endpoint,
   GetAssistantAnalysis,
+  GetAssistantAnalysisRequest,
+  Metadata,
+  UpdateAssistantAnalysisRequest,
   UpdateAnalysis,
 } from '@rapidaai/react';
 import { useParams } from 'react-router-dom';
 import toast from 'react-hot-toast/headless';
 import { connectionConfig } from '@/configs';
 import { TabForm } from '@/app/components/form/tab-form';
+import {
+  ASSISTANT_CONDITION_KEY_OPTIONS,
+  ASSISTANT_CONDITION_OPERATOR_OPTIONS,
+  ASSISTANT_CONDITION_SOURCE_OPTIONS,
+  ASSISTANT_CONDITION_VALUE_OPTIONS_BY_KEY,
+  AssistantConditionEntry,
+  AssistantMappingTable,
+  normalizeAssistantConditionEntries,
+} from '@/app/components/tools/common';
+import { SourceConditionRule } from '@/app/components/conditions/source-condition-rule';
+import { InputGroup } from '@/app/components/input-group/index';
 
-// ── Parameter types ──────────────────────────────────────────────────────────
-
-type ParamType = 'assistant' | 'conversation' | 'argument' | 'metadata' | 'option' | 'analysis';
+type ParamType =
+  | 'client'
+  | 'assistant'
+  | 'conversation'
+  | 'argument'
+  | 'metadata'
+  | 'option'
+  | 'custom'
+  | 'analysis';
 
 interface Parameter {
   type: ParamType;
@@ -33,115 +48,64 @@ interface Parameter {
 }
 
 const PARAM_TYPE_OPTIONS = [
-  { value: 'assistant', text: 'Assistant' },
-  { value: 'conversation', text: 'Conversation' },
-  { value: 'argument', text: 'Argument' },
-  { value: 'metadata', text: 'Metadata' },
-  { value: 'option', text: 'Option' },
-  { value: 'analysis', text: 'Analysis' },
+  { value: 'client', name: 'Client' },
+  { value: 'assistant', name: 'Assistant' },
+  { value: 'conversation', name: 'Conversation' },
+  { value: 'argument', name: 'Argument' },
+  { value: 'metadata', name: 'Metadata' },
+  { value: 'option', name: 'Option' },
+  { value: 'custom', name: 'Custom' },
+  { value: 'analysis', name: 'Analysis' },
+];
+const ANALYSIS_CONDITION_OPTION_KEY = 'analysis.condition';
+
+const RESERVED_OPTION_KEYS = new Set([
+  'option.endpoint_id',
+  'option.endpoint_version',
+  'option.endpoint_parameters',
+  `option.${ANALYSIS_CONDITION_OPTION_KEY}`,
+]);
+
+const DEFAULT_CONDITIONS: AssistantConditionEntry[] = [
+  { key: 'source', condition: '=', value: 'all' },
 ];
 
-const ASSISTANT_KEYS = [
-  { value: 'name', text: 'Name' },
-  { value: 'prompt', text: 'Prompt' },
-];
-
-const CONVERSATION_KEYS = [
-  { value: 'messages', text: 'Messages' },
-];
-
-// ── Parameter Editor ─────────────────────────────────────────────────────────
-
-const ParameterEditor: FC<{
-  parameters: Parameter[];
-  onChange: (params: Parameter[]) => void;
-}> = ({ parameters, onChange }) => {
-  const update = (index: number, field: keyof Parameter, value: string) => {
-    onChange(parameters.map((p, i) => (i === index ? { ...p, [field]: value } : p)));
-  };
-
-  const remove = (index: number) => {
-    onChange(parameters.filter((_, i) => i !== index));
-  };
-
-  const add = () => {
-    onChange([...parameters, { type: 'assistant', key: '', value: '' }]);
-  };
-
-  const getKeyOptions = (type: ParamType) => {
-    switch (type) {
-      case 'assistant': return ASSISTANT_KEYS;
-      case 'conversation': return CONVERSATION_KEYS;
-      default: return null;
-    }
-  };
-
-  return (
-    <div>
-      <p className="text-xs font-medium mb-2">Parameters ({parameters.length})</p>
-      <table className="w-full border-collapse border border-gray-200 dark:border-gray-700 text-sm [&_input]:!border-none [&_.cds--text-input]:!border-none [&_.cds--text-input]:!outline-none [&_.cds--select-input]:!border-none [&_.cds--form-item]:!m-0">
-        <thead>
-          <tr className="bg-gray-50 dark:bg-gray-900">
-            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/4">Type</th>
-            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/4">Key</th>
-            <th className="border-b border-r border-gray-200 dark:border-gray-700 w-8" />
-            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/4">Value</th>
-            <th className="border-b border-gray-200 dark:border-gray-700 w-8" />
-          </tr>
-        </thead>
-        <tbody>
-          {parameters.map((param, index) => {
-            const keyOptions = getKeyOptions(param.type);
-            return (
-              <tr key={index} className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
-                <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                  <Select id={`param-type-${index}`} labelText="" hideLabel value={param.type} onChange={e => { update(index, 'type', e.target.value); update(index, 'key', ''); }} size="md">
-                    {PARAM_TYPE_OPTIONS.map(o => (
-                      <SelectItem key={o.value} value={o.value} text={o.text} />
-                    ))}
-                  </Select>
-                </td>
-                <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                  {keyOptions ? (
-                    <Select id={`param-key-${index}`} labelText="" hideLabel value={param.key} onChange={e => update(index, 'key', e.target.value)} size="md">
-                      <SelectItem value="" text="Select key" />
-                      {keyOptions.map(o => (
-                        <SelectItem key={o.value} value={o.value} text={o.text} />
-                      ))}
-                    </Select>
-                  ) : (
-                    <TextInput id={`param-key-${index}`} labelText="" hideLabel value={param.key} onChange={e => update(index, 'key', e.target.value)} placeholder="Source key" size="md" />
-                  )}
-                </td>
-                <td className="border-r border-gray-200 dark:border-gray-700 p-0 text-center text-gray-400">
-                  <ArrowRight size={16} className="mx-auto" />
-                </td>
-                <td className="border-r border-gray-200 dark:border-gray-700 p-0">
-                  <TextInput id={`param-val-${index}`} labelText="" hideLabel value={param.value} onChange={e => update(index, 'value', e.target.value)} placeholder="Variable name" size="md" />
-                </td>
-                <td className="p-0 text-center">
-                  <Button hasIconOnly renderIcon={TrashCan} iconDescription="Remove" kind="danger--ghost" size="sm" onClick={() => remove(index)} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <div className="pt-4">
-        <TertiaryButton
-          size="md"
-          renderIcon={Add}
-          onClick={add}
-          className="!w-full !max-w-none"
-        >
-          Add parameter
-        </TertiaryButton>
-      </div>
-    </div>
-  );
+const parseConditions = (
+  raw?: string,
+): AssistantConditionEntry[] | undefined => {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    const normalized = normalizeAssistantConditionEntries(parsed);
+    return normalized.length > 0 ? normalized : DEFAULT_CONDITIONS;
+  } catch {
+    return DEFAULT_CONDITIONS;
+  }
 };
 
-// ── Main component ───────────────────────────────────────────────────────────
+const parseEndpointParameters = (raw?: string): Parameter[] => {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return [];
+    }
+    return Object.entries(parsed).flatMap(([key, value]) => {
+      if (typeof value !== 'string') return [];
+      const [type, ...parts] = key.split('.');
+      if (!type || parts.length === 0) return [];
+      return [
+        {
+          type: type as ParamType,
+          key: parts.join('.'),
+          value,
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
+};
 
 export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
   assistantId,
@@ -158,49 +122,72 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<number>(0);
   const [endpointId, setEndpointId] = useState<string>('');
-  const [parameters, setParameters] = useState<Parameter[]>([]);
+  const [parameters, setParameters] = useState<Parameter[]>([
+    { type: 'conversation', key: 'messages', value: 'messages' },
+  ]);
+  const [sourceConditions, setSourceConditions] =
+    useState<AssistantConditionEntry[]>(DEFAULT_CONDITIONS);
 
   useEffect(() => {
-    GetAssistantAnalysis(
-      connectionConfig,
-      assistantId,
-      analysisId!,
-      (err, res) => {
-        if (err) {
-          toast.error('Unable to load analysis, please try again later.');
-          return;
+    const load = async () => {
+      const request = new GetAssistantAnalysisRequest();
+      request.setAssistantid(assistantId);
+      request.setId(analysisId!);
+
+      try {
+        const res = await GetAssistantAnalysis(connectionConfig, request, {
+          'x-auth-id': authId,
+          authorization: token,
+          'x-project-id': projectId,
+        });
+        const analysis = res?.getData();
+        if (!analysis) return;
+
+        setName(analysis.getName());
+        setDescription(analysis.getDescription());
+        setPriority(analysis.getExecutionpriority());
+
+        const options = new Map<string, string>();
+        const optionsList = (analysis as any).getOptionsList?.();
+        if (Array.isArray(optionsList)) {
+          optionsList.forEach((item: any) => {
+            const key = item?.getKey?.();
+            const value = item?.getValue?.();
+            if (key && typeof value === 'string') {
+              options.set(key, value);
+            }
+          });
         }
-        const wb = res?.getData();
-        if (wb) {
-          setName(wb.getName());
-          setDescription(wb.getDescription());
-          setPriority(wb.getExecutionpriority());
-          setEndpointId(wb.getEndpointid());
-          const parametersMap = wb.getEndpointparametersMap();
-          setParameters(
-            Array.from(parametersMap.entries()).map(([key, value]) => {
-              const [type, paramKey] = key.split('.');
-              return {
-                type: type as ParamType,
-                key: paramKey,
-                value,
-              };
-            }),
-          );
-        }
-      },
-      {
-        'x-auth-id': authId,
-        authorization: token,
-        'x-project-id': projectId,
-      },
-    );
+
+        setEndpointId(options.get('endpoint_id') || '');
+
+        const parsedConditions =
+          parseConditions(options.get(ANALYSIS_CONDITION_OPTION_KEY)) ||
+          DEFAULT_CONDITIONS;
+        setSourceConditions(parsedConditions);
+
+        const nextParameters = parseEndpointParameters(
+          options.get('endpoint_parameters'),
+        );
+        setParameters(
+          nextParameters.length > 0
+            ? nextParameters
+            : [{ type: 'conversation', key: 'messages', value: 'messages' }],
+        );
+      } catch {
+        toast.error('Unable to load analysis, please try again later.');
+      }
+    };
+
+    load();
   }, [assistantId, analysisId, authId, token, projectId]);
 
   const validateConfigure = (): boolean => {
     setErrorMessage('');
     if (!endpointId) {
-      setErrorMessage('Please select a valid endpoint to be executed for analysis.');
+      setErrorMessage(
+        'Please select a valid endpoint to be executed for analysis.',
+      );
       return false;
     }
     if (parameters.length === 0) {
@@ -208,6 +195,11 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
       return false;
     }
     const keys = parameters.map(p => `${p.type}.${p.key}`);
+    const reservedKey = keys.find(key => RESERVED_OPTION_KEYS.has(key));
+    if (reservedKey) {
+      setErrorMessage(`${reservedKey} is reserved and managed by analysis options.`);
+      return false;
+    }
     if (new Set(keys).size !== keys.length) {
       setErrorMessage('Duplicate parameter keys are not allowed.');
       return false;
@@ -224,44 +216,73 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
     return true;
   };
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     setErrorMessage('');
     if (!name) {
       setErrorMessage('Please provide a valid name for analysis.');
       return;
     }
 
-    UpdateAnalysis(
-      connectionConfig,
-      assistantId,
-      analysisId!,
-      name,
-      endpointId,
-      'latest',
-      priority,
-      parameters.map(p => ({ key: `${p.type}.${p.key}`, value: p.value })),
-      (err, response) => {
-        if (err) {
-          setErrorMessage('Unable to update assistant analysis, please check and try again.');
-          return;
-        }
-        if (response?.getSuccess()) {
-          toast.success(`Assistant's analysis updated successfully`);
-          navigator.goToConfigureAssistantAnalysis(assistantId);
-        } else {
-          setErrorMessage(
-            response?.getError()?.getHumanmessage() ||
-            'Unable to update assistant analysis, please check and try again.',
-          );
-        }
+    const keys = parameters.map(p => `${p.type}.${p.key}`);
+    const reservedKey = keys.find(key => RESERVED_OPTION_KEYS.has(key));
+    if (reservedKey) {
+      setErrorMessage(`${reservedKey} is reserved and managed by analysis options.`);
+      return;
+    }
+
+    const endpointParameters = Object.fromEntries(
+      parameters.map(p => [`${p.type}.${p.key}`, p.value]),
+    );
+
+    const request = new UpdateAssistantAnalysisRequest();
+    request.setAssistantid(assistantId);
+    request.setId(analysisId!);
+    request.setProvider('endpoint');
+    request.setName(name);
+    request.setDescription(description);
+    request.setExecutionpriority(priority);
+
+    const options: Metadata[] = [];
+    [
+      { key: 'endpoint_id', value: endpointId },
+      { key: 'endpoint_version', value: 'latest' },
+      {
+        key: 'endpoint_parameters',
+        value: JSON.stringify(endpointParameters),
       },
       {
+        key: ANALYSIS_CONDITION_OPTION_KEY,
+        value: JSON.stringify(sourceConditions),
+      },
+    ].forEach(({ key, value }) => {
+      const item = new Metadata();
+      item.setKey(key);
+      item.setValue(value);
+      options.push(item);
+    });
+    request.setOptionsList(options);
+
+    try {
+      const response = await UpdateAnalysis(connectionConfig, request, {
         'x-auth-id': authId,
         authorization: token,
         'x-project-id': projectId,
-      },
-      description,
-    );
+      });
+
+      if (response?.getSuccess()) {
+        toast.success(`Assistant's analysis updated successfully`);
+        navigator.goToConfigureAssistantAnalysis(assistantId);
+      } else {
+        setErrorMessage(
+          response?.getError()?.getHumanmessage() ||
+            'Unable to update assistant analysis, please check and try again.',
+        );
+      }
+    } catch {
+      setErrorMessage(
+        'Unable to update assistant analysis, please check and try again.',
+      );
+    }
   };
 
   return (
@@ -276,25 +297,61 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
           {
             code: 'configure',
             name: 'Configure',
-            description: 'Select the endpoint and map the data parameters for analysis.',
+            description:
+              'Select the endpoint and map the data parameters for analysis.',
             actions: [
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <SecondaryButton size="lg" onClick={() => showDialog(navigator.goBack)}>
+                <SecondaryButton
+                  size="lg"
+                  onClick={() => showDialog(navigator.goBack)}
+                >
                   Cancel
                 </SecondaryButton>
-                <PrimaryButton size="lg" onClick={() => { if (validateConfigure()) setActiveTab('profile'); }}>
+                <PrimaryButton
+                  size="lg"
+                  onClick={() => {
+                    if (validateConfigure()) setActiveTab('profile');
+                  }}
+                >
                   Continue
                 </PrimaryButton>
               </ButtonSet>,
             ],
             body: (
-              <div className="px-8 pt-6 pb-8 max-w-4xl">
-                <Stack gap={7}>
+              <div>
+                <InputGroup title="Execution conditions (Optional)">
+                  <SourceConditionRule
+                    conditions={sourceConditions}
+                    onChangeConditions={setSourceConditions}
+                    conditionOptions={ASSISTANT_CONDITION_OPERATOR_OPTIONS}
+                    sourceOptions={ASSISTANT_CONDITION_SOURCE_OPTIONS}
+                    keyOptions={ASSISTANT_CONDITION_KEY_OPTIONS}
+                    valueOptionsByKey={ASSISTANT_CONDITION_VALUE_OPTIONS_BY_KEY}
+                    keyTooltipText="The variable to evaluate before running this analysis."
+                  />
+                </InputGroup>
+                <Stack gap={7} className="px-8 pt-6 pb-8 max-w-4xl">
                   <EndpointDropdown
                     currentEndpoint={endpointId}
-                    onChangeEndpoint={(e: Endpoint) => { if (e) setEndpointId(e.getId()); }}
+                    onChangeEndpoint={(e: Endpoint) => {
+                      if (e) setEndpointId(e.getId());
+                    }}
                   />
-                  <ParameterEditor parameters={parameters} onChange={setParameters} />
+                  <AssistantMappingTable
+                    parameters={parameters}
+                    onChange={setParameters}
+                    typeOptions={PARAM_TYPE_OPTIONS}
+                    includeEmptyKeyOption
+                    createNewParameter={() => ({
+                      type: 'assistant',
+                      key: '',
+                      value: '',
+                    })}
+                    title="Parameters"
+                    addButtonLabel="Add parameter"
+                    valuePlaceholder="Variable name"
+                    removeButtonKind="danger--ghost"
+                  />
                 </Stack>
               </div>
             ),
@@ -305,7 +362,10 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
             description: 'Provide a name and set the execution priority.',
             actions: [
               <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-                <SecondaryButton size="lg" onClick={() => showDialog(navigator.goBack)}>
+                <SecondaryButton
+                  size="lg"
+                  onClick={() => showDialog(navigator.goBack)}
+                >
                   Cancel
                 </SecondaryButton>
                 <PrimaryButton size="lg" onClick={onSubmit}>

@@ -13,6 +13,8 @@ const providerLabels: Record<string, string> = {
   mistral: 'Mistral',
   cohere: 'Cohere',
   deepseek: 'DeepSeek',
+  'custom-tts': 'Custom TTS',
+  'custom-stt': 'Custom STT',
 };
 
 export const ProviderTag: FC<{ provider?: string }> = ({ provider }) => {
@@ -21,7 +23,7 @@ export const ProviderTag: FC<{ provider?: string }> = ({ provider }) => {
 
   return (
     <Tag size="md" type="cool-gray" className="!inline-flex !items-center">
-      <span className="inline-flex items-center gap-1.5 leading-none [&>svg]:block">
+      <span className="flex items-center gap-1.5 leading-none [&>svg]:block">
         <Ai size={16} />
         {label}
       </span>

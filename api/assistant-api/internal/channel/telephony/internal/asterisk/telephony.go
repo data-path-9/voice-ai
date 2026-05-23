@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
@@ -71,11 +72,25 @@ func (apt *asteriskTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallIn
 		return nil, fmt.Errorf("missing caller information in query params")
 	}
 
+	dialedNumber := c.Query("to")
+	if dialedNumber == "" {
+		dialedNumber = c.Query("extension")
+	}
+	if dialedNumber == "" {
+		dialedNumber = c.Query("dnid")
+	}
+
+	payload := map[string]string{"from": clientNumber}
+	if dialedNumber != "" {
+		payload["to"] = dialedNumber
+	}
+
 	info := &internal_type.CallInfo{
 		CallerNumber: clientNumber,
+		FromNumber:   dialedNumber,
 		Provider:     asteriskProvider,
 		Status:       "SUCCESS",
-		StatusInfo:   internal_type.StatusInfo{Event: "webhook", Payload: map[string]string{"from": clientNumber}},
+		StatusInfo:   internal_type.StatusInfo{Event: "webhook", Payload: payload},
 	}
 	if channelID := c.Query("channel_id"); channelID != "" {
 		info.ChannelUUID = channelID
@@ -87,7 +102,7 @@ func (apt *asteriskTelephony) OutboundCall(
 	auth types.SimplePrinciple,
 	toPhone string,
 	fromPhone string,
-	assistantId, assistantConversationId uint64,
+	assistant *internal_assistant_entity.Assistant, assistantConversationId uint64,
 	vaultCredential *protos.VaultCredential,
 	opts utils.Option,
 ) (*internal_type.CallInfo, error) {
@@ -151,7 +166,7 @@ func (apt *asteriskTelephony) OutboundCall(
 
 	if !hasDialplan {
 		params.Set("app", appName)
-		params.Set("appArgs", fmt.Sprintf("incoming,assistant_id=%d,conversation_id=%d", assistantId, assistantConversationId))
+		params.Set("appArgs", fmt.Sprintf("incoming,assistant_id=%d,conversation_id=%d", assistant.Id, assistantConversationId))
 	}
 
 	channelVars := map[string]string{}

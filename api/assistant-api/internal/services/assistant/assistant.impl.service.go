@@ -167,6 +167,9 @@ func (eService *assistantService) Get(ctx context.Context,
 	assistantId uint64,
 	assistantProviderId *uint64,
 	opts *internal_services.GetAssistantOption) (*internal_assistant_entity.Assistant, error) {
+	if opts == nil {
+		opts = &internal_services.GetAssistantOption{}
+	}
 	start := time.Now()
 	db := eService.postgres.DB(ctx)
 
@@ -181,6 +184,10 @@ func (eService *assistantService) Get(ctx context.Context,
 		if *auth.GetCurrentOrganizationId() != assistant.OrganizationId || *auth.GetCurrentProjectId() != assistant.ProjectId {
 			return nil, fmt.Errorf("you don't have access to the assistant")
 		}
+	}
+
+	if assistantProviderId != nil {
+		assistant.AssistantProviderId = *assistantProviderId
 	}
 
 	// get assistant
@@ -215,6 +222,26 @@ func (eService *assistantService) Get(ctx context.Context,
 				}
 				assistant.AssistantTelemetryProviders = providers
 
+			})
+	}
+
+	if opts.InjectAuthentication {
+		wg.Add(1)
+		utils.Go(ctx,
+			func() {
+				defer wg.Done()
+				var authentication *internal_assistant_entity.AssistantAuthentication
+				tx := db.Preload("AssistantAuthenticationOption", "status = ?", type_enums.RECORD_ACTIVE).
+					Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE).
+					Order(clause.OrderByColumn{
+						Column: clause.Column{Name: "created_date"},
+						Desc:   true,
+					}).
+					First(&authentication)
+				if tx.Error != nil {
+					return
+				}
+				assistant.AssistantAuthentication = authentication
 			})
 	}
 
@@ -365,10 +392,6 @@ func (eService *assistantService) Get(ctx context.Context,
 	}
 
 	if opts.InjectAssistantProvider {
-		if assistantProviderId != nil {
-			assistant.AssistantProviderId = *assistantProviderId
-		}
-
 		wg.Add(1)
 		utils.Go(ctx,
 			func() {
@@ -426,9 +449,10 @@ func (eService *assistantService) Get(ctx context.Context,
 				defer wg.Done()
 				var webhooks []*internal_assistant_entity.AssistantWebhook
 				tx := db.
+					Preload("AssistantWebhookOption", "status = ?", type_enums.RECORD_ACTIVE).
 					Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE.String()).
-					Find(&webhooks).
-					Order("execution_priority DESC")
+					Order("execution_priority DESC").
+					Find(&webhooks)
 				if tx.Error != nil {
 					return
 				}
@@ -443,9 +467,10 @@ func (eService *assistantService) Get(ctx context.Context,
 				defer wg.Done()
 				var analysis []*internal_assistant_entity.AssistantAnalysis
 				tx := db.
+					Preload("AssistantAnalysisOption", "status = ?", type_enums.RECORD_ACTIVE).
 					Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE.String()).
-					Find(&analysis).
-					Order("execution_priority DESC")
+					Order("execution_priority DESC").
+					Find(&analysis)
 				if tx.Error != nil {
 					return
 				}

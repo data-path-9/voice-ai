@@ -21,7 +21,16 @@ func (assistantApi *assistantGrpcApi) CreateAssistantAnalysis(ctx context.Contex
 		assistantApi.logger.Errorf("unauthenticated request for invoke")
 		return exceptions.AuthenticationError[assistant_api.GetAssistantAnalysisResponse]()
 	}
-	wl, err := assistantApi.assistantAnalysisService.Create(ctx, iAuth, cawr.GetAssistantId(), cawr.GetName(), cawr.GetEndpointId(), cawr.GetEndpointVersion(), cawr.GetEndpointParameters(), cawr.GetExecutionPriority(), &cawr.Description)
+	wl, err := assistantApi.assistantAnalysisService.Create(
+		ctx,
+		iAuth,
+		cawr.GetAssistantId(),
+		cawr.GetProvider(),
+		cawr.GetName(),
+		cawr.GetOptions(),
+		cawr.GetExecutionPriority(),
+		&cawr.Description,
+	)
 	if err != nil {
 		return exceptions.BadRequestError[assistant_api.GetAssistantAnalysisResponse]("Unable to create assistant analysis.")
 	}

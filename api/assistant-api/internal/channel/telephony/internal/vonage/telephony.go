@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
@@ -93,7 +94,7 @@ func (vng *vonageTelephony) OutboundCall(
 	auth types.SimplePrinciple,
 	toPhone string,
 	fromPhone string,
-	assistantId, assistantConversationId uint64,
+	assistant *internal_assistant_entity.Assistant, assistantConversationId uint64,
 	vaultCredential *protos.VaultCredential,
 	opts utils.Option,
 ) (*internal_type.CallInfo, error) {
@@ -112,10 +113,10 @@ func (vng *vonageTelephony) OutboundCall(
 	connectAction := ncco.Ncco{}
 	nccoConnect := ncco.ConnectAction{
 		EventType: "synchronous",
-		EventUrl:  []string{fmt.Sprintf("https://%s/%s", vng.appCfg.PublicAssistantHost, internal_type.GetContextEventPath(vonageProvider, contextID))},
+		EventUrl:  []string{fmt.Sprintf("https://%s/%s", vng.appCfg.Assistant.Public, internal_type.GetContextEventPath(vonageProvider, contextID))},
 		Endpoint: []ncco.Endpoint{ncco.WebSocketEndpoint{
 			Uri: fmt.Sprintf("wss://%s/%s",
-				vng.appCfg.PublicAssistantHost,
+				vng.appCfg.Assistant.Public,
 				internal_type.GetContextAnswerPath(vonageProvider, contextID)),
 			ContentType: "audio/l16;rate=16000",
 		}},
@@ -157,12 +158,12 @@ func (vng *vonageTelephony) InboundCall(c *gin.Context, auth types.SimplePrincip
 		{
 			"action":    "connect",
 			"eventType": "synchronous",
-			"eventUrl":  []string{fmt.Sprintf("https://%s/%s", vng.appCfg.PublicAssistantHost, internal_type.GetContextEventPath("vonage", ctxID))},
+			"eventUrl":  []string{fmt.Sprintf("https://%s/%s", vng.appCfg.Assistant.Public, internal_type.GetContextEventPath("vonage", ctxID))},
 			"endpoint": []gin.H{
 				{
 					"type": "websocket",
 					"uri": fmt.Sprintf("wss://%s/%s",
-						vng.appCfg.PublicAssistantHost,
+						vng.appCfg.Assistant.Public,
 						internal_type.GetContextAnswerPath("vonage", ctxID)),
 					"content-type": "audio/l16;rate=16000",
 				},

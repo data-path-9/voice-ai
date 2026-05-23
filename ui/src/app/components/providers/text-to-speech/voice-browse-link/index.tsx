@@ -9,7 +9,6 @@ export const VoiceBrowseLink: React.FC<{ href: string }> = ({ href }) => (
   <SecondaryButton
     size="md"
     as="a"
-    target="_blank"
     href={href}
     className="h-10 text-sm p-2 px-3 bg-light-background max-w-full dark:bg-gray-950 border-b"
   >

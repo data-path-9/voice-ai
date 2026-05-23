@@ -7,13 +7,17 @@
 package internal_asterisk
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
+	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
 	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
+	internal_channel_input "github.com/rapidaai/api/assistant-api/internal/channel/input"
+	internal_telephony_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -38,6 +42,7 @@ type AudioProcessorConfig struct {
 	DownstreamConfig *protos.AudioConfig // internal format (linear16 16kHz)
 	SilenceByte      byte                // 0xFF for mu-law, 0x00 for SLIN
 	FrameSize        int                 // optimal frame size (bytes per 20ms)
+	Ambient          *internal_ambient.Config
 }
 
 // AudioProcessor handles audio conversion between Asterisk and downstream
@@ -51,18 +56,22 @@ type AudioProcessor struct {
 	downstreamConfig *protos.AudioConfig
 	silenceByte      byte
 	optimalFrameSize int
+	stateMu          sync.RWMutex
 
-	inputBuffer    *bytes.Buffer
-	inputBufferMu  sync.Mutex
-	outputBuffer   *bytes.Buffer
-	outputBufferMu sync.Mutex
+	inputBuffer  internal_channel_input.InputBuffer
+	outputBuffer internal_telephony_output.FrameBuffer
 
 	onInputAudio  func(audio []byte)
 	onOutputChunk func(chunk *AudioChunk) error
 	silenceChunk  *AudioChunk
+	ambientMixer  internal_ambient.Mixer
+	adapter       internal_telephony_output.AudioAdapter
 
 	xoffActive bool
 	xoffMu     sync.Mutex
+
+	outputSenderRunning atomic.Bool
+	outputHealth        *internal_telephony_output.HealthStats
 }
 
 func NewAudioProcessor(logger commons.Logger, cfg AudioProcessorConfig) (*AudioProcessor, error) {
@@ -83,10 +92,37 @@ func NewAudioProcessor(logger commons.Logger, cfg AudioProcessorConfig) (*AudioP
 		downstreamConfig: cfg.DownstreamConfig,
 		silenceByte:      cfg.SilenceByte,
 		optimalFrameSize: frameSize,
-		inputBuffer:      new(bytes.Buffer),
-		outputBuffer:     new(bytes.Buffer),
+		inputBuffer:      internal_channel_input.NewBytesInputBuffer(inputBufferThreshold * 2),
+		outputBuffer:     internal_telephony_output.NewBytesFrameBuffer(frameSize * 8),
+		outputHealth:     internal_telephony_output.NewHealthStats(),
 	}
-	p.silenceChunk = p.createSilenceChunk()
+	p.adapter = newAudioAdapter(p.resampler, p.downstreamConfig, p.asteriskConfig, frameSize, p.silenceByte)
+	p.silenceChunk = p.createSilenceChunk(frameSize, p.adapter.SilenceByte())
+	if cfg.AsteriskConfig != nil {
+		switch cfg.AsteriskConfig.GetAudioFormat() {
+		case protos.AudioConfig_MuLaw8:
+			ambientMixer, err := internal_ambient.NewLoopMixer(internal_ambient.MixerSpec{
+				Resampler:         p.resampler,
+				TargetAudioConfig: internal_audio.NewLinear8khzMonoAudioConfig(),
+				FrameBytes:        frameSize * 2,
+			})
+			if err == nil {
+				p.ambientMixer = ambientMixer
+			}
+		case protos.AudioConfig_LINEAR16:
+			ambientMixer, err := internal_ambient.NewLoopMixer(internal_ambient.MixerSpec{
+				Resampler:         p.resampler,
+				TargetAudioConfig: cfg.AsteriskConfig,
+				FrameBytes:        frameSize,
+			})
+			if err == nil {
+				p.ambientMixer = ambientMixer
+			}
+		}
+	}
+	if cfg.Ambient != nil {
+		_ = p.ConfigureAmbient(*cfg.Ambient)
+	}
 	return p, nil
 }
 
@@ -98,14 +134,26 @@ func (p *AudioProcessor) SetOutputChunkCallback(callback func(chunk *AudioChunk)
 	p.onOutputChunk = callback
 }
 
+func (p *AudioProcessor) ConfigureAmbient(cfg internal_ambient.Config) error {
+	if p.ambientMixer == nil {
+		return nil
+	}
+	return p.ambientMixer.Configure(cfg)
+}
+
 func (p *AudioProcessor) SetOptimalFrameSize(size int) {
 	if size > 0 {
+		p.stateMu.Lock()
 		p.optimalFrameSize = size
-		p.silenceChunk = p.createSilenceChunk()
+		p.adapter = newAudioAdapter(p.resampler, p.downstreamConfig, p.asteriskConfig, size, p.silenceByte)
+		p.silenceChunk = p.createSilenceChunk(size, p.adapter.SilenceByte())
+		p.stateMu.Unlock()
 	}
 }
 
 func (p *AudioProcessor) GetOptimalFrameSize() int {
+	p.stateMu.RLock()
+	defer p.stateMu.RUnlock()
 	return p.optimalFrameSize
 }
 
@@ -128,17 +176,11 @@ func (p *AudioProcessor) ProcessInputAudio(audio []byte) error {
 }
 
 func (p *AudioProcessor) bufferAndSendInput(audio []byte) {
-	p.inputBufferMu.Lock()
 	p.inputBuffer.Write(audio)
-
-	if p.inputBuffer.Len() < inputBufferThreshold {
-		p.inputBufferMu.Unlock()
+	audioData, ok := p.inputBuffer.DrainIfReady(inputBufferThreshold)
+	if !ok {
 		return
 	}
-
-	audioData := make([]byte, p.inputBuffer.Len())
-	p.inputBuffer.Read(audioData)
-	p.inputBufferMu.Unlock()
 
 	if p.onInputAudio != nil {
 		p.onInputAudio(audioData)
@@ -146,9 +188,7 @@ func (p *AudioProcessor) bufferAndSendInput(audio []byte) {
 }
 
 func (p *AudioProcessor) ClearInputBuffer() {
-	p.inputBufferMu.Lock()
-	p.inputBuffer.Reset()
-	p.inputBufferMu.Unlock()
+	p.inputBuffer.Clear()
 }
 
 func (p *AudioProcessor) ProcessOutputAudio(audio []byte) error {
@@ -156,38 +196,27 @@ func (p *AudioProcessor) ProcessOutputAudio(audio []byte) error {
 		return nil
 	}
 
-	converted, err := p.resampler.Resample(audio, p.downstreamConfig, p.asteriskConfig)
+	adapter := p.getAdapter()
+	converted, err := adapter.ConvertOutput(audio)
 	if err != nil {
 		return fmt.Errorf("audio conversion from downstream to asterisk format failed: %w", err)
 	}
 
-	p.outputBufferMu.Lock()
 	p.outputBuffer.Write(converted)
-	p.outputBufferMu.Unlock()
 
 	return nil
 }
 
+// Complete flushes buffered trailing bytes by padding to a full frame.
+func (p *AudioProcessor) Complete() {
+	p.outputBuffer.Complete(p.getFrameSize(), p.getAdapter().SilenceByte())
+}
+
 func (p *AudioProcessor) GetNextChunk() *AudioChunk {
-	chunkSize := p.optimalFrameSize
-	if chunkSize <= 0 {
-		chunkSize = defaultFrameSize
-	}
-
-	chunk := make([]byte, chunkSize)
-
-	p.outputBufferMu.Lock()
-	n, _ := p.outputBuffer.Read(chunk)
-	p.outputBufferMu.Unlock()
-
-	if n == 0 {
+	chunkSize := p.getFrameSize()
+	chunk, ok := p.outputBuffer.Next(chunkSize)
+	if !ok {
 		return nil
-	}
-
-	if n < chunkSize {
-		for i := n; i < chunkSize; i++ {
-			chunk[i] = p.silenceByte
-		}
 	}
 
 	return &AudioChunk{
@@ -197,20 +226,16 @@ func (p *AudioProcessor) GetNextChunk() *AudioChunk {
 }
 
 func (p *AudioProcessor) ClearOutputBuffer() {
-	p.outputBufferMu.Lock()
-	p.outputBuffer.Reset()
-	p.outputBufferMu.Unlock()
+	p.outputBuffer.Clear()
 }
 
-func (p *AudioProcessor) createSilenceChunk() *AudioChunk {
-	chunkSize := p.optimalFrameSize
+func (p *AudioProcessor) createSilenceChunk(chunkSize int, silenceByte byte) *AudioChunk {
 	if chunkSize <= 0 {
 		chunkSize = defaultFrameSize
 	}
-
 	chunk := make([]byte, chunkSize)
 	for i := range chunk {
-		chunk[i] = p.silenceByte
+		chunk[i] = silenceByte
 	}
 
 	return &AudioChunk{
@@ -224,39 +249,59 @@ func (p *AudioProcessor) RunOutputSender(ctx context.Context) {
 		p.logger.Error("RunOutputSender called without output callback set")
 		return
 	}
-
-	nextSendTime := time.Now().Add(chunkDuration)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		now := time.Now()
-		if sleepDuration := nextSendTime.Sub(now); sleepDuration > 0 {
-			time.Sleep(sleepDuration)
-		}
-
-		nextSendTime = nextSendTime.Add(chunkDuration)
-		if time.Now().After(nextSendTime) {
-			nextSendTime = time.Now().Add(chunkDuration)
-		}
-
-		if p.IsXOFF() {
-			continue
-		}
-
-		chunk := p.GetNextChunk()
-		if chunk == nil {
-			chunk = p.silenceChunk
-		}
-
-		if err := p.onOutputChunk(chunk); err != nil {
-			p.logger.Debug("Failed to send audio chunk", "error", err)
-		}
+	if !p.outputSenderRunning.CompareAndSwap(false, true) {
+		return
 	}
+	defer p.outputSenderRunning.Store(false)
+	(&internal_telephony_output.Pacer{
+		Logger:        p.logger,
+		FrameDuration: chunkDuration,
+		Provider:      p,
+		Consumer:      p,
+		Health:        p.outputHealth,
+	}).Run(ctx)
+}
+
+func (p *AudioProcessor) OutputHealthSnapshot() internal_telephony_output.HealthSnapshot {
+	if p.outputHealth == nil {
+		return internal_telephony_output.HealthSnapshot{}
+	}
+	return p.outputHealth.Snapshot()
+}
+
+func (p *AudioProcessor) applyAmbient(chunk []byte) []byte {
+	return p.getAdapter().MixAmbient(chunk, p.ambientMixer)
+}
+
+func (p *AudioProcessor) NextFrame() []byte {
+	if p.IsXOFF() {
+		return nil
+	}
+	chunk := p.GetNextChunk()
+	if chunk == nil {
+		return nil
+	}
+	return p.applyAmbient(chunk.Data)
+}
+
+func (p *AudioProcessor) IdleFrame() []byte {
+	if p.IsXOFF() {
+		return nil
+	}
+	frame := p.applyAmbient(nil)
+	if len(frame) > 0 {
+		return frame
+	}
+	p.stateMu.RLock()
+	defer p.stateMu.RUnlock()
+	return append([]byte(nil), p.silenceChunk.Data...)
+}
+
+func (p *AudioProcessor) ConsumeFrame(frame []byte) error {
+	return p.onOutputChunk(&AudioChunk{
+		Data:     frame,
+		Duration: chunkDuration,
+	})
 }
 
 func (p *AudioProcessor) SetXOFF() {
@@ -275,4 +320,19 @@ func (p *AudioProcessor) IsXOFF() bool {
 	p.xoffMu.Lock()
 	defer p.xoffMu.Unlock()
 	return p.xoffActive
+}
+
+func (p *AudioProcessor) getFrameSize() int {
+	p.stateMu.RLock()
+	defer p.stateMu.RUnlock()
+	if p.optimalFrameSize <= 0 {
+		return defaultFrameSize
+	}
+	return p.optimalFrameSize
+}
+
+func (p *AudioProcessor) getAdapter() internal_telephony_output.AudioAdapter {
+	p.stateMu.RLock()
+	defer p.stateMu.RUnlock()
+	return p.adapter
 }

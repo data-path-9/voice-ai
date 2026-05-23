@@ -19,9 +19,6 @@ const (
 	// ComponentSession is the conversation session lifecycle.
 	ComponentSession = "session"
 
-	// ComponentSIP is the SIP signaling layer.
-	ComponentSIP = "sip"
-
 	// ComponentTelephony is the telephony provider layer (Twilio, Asterisk, etc.)
 	ComponentTelephony = "telephony"
 
@@ -62,10 +59,13 @@ const (
 
 const (
 	EventConnected            = "connected"
+	EventInitializing         = "initializing"
+	EventInitialized          = "initialized"
 	EventConnectFailed        = "connect_failed"
 	EventDisconnected         = "disconnected"
 	EventDisconnectRequested  = "disconnect_requested"
 	EventCompleted            = "completed"
+	EventCleanup              = "cleanup"
 	EventModeSwitch           = "mode_switch"
 	EventResumed              = "resumed"
 	EventSessionResolved      = "session_resolved"
@@ -104,15 +104,25 @@ const (
 	EventResume            = "resume"
 	EventReInvite          = "reinvite"
 	EventTransferRequested = "transfer_requested"
+	EventTransferring      = "transferring"
+	EventTransferConnected = "transfer_connected"
+	EventTransferCompleted = "transfer_completed"
+	EventTransferFailed    = "transfer_failed"
 	EventRegisterActive    = "register_active"
 	EventRegisterFailed    = "register_failed"
 	EventDTMF              = "dtmf"
 
 	// --- WebRTC-specific ---
-	EventICEConnected     = "ice_connected"
-	EventICEFailed        = "ice_failed"
-	EventPeerConnected    = "peer_connected"
-	EventPeerDisconnected = "peer_disconnected"
+	EventICEConnected       = "ice_connected"
+	EventICEFailed          = "ice_failed"
+	EventPeerConnected      = "peer_connected"
+	EventPeerFailed         = "peer_failed"
+	EventPeerDisconnected   = "peer_disconnected"
+	EventAudioTrackReceived = "audio_track_received"
+
+	// --- Tool ---
+	EventToolCallStarted   = "tool_call_started"
+	EventToolCallCompleted = "tool_call_completed"
 
 	// --- Recording ---
 	EventRecordingStarted = "recording_started"
@@ -140,6 +150,9 @@ const (
 	// --- SIP ---
 	MetricSIPRegisterFailure = "sip.register_failure"
 
+	// --- Transfer ---
+	MetricTransferDurationMs = "transfer.bridge_duration_ms"
+
 	// --- RTP ---
 	MetricRTPPacketsSent     = "rtp.packets_sent"
 	MetricRTPPacketsReceived = "rtp.packets_received"
@@ -147,7 +160,8 @@ const (
 	MetricRTPBytesReceived   = "rtp.bytes_received"
 
 	// --- WebRTC ---
-	MetricICELatencyMs = "webrtc.ice_latency_ms"
+	MetricICELatencyMs           = "webrtc.ice_latency_ms"
+	MetricWebRTCOutputQueueDrops = "webrtc.output_queue_dropped_frames"
 
 	// --- Telephony ---
 	MetricTelephonyStatus = "telephony.status"
@@ -158,23 +172,26 @@ const (
 // =============================================================================
 
 const (
-	DataType      = "type"
-	DataProvider  = "provider"
-	DataDirection = "direction"
-	DataReason    = "reason"
-	DataError     = "error"
-	DataStage     = "stage"
-	DataDID       = "did"
-	DataCaller    = "caller"
-	DataCallee    = "callee"
-	DataContextID = "context_id"
-	DataCodec     = "codec"
-	DataMode      = "mode"
-	DataFrom      = "from"
-	DataTo        = "to"
-	DataDuration  = "duration_ms"
-	DataMessages  = "messages"
-	DataDigit     = "digit"
+	DataType           = "type"
+	DataProvider       = "provider"
+	DataDirection      = "direction"
+	DataReason         = "reason"
+	DataError          = "error"
+	DataStage          = "stage"
+	DataDID            = "did"
+	DataCaller         = "caller"
+	DataCallee         = "callee"
+	DataContextID      = "context_id"
+	DataCodec          = "codec"
+	DataMode           = "mode"
+	DataFrom           = "from"
+	DataTo             = "to"
+	DataDuration       = "duration_ms"
+	DataMessages       = "messages"
+	DataDigit          = "digit"
+	DataTarget         = "target"
+	DataOutboundCallID = "outbound_call_id"
+	DataStatus         = "status"
 )
 
 // =============================================================================
@@ -193,11 +210,15 @@ const (
 )
 
 // ClientMetadata returns standardized client metadata for a conversation.
-// Called from both session.go (telephony channels) and media.go (SIP).
+// Each field is emitted only when non-empty so callers can pass "" for fields
+// already covered by ConversationInitialization.Metadata.
 func ClientMetadata(phone, assistantPhone, direction, provider, providerCallID, contextID, codec, sampleRate string) []*types.Metadata {
-	md := []*types.Metadata{
-		types.NewMetadata(ClientDirection, direction),
-		types.NewMetadata(ClientTelephonyProvider, provider),
+	md := make([]*types.Metadata, 0, 8)
+	if direction != "" {
+		md = append(md, types.NewMetadata(ClientDirection, direction))
+	}
+	if provider != "" {
+		md = append(md, types.NewMetadata(ClientTelephonyProvider, provider))
 	}
 	if phone != "" {
 		md = append(md, types.NewMetadata(ClientPhone, phone))

@@ -104,7 +104,6 @@ func (cst *sarvamSpeechToText) readLoop(conn *websocket.Conn) {
 			return
 		default:
 		}
-
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			cst.mu.Lock()
@@ -115,6 +114,11 @@ func (cst *sarvamSpeechToText) readLoop(conn *websocket.Conn) {
 			cst.mu.Unlock()
 			if !intentional {
 				cst.logger.Errorf("sarvam-stt: connection lost: %v", err)
+				cst.onPacket(internal_type.SpeechToTextErrorPacket{
+					ContextID: cst.contextId,
+					Error:     fmt.Errorf("sarvam-stt: connection lost: %w", err),
+					Type:      internal_type.STTNetworkTimeout,
+				})
 			}
 			return
 		}
@@ -196,14 +200,10 @@ func (cst *sarvamSpeechToText) handleServerError(response sarvam_internal.Sarvam
 		return
 	}
 	cst.logger.Errorf("sarvam-stt: server error code=%s message=%s", errorData.Code, errorData.Error)
-	cst.onPacket(internal_type.ConversationEventPacket{
+	cst.onPacket(internal_type.SpeechToTextErrorPacket{
 		ContextID: cst.contextId,
-		Name:      "stt",
-		Data: map[string]string{
-			"type":    "error",
-			"message": errorData.Error,
-		},
-		Time: time.Now(),
+		Error:     fmt.Errorf("sarvam-stt: server error: %s (code=%s)", errorData.Error, errorData.Code),
+		Type:      internal_type.STTNetworkTimeout,
 	})
 }
 
@@ -214,31 +214,36 @@ func (cst *sarvamSpeechToText) Transform(ctx context.Context, in internal_type.P
 		cst.contextId = pkt.ContextID
 		cst.mu.Unlock()
 		return nil
-	case internal_type.InterruptionDetectedPacket:
+	case internal_type.SpeechToTextInterruptPacket:
 		cst.mu.Lock()
-		if pkt.Source == internal_type.InterruptionSourceVad && cst.startedAt.IsZero() {
+		if cst.startedAt.IsZero() {
 			cst.startedAt = time.Now()
 		}
 		cst.mu.Unlock()
 		return nil
-	case internal_type.UserAudioReceivedPacket:
+	case internal_type.SpeechToTextAudioPacket:
 		vl, err := cst.speechToTextMessage(pkt.Audio)
 		if err != nil {
 			return fmt.Errorf("sarvam-stt: failed to encode audio: %w", err)
 		}
-
 		cst.mu.Lock()
 		connection := cst.connection
-		cst.mu.Unlock()
-
+		ctxID := cst.contextId
 		if connection == nil {
-			return fmt.Errorf("sarvam-stt: connection is not initialized")
+			cst.mu.Unlock()
+			return nil
 		}
-
-		if err := connection.WriteMessage(websocket.TextMessage, vl); err != nil {
-			return fmt.Errorf("sarvam-stt: failed to send audio: %w", err)
+		err = connection.WriteMessage(websocket.TextMessage, vl)
+		cst.mu.Unlock()
+		if err != nil {
+			cst.logger.Errorf("sarvam-stt: error sending audio: %v", err)
+			cst.onPacket(internal_type.SpeechToTextErrorPacket{
+				ContextID: ctxID,
+				Error:     fmt.Errorf("sarvam-stt: send failed: %w", err),
+				Type:      internal_type.STTSystemPanic,
+			})
+			return nil
 		}
-
 		return nil
 	default:
 		return nil

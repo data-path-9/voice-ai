@@ -7,9 +7,12 @@ package storages
 
 import (
 	"context"
+	"time"
 
 	"github.com/rapidaai/pkg/configs"
 )
+
+const FileWriteTimeout = 45 * time.Second
 
 // such as Store or GetUrl.
 type StorageOutput struct {

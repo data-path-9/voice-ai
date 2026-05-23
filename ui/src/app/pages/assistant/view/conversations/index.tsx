@@ -8,7 +8,7 @@ import {
 import { useCredential } from '@/hooks/use-credential';
 import { useRapidaStore } from '@/hooks/use-rapida-store';
 import toast from 'react-hot-toast/headless';
-import { toDate, toDateString } from '@/utils/date';
+import { toDate, toDateString, toHumanReadableDateTime } from '@/utils/date';
 import { useAssistantConversationListPageStore } from '@/hooks/use-assistant-conversation-list-page-store';
 import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
 import SourceIndicator from '@/app/components/indicators/source';
@@ -30,9 +30,8 @@ import {
   TableToolbarContent,
   TableToolbarSearch,
   Loading,
-  DefinitionTooltip,
+  Link,
 } from '@carbon/react';
-import { TableLink } from '@/app/components/carbon/table-link';
 import { Pagination } from '@/app/components/carbon/pagination';
 import { IconOnlyButton } from '@/app/components/carbon/button';
 import { DateFilter } from '@/app/components/carbon/date-filter';
@@ -68,8 +67,16 @@ export function Conversations({ currentAssistant }: ConversationProps) {
 
   const onDateSelect = (to: Date, from: Date) => {
     assistantConversationListAction.setCriterias([
-      { k: 'assistant_conversations.created_date', v: toDateString(from), logic: '>=' },
-      { k: 'assistant_conversations.created_date', v: toDateString(to), logic: '<=' },
+      {
+        k: 'assistant_conversations.created_date',
+        v: toDateString(from),
+        logic: '>=',
+      },
+      {
+        k: 'assistant_conversations.created_date',
+        v: toDateString(to),
+        logic: '<=',
+      },
     ]);
   };
 
@@ -86,13 +93,25 @@ export function Conversations({ currentAssistant }: ConversationProps) {
       const [, filterType, filterValue] = match;
       switch (filterType) {
         case 'id':
-          criterias.push({ k: 'assistant_conversations.id', v: filterValue, logic: '=' });
+          criterias.push({
+            k: 'assistant_conversations.id',
+            v: filterValue,
+            logic: '=',
+          });
           break;
         case 'source':
-          criterias.push({ k: 'assistant_conversations.source', v: filterValue, logic: '=' });
+          criterias.push({
+            k: 'assistant_conversations.source',
+            v: filterValue,
+            logic: '=',
+          });
           break;
         case 'status':
-          criterias.push({ k: 'assistant_conversations.status', v: filterValue, logic: '=' });
+          criterias.push({
+            k: 'assistant_conversations.status',
+            v: filterValue,
+            logic: '=',
+          });
           break;
       }
     }
@@ -195,7 +214,9 @@ export function Conversations({ currentAssistant }: ConversationProps) {
     setDownloading(false);
   };
 
-  const visibleColumns = assistantConversationListAction.columns.filter(c => c.visible);
+  const visibleColumns = assistantConversationListAction.columns.filter(
+    c => c.visible,
+  );
 
   return (
     <div className="h-full flex flex-col flex-1">
@@ -262,30 +283,36 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                 (row, idx) => (
                   <TableRow key={idx}>
                     {assistantConversationListAction.visibleColumn('id') && (
-                      <TableCell>
-                        <TableLink
+                      <TableCell className="text-sm">
+                        <Link
                           href={`/deployment/assistant/${row.getAssistantid()}/sessions/${row.getId()}`}
+                          className="!text-sm !inline-flex !items-center !gap-1"
                         >
-                          {row.getId()}
-                        </TableLink>
+                          <span>{row.getId()}</span>
+                          <Launch size={12} />
+                        </Link>
                       </TableCell>
                     )}
                     {assistantConversationListAction.visibleColumn(
                       'assistant_id',
-                    ) && <TableCell className="!text-xs">{row.getAssistantid()}</TableCell>}
+                    ) && (
+                      <TableCell className="text-sm">
+                        {row.getAssistantid()}
+                      </TableCell>
+                    )}
 
                     {assistantConversationListAction.visibleColumn(
                       'assistant_provider_model_id',
                     ) && (
-                      <TableCell className="!text-xs">
-                        {`vrsn_${row.getAssistantprovidermodelid()}`}
+                      <TableCell className="font-mono text-[13px]">
+                        vrsn_{row.getAssistantprovidermodelid()}
                       </TableCell>
                     )}
 
                     {assistantConversationListAction.visibleColumn(
                       'direction',
                     ) && (
-                      <TableCell>
+                      <TableCell className="text-sm">
                         <ConversationDirectionIndicator
                           direction={row.getDirection() || 'inbound'}
                         />
@@ -294,12 +321,14 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                     {assistantConversationListAction.visibleColumn(
                       'identifier',
                     ) && (
-                      <TableCell className="max-w-[160px] truncate">
+                      <TableCell className="max-w-[160px] truncate text-sm">
                         {row.getIdentifier()}
                       </TableCell>
                     )}
-                    {assistantConversationListAction.visibleColumn('source') && (
-                      <TableCell>
+                    {assistantConversationListAction.visibleColumn(
+                      'source',
+                    ) && (
+                      <TableCell className="text-sm">
                         <SourceIndicator source={row.getSource()} />
                       </TableCell>
                     )}
@@ -307,13 +336,15 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                     {assistantConversationListAction.visibleColumn(
                       'duration',
                     ) && (
-                      <TableCell className="!text-xs tabular-nums">
+                      <TableCell className="text-sm tabular-nums">
                         {getConversationDuration(row.getMetricsList())}
                       </TableCell>
                     )}
 
-                    {assistantConversationListAction.visibleColumn('action') && (
-                      <TableCell>
+                    {assistantConversationListAction.visibleColumn(
+                      'action',
+                    ) && (
+                      <TableCell className="text-sm">
                         <div className="flex items-center gap-0">
                           {row.getTelephonyeventsList().length > 0 && (
                             <IconOnlyButton
@@ -322,7 +353,9 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                               renderIcon={Phone}
                               iconDescription="View telephony status"
                               onClick={() => {
-                                setTelephonyEvents(row.getTelephonyeventsList());
+                                setTelephonyEvents(
+                                  row.getTelephonyeventsList(),
+                                );
                                 setTelephonyStatusOpen(true);
                               }}
                             />
@@ -358,8 +391,10 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                       </TableCell>
                     )}
 
-                    {assistantConversationListAction.visibleColumn('status') && (
-                      <TableCell>
+                    {assistantConversationListAction.visibleColumn(
+                      'status',
+                    ) && (
+                      <TableCell className="text-sm">
                         <CarbonStatusIndicator
                           state={getStatusMetric(row.getMetricsList())}
                         />
@@ -369,15 +404,10 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                     {assistantConversationListAction.visibleColumn(
                       'created_date',
                     ) && (
-                      <TableCell className="!text-xs whitespace-nowrap">
-                        {row.getCreateddate() && (
-                          <DefinitionTooltip
-                            definition={toDate(row.getCreateddate()!).toUTCString()}
-                            openOnHover
-                          >
-                            {toDate(row.getCreateddate()!).toLocaleString()}
-                          </DefinitionTooltip>
-                        )}
+                      <TableCell className="text-[13px] whitespace-nowrap">
+                        {row.getCreateddate()
+                          ? toHumanReadableDateTime(row.getCreateddate()!)
+                          : '—'}
                       </TableCell>
                     )}
                   </TableRow>

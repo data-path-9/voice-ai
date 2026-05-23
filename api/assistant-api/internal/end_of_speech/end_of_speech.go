@@ -7,6 +7,7 @@ package internal_end_of_speech
 
 import (
 	"context"
+	"fmt"
 
 	internal_livekit "github.com/rapidaai/api/assistant-api/internal/end_of_speech/internal/livekit"
 	internal_pipecat "github.com/rapidaai/api/assistant-api/internal/end_of_speech/internal/pipecat"
@@ -25,37 +26,21 @@ const (
 	EndOfSpeechOptionsKeyProvider                       = "microphone.eos.provider"
 )
 
-func GetEndOfSpeech(ctx context.Context, logger commons.Logger, onCallback func(context.Context, ...internal_type.Packet) error, opts utils.Option) (internal_type.EndOfSpeech, error) {
-	switch resolveEndOfSpeechProvider(opts) {
+func GetEndOfSpeech(
+	_ context.Context,
+	logger commons.Logger,
+	onCallback func(context.Context, ...internal_type.Packet) error,
+	opts utils.Option,
+) (internal_type.EndOfSpeechExecutor, error) {
+	provider, _ := opts.GetString(EndOfSpeechOptionsKeyProvider)
+	switch EndOfSpeechIdentifier(provider) {
 	case SilenceBasedEndOfSpeech:
 		return internal_silence_based.NewSilenceBasedEndOfSpeech(logger, onCallback, opts)
 	case LiveKitEndOfSpeech:
 		return internal_livekit.NewLivekitEndOfSpeech(logger, onCallback, opts)
 	case PipecatSmartTurnEndOfSpeech:
-		eos, err := internal_pipecat.NewPipecatEndOfSpeech(logger, onCallback, opts)
-		if err == nil {
-			return eos, nil
-		}
-		if logger != nil {
-			logger.Warnf("pipecat eos initialization failed, falling back to silence based eos: %v", err)
-		}
-		return internal_silence_based.NewSilenceBasedEndOfSpeech(logger, onCallback, opts)
+		return internal_pipecat.NewPipecatEndOfSpeech(logger, onCallback, opts)
 	default:
-		eos, err := internal_pipecat.NewPipecatEndOfSpeech(logger, onCallback, opts)
-		if err == nil {
-			return eos, nil
-		}
-		if logger != nil {
-			logger.Warnf("default pipecat eos initialization failed, falling back to silence based eos: %v", err)
-		}
-		return internal_silence_based.NewSilenceBasedEndOfSpeech(logger, onCallback, opts)
+		return nil, fmt.Errorf("end_of_speech: unsupported provider %q", provider)
 	}
-}
-
-func resolveEndOfSpeechProvider(opts utils.Option) EndOfSpeechIdentifier {
-	provider, _ := opts.GetString(EndOfSpeechOptionsKeyProvider)
-	if EndOfSpeechIdentifier(provider) == "" {
-		return PipecatSmartTurnEndOfSpeech
-	}
-	return EndOfSpeechIdentifier(provider)
 }

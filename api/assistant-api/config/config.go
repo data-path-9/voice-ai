@@ -18,6 +18,7 @@ import (
 // SIPConfig holds the SIP server configuration
 type SIPConfig struct {
 	Server            string `mapstructure:"server"`
+	InstanceID        string `mapstructure:"instance_id"` // Unique identifier for this SIP server instance (defaults to external_ip)
 	ExternalIP        string `mapstructure:"external_ip"` // Public/reachable IP for SDP and SIP Contact headers (defaults to Server if empty)
 	Port              int    `mapstructure:"port"`
 	Transport         string `mapstructure:"transport"`
@@ -40,38 +41,36 @@ type AudioSocketConfig struct {
 }
 
 type AssistantConfig struct {
-	config.AppConfig    `mapstructure:",squash"`
-	PostgresConfig      configs.PostgresConfig    `mapstructure:"postgres" validate:"required"`
-	RedisConfig         configs.RedisConfig       `mapstructure:"redis" validate:"required"`
-	OpenSearchConfig    *configs.OpenSearchConfig `mapstructure:"opensearch"`
-	TelemetryConfig     *configs.TelemetryConfig  `mapstructure:"telemetry"`
-	WeaviateConfig      configs.WeaviateConfig    `mapstructure:"weaviate"`
-	AssetStoreConfig    configs.AssetStoreConfig  `mapstructure:"asset_store" validate:"required"`
-	PublicAssistantHost string                    `mapstructure:"public_assistant_host" validate:"required"`
-	SIPConfig           *SIPConfig                `mapstructure:"sip"`
-	AudioSocketConfig   *AudioSocketConfig        `mapstructure:"audiosocket"`
-	WebRTCConfig        *WebRTCConfig             `mapstructure:"webrtc"`
+	config.AppConfig  `mapstructure:",squash"`
+	PostgresConfig    configs.PostgresConfig    `mapstructure:"postgres" validate:"required"`
+	RedisConfig       configs.RedisConfig       `mapstructure:"redis" validate:"required"`
+	OpenSearchConfig  *configs.OpenSearchConfig `mapstructure:"opensearch"`
+	TelemetryConfig   *configs.TelemetryConfig  `mapstructure:"telemetry"`
+	WeaviateConfig    configs.WeaviateConfig    `mapstructure:"weaviate"`
+	AssetStoreConfig  configs.AssetStoreConfig  `mapstructure:"asset_store" validate:"required"`
+	SIPConfig         *SIPConfig                `mapstructure:"sip"`
+	AudioSocketConfig *AudioSocketConfig        `mapstructure:"audiosocket"`
+	WebRTCConfig      *WebRTCConfig             `mapstructure:"webrtc"`
 }
 
 // reading config and intializing configs for application
 func InitConfig() (*viper.Viper, error) {
-	vConfig := viper.NewWithOptions(viper.KeyDelimiter("__"))
+	vConfig := viper.New()
 
-	vConfig.AddConfigPath("./env/")
-	vConfig.SetConfigName(".assistant.env")
 	path := os.Getenv("ENV_PATH")
 	if path != "" {
-		log.Printf("env path %v", path)
+		log.Printf("config path %v", path)
 		vConfig.SetConfigFile(path)
-	}
-	vConfig.SetConfigType("env")
-	vConfig.AutomaticEnv()
-	if err := vConfig.ReadInConfig(); err != nil {
-		log.Printf("Error while reading the config")
+	} else {
+		vConfig.AddConfigPath("./env/")
+		vConfig.SetConfigName("assistant")
+		vConfig.SetConfigType("yaml")
 	}
 
-	if err := vConfig.ReadInConfig(); err != nil && !os.IsNotExist(err) {
-		log.Printf("Reading from env varaibles.")
+	if err := vConfig.ReadInConfig(); err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("Error while reading the config: %v", err)
+		}
 	}
 
 	return vConfig, nil
@@ -85,6 +84,7 @@ func GetApplicationConfig(v *viper.Viper) (*AssistantConfig, error) {
 		log.Printf("%+v\n", err)
 		return nil, err
 	}
+
 	// If OpenSearch config is missing any required connection field, treat as not configured
 	if config.OpenSearchConfig != nil &&
 		(config.OpenSearchConfig.Host == "" || config.OpenSearchConfig.Schema == "") {

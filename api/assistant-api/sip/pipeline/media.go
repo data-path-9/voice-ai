@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"time"
 
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	obs "github.com/rapidaai/api/assistant-api/internal/observe"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 )
@@ -45,9 +46,19 @@ func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.S
 			v.Session.End()
 			return
 		}
+		v.Session.SetConversationID(conversationID)
 	}
 
-	setup, err := d.onCallSetup(ctx, v.Session, v.Auth, v.AssistantID, conversationID)
+	var cc *callcontext.CallContext
+	if d.onEnsureCallContext != nil {
+		ensured, err := d.onEnsureCallContext(ctx, v.Session, v.Auth, v.AssistantID, conversationID, v.Direction, v.FromURI, v.ToURI)
+		if err != nil {
+			d.logger.Warnw("Pipeline: ensure call context failed", "call_id", v.ID, "error", err)
+		}
+		cc = ensured
+	}
+
+	setup, err := d.onCallSetup(ctx, v.Session, v.Auth, v.AssistantID, conversationID, cc)
 	if err != nil {
 		d.logger.Error("Pipeline: call setup failed", "call_id", v.ID, "error", err)
 		v.Session.End()
@@ -59,33 +70,20 @@ func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.S
 		observer = d.onCreateObserver(ctx, setup, v.Auth)
 	}
 
-	var hooks *obs.ConversationHooks
-	if d.onCreateHooks != nil {
-		hooks = d.onCreateHooks(ctx, v.Auth, v.AssistantID, setup.ConversationID)
-		if hooks != nil {
-			hooks.OnBegin(ctx)
-		}
-	}
-
 	if observer != nil {
-		clientPhone := sip_infra.ExtractDIDFromURI(v.FromURI)
-		if clientPhone == "" {
-			clientPhone = v.FromURI
-		}
-		// Assistant phone = our DID (To URI for inbound, From URI for outbound)
-		assistantPhone := ""
-		if info := v.Session.GetInfo(); info.LocalURI != "" {
-			assistantPhone = sip_infra.ExtractDIDFromURI(info.LocalURI)
-		}
 		codec := ""
 		sampleRate := ""
 		if negotiated := v.Session.GetNegotiatedCodec(); negotiated != nil {
 			codec = negotiated.Name
 			sampleRate = fmt.Sprintf("%d", negotiated.ClockRate)
 		}
+		// Identity keys flow through ConversationInitialization.Metadata.
+		// provider_call_id is emitted here as well because the SIP Call-ID
+		// is only known at this stage and isn't required for prompts.
 		observer.EmitMetadata(ctx, obs.ClientMetadata(
-			clientPhone, assistantPhone, string(v.Direction), "sip",
-			v.ID, "", codec, sampleRate,
+			"", "", "", "",
+			v.ID, "",
+			codec, sampleRate,
 		))
 		observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
 			obs.DataType:      obs.EventCallStarted,
@@ -107,28 +105,51 @@ func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.S
 
 			if observer != nil {
 				observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
-					obs.DataType:   obs.EventCallEnded,
-					obs.DataReason: reason,
+					obs.DataType:      obs.EventCallEnded,
+					obs.DataProvider:  "sip",
+					obs.DataDirection: string(v.Direction),
+					obs.DataReason:    reason,
 				})
 				observer.EmitMetric(ctx, obs.CallStatusMetric(status, reason))
 				observer.Shutdown(ctx)
-			}
-			if hooks != nil {
-				hooks.OnEnd(ctx)
 			}
 			if d.onCallEnd != nil {
 				d.onCallEnd(v.ID)
 			}
 
-			d.logger.Infow("Pipeline: CallEnded",
-				"call_id", v.ID,
-				"duration", fmt.Sprintf("%dms", time.Since(startTime).Milliseconds()),
-				"reason", reason,
-				"status", status)
+			d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
+				ID:       v.ID,
+				Duration: time.Since(startTime),
+				Reason:   reason,
+			})
 		}()
 		if err := d.onCallStart(ctx, v.Session, setup, v.VaultCredential, v.Config, string(v.Direction)); err != nil {
 			reason = err.Error()
 			status = "FAILED"
+		}
+
+		// Check if the call ended due to a bridge transfer — emit transfer events
+		if observer != nil {
+			if targetVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferTarget); ok {
+				if target, ok := targetVal.(string); ok && target != "" {
+					transferStatus := "failed"
+					if statusVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferStatus); ok {
+						if s, ok := statusVal.(string); ok {
+							transferStatus = s
+						}
+					}
+					reason = "transfer_" + transferStatus
+					d.logger.Infow("Pipeline: bridge transfer",
+						"call_id", v.ID, "target", target, "status", transferStatus)
+					observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
+						obs.DataType:      obs.EventTransferRequested,
+						obs.DataProvider:  "sip",
+						obs.DataDirection: string(v.Direction),
+						obs.DataTo:        target,
+						obs.DataReason:    transferStatus,
+					})
+				}
+			}
 		}
 	}()
 }

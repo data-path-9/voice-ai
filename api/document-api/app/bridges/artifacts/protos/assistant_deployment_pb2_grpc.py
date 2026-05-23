@@ -44,6 +44,16 @@ class AssistantDeploymentServiceStub(object):
                 request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
                 response_deserializer=assistant__deployment__pb2.GetAssistantApiDeploymentResponse.FromString,
                 _registered_method=True)
+        self.GetAllAssistantApiDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/GetAllAssistantApiDeployment',
+                request_serializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAllAssistantApiDeploymentResponse.FromString,
+                _registered_method=True)
+        self.DisableAssistantApiDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/DisableAssistantApiDeployment',
+                request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAssistantApiDeploymentResponse.FromString,
+                _registered_method=True)
         self.CreateAssistantWebpluginDeployment = channel.unary_unary(
                 '/assistant_api.AssistantDeploymentService/CreateAssistantWebpluginDeployment',
                 request_serializer=assistant__deployment__pb2.CreateAssistantDeploymentRequest.SerializeToString,
@@ -51,6 +61,16 @@ class AssistantDeploymentServiceStub(object):
                 _registered_method=True)
         self.GetAssistantWebpluginDeployment = channel.unary_unary(
                 '/assistant_api.AssistantDeploymentService/GetAssistantWebpluginDeployment',
+                request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAssistantWebpluginDeploymentResponse.FromString,
+                _registered_method=True)
+        self.GetAllAssistantWebpluginDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/GetAllAssistantWebpluginDeployment',
+                request_serializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAllAssistantWebpluginDeploymentResponse.FromString,
+                _registered_method=True)
+        self.DisableAssistantWebpluginDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/DisableAssistantWebpluginDeployment',
                 request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
                 response_deserializer=assistant__deployment__pb2.GetAssistantWebpluginDeploymentResponse.FromString,
                 _registered_method=True)
@@ -64,6 +84,16 @@ class AssistantDeploymentServiceStub(object):
                 request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
                 response_deserializer=assistant__deployment__pb2.GetAssistantDebuggerDeploymentResponse.FromString,
                 _registered_method=True)
+        self.GetAllAssistantDebuggerDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/GetAllAssistantDebuggerDeployment',
+                request_serializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAllAssistantDebuggerDeploymentResponse.FromString,
+                _registered_method=True)
+        self.DisableAssistantDebuggerDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/DisableAssistantDebuggerDeployment',
+                request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAssistantDebuggerDeploymentResponse.FromString,
+                _registered_method=True)
         self.CreateAssistantWhatsappDeployment = channel.unary_unary(
                 '/assistant_api.AssistantDeploymentService/CreateAssistantWhatsappDeployment',
                 request_serializer=assistant__deployment__pb2.CreateAssistantDeploymentRequest.SerializeToString,
@@ -74,6 +104,16 @@ class AssistantDeploymentServiceStub(object):
                 request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
                 response_deserializer=assistant__deployment__pb2.GetAssistantWhatsappDeploymentResponse.FromString,
                 _registered_method=True)
+        self.GetAllAssistantWhatsappDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/GetAllAssistantWhatsappDeployment',
+                request_serializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAllAssistantWhatsappDeploymentResponse.FromString,
+                _registered_method=True)
+        self.DisableAssistantWhatsappDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/DisableAssistantWhatsappDeployment',
+                request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAssistantWhatsappDeploymentResponse.FromString,
+                _registered_method=True)
         self.CreateAssistantPhoneDeployment = channel.unary_unary(
                 '/assistant_api.AssistantDeploymentService/CreateAssistantPhoneDeployment',
                 request_serializer=assistant__deployment__pb2.CreateAssistantDeploymentRequest.SerializeToString,
@@ -81,6 +121,16 @@ class AssistantDeploymentServiceStub(object):
                 _registered_method=True)
         self.GetAssistantPhoneDeployment = channel.unary_unary(
                 '/assistant_api.AssistantDeploymentService/GetAssistantPhoneDeployment',
+                request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAssistantPhoneDeploymentResponse.FromString,
+                _registered_method=True)
+        self.GetAllAssistantPhoneDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/GetAllAssistantPhoneDeployment',
+                request_serializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+                response_deserializer=assistant__deployment__pb2.GetAllAssistantPhoneDeploymentResponse.FromString,
+                _registered_method=True)
+        self.DisableAssistantPhoneDeployment = channel.unary_unary(
+                '/assistant_api.AssistantDeploymentService/DisableAssistantPhoneDeployment',
                 request_serializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
                 response_deserializer=assistant__deployment__pb2.GetAssistantPhoneDeploymentResponse.FromString,
                 _registered_method=True)
@@ -101,6 +151,18 @@ class AssistantDeploymentServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetAllAssistantApiDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DisableAssistantApiDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def CreateAssistantWebpluginDeployment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -108,6 +170,18 @@ class AssistantDeploymentServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def GetAssistantWebpluginDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAllAssistantWebpluginDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DisableAssistantWebpluginDeployment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -125,6 +199,18 @@ class AssistantDeploymentServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetAllAssistantDebuggerDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DisableAssistantDebuggerDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def CreateAssistantWhatsappDeployment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -137,6 +223,18 @@ class AssistantDeploymentServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetAllAssistantWhatsappDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DisableAssistantWhatsappDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def CreateAssistantPhoneDeployment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -144,6 +242,18 @@ class AssistantDeploymentServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def GetAssistantPhoneDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAllAssistantPhoneDeployment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DisableAssistantPhoneDeployment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -162,6 +272,16 @@ def add_AssistantDeploymentServiceServicer_to_server(servicer, server):
                     request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
                     response_serializer=assistant__deployment__pb2.GetAssistantApiDeploymentResponse.SerializeToString,
             ),
+            'GetAllAssistantApiDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAllAssistantApiDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAllAssistantApiDeploymentResponse.SerializeToString,
+            ),
+            'DisableAssistantApiDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.DisableAssistantApiDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAssistantApiDeploymentResponse.SerializeToString,
+            ),
             'CreateAssistantWebpluginDeployment': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateAssistantWebpluginDeployment,
                     request_deserializer=assistant__deployment__pb2.CreateAssistantDeploymentRequest.FromString,
@@ -169,6 +289,16 @@ def add_AssistantDeploymentServiceServicer_to_server(servicer, server):
             ),
             'GetAssistantWebpluginDeployment': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAssistantWebpluginDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAssistantWebpluginDeploymentResponse.SerializeToString,
+            ),
+            'GetAllAssistantWebpluginDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAllAssistantWebpluginDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAllAssistantWebpluginDeploymentResponse.SerializeToString,
+            ),
+            'DisableAssistantWebpluginDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.DisableAssistantWebpluginDeployment,
                     request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
                     response_serializer=assistant__deployment__pb2.GetAssistantWebpluginDeploymentResponse.SerializeToString,
             ),
@@ -182,6 +312,16 @@ def add_AssistantDeploymentServiceServicer_to_server(servicer, server):
                     request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
                     response_serializer=assistant__deployment__pb2.GetAssistantDebuggerDeploymentResponse.SerializeToString,
             ),
+            'GetAllAssistantDebuggerDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAllAssistantDebuggerDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAllAssistantDebuggerDeploymentResponse.SerializeToString,
+            ),
+            'DisableAssistantDebuggerDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.DisableAssistantDebuggerDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAssistantDebuggerDeploymentResponse.SerializeToString,
+            ),
             'CreateAssistantWhatsappDeployment': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateAssistantWhatsappDeployment,
                     request_deserializer=assistant__deployment__pb2.CreateAssistantDeploymentRequest.FromString,
@@ -192,6 +332,16 @@ def add_AssistantDeploymentServiceServicer_to_server(servicer, server):
                     request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
                     response_serializer=assistant__deployment__pb2.GetAssistantWhatsappDeploymentResponse.SerializeToString,
             ),
+            'GetAllAssistantWhatsappDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAllAssistantWhatsappDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAllAssistantWhatsappDeploymentResponse.SerializeToString,
+            ),
+            'DisableAssistantWhatsappDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.DisableAssistantWhatsappDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAssistantWhatsappDeploymentResponse.SerializeToString,
+            ),
             'CreateAssistantPhoneDeployment': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateAssistantPhoneDeployment,
                     request_deserializer=assistant__deployment__pb2.CreateAssistantDeploymentRequest.FromString,
@@ -199,6 +349,16 @@ def add_AssistantDeploymentServiceServicer_to_server(servicer, server):
             ),
             'GetAssistantPhoneDeployment': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAssistantPhoneDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAssistantPhoneDeploymentResponse.SerializeToString,
+            ),
+            'GetAllAssistantPhoneDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAllAssistantPhoneDeployment,
+                    request_deserializer=assistant__deployment__pb2.GetAllAssistantDeploymentRequest.FromString,
+                    response_serializer=assistant__deployment__pb2.GetAllAssistantPhoneDeploymentResponse.SerializeToString,
+            ),
+            'DisableAssistantPhoneDeployment': grpc.unary_unary_rpc_method_handler(
+                    servicer.DisableAssistantPhoneDeployment,
                     request_deserializer=assistant__deployment__pb2.GetAssistantDeploymentRequest.FromString,
                     response_serializer=assistant__deployment__pb2.GetAssistantPhoneDeploymentResponse.SerializeToString,
             ),
@@ -268,6 +428,60 @@ class AssistantDeploymentService(object):
             _registered_method=True)
 
     @staticmethod
+    def GetAllAssistantApiDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/GetAllAssistantApiDeployment',
+            assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAllAssistantApiDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DisableAssistantApiDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/DisableAssistantApiDeployment',
+            assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAssistantApiDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def CreateAssistantWebpluginDeployment(request,
             target,
             options=(),
@@ -309,6 +523,60 @@ class AssistantDeploymentService(object):
             request,
             target,
             '/assistant_api.AssistantDeploymentService/GetAssistantWebpluginDeployment',
+            assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAssistantWebpluginDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAllAssistantWebpluginDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/GetAllAssistantWebpluginDeployment',
+            assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAllAssistantWebpluginDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DisableAssistantWebpluginDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/DisableAssistantWebpluginDeployment',
             assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
             assistant__deployment__pb2.GetAssistantWebpluginDeploymentResponse.FromString,
             options,
@@ -376,6 +644,60 @@ class AssistantDeploymentService(object):
             _registered_method=True)
 
     @staticmethod
+    def GetAllAssistantDebuggerDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/GetAllAssistantDebuggerDeployment',
+            assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAllAssistantDebuggerDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DisableAssistantDebuggerDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/DisableAssistantDebuggerDeployment',
+            assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAssistantDebuggerDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def CreateAssistantWhatsappDeployment(request,
             target,
             options=(),
@@ -430,6 +752,60 @@ class AssistantDeploymentService(object):
             _registered_method=True)
 
     @staticmethod
+    def GetAllAssistantWhatsappDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/GetAllAssistantWhatsappDeployment',
+            assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAllAssistantWhatsappDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DisableAssistantWhatsappDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/DisableAssistantWhatsappDeployment',
+            assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAssistantWhatsappDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def CreateAssistantPhoneDeployment(request,
             target,
             options=(),
@@ -471,6 +847,60 @@ class AssistantDeploymentService(object):
             request,
             target,
             '/assistant_api.AssistantDeploymentService/GetAssistantPhoneDeployment',
+            assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAssistantPhoneDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAllAssistantPhoneDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/GetAllAssistantPhoneDeployment',
+            assistant__deployment__pb2.GetAllAssistantDeploymentRequest.SerializeToString,
+            assistant__deployment__pb2.GetAllAssistantPhoneDeploymentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DisableAssistantPhoneDeployment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/assistant_api.AssistantDeploymentService/DisableAssistantPhoneDeployment',
             assistant__deployment__pb2.GetAssistantDeploymentRequest.SerializeToString,
             assistant__deployment__pb2.GetAssistantPhoneDeploymentResponse.FromString,
             options,

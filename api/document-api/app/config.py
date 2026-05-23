@@ -116,7 +116,7 @@ class ApplicationSettings(BaseSettings):
 @functools.lru_cache()
 def get_settings() -> "ApplicationSettings":
     """Get current app settings."""
-    with open("env/config.yaml", "r") as file:
+    with open("env/document.yaml", "r") as file:
         config_data = yaml.safe_load(file)
     config = ApplicationSettings(**config_data)
     return config

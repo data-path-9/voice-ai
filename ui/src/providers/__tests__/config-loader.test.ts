@@ -191,4 +191,88 @@ describe('resolveCategoryParameters', () => {
     expect(resolved.find(p => p.key === 'model.id')).toBeDefined();
     expect(resolved.find(p => p.key === 'model.temperature')).toBeDefined();
   });
+
+  it('enables free-form model selection for openrouter', () => {
+    const config = loadProviderConfig('openrouter');
+    expect(config?.text).toBeDefined();
+
+    const modelSelector = config?.text?.parameters.find(
+      p => p.key === 'model.id',
+    );
+    expect(modelSelector).toBeDefined();
+    expect(modelSelector?.customValue).toBe(true);
+    expect(modelSelector?.strict).toBe(false);
+    expect(modelSelector?.data).toBe('text-models.json');
+  });
+
+  it('uses reasoning-style params for gpt-5.5 without sampling controls', () => {
+    const config = loadProviderConfig('openai');
+    expect(config?.text).toBeDefined();
+
+    const resolved = resolveCategoryParameters(
+      'openai',
+      'text',
+      config!.text!,
+      [
+        createMetadata('model.id', 'openai/gpt-5.5'),
+        createMetadata('model.name', 'gpt-5.5'),
+      ],
+    );
+
+    expect(resolved.find(p => p.key === 'model.id')).toBeDefined();
+    expect(resolved.find(p => p.key === 'model.max_completion_tokens')).toBeDefined();
+    expect(resolved.find(p => p.key === 'model.reasoning_effort')).toBeDefined();
+    expect(resolved.find(p => p.key === 'model.temperature')).toBeUndefined();
+    expect(resolved.find(p => p.key === 'model.top_p')).toBeUndefined();
+    expect(resolved.find(p => p.key === 'model.frequency_penalty')).toBeUndefined();
+    expect(resolved.find(p => p.key === 'model.presence_penalty')).toBeUndefined();
+    expect(resolved.find(p => p.key === 'model.seed')).toBeUndefined();
+  });
+
+  it('applies model-specific reasoning_effort choices for gpt-5 variants', () => {
+    const config = loadProviderConfig('openai');
+    expect(config?.text).toBeDefined();
+
+    const resolveChoices = (model: string) =>
+      resolveCategoryParameters(
+        'openai',
+        'text',
+        config!.text!,
+        [
+          createMetadata('model.id', `openai/${model}`),
+          createMetadata('model.name', model),
+        ],
+      ).find(p => p.key === 'model.reasoning_effort')?.choices;
+
+    const gpt55Choices = resolveChoices('gpt-5.5')?.map(c => c.value);
+    const gpt52Choices = resolveChoices('gpt-5.2')?.map(c => c.value);
+    const gpt51Choices = resolveChoices('gpt-5.1')?.map(c => c.value);
+    const gpt54MiniChoices = resolveChoices('gpt-5.4-mini')?.map(c => c.value);
+    const gpt54NanoChoices = resolveChoices('gpt-5.4-nano')?.map(c => c.value);
+
+    expect(gpt55Choices).toEqual(['none', 'low', 'medium', 'high', 'xhigh', 'xhigh']);
+    expect(gpt52Choices).toEqual(['none', 'low', 'medium', 'high', 'xhigh', 'xhigh']);
+    expect(gpt51Choices).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+    expect(gpt54MiniChoices).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+    expect(gpt54NanoChoices).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+  });
+
+  it('uses the configured reasoning effort help text for gpt-5 family', () => {
+    const config = loadProviderConfig('openai');
+    expect(config?.text).toBeDefined();
+
+    const resolved = resolveCategoryParameters(
+      'openai',
+      'text',
+      config!.text!,
+      [
+        createMetadata('model.id', 'openai/gpt-5.5'),
+        createMetadata('model.name', 'gpt-5.5'),
+      ],
+    );
+
+    const reasoningParam = resolved.find(p => p.key === 'model.reasoning_effort');
+    expect(reasoningParam).toBeDefined();
+    expect(reasoningParam?.helpText).toBeUndefined();
+  });
 });

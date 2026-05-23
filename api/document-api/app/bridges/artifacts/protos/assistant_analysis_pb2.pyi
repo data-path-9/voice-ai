@@ -11,20 +11,12 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class AssistantAnalysis(_message.Message):
-    __slots__ = ("id", "name", "description", "endpointId", "endpointVersion", "endpointParameters", "assistantId", "status", "createdBy", "createdUser", "updatedBy", "updatedUser", "createdDate", "updatedDate", "executionPriority")
-    class EndpointParametersEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: str
-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    __slots__ = ("id", "name", "description", "provider", "options", "assistantId", "status", "createdBy", "createdUser", "updatedBy", "updatedUser", "createdDate", "updatedDate", "executionPriority")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
-    ENDPOINTID_FIELD_NUMBER: _ClassVar[int]
-    ENDPOINTVERSION_FIELD_NUMBER: _ClassVar[int]
-    ENDPOINTPARAMETERS_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
     ASSISTANTID_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     CREATEDBY_FIELD_NUMBER: _ClassVar[int]
@@ -37,9 +29,8 @@ class AssistantAnalysis(_message.Message):
     id: int
     name: str
     description: str
-    endpointId: int
-    endpointVersion: str
-    endpointParameters: _containers.ScalarMap[str, str]
+    provider: str
+    options: _containers.RepeatedCompositeFieldContainer[_common_pb2.Metadata]
     assistantId: int
     status: str
     createdBy: int
@@ -49,59 +40,41 @@ class AssistantAnalysis(_message.Message):
     createdDate: _timestamp_pb2.Timestamp
     updatedDate: _timestamp_pb2.Timestamp
     executionPriority: int
-    def __init__(self, id: _Optional[int] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., endpointId: _Optional[int] = ..., endpointVersion: _Optional[str] = ..., endpointParameters: _Optional[_Mapping[str, str]] = ..., assistantId: _Optional[int] = ..., status: _Optional[str] = ..., createdBy: _Optional[int] = ..., createdUser: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., updatedBy: _Optional[int] = ..., updatedUser: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., createdDate: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updatedDate: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., executionPriority: _Optional[int] = ...) -> None: ...
+    def __init__(self, id: _Optional[int] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., provider: _Optional[str] = ..., options: _Optional[_Iterable[_Union[_common_pb2.Metadata, _Mapping]]] = ..., assistantId: _Optional[int] = ..., status: _Optional[str] = ..., createdBy: _Optional[int] = ..., createdUser: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., updatedBy: _Optional[int] = ..., updatedUser: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., createdDate: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updatedDate: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., executionPriority: _Optional[int] = ...) -> None: ...
 
 class CreateAssistantAnalysisRequest(_message.Message):
-    __slots__ = ("name", "description", "endpointId", "endpointVersion", "endpointParameters", "assistantId", "executionPriority")
-    class EndpointParametersEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: str
-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    __slots__ = ("name", "description", "provider", "options", "assistantId", "executionPriority")
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
-    ENDPOINTID_FIELD_NUMBER: _ClassVar[int]
-    ENDPOINTVERSION_FIELD_NUMBER: _ClassVar[int]
-    ENDPOINTPARAMETERS_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
     ASSISTANTID_FIELD_NUMBER: _ClassVar[int]
     EXECUTIONPRIORITY_FIELD_NUMBER: _ClassVar[int]
     name: str
     description: str
-    endpointId: int
-    endpointVersion: str
-    endpointParameters: _containers.ScalarMap[str, str]
+    provider: str
+    options: _containers.RepeatedCompositeFieldContainer[_common_pb2.Metadata]
     assistantId: int
     executionPriority: int
-    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., endpointId: _Optional[int] = ..., endpointVersion: _Optional[str] = ..., endpointParameters: _Optional[_Mapping[str, str]] = ..., assistantId: _Optional[int] = ..., executionPriority: _Optional[int] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., provider: _Optional[str] = ..., options: _Optional[_Iterable[_Union[_common_pb2.Metadata, _Mapping]]] = ..., assistantId: _Optional[int] = ..., executionPriority: _Optional[int] = ...) -> None: ...
 
 class UpdateAssistantAnalysisRequest(_message.Message):
-    __slots__ = ("id", "name", "description", "endpointId", "endpointVersion", "endpointParameters", "assistantId", "executionPriority")
-    class EndpointParametersEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: str
-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    __slots__ = ("id", "name", "description", "provider", "options", "assistantId", "executionPriority")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
-    ENDPOINTID_FIELD_NUMBER: _ClassVar[int]
-    ENDPOINTVERSION_FIELD_NUMBER: _ClassVar[int]
-    ENDPOINTPARAMETERS_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
     ASSISTANTID_FIELD_NUMBER: _ClassVar[int]
     EXECUTIONPRIORITY_FIELD_NUMBER: _ClassVar[int]
     id: int
     name: str
     description: str
-    endpointId: int
-    endpointVersion: str
-    endpointParameters: _containers.ScalarMap[str, str]
+    provider: str
+    options: _containers.RepeatedCompositeFieldContainer[_common_pb2.Metadata]
     assistantId: int
     executionPriority: int
-    def __init__(self, id: _Optional[int] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., endpointId: _Optional[int] = ..., endpointVersion: _Optional[str] = ..., endpointParameters: _Optional[_Mapping[str, str]] = ..., assistantId: _Optional[int] = ..., executionPriority: _Optional[int] = ...) -> None: ...
+    def __init__(self, id: _Optional[int] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., provider: _Optional[str] = ..., options: _Optional[_Iterable[_Union[_common_pb2.Metadata, _Mapping]]] = ..., assistantId: _Optional[int] = ..., executionPriority: _Optional[int] = ...) -> None: ...
 
 class GetAssistantAnalysisRequest(_message.Message):
     __slots__ = ("id", "assistantId")

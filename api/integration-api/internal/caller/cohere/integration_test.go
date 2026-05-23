@@ -1,11 +1,6 @@
-//go:build integration
-
-// Copyright (c) 2023-2025 RapidaAI
-// Author: Prashant Srivastav <prashant@rapida.ai>
-//
-// Licensed under GPL-2.0 with Rapida Additional Terms.
-// See LICENSE.md or contact sales@rapida.ai for commercial usage.
-
+// Rapida – Open Source Voice AI Orchestration Platform
+// Copyright (C) 2023-2025 Prashant Srivastav <prashant@rapida.ai>
+// Licensed under a modified GPL-2.0. See the LICENSE file for details.
 package internal_cohere_callers
 
 import (
@@ -13,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	internal_cohere_reranking "github.com/rapidaai/api/integration-api/internal/caller/cohere/reranking"
+	internal_cohere_text_embedding "github.com/rapidaai/api/integration-api/internal/caller/cohere/text_embedding"
+	internal_cohere_verify_credential "github.com/rapidaai/api/integration-api/internal/caller/cohere/verify_credential"
 	testutil "github.com/rapidaai/api/integration-api/internal/caller/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,8 +18,6 @@ import (
 
 const providerName = "cohere"
 
-// TestIntegration_ChatCompletion verifies non-streaming chat completion: send a
-// simple prompt and assert the assistant responds with content and metrics.
 func TestIntegration_ChatCompletion(t *testing.T) {
 	cfg := testutil.LoadConfig(t)
 	pcfg := cfg.ChatProvider(t, providerName)
@@ -29,11 +25,12 @@ func TestIntegration_ChatCompletion(t *testing.T) {
 	defer cancel()
 
 	cred := testutil.BuildCredential(pcfg.Credential)
-	caller := NewLargeLanguageCaller(testutil.NewTestLogger(), cred)
+	chat, err := NewChat(testutil.NewTestLogger(), cred, nil)
+	require.NoError(t, err)
 	opts := testutil.BuildChatOptions(pcfg)
 
-	msg, metrics, err := caller.GetChatCompletion(ctx, testutil.SimpleMessages(), opts)
-	require.NoError(t, err, "GetChatCompletion should succeed")
+	msg, metrics, err := chat.ChatComplete(ctx, testutil.SimpleMessages(), opts)
+	require.NoError(t, err, "ChatComplete should succeed")
 	require.NotNil(t, msg, "response message should not be nil")
 
 	contents := msg.GetAssistant().GetContents()
@@ -43,8 +40,6 @@ func TestIntegration_ChatCompletion(t *testing.T) {
 	t.Logf("provider=%s response=%q", providerName, contents)
 }
 
-// TestIntegration_StreamChatCompletion verifies streaming chat completion: tokens
-// should be streamed via onStream, and metrics delivered once via onMetrics.
 func TestIntegration_StreamChatCompletion(t *testing.T) {
 	cfg := testutil.LoadConfig(t)
 	pcfg := cfg.ChatProvider(t, providerName)
@@ -52,18 +47,23 @@ func TestIntegration_StreamChatCompletion(t *testing.T) {
 	defer cancel()
 
 	cred := testutil.BuildCredential(pcfg.Credential)
-	caller := NewLargeLanguageCaller(testutil.NewTestLogger(), cred)
-	opts := testutil.BuildChatOptions(pcfg)
+	stream, err := NewChatStream(testutil.NewTestLogger(), cred, map[string]string{
+		OptionTransportKey: TransportChatV2,
+	})
+	require.NoError(t, err)
+	opts := testutil.BuildChatStreamOptions(pcfg)
 	sc := &testutil.StreamCollector{}
 
-	err := caller.StreamChatCompletion(ctx, testutil.SimpleMessages(), opts, sc.OnStream, sc.OnMetrics, sc.OnError)
+	err = stream.Connect(ctx, nil)
+	require.NoError(t, err, "Connect should succeed")
+	defer func() { _ = stream.Close(ctx) }()
+
+	err = stream.Chat(ctx, testutil.SimpleMessages(), opts, sc.OnStream, sc.OnMetrics, sc.OnError)
 	require.NoError(t, err, "StreamChatCompletion should succeed")
 	sc.AssertStream(t)
 	t.Logf("provider=%s stream_tokens=%d", providerName, sc.StreamCount)
 }
 
-// TestIntegration_Embedding verifies embedding generation: a single document
-// should produce a non-empty vector with TIME_TAKEN metric.
 func TestIntegration_Embedding(t *testing.T) {
 	cfg := testutil.LoadConfig(t)
 	pcfg := cfg.EmbeddingProvider(t, providerName)
@@ -71,7 +71,7 @@ func TestIntegration_Embedding(t *testing.T) {
 	defer cancel()
 
 	cred := testutil.BuildCredential(pcfg.Credential)
-	caller := NewEmbeddingCaller(testutil.NewTestLogger(), cred)
+	caller := internal_cohere_text_embedding.New(testutil.NewTestLogger(), cred)
 	opts := testutil.BuildEmbeddingOptions(pcfg)
 
 	embeddings, metrics, err := caller.GetEmbedding(ctx, testutil.EmbeddingContent(), opts)
@@ -84,8 +84,6 @@ func TestIntegration_Embedding(t *testing.T) {
 	t.Logf("provider=%s embeddings=%d dimensions=%d", providerName, len(embeddings), len(embeddings[0].GetEmbedding()))
 }
 
-// TestIntegration_Reranking verifies document reranking: given a query and
-// candidate documents, the top result should have a positive relevance score.
 func TestIntegration_Reranking(t *testing.T) {
 	cfg := testutil.LoadConfig(t)
 	pcfg := cfg.RerankingProvider(t, providerName)
@@ -93,7 +91,7 @@ func TestIntegration_Reranking(t *testing.T) {
 	defer cancel()
 
 	cred := testutil.BuildCredential(pcfg.Credential)
-	caller := NewRerankingCaller(testutil.NewTestLogger(), cred)
+	caller := internal_cohere_reranking.New(testutil.NewTestLogger(), cred)
 	opts := testutil.BuildRerankerOptions(pcfg)
 
 	results, metrics, err := caller.GetReranking(ctx, testutil.RerankingQuery(), testutil.RerankingContent(), opts)
@@ -104,8 +102,6 @@ func TestIntegration_Reranking(t *testing.T) {
 	t.Logf("provider=%s results=%d top_score=%.4f", providerName, len(results), results[0].GetRelevanceScore())
 }
 
-// TestIntegration_VerifyCredential verifies that valid credentials pass
-// the provider's credential verification endpoint without error.
 func TestIntegration_VerifyCredential(t *testing.T) {
 	cfg := testutil.LoadConfig(t)
 	pcfg := cfg.VerifyProvider(t, providerName)
@@ -113,7 +109,7 @@ func TestIntegration_VerifyCredential(t *testing.T) {
 	defer cancel()
 
 	cred := testutil.BuildCredential(pcfg.Credential)
-	verifier := NewVerifyCredentialCaller(testutil.NewTestLogger(), cred)
+	verifier := internal_cohere_verify_credential.New(testutil.NewTestLogger(), cred)
 	_, err := verifier.CredentialVerifier(ctx, testutil.BuildVerifyOptions(pcfg))
 	require.NoError(t, err, "CredentialVerifier should succeed with valid credentials")
 	t.Logf("provider=%s credential_verification=ok", providerName)

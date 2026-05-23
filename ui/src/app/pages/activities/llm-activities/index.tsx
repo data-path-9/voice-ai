@@ -12,7 +12,7 @@ import {
   toDateString,
   toHumanReadableDateTime,
 } from '@/utils/date';
-import { getMetadataValue } from '@/utils/metadata';
+import { getMetadataValue, getMetricValueOrDefault } from '@/utils/metadata';
 import { LLMLogDialog } from '@/app/components/base/modal/llm-log-modal';
 import { HttpStatusSpanIndicator } from '@/app/components/indicators/http-status';
 import { PageTitleWithCount } from '@/app/components/blocks/page-title-with-count';
@@ -23,7 +23,7 @@ import { IconOnlyButton } from '@/app/components/carbon/button';
 import { Renew, View, Launch, Ai } from '@carbon/icons-react';
 import { ProviderTag } from '@/app/components/carbon/provider-tag';
 import { EmptyState } from '@/app/components/carbon/empty-state';
-
+import { ScrollableTableSection } from '@/app/components/sections/table-section';
 import {
   Table,
   TableHead,
@@ -35,6 +35,7 @@ import {
   TableToolbarContent,
   TableToolbarSearch,
   Loading,
+  Link,
 } from '@carbon/react';
 
 export function ListingPage() {
@@ -55,7 +56,6 @@ export function ListingPage() {
     pageSize,
     visibleColumn,
     setPageSize,
-    setColumns,
   } = useActivityLogPage();
 
   const onDateSelect = (to: Date, from: Date) => {
@@ -97,37 +97,38 @@ export function ListingPage() {
         />
       )}
 
-      <Helmet title="LLM Logs" />
-      <PageHeaderBlock>
-        <PageTitleWithCount count={activities.length} total={totalCount}>
-          LLM Logs
-        </PageTitleWithCount>
-      </PageHeaderBlock>
+      <div className="h-full flex flex-col overflow-hidden">
+        <Helmet title="LLM Logs" />
+        <PageHeaderBlock>
+          <PageTitleWithCount count={activities.length} total={totalCount}>
+            LLM Logs
+          </PageTitleWithCount>
+        </PageHeaderBlock>
 
-      <TableToolbar>
-        <TableToolbarContent>
-          <TableToolbarSearch placeholder="Search LLM logs" />
-          <DateFilter
-            onApply={(from, to) => onDateSelect(to, from)}
-            onReset={() => addCriterias([])}
-          />
-          <IconOnlyButton
-            kind="ghost"
-            size="lg"
-            renderIcon={Renew}
-            iconDescription="Refresh"
-            onClick={() => onGetAcitvities()}
-          />
-        </TableToolbarContent>
-      </TableToolbar>
+        <TableToolbar>
+          <TableToolbarContent>
+            <TableToolbarSearch placeholder="Search LLM logs" />
+            <DateFilter
+              onApply={(from, to) => onDateSelect(to, from)}
+              onReset={() => addCriterias([])}
+            />
+            <IconOnlyButton
+              kind="ghost"
+              size="lg"
+              renderIcon={Renew}
+              iconDescription="Refresh"
+              onClick={() => onGetAcitvities()}
+            />
+          </TableToolbarContent>
+        </TableToolbar>
 
-      {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loading withOverlay={false} small />
-        </div>
-      ) : activities.length > 0 ? (
-        <div className="overflow-auto flex-1">
-          <Table>
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loading withOverlay={false} small />
+          </div>
+        ) : activities.length > 0 ? (
+          <ScrollableTableSection>
+            <Table className="min-w-max">
             <TableHead>
               <TableRow>
                 {visibleColumns.map(col => (
@@ -164,7 +165,7 @@ export function ListingPage() {
                     </TableCell>
                   )}
                   {visibleColumn('Created Date') && (
-                    <TableCell className="!text-xs whitespace-nowrap">
+                    <TableCell className="text-[13px] whitespace-nowrap">
                       {at.getCreateddate() &&
                         toHumanReadableDateTime(at.getCreateddate()!)}
                     </TableCell>
@@ -202,11 +203,22 @@ export function ListingPage() {
                       <CarbonStatusIndicator state={at.getStatus()} />
                     </TableCell>
                   )}
-                  {visibleColumn('Time_Taken') && (
-                    <TableCell className="!font-mono !text-xs">
+                  {visibleColumn('TTFT') && (
+                    <TableCell className="font-mono text-[13px]">
+                      {formatNanoToReadableMilli(
+                        getMetricValueOrDefault(
+                        at.getMetricsList(),
+                        'time_to_first_token',
+                        "0",
+                      )) }
+                    </TableCell>
+                  )}
+                  {visibleColumn('TRT') && (
+                    <TableCell className="font-mono text-[13px]">
                       {formatNanoToReadableMilli(at.getTimetaken())}
                     </TableCell>
                   )}
+
                   {visibleColumn('Http_status') && (
                     <TableCell>
                       <HttpStatusSpanIndicator
@@ -217,28 +229,29 @@ export function ListingPage() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <EmptyState
-          icon={Ai}
-          title="No LLM activities found"
-          subtitle="Requests made to LLM providers like OpenAI, Anthropic, and Google will appear here as your assistants process conversations."
-        />
-      )}
+            </Table>
+          </ScrollableTableSection>
+        ) : (
+          <EmptyState
+            icon={Ai}
+            title="No LLM activities found"
+            subtitle="Requests made to LLM providers like OpenAI, Anthropic, and Google will appear here as your assistants process conversations."
+          />
+        )}
 
-      {activities.length > 0 && (
-        <Pagination
-          totalItems={totalCount}
-          page={page}
-          pageSize={pageSize}
-          pageSizes={[10, 20, 25, 50, 100]}
-          onChange={({ page: p, pageSize: ps }) => {
-            if (ps !== pageSize) setPageSize(ps);
-            else setPage(p);
-          }}
-        />
-      )}
+        {activities.length > 0 && (
+          <Pagination
+            totalItems={totalCount}
+            page={page}
+            pageSize={pageSize}
+            pageSizes={[10, 20, 25, 50, 100]}
+            onChange={({ page: p, pageSize: ps }) => {
+              if (ps !== pageSize) setPageSize(ps);
+              else setPage(p);
+            }}
+          />
+        )}
+      </div>
     </>
   );
 }
@@ -246,9 +259,12 @@ export function ListingPage() {
 function ActivitySource(props: { metadatas: Metadata[] }) {
   const { source, link } = getActivityLink(props.metadatas);
   return link ? (
-    <TableLink href={link}>{source}</TableLink>
+    <Link href={link} className="!text-sm !inline-flex !items-center !gap-1">
+      <span>{source}</span>
+      <Launch size={12} />
+    </Link>
   ) : (
-    <span className="text-xs">{source}</span>
+    <span className="text-sm">{source}</span>
   );
 }
 

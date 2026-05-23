@@ -1,22 +1,17 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Metadata } from '@rapidaai/react';
 import { SettingsAdjust, Add, TrashCan } from '@carbon/icons-react';
-import {
-  PrimaryButton,
-  SecondaryButton,
-} from '@/app/components/carbon/button';
+import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import { cn } from '@/utils';
 import { TextInput, TextArea } from '@/app/components/carbon/form';
 import { TertiaryButton } from '@/app/components/carbon/button';
 import {
   Select as CarbonSelect,
   SelectItem,
-  NumberInput,
   Slider,
   Button,
   Dropdown as CarbonDropdown,
   ComboBox,
-  ButtonSet,
   ComposedModal,
   ModalHeader,
   ModalBody,
@@ -31,10 +26,20 @@ import {
   resolveCategoryParameters,
 } from '@/providers/config-loader';
 import { getDefaultsFromConfig } from '@/providers/config-defaults';
+import { JsonEditor } from '@/app/components/json-editor';
+import { WebsocketDslEditor } from '@/app/components/providers/websocket-dsl-editor';
 
 export const ConfigRenderer: React.FC<{
   provider: string;
-  category: 'stt' | 'tts' | 'text' | 'vad' | 'eos' | 'noise' | 'telemetry';
+  category:
+    | 'stt'
+    | 'tts'
+    | 'text'
+    | 'telephony'
+    | 'vad'
+    | 'eos'
+    | 'noise'
+    | 'telemetry';
   config: CategoryConfig;
   parameters: Metadata[] | null;
   onParameterChange: (parameters: Metadata[]) => void;
@@ -85,6 +90,29 @@ export const ConfigRenderer: React.FC<{
       onParameterChange(updatedParams);
       return;
     }
+    if (sourceParam.customValue && nextModelValue !== '') {
+      const data = sourceParam.data
+        ? loadProviderData(provider, sourceParam.data)
+        : [];
+      const valueField = sourceParam.valueField || 'id';
+      const hasCatalogMatch = data.some((item: any) => {
+        const catalogValue = item?.[valueField];
+        if (
+          catalogValue !== undefined &&
+          String(catalogValue) === nextModelValue
+        ) {
+          return true;
+        }
+        return (
+          typeof item?.name === 'string' &&
+          item.name.toLowerCase() === nextModelValue.toLowerCase()
+        );
+      });
+      if (!hasCatalogMatch) {
+        onParameterChange(updatedParams);
+        return;
+      }
+    }
 
     const includeCredential = updatedParams.some(
       p => p.getKey() === 'rapida.credential_id',
@@ -129,7 +157,16 @@ export const ConfigRenderer: React.FC<{
   const renderField = (param: ParameterConfig) => {
     if (!isVisible(param)) return null;
 
-    const colSpanClass = param.colSpan === 2 ? 'col-span-2' : 'col-span-1';
+    const isSingleAdvancedTextField =
+      category === 'text' && param.advanced && advancedParams.length === 1;
+    const colSpanClass = cn(
+      'min-w-0',
+      isSingleAdvancedTextField
+        ? 'col-span-full'
+        : param.colSpan === 2
+          ? 'col-span-2'
+          : 'col-span-1',
+    );
 
     switch (param.type) {
       case 'dropdown':
@@ -161,9 +198,15 @@ export const ConfigRenderer: React.FC<{
 
       case 'slider':
         const sliderRawValue = getParamValue(param.key);
-        const sliderParsedValue = Number.parseFloat(sliderRawValue);
+        const sliderSourceValue =
+          sliderRawValue !== ''
+            ? sliderRawValue
+            : param.default !== undefined
+              ? String(param.default)
+              : '';
+        const sliderParsedValue = Number.parseFloat(sliderSourceValue);
         const sliderValue = Number.isNaN(sliderParsedValue)
-          ? (param.min ?? 0)
+          ? param.min ?? 0
           : sliderParsedValue;
         return (
           <div className={cn(colSpanClass)} key={param.key}>
@@ -174,9 +217,13 @@ export const ConfigRenderer: React.FC<{
               max={param.max ?? 1}
               step={param.step ?? 0.1}
               value={sliderValue}
-              onChange={({ value: v }: { value: number }) => updateParameter(param.key, v.toString())}
+              onChange={({ value: v }: { value: number }) =>
+                updateParameter(param.key, v.toString())
+              }
             />
-            {param.helpText && <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>}
+            {param.helpText && (
+              <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>
+            )}
           </div>
         );
 
@@ -238,7 +285,10 @@ export const ConfigRenderer: React.FC<{
               helperText={param.helpText}
               onChange={e => updateParameter(param.key, e.target.value)}
             >
-              <SelectItem value="" text={`Select ${param.label.toLowerCase()}`} />
+              <SelectItem
+                value=""
+                text={`Select ${param.label.toLowerCase()}`}
+              />
               {(param.choices ?? []).map(c => (
                 <SelectItem key={c.value} value={c.value} text={c.label} />
               ))}
@@ -249,14 +299,38 @@ export const ConfigRenderer: React.FC<{
       case 'json':
         return (
           <div className={cn(colSpanClass)} key={param.key}>
-            <TextArea
-              id={`json-${param.key}`}
-              labelText={param.label}
-              placeholder="Enter as JSON"
-              value={getParamValue(param.key) || '{}'}
-              helperText={param.helpText}
-              onChange={e => updateParameter(param.key, e.target.value)}
-            />
+            <label
+              htmlFor={`json-${param.key}`}
+              className="cds--label text-gray-900 dark:text-gray-100"
+            >
+              {param.label}
+            </label>
+            <div className="mt-1 w-full min-w-0 overflow-hidden bg-[var(--cds-field)] border-b-2 border-b-[var(--cds-border-strong)] p-2">
+              {param.editor === 'websocket_dsl_json' ? (
+                <WebsocketDslEditor
+                  provider={
+                    provider === 'custom-stt' ? 'custom-stt' : 'custom-tts'
+                  }
+                  mode={param.editorMode ?? 'query_params'}
+                  value={getParamValue(param.key)}
+                  placeholder={param.placeholder ?? 'Enter as JSON'}
+                  onChange={value => updateParameter(param.key, value)}
+                  height="160px"
+                  className="w-full"
+                />
+              ) : (
+                <JsonEditor
+                  value={getParamValue(param.key)}
+                  placeholder={param.placeholder ?? 'Enter as JSON'}
+                  onChange={value => updateParameter(param.key, value)}
+                  height="160px"
+                  className="w-full"
+                />
+              )}
+            </div>
+            {param.helpText && (
+              <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>
+            )}
           </div>
         );
 
@@ -379,10 +453,10 @@ const TextCategoryLayout: React.FC<{
             </div>
           </ModalBody>
           <ModalFooter>
-            <SecondaryButton onClick={handleClose}>
+            <SecondaryButton size="md" onClick={handleClose}>
               Close
             </SecondaryButton>
-            <PrimaryButton onClick={handleComplete}>
+            <PrimaryButton size="md" onClick={handleComplete}>
               Complete
             </PrimaryButton>
           </ModalFooter>
@@ -401,7 +475,21 @@ const DropdownField: React.FC<{
 }> = ({ param, provider, value, onChange, colSpanClass }) => {
   const data = param.data ? loadProviderData(provider, param.data) : [];
   const valueField = param.valueField || 'id';
-  const selectedItem = data.find((item: any) => item[valueField] === value) || null;
+  const selectedItem =
+    data.find((item: any) => item[valueField] === value) ||
+    (param.customValue && value ? { [valueField]: value, name: value } : null);
+  const commitCustomValue = (rawInput: string) => {
+    const inputValue = rawInput?.trim();
+    if (!param.customValue || !inputValue) return;
+    const hasMatch = data.some(
+      (d: any) =>
+        String(d.name || '').toLowerCase() === inputValue.toLowerCase() ||
+        String(d[valueField] || '') === inputValue,
+    );
+    if (!hasMatch) {
+      onChange(inputValue);
+    }
+  };
 
   if (param.customValue || param.searchable) {
     return (
@@ -413,16 +501,18 @@ const DropdownField: React.FC<{
           selectedItem={selectedItem}
           itemToString={(item: any) => item?.name || ''}
           placeholder={`Select ${param.label.toLowerCase()}`}
-          onChange={({ selectedItem: item }: any) => {
+          onChange={({ selectedItem: item, inputValue }: any) => {
             if (item) {
-              onChange(item[valueField], item);
+              const selectedValue =
+                item[valueField] ?? item.name ?? inputValue ?? '';
+              if (selectedValue) {
+                onChange(String(selectedValue), item);
+              }
+              return;
             }
+            commitCustomValue(inputValue || '');
           }}
-          onInputChange={(inputValue: string) => {
-            if (param.customValue && inputValue && !data.find((d: any) => d.name === inputValue)) {
-              onChange(inputValue);
-            }
-          }}
+          onBlur={(e: any) => commitCustomValue(e?.target?.value || '')}
           allowCustomValue={param.customValue}
           helperText={param.helpText}
         />
@@ -477,8 +567,8 @@ const KeyValueField: React.FC<{
     return Object.keys(obj).length > 0 ? JSON.stringify(obj) : '';
   };
 
-  const [entries, setEntries] = useState<{ key: string; value: string }[]>(
-    () => parseEntries(value),
+  const [entries, setEntries] = useState<{ key: string; value: string }[]>(() =>
+    parseEntries(value),
   );
 
   const syncEntries = (next: { key: string; value: string }[]) => {
@@ -508,14 +598,21 @@ const KeyValueField: React.FC<{
       <table className="w-full border-collapse border border-gray-200 dark:border-gray-700 text-sm [&_input]:!border-none [&_.cds--text-input]:!border-none [&_.cds--text-input]:!outline-none [&_.cds--form-item]:!m-0">
         <thead>
           <tr className="bg-gray-50 dark:bg-gray-900">
-            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">Key</th>
-            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">Value</th>
+            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">
+              Key
+            </th>
+            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-r border-gray-200 dark:border-gray-700 w-1/2">
+              Value
+            </th>
             <th className="border-b border-gray-200 dark:border-gray-700 w-8" />
           </tr>
         </thead>
         <tbody>
           {entries.map((entry, index) => (
-            <tr key={index} className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
+            <tr
+              key={index}
+              className="border-b border-gray-200 dark:border-gray-700 last:border-b-0"
+            >
               <td className="border-r border-gray-200 dark:border-gray-700 p-0">
                 <TextInput
                   id={`kv-key-${param.key}-${index}`}
@@ -560,7 +657,9 @@ const KeyValueField: React.FC<{
       >
         Add {param.label.toLowerCase()}
       </TertiaryButton>
-      {param.helpText && <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>}
+      {param.helpText && (
+        <p className="text-xs text-gray-500 mt-1">{param.helpText}</p>
+      )}
     </div>
   );
 };
@@ -582,17 +681,35 @@ function renderTextMainDropdown(
   const data = param.data ? loadProviderData(provider, param.data) : [];
   const valueField = param.valueField || 'id';
   const currentValue = getParamValue(param.key);
-  const selectedItem = data.find((x: any) => x[valueField] === currentValue) || null;
+  const selectedItem =
+    data.find((x: any) => x[valueField] === currentValue) ||
+    (param.customValue && currentValue
+      ? { [valueField]: currentValue, name: currentValue }
+      : null);
+  const commitCustom = (rawInput: string) => {
+    const vl = rawInput?.trim();
+    if (!vl) return;
+    const hasMatch = data.some(
+      (d: any) =>
+        String(d.name || '').toLowerCase() === vl.toLowerCase() ||
+        String(d[valueField] || '') === vl,
+    );
+    if (!hasMatch) {
+      handleCustom(vl);
+    }
+  };
 
   const handleSelect = (item: any) => {
     if (!item) return;
+    const selectedValue = item[valueField] ?? item.name;
+    if (!selectedValue) return;
     if (param.linkedField) {
       updateMultipleParameters(
         [
-          { key: param.key, value: item[valueField] },
+          { key: param.key, value: String(selectedValue) },
           {
             key: param.linkedField.key,
-            value: item[param.linkedField.sourceField] ?? item[valueField],
+            value: item[param.linkedField.sourceField] ?? String(selectedValue),
           },
         ],
         param,
@@ -621,20 +738,16 @@ function renderTextMainDropdown(
       <ComboBox
         id={`text-main-combo-${param.key}`}
         titleText=""
-        hideLabel
         items={data}
         size="md"
         selectedItem={selectedItem}
         itemToString={(item: any) => item?.name || ''}
         placeholder="Select model"
-        onChange={({ selectedItem: item }: any) => {
+        onChange={({ selectedItem: item, inputValue }: any) => {
           if (item) handleSelect(item);
+          else commitCustom(inputValue || '');
         }}
-        onInputChange={(inputValue: string) => {
-          if (inputValue && !data.find((d: any) => d.name === inputValue)) {
-            handleCustom(inputValue);
-          }
-        }}
+        onBlur={(e: any) => commitCustom(e?.target?.value || '')}
         allowCustomValue
       />
     );

@@ -43,8 +43,8 @@ class UnifiedProviderServiceStub(object):
                 _registered_method=True)
         self.StreamChat = channel.stream_stream(
                 '/integration_api.UnifiedProviderService/StreamChat',
-                request_serializer=integration__api__pb2.ChatRequest.SerializeToString,
-                response_deserializer=integration__api__pb2.ChatResponse.FromString,
+                request_serializer=integration__api__pb2.StreamChatRequest.SerializeToString,
+                response_deserializer=integration__api__pb2.StreamChatResponse.FromString,
                 _registered_method=True)
         self.Embedding = channel.unary_unary(
                 '/integration_api.UnifiedProviderService/Embedding',
@@ -108,8 +108,8 @@ def add_UnifiedProviderServiceServicer_to_server(servicer, server):
             ),
             'StreamChat': grpc.stream_stream_rpc_method_handler(
                     servicer.StreamChat,
-                    request_deserializer=integration__api__pb2.ChatRequest.FromString,
-                    response_serializer=integration__api__pb2.ChatResponse.SerializeToString,
+                    request_deserializer=integration__api__pb2.StreamChatRequest.FromString,
+                    response_serializer=integration__api__pb2.StreamChatResponse.SerializeToString,
             ),
             'Embedding': grpc.unary_unary_rpc_method_handler(
                     servicer.Embedding,
@@ -181,8 +181,8 @@ class UnifiedProviderService(object):
             request_iterator,
             target,
             '/integration_api.UnifiedProviderService/StreamChat',
-            integration__api__pb2.ChatRequest.SerializeToString,
-            integration__api__pb2.ChatResponse.FromString,
+            integration__api__pb2.StreamChatRequest.SerializeToString,
+            integration__api__pb2.StreamChatResponse.FromString,
             options,
             channel_credentials,
             insecure,

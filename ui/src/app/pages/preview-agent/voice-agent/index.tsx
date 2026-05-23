@@ -455,17 +455,13 @@ const PhoneAgentDebugger: React.FC<{
             {stt && (
               <>
                 <InfoRow label="provider" value={stt.getAudioprovider()} />
-                {stt
-                  .getAudiooptionsList()
-                  .filter((d: any) => d.getValue())
-                  .filter((d: any) => d.getKey().startsWith('listen.'))
-                  .map((d: any) => (
-                    <InfoRow
-                      key={d.getKey()}
-                      label={d.getKey()}
-                      value={d.getValue()}
-                    />
-                  ))}
+                {stt.getAudiooptionsList().map((d: any) => (
+                  <InfoRow
+                    key={d.getKey()}
+                    label={d.getKey()}
+                    value={d.getValue()}
+                  />
+                ))}
               </>
             )}
           </ConfigBlock>
@@ -474,17 +470,13 @@ const PhoneAgentDebugger: React.FC<{
             {tts && (
               <>
                 <InfoRow label="provider" value={tts.getAudioprovider()} />
-                {tts
-                  .getAudiooptionsList()
-                  .filter((d: any) => d.getValue())
-                  .filter((d: any) => d.getKey().startsWith('speak.'))
-                  .map((d: any) => (
-                    <InfoRow
-                      key={d.getKey()}
-                      label={d.getKey()}
-                      value={d.getValue()}
-                    />
-                  ))}
+                {tts.getAudiooptionsList().map((d: any) => (
+                  <InfoRow
+                    key={d.getKey()}
+                    label={d.getKey()}
+                    value={d.getValue()}
+                  />
+                ))}
               </>
             )}
           </ConfigBlock>

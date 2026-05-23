@@ -1,0 +1,77 @@
+service_name: "workflow-api"
+host: "0.0.0.0"
+port: 9007
+log_level: "debug"
+secret: "rpd_pks"
+env: "development"
+
+postgres:
+  host: "postgres"
+  port: 5432
+  db_name: "assistant_db"
+  auth:
+    user: "rapida_user"
+    password: "rapida_db_password"
+  max_open_connection: 50
+  max_ideal_connection: 25
+  ssl_mode: "disable"
+  slc_cache:
+    host: "redis"
+    port: 6379
+    db: 1
+    max_connection: 10
+    auth:
+      user: ""
+      password: ""
+
+redis:
+  host: "redis"
+  port: 6379
+  db: 0
+  max_connection: 10
+  auth:
+    user: ""
+    password: ""
+
+asset_store:
+  storage_type: "local"
+  storage_path_prefix: "/app/rapida-data/assets/workflow"
+  public_url_prefix: "http://localhost:8080/rapida-data/assets/workflow"
+
+opensearch:
+  schema: "http"
+  host: "opensearch"
+  port: 9200
+  max_retries: 3
+  max_connection: 10
+
+integration:
+  host: "integration-api:9004"
+endpoint:
+  host: "endpoint-api:9005"
+web:
+  host: "web-api:9001"
+document:
+  host: "http://document-api:9010"
+ui:
+  host: "https://localhost:3000"
+assistant:
+  host: "assistant-api:9007"
+  public: "integral-presently-cub.ngrok-free.app"
+
+audiosocket:
+  host: "0.0.0.0"
+  port: 4573
+
+sip:
+  server: "0.0.0.0"
+  external_ip: "0.0.0.0"
+  port: 5090
+  transport: "udp"
+  rtp_port_range_start: 10000
+  rtp_port_range_end: 10199
+
+webrtc:
+  external_ip: ""
+  udp_port_range_start: 20000
+  udp_port_range_end: 20100

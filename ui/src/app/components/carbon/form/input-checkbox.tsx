@@ -22,7 +22,7 @@ export const InputCheckbox = forwardRef<HTMLInputElement, InputCheckboxProps>(
         ref={ref}
         id={checkboxId}
         name={name}
-        className={cn(className)}
+        className={cn('rounded-none!', className)}
         labelText={children ?? ''}
         hideLabel={!children}
         onChange={e => onChange?.(e as ChangeEvent<HTMLInputElement>)}

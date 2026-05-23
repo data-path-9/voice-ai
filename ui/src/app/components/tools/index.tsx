@@ -1,6 +1,5 @@
 import { Metadata } from '@rapidaai/react';
 import { FC, useCallback, useMemo } from 'react';
-import { cn } from '@/utils';
 import { Dropdown } from '@carbon/react';
 import { CONFIG } from '@/configs';
 import { ConfigureAPIRequest } from '@/app/components/tools/api-request';
@@ -28,14 +27,32 @@ import {
   GetMCPDefaultOptions,
   ValidateMCPDefaultOptions,
 } from '@/app/components/tools/mcp/constant';
+import { ConfigureTransferCall } from '@/app/components/tools/transfer-call';
+import { InputGroup } from '../input-group/index';
+import {
+  GetTransferCallDefaultOptions,
+  ValidateTransferCallDefaultOptions,
+} from '@/app/components/tools/transfer-call/constant';
 import {
   APIRequestToolDefintion,
   BUILDIN_TOOLS,
   EndOfConverstaionToolDefintion,
   EndpointToolDefintion,
   KnowledgeRetrievalToolDefintion,
+  TransferCallToolDefintion,
 } from '@/llm-tools';
-import { ConfigureToolProps } from './common';
+import {
+  ConfigureToolProps,
+  ASSISTANT_CONDITION_KEY_OPTIONS,
+  ASSISTANT_CONDITION_OPERATOR_OPTIONS,
+  ASSISTANT_CONDITION_SOURCE_OPTIONS,
+  ASSISTANT_CONDITION_VALUE_OPTIONS_BY_KEY,
+  getToolConditionEntries,
+  validateToolConditionMetadata,
+  withToolConditionEntries,
+  withNormalizedToolCondition,
+} from './common';
+import { SourceConditionRule } from '@/app/components/conditions/source-condition-rule';
 
 // ============================================================================
 // Types
@@ -46,6 +63,7 @@ export type ToolCode =
   | 'api_request'
   | 'endpoint'
   | 'end_of_conversation'
+  | 'transfer_call'
   | 'mcp';
 
 export interface ToolDefinition {
@@ -101,6 +119,12 @@ const TOOL_REGISTRY: Record<ToolCode, ToolConfig> = {
     getDefaultOptions: GetEndOfConversationDefaultOptions,
     validateOptions: ValidateEndOfConversationDefaultOptions,
     Component: ConfigureEndOfConversation,
+  },
+  transfer_call: {
+    definition: TransferCallToolDefintion,
+    getDefaultOptions: GetTransferCallDefaultOptions,
+    validateOptions: ValidateTransferCallDefaultOptions,
+    Component: ConfigureTransferCall,
   },
   mcp: {
     // MCP tools don't have a static definition - resolved dynamically at runtime
@@ -179,7 +203,10 @@ export const GetDefaultToolConfigIfInvalid = (
   parameters: Metadata[],
 ): Metadata[] => {
   const config = getToolConfig(code);
-  return config.getDefaultOptions(parameters);
+  return withNormalizedToolCondition(
+    config.getDefaultOptions(parameters),
+    parameters,
+  );
 };
 
 /**
@@ -193,29 +220,15 @@ export const ValidateToolDefaultOptions = (
   if (!isValidToolCode(code)) {
     return `Invalid tool code: ${code}`;
   }
-  return TOOL_REGISTRY[code].validateOptions(parameters);
+  return (
+    TOOL_REGISTRY[code].validateOptions(parameters) ||
+    validateToolConditionMetadata(parameters)
+  );
 };
 
 // ============================================================================
 // Components
 // ============================================================================
-
-const ToolOptionRenderer: FC<{ icon: string; name: string }> = ({
-  icon,
-  name,
-}) => (
-  <span className="inline-flex items-center gap-2 sm:gap-2.5 max-w-full text-sm font-medium">
-    <img
-      alt=""
-      loading="lazy"
-      width={16}
-      height={16}
-      className="w-4 h-4 align-middle block shrink-0"
-      src={icon}
-    />
-    <span className="truncate capitalize">{name}</span>
-  </span>
-);
 
 const ConfigureBuildinTool: FC<{
   toolDefinition: ToolDefinition;
@@ -264,9 +277,16 @@ export const BuildinTool: FC<{
   inputClass,
   showDefinitionForm = true,
 }) => {
+  const conditionEntries = useMemo(
+    () => getToolConditionEntries(config.parameters),
+    [config.parameters],
+  );
   const handleParameterChange = useCallback(
     (params: Metadata[]) => {
-      onChangeConfig({ ...config, parameters: params });
+      onChangeConfig({
+        ...config,
+        parameters: withNormalizedToolCondition(params, config.parameters),
+      });
     },
     [config, onChangeConfig],
   );
@@ -284,16 +304,32 @@ export const BuildinTool: FC<{
     [config.code, availableTools],
   );
 
-  const renderOption = useCallback(
-    (tool: { icon: string; name: string }) => (
-      <ToolOptionRenderer icon={tool.icon} name={tool.name} />
-    ),
-    [],
-  );
-
   return (
     <>
-      <div className="p-6">
+      <InputGroup
+        title="Condition"
+        className="relative z-20"
+        childClass="overflow-visible relative z-20"
+      >
+        <SourceConditionRule
+          conditions={conditionEntries}
+          onChangeConditions={nextConditions =>
+            onChangeConfig({
+              ...config,
+              parameters: withToolConditionEntries(
+                config.parameters,
+                nextConditions,
+              ),
+            })
+          }
+          conditionOptions={ASSISTANT_CONDITION_OPERATOR_OPTIONS}
+          sourceOptions={ASSISTANT_CONDITION_SOURCE_OPTIONS}
+          keyOptions={ASSISTANT_CONDITION_KEY_OPTIONS}
+          valueOptionsByKey={ASSISTANT_CONDITION_VALUE_OPTIONS_BY_KEY}
+        />
+      </InputGroup>
+
+      <InputGroup title="Action">
         <Dropdown
           id="tool-action-select"
           titleText="Action"
@@ -305,7 +341,7 @@ export const BuildinTool: FC<{
             if (selectedItem) onChangeBuildinTool(selectedItem.code);
           }}
         />
-      </div>
+      </InputGroup>
 
       <ConfigureBuildinTool
         toolDefinition={toolDefinition}

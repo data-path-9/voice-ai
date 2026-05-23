@@ -73,6 +73,38 @@ jest.mock('@carbon/react', () => {
             }),
         }),
       ),
+    Dropdown: ({ id, titleText, items = [], selectedItem, onChange }: any) =>
+      React.createElement(
+        'div',
+        null,
+        titleText ? React.createElement('div', null, titleText) : null,
+        React.createElement(
+          'select',
+          {
+            'data-testid': id,
+            value: selectedItem?.id ?? '',
+            onChange: (e: any) =>
+              onChange({
+                selectedItem:
+                  items.find((item: any) => item.id === e.target.value) || null,
+              }),
+          },
+          items.map((item: any) =>
+            React.createElement('option', { key: item.id, value: item.id }, item.label),
+          ),
+        ),
+      ),
+    Slider: ({ id, value = 0, onChange, min, max, step }: any) =>
+      React.createElement('input', {
+        id,
+        type: 'range',
+        min,
+        max,
+        step,
+        value,
+        'data-testid': id,
+        onChange: (e: any) => onChange?.({ value: Number(e.target.value) }),
+      }),
   };
 });
 
@@ -100,6 +132,8 @@ describe('ConfigureAudioOutputProvider design integration', () => {
       createMetadata('speaker.model', 'sonic-2'),
       createMetadata('speaker.voice', 'f6f3f5f8'),
       createMetadata('speaker.language', 'en'),
+      createMetadata('speaker.ambient', 'office'),
+      createMetadata('speaker.ambient_volume', '24'),
       createMetadata('speaker.conjunction.boundaries', 'and<|||>or'),
       createMetadata('speaker.conjunction.break', '240'),
       createMetadata('speaker.pronunciation.dictionaries', 'medical'),
@@ -125,6 +159,8 @@ describe('ConfigureAudioOutputProvider design integration', () => {
       keptParams.map(p => `${p.getKey()}=${p.getValue()}`).sort(),
     ).toEqual(
       [
+        'speaker.ambient=office',
+        'speaker.ambient_volume=24',
         'speaker.conjunction.boundaries=and<|||>or',
         'speaker.conjunction.break=240',
         'speaker.pronunciation.dictionaries=medical',
@@ -159,6 +195,12 @@ describe('ConfigureAudioOutputProvider design integration', () => {
     fireEvent.change(screen.getByTestId('pronunciation-dictionaries'), {
       target: { value: 'medical<|||>retail' },
     });
+    fireEvent.change(screen.getByTestId('ambient-sound'), {
+      target: { value: 'cafe' },
+    });
+    fireEvent.change(screen.getByTestId('ambient-volume'), {
+      target: { value: '34' },
+    });
     fireEvent.change(screen.getByTestId('conjunction-boundaries'), {
       target: { value: 'and<|||>or' },
     });
@@ -175,6 +217,12 @@ describe('ConfigureAudioOutputProvider design integration', () => {
       ),
     );
 
+    expect(
+      allMaps.some(values => values['speaker.ambient'] === 'cafe'),
+    ).toBe(true);
+    expect(
+      allMaps.some(values => values['speaker.ambient_volume'] === '34'),
+    ).toBe(true);
     expect(
       allMaps.some(
         values =>

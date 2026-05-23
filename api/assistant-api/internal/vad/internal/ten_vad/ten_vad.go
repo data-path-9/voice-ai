@@ -7,12 +7,11 @@ package internal_ten_vad
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
+	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/utils"
@@ -41,7 +40,7 @@ const (
 // TenVAD - Voice Activity Detection using TEN Framework
 // -----------------------------------------------------------------------------
 
-// TenVAD implements the Vad interface using the TEN VAD library.
+// TenVAD implements the VoiceActivityDetectorExecutor interface using the TEN VAD library.
 // It provides frame-level speech probability scores with low latency.
 //
 // Input audio must be 16 kHz LINEAR16 mono (the platform's internal format).
@@ -49,6 +48,7 @@ const (
 type TenVAD struct {
 	logger   commons.Logger
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error
+	opts     utils.Option
 
 	// TEN VAD detector instance
 	detector *Detector
@@ -61,6 +61,7 @@ type TenVAD struct {
 	currSample int
 	triggered  bool
 	tempEnd    int
+	pending    []int16
 
 	// Configuration
 	hopSize              int
@@ -76,7 +77,7 @@ func NewTenVAD(
 	logger commons.Logger,
 	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error,
 	options utils.Option,
-) (internal_type.Vad, error) {
+) (internal_type.VoiceActivityDetectorExecutor, error) {
 	start := time.Now()
 
 	hopSize := defaultHopSize
@@ -90,6 +91,7 @@ func NewTenVAD(
 	tv := &TenVAD{
 		logger:               logger,
 		onPacket:             onPacket,
+		opts:                 options,
 		detector:             detector,
 		hopSize:              hopSize,
 		threshold:            float32(threshold),
@@ -101,7 +103,7 @@ func NewTenVAD(
 	// Auto-close on context cancellation
 	go func() {
 		<-ctx.Done()
-		tv.Close()
+		_ = tv.Close(context.Background())
 	}()
 
 	if onPacket != nil {
@@ -124,29 +126,41 @@ func (t *TenVAD) Name() string {
 	return vadName
 }
 
-// Process analyzes an audio packet for voice activity.
+func (t *TenVAD) Options() utils.Option {
+	return t.opts
+}
+
+func (t *TenVAD) Arguments() (map[string]string, error) {
+	return nil, nil
+}
+
+// Execute analyzes an audio packet for voice activity.
 // The packet must contain 16 kHz LINEAR16 mono audio.
-func (t *TenVAD) Process(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
+func (t *TenVAD) Execute(ctx context.Context, pkt internal_type.UserAudioReceivedPacket) error {
 	if !t.isActive() {
 		return nil
 	}
 
 	// Convert bytes to int16 samples
-	samples := bytesToInt16(pkt.Audio)
-	if len(samples) < t.hopSize {
-		return nil
-	}
-
+	samples := internal_audio.Linear16ToInt16(pkt.Audio)
 	// Process frame-by-frame under lock
 	segments, err := t.processFrames(samples)
 	if err != nil {
 		return err
 	}
 
-	// Emit InterruptionDetectedPacket only on confirmed speech onset — this is the
-	// signal to interrupt assistant TTS/LLM.
-	if hasSpeechStart(segments) {
-		t.notifyActivity(ctx, segments)
+	hasSpeechStart := false
+	hasSpeechEnd := false
+	var speechStartAt, speechEndAt float64
+	for _, seg := range segments {
+		if seg.startAt >= 0 && (!hasSpeechStart || seg.startAt < speechStartAt) {
+			speechStartAt = seg.startAt
+			hasSpeechStart = true
+		}
+		if seg.endAt >= 0 && (!hasSpeechEnd || seg.endAt > speechEndAt) {
+			speechEndAt = seg.endAt
+			hasSpeechEnd = true
+		}
 	}
 
 	// Emit a heartbeat while the user is actively speaking so the EOS
@@ -157,20 +171,22 @@ func (t *TenVAD) Process(ctx context.Context, pkt internal_type.UserAudioReceive
 	if isSpeaking && t.onPacket != nil {
 		_ = t.onPacket(ctx,
 			internal_type.VadSpeechActivityPacket{},
-			// internal_type.ConversationEventPacket{
-			// 	Name: "vad",
-			// 	Data: map[string]string{
-			// 		"type": "heartbeat",
-			// 	},
-			// },
 		)
+	}
+
+	// Emit explicit interruption lifecycle events from VAD transitions.
+	if hasSpeechStart {
+		t.notifyInterruption(ctx, internal_type.InterruptionEventStart, speechStartAt, len(segments))
+	}
+	if hasSpeechEnd {
+		t.notifyInterruption(ctx, internal_type.InterruptionEventEnd, speechEndAt, len(segments))
 	}
 
 	return nil
 }
 
 // Close releases the TEN VAD resources.
-func (t *TenVAD) Close() error {
+func (t *TenVAD) Close(_ context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -187,16 +203,6 @@ func (t *TenVAD) Close() error {
 	return nil
 }
 
-// hasSpeechStart returns true if any segment contains a speech onset.
-func hasSpeechStart(segments []segment) bool {
-	for _, seg := range segments {
-		if seg.startAt > 0 {
-			return true
-		}
-	}
-	return false
-}
-
 // -----------------------------------------------------------------------------
 // Private Methods
 // -----------------------------------------------------------------------------
@@ -209,6 +215,7 @@ func (t *TenVAD) isActive() bool {
 
 // segment represents a detected speech region.
 type segment struct {
+	// startAt/endAt use -1 as "unset" sentinel so valid timestamp 0 is preserved.
 	startAt float64
 	endAt   float64
 }
@@ -228,10 +235,30 @@ func (t *TenVAD) processFrames(samples []int16) ([]segment, error) {
 	minSilenceSamples := t.minSilenceDurationMs * sampleRate / 1000
 	speechPadSamples := t.speechPadMs * sampleRate / 1000
 
+	input := samples
+	if len(t.pending) > 0 {
+		combined := make([]int16, 0, len(t.pending)+len(samples))
+		combined = append(combined, t.pending...)
+		combined = append(combined, samples...)
+		input = combined
+	}
+
+	fullSamples := (len(input) / t.hopSize) * t.hopSize
+	if fullSamples == 0 {
+		t.pending = append(t.pending[:0], input...)
+		return nil, nil
+	}
+
+	if fullSamples < len(input) {
+		t.pending = append(t.pending[:0], input[fullSamples:]...)
+	} else {
+		t.pending = t.pending[:0]
+	}
+
 	var segments []segment
 
-	for i := 0; i <= len(samples)-t.hopSize; i += t.hopSize {
-		frame := samples[i : i+t.hopSize]
+	for i := 0; i < fullSamples; i += t.hopSize {
+		frame := input[i : i+t.hopSize]
 
 		probability, _, err := t.detector.Process(frame)
 		if err != nil {
@@ -252,7 +279,7 @@ func (t *TenVAD) processFrames(samples []int16) ([]segment, error) {
 			if speechStartAt < 0 {
 				speechStartAt = 0
 			}
-			segments = append(segments, segment{startAt: speechStartAt})
+			segments = append(segments, segment{startAt: speechStartAt, endAt: -1})
 		}
 
 		// Speech offset (with hysteresis)
@@ -271,6 +298,7 @@ func (t *TenVAD) processFrames(samples []int16) ([]segment, error) {
 
 			// Speech started in a previous call — onset already reported
 			if len(segments) == 0 {
+				segments = append(segments, segment{startAt: -1, endAt: speechEndAt})
 				continue
 			}
 			segments[len(segments)-1].endAt = speechEndAt
@@ -280,47 +308,27 @@ func (t *TenVAD) processFrames(samples []int16) ([]segment, error) {
 	return segments, nil
 }
 
-func (t *TenVAD) notifyActivity(ctx context.Context, segments []segment) {
-	minStart := math.MaxFloat64
-	maxEnd := -math.MaxFloat64
-
-	for _, seg := range segments {
-		if seg.startAt < minStart {
-			minStart = seg.startAt
-		}
-		if seg.endAt > maxEnd {
-			maxEnd = seg.endAt
-		}
-	}
-
+func (t *TenVAD) notifyInterruption(ctx context.Context, event internal_type.InterruptionEvent, at float64, segmentCount int) {
 	if t.onPacket != nil {
-		t.onPacket(ctx,
+		_ = t.onPacket(ctx,
 			internal_type.InterruptionDetectedPacket{
 				Source:  internal_type.InterruptionSourceVad,
-				StartAt: minStart,
-				EndAt:   maxEnd,
+				Event:   event,
+				StartAt: at,
+				EndAt:   at,
 			},
 			internal_type.ConversationEventPacket{
 				Name: "vad",
 				Data: map[string]string{
 					"type":          "detected",
-					"start_at":      fmt.Sprintf("%f", minStart),
-					"end_at":        fmt.Sprintf("%f", maxEnd),
-					"segment_count": fmt.Sprintf("%d", len(segments)),
+					"event":         string(event),
+					"start_at":      fmt.Sprintf("%f", at),
+					"end_at":        fmt.Sprintf("%f", at),
+					"segment_count": fmt.Sprintf("%d", segmentCount),
 				},
 			},
 		)
 	}
-}
-
-// bytesToInt16 converts signed 16-bit little-endian PCM bytes to int16 samples.
-func bytesToInt16(data []byte) []int16 {
-	numSamples := len(data) / 2
-	samples := make([]int16, numSamples)
-	for i := 0; i < numSamples; i++ {
-		samples[i] = int16(binary.LittleEndian.Uint16(data[i*2 : i*2+2]))
-	}
-	return samples
 }
 
 func resolveThreshold(options utils.Option) float64 {

@@ -80,6 +80,63 @@ func TestMergeMaps(t *testing.T) {
 	}
 }
 
+func TestCloneMap(t *testing.T) {
+	t.Run("nil map returns empty writable map", func(t *testing.T) {
+		var src map[string]interface{}
+		cloned := CloneMap(src)
+		if cloned == nil {
+			t.Fatalf("expected non-nil map")
+		}
+		if len(cloned) != 0 {
+			t.Fatalf("expected empty map, got %d", len(cloned))
+		}
+		cloned["k"] = "v"
+		if _, ok := src["k"]; ok {
+			t.Fatalf("source map should not be mutated")
+		}
+	})
+
+	t.Run("clone copies entries and is independent", func(t *testing.T) {
+		src := map[string]int{"a": 1, "b": 2}
+		cloned := CloneMap(src)
+		if len(cloned) != len(src) {
+			t.Fatalf("expected len %d, got %d", len(src), len(cloned))
+		}
+		if cloned["a"] != 1 || cloned["b"] != 2 {
+			t.Fatalf("unexpected cloned values: %#v", cloned)
+		}
+		cloned["a"] = 10
+		if src["a"] != 1 {
+			t.Fatalf("source map mutated: %#v", src)
+		}
+	})
+}
+
+func TestUnique(t *testing.T) {
+	t.Run("preserves first occurrence order", func(t *testing.T) {
+		got := Unique([]uint64{3, 1, 3, 2, 1})
+		expected := []uint64{3, 1, 2}
+		if len(got) != len(expected) {
+			t.Fatalf("expected len %d, got %d", len(expected), len(got))
+		}
+		for i := range expected {
+			if got[i] != expected[i] {
+				t.Fatalf("expected %v, got %v", expected, got)
+			}
+		}
+	})
+
+	t.Run("empty input returns empty writable slice", func(t *testing.T) {
+		got := Unique([]string{})
+		if got == nil {
+			t.Fatal("expected non-nil slice")
+		}
+		if len(got) != 0 {
+			t.Fatalf("expected empty slice, got %d", len(got))
+		}
+	})
+}
+
 func TestGetCaseInsensitiveKeyValue(t *testing.T) {
 	cfg := map[string]string{
 		"KEY1": "value1",

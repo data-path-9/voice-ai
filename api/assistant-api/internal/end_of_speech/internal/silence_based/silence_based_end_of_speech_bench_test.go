@@ -31,7 +31,7 @@ func BenchmarkAnalyze_UserInput(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_ = svcIface.Analyze(ctx, userInput("hello world"))
+		_ = svcIface.Execute(ctx, userInput("hello world"))
 	}
 }
 
@@ -48,7 +48,7 @@ func BenchmarkAnalyze_SystemInput(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, systemInput("system"))
+		_ = svcIface.Execute(ctx, systemInput("system"))
 	}
 }
 
@@ -65,7 +65,7 @@ func BenchmarkAnalyze_STTInput(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, sttInput("transcription", i%5 == 0))
+		_ = svcIface.Execute(ctx, sttInput("transcription", i%5 == 0))
 	}
 }
 
@@ -81,7 +81,7 @@ func BenchmarkAnalyze_NoWait(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_ = svcIface.Analyze(ctx, userInput("bench"))
+		_ = svcIface.Execute(ctx, userInput("bench"))
 	}
 }
 
@@ -102,7 +102,7 @@ func BenchmarkAnalyze_Concurrent(b *testing.B) {
 		for pb.Next() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
-			_ = svcIface.Analyze(ctx, userInput("bench"))
+			_ = svcIface.Execute(ctx, userInput("bench"))
 		}
 	})
 }
@@ -121,7 +121,7 @@ func BenchmarkAnalyze_ConcurrentHighContention(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = svcIface.Analyze(ctx, systemInput("contention"))
+			_ = svcIface.Execute(ctx, systemInput("contention"))
 		}
 	})
 }
@@ -144,11 +144,11 @@ func BenchmarkAnalyze_ConcurrentMixedInputs(b *testing.B) {
 			c := atomic.AddInt64(&counter, 1)
 			switch c % 3 {
 			case 0:
-				_ = svcIface.Analyze(ctx, userInput("user"))
+				_ = svcIface.Execute(ctx, userInput("user"))
 			case 1:
-				_ = svcIface.Analyze(ctx, systemInput("system"))
+				_ = svcIface.Execute(ctx, systemInput("system"))
 			case 2:
-				_ = svcIface.Analyze(ctx, sttInput("stt", c%5 == 0))
+				_ = svcIface.Execute(ctx, sttInput("stt", c%5 == 0))
 			}
 		}
 	})
@@ -171,7 +171,7 @@ func BenchmarkAnalyze_STTIncomplete(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("incomplete %d", i), false))
+		_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("incomplete %d", i), false))
 	}
 }
 
@@ -188,7 +188,7 @@ func BenchmarkAnalyze_STTComplete(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("complete %d", i), true))
+		_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("complete %d", i), true))
 	}
 }
 
@@ -203,13 +203,13 @@ func BenchmarkAnalyze_STTFormatting(b *testing.B) {
 	defer cancel()
 
 	// First send unformatted
-	_ = svcIface.Analyze(ctx, sttInput("hello world", false))
+	_ = svcIface.Execute(ctx, sttInput("hello world", false))
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		// Then repeatedly send formatted version
-		_ = svcIface.Analyze(ctx, sttInput("Hello, World!", i%2 == 0))
+		_ = svcIface.Execute(ctx, sttInput("Hello, World!", i%2 == 0))
 	}
 }
 
@@ -227,7 +227,7 @@ func BenchmarkAnalyze_STTHighFrequency(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		// Simulate streaming updates with varying completeness
-		_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("hello world part %d", i), i%10 == 0))
+		_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("hello world part %d", i), i%10 == 0))
 	}
 }
 
@@ -248,7 +248,7 @@ func BenchmarkAnalyze_RapidFireInputs(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, userInput(fmt.Sprintf("input %d", i)))
+		_ = svcIface.Execute(ctx, userInput(fmt.Sprintf("input %d", i)))
 	}
 }
 
@@ -271,7 +271,7 @@ func BenchmarkAnalyze_LargePayloads(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, userInput(largePayload))
+		_ = svcIface.Execute(ctx, userInput(largePayload))
 	}
 }
 
@@ -288,7 +288,7 @@ func BenchmarkAnalyze_EmptyInputs(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, userInput(""))
+		_ = svcIface.Execute(ctx, userInput(""))
 	}
 }
 
@@ -304,7 +304,7 @@ func BenchmarkAnalyze_ContextCancellation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_ = svcIface.Analyze(ctx, systemInput("cancelled"))
+		_ = svcIface.Execute(ctx, systemInput("cancelled"))
 	}
 }
 
@@ -322,7 +322,7 @@ func BenchmarkAnalyze_GenerationInvalidation(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		// Each input increments generation counter
-		_ = svcIface.Analyze(ctx, systemInput(fmt.Sprintf("gen %d", i)))
+		_ = svcIface.Execute(ctx, systemInput(fmt.Sprintf("gen %d", i)))
 	}
 }
 
@@ -345,11 +345,11 @@ func BenchmarkAnalyze_HighThroughput(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Alternate between input types for realism
 		if i%3 == 0 {
-			_ = svcIface.Analyze(ctx, userInput(fmt.Sprintf("msg %d", i)))
+			_ = svcIface.Execute(ctx, userInput(fmt.Sprintf("msg %d", i)))
 		} else if i%3 == 1 {
-			_ = svcIface.Analyze(ctx, systemInput("sys"))
+			_ = svcIface.Execute(ctx, systemInput("sys"))
 		} else {
-			_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("stt %d", i), i%7 == 0))
+			_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("stt %d", i), i%7 == 0))
 		}
 	}
 }
@@ -371,7 +371,7 @@ func BenchmarkAnalyze_SustainedLoad(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, systemInput(fmt.Sprintf("load %d", i)))
+		_ = svcIface.Execute(ctx, systemInput(fmt.Sprintf("load %d", i)))
 	}
 	b.Logf("Callbacks fired: %d", atomic.LoadInt64(&callCount))
 }
@@ -383,7 +383,7 @@ func BenchmarkAnalyze_MultipleServices(b *testing.B) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 
 	// Create 10 service instances
-	services := make([]internal_type.EndOfSpeech, 10)
+	services := make([]internal_type.EndOfSpeechExecutor, 10)
 	for i := 0; i < 10; i++ {
 		svc, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 		services[i] = svc
@@ -396,7 +396,7 @@ func BenchmarkAnalyze_MultipleServices(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		svc := services[i%10]
-		_ = svc.Analyze(ctx, userInput(fmt.Sprintf("multi %d", i)))
+		_ = svc.Execute(ctx, userInput(fmt.Sprintf("multi %d", i)))
 	}
 }
 
@@ -420,11 +420,11 @@ func BenchmarkAnalyze_RaceDetectionConcurrent(b *testing.B) {
 		for pb.Next() {
 			switch idx % 3 {
 			case 0:
-				_ = svcIface.Analyze(ctx, userInput(fmt.Sprintf("race %d", idx)))
+				_ = svcIface.Execute(ctx, userInput(fmt.Sprintf("race %d", idx)))
 			case 1:
-				_ = svcIface.Analyze(ctx, systemInput("race"))
+				_ = svcIface.Execute(ctx, systemInput("race"))
 			case 2:
-				_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("race %d", idx), idx%5 == 0))
+				_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("race %d", idx), idx%5 == 0))
 			}
 			idx++
 		}
@@ -450,7 +450,7 @@ func BenchmarkAnalyze_RaceDetectionWithCallback(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = svcIface.Analyze(ctx, userInput("callback"))
+			_ = svcIface.Execute(ctx, userInput("callback"))
 		}
 	})
 	b.Logf("Callbacks: %d", atomic.LoadInt64(&callCount))
@@ -471,7 +471,7 @@ func BenchmarkMemory_UserInputAlloc(b *testing.B) {
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, userInput(fmt.Sprintf("msg %d", i)))
+		_ = svcIface.Execute(ctx, userInput(fmt.Sprintf("msg %d", i)))
 	}
 }
 
@@ -486,7 +486,7 @@ func BenchmarkMemory_STTInputAlloc(b *testing.B) {
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, sttInput(fmt.Sprintf("transcription %d", i), i%10 == 0))
+		_ = svcIface.Execute(ctx, sttInput(fmt.Sprintf("transcription %d", i), i%10 == 0))
 	}
 }
 
@@ -502,7 +502,7 @@ func BenchmarkMemory_ConcurrentAlloc(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = svcIface.Analyze(ctx, systemInput("mem"))
+			_ = svcIface.Execute(ctx, systemInput("mem"))
 		}
 	})
 }
@@ -528,6 +528,6 @@ func BenchmarkBufferAppend(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = svcIface.Analyze(ctx, userInput("msg"))
+		_ = svcIface.Execute(ctx, userInput("msg"))
 	}
 }

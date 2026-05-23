@@ -10,6 +10,7 @@ import {
   Debug,
   Phone,
   ChartLine,
+  DigitalIdentity,
 } from '@carbon/icons-react';
 import type { ComponentType } from 'react';
 
@@ -79,6 +80,24 @@ export const assistantNavSections: AssistantNavSection[] = [
         label: 'General',
         icon: Settings,
         path: 'edit-assistant',
+      },
+      {
+        key: 'authentication',
+        label: 'Authentication',
+        icon: DigitalIdentity,
+        path: 'configure-authentication',
+        children: [
+          {
+            key: 'authentication-list',
+            label: 'View all',
+            path: 'configure-authentication',
+          },
+          {
+            key: 'authentication-create',
+            label: 'Add authentication',
+            path: 'configure-authentication/create',
+          },
+        ],
       },
       {
         key: 'deployment',

@@ -52,7 +52,7 @@ func newSileroOrSkip(t *testing.T, threshold float64, cb func(ctx context.Contex
 		require.NoError(t, err)
 	}
 	silero := vad.(*SileroVAD)
-	t.Cleanup(func() { _ = silero.Close() })
+	t.Cleanup(func() { _ = silero.Close(context.Background()) })
 	return silero
 }
 
@@ -109,7 +109,7 @@ func TestSileroVAD_Process_Silence_NoCallback(t *testing.T) {
 
 	vad := newSileroOrSkip(t, 0.5, callback)
 
-	err := vad.Process(context.Background(), generateSilence(16000))
+	err := vad.Execute(context.Background(), generateSilence(16000))
 	require.NoError(t, err)
 	assert.False(t, detectionFired, "silence should not trigger a speech detection event")
 }
@@ -127,7 +127,7 @@ func TestSileroVAD_Process_Speech_AllowsCallback(t *testing.T) {
 
 	vad := newSileroOrSkip(t, 0.2, callback)
 
-	err := vad.Process(context.Background(), generateSineWave(16000, 440, 0.9))
+	err := vad.Execute(context.Background(), generateSineWave(16000, 440, 0.9))
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, result.EndAt, result.StartAt)
 }
@@ -138,7 +138,7 @@ func TestSileroVAD_Process_CorruptedData(t *testing.T) {
 	vad := newSileroOrSkip(t, 0.5, callback)
 
 	corrupted := make([]byte, 999) // Odd length
-	err := vad.Process(context.Background(), internal_type.UserAudioReceivedPacket{Audio: corrupted})
+	err := vad.Execute(context.Background(), internal_type.UserAudioReceivedPacket{Audio: corrupted})
 	_ = err // Accept error or nil; should not panic
 }
 
@@ -151,7 +151,7 @@ func TestSileroVAD_Process_VerySmallChunks(t *testing.T) {
 	for _, size := range sizes {
 		size := size
 		t.Run(fmt.Sprintf("%d_samples", size), func(t *testing.T) {
-			err := vad.Process(context.Background(), generateSilence(size))
+			err := vad.Execute(context.Background(), generateSilence(size))
 			_ = err
 		})
 	}
@@ -168,7 +168,7 @@ func TestSileroVAD_Process_Concurrent(t *testing.T) {
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer wg.Done()
-			_ = vad.Process(context.Background(), generateSilence(1600))
+			_ = vad.Execute(context.Background(), generateSilence(1600))
 		}()
 	}
 	wg.Wait()
@@ -187,8 +187,8 @@ func TestSileroVAD_Close_Idempotent(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	require.NoError(t, vad.Close())
-	err = vad.Close()
+	require.NoError(t, vad.Close(context.Background()))
+	err = vad.Close(context.Background())
 	_ = err
 }
 
@@ -217,7 +217,7 @@ func TestSileroVAD_Process_NoisePatterns(t *testing.T) {
 
 	vad := newSileroOrSkip(t, 0.5, callback)
 
-	err := vad.Process(context.Background(), generateNoise(16000))
+	err := vad.Execute(context.Background(), generateNoise(16000))
 	require.NoError(t, err)
 }
 
@@ -238,7 +238,7 @@ func TestSileroVAD_Process_MaxAmplitude(t *testing.T) {
 		binary.LittleEndian.PutUint16(data[i*2:i*2+2], uint16(val))
 	}
 
-	err := vad.Process(context.Background(), internal_type.UserAudioReceivedPacket{Audio: data})
+	err := vad.Execute(context.Background(), internal_type.UserAudioReceivedPacket{Audio: data})
 	require.NoError(t, err)
 }
 
@@ -249,7 +249,7 @@ func TestSileroVAD_Process_RepeatedCalls(t *testing.T) {
 
 	chunk := generateSilence(1600)
 	for i := 0; i < 50; i++ {
-		err := vad.Process(context.Background(), chunk)
+		err := vad.Execute(context.Background(), chunk)
 		require.NoError(t, err)
 	}
 }
@@ -264,9 +264,73 @@ func TestSileroVAD_StatefulProcessing(t *testing.T) {
 	vad := newSileroOrSkip(t, 0.3, callback)
 
 	for i := 0; i < 10; i++ {
-		err := vad.Process(context.Background(), generateSineWave(1600, 440, 0.8))
+		err := vad.Execute(context.Background(), generateSineWave(1600, 440, 0.8))
 		require.NoError(t, err)
 	}
 
 	assert.GreaterOrEqual(t, calls, 0)
+}
+
+func TestSileroVAD_Process_ExactWindow_512Samples(t *testing.T) {
+	callback := func(context.Context, ...internal_type.Packet) error { return nil }
+	vad := newSileroOrSkip(t, 0.5, callback)
+
+	err := vad.Execute(context.Background(), generateSilence(512))
+	require.NoError(t, err)
+	assert.Equal(t, 512, vad.detector.currSample, "exact 512-sample chunk should process one full window")
+}
+
+func TestSileroVAD_Process_ExactMultiple_1024Samples(t *testing.T) {
+	callback := func(context.Context, ...internal_type.Packet) error { return nil }
+	vad := newSileroOrSkip(t, 0.5, callback)
+
+	err := vad.Execute(context.Background(), generateSilence(1024))
+	require.NoError(t, err)
+	assert.Equal(t, 1024, vad.detector.currSample, "exact 1024-sample chunk should process two full windows")
+}
+
+func TestSileroVAD_Process_CrossCallWindowCarry(t *testing.T) {
+	callback := func(context.Context, ...internal_type.Packet) error { return nil }
+	vad := newSileroOrSkip(t, 0.5, callback)
+
+	err := vad.Execute(context.Background(), generateSilence(320))
+	require.NoError(t, err)
+	assert.Equal(t, 0, vad.detector.currSample, "320 samples alone should not process a full 512-sample window")
+
+	err = vad.Execute(context.Background(), generateSilence(192))
+	require.NoError(t, err)
+	assert.Equal(t, 512, vad.detector.currSample, "320+192 samples across calls should process one full window")
+}
+
+func TestSileroVAD_Process_RemainderCarry(t *testing.T) {
+	callback := func(context.Context, ...internal_type.Packet) error { return nil }
+	vad := newSileroOrSkip(t, 0.5, callback)
+
+	err := vad.Execute(context.Background(), generateSilence(1600))
+	require.NoError(t, err)
+	assert.Equal(t, 1536, vad.detector.currSample, "1600 samples should process three windows and carry 64")
+
+	err = vad.Execute(context.Background(), generateSilence(448))
+	require.NoError(t, err)
+	assert.Equal(t, 2048, vad.detector.currSample, "64 carry + 448 samples should process one more window")
+}
+
+func TestSileroVAD_NotifyInterruption_SetsEvent(t *testing.T) {
+	var got internal_type.InterruptionDetectedPacket
+	callback := func(_ context.Context, pkts ...internal_type.Packet) error {
+		for _, p := range pkts {
+			if ip, ok := p.(internal_type.InterruptionDetectedPacket); ok {
+				got = ip
+			}
+		}
+		return nil
+	}
+
+	s := &SileroVAD{onPacket: callback}
+	s.notifyInterruption(context.Background(), internal_type.InterruptionEventEnd, 2.75, 1)
+
+	assert.Equal(t, internal_type.InterruptionSourceVad, got.Source)
+	assert.Equal(t, internal_type.InterruptionEventEnd, got.Event)
+	assert.Equal(t, 2.75, got.StartAt)
+	assert.Equal(t, 2.75, got.EndAt)
 }

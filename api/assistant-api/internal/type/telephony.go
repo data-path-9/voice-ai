@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/gin-gonic/gin"
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
@@ -78,7 +79,7 @@ type Telephony interface {
 	// ReceiveCall processes an incoming call webhook and returns structured call info.
 	ReceiveCall(c *gin.Context) (*CallInfo, error)
 	// OutboundCall places an outbound call and returns structured call info.
-	OutboundCall(auth types.SimplePrinciple, toPhone string, fromPhone string, assistantId, assistantConversationId uint64, vaultCredential *protos.VaultCredential, opts utils.Option) (*CallInfo, error)
+	OutboundCall(auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, opts utils.Option) (*CallInfo, error)
 	// InboundCall instructs the provider to answer/connect the inbound call.
 	InboundCall(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, clientNumber string, assistantConversationId uint64) error
 }

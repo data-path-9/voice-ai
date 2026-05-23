@@ -1,0 +1,19 @@
+[
+  {
+    "id": "custom/model",
+    "name": "custom-model",
+    "config": {
+      "parameters": [
+        {
+          "key": "model.parameters",
+          "label": "Model Parameters",
+          "type": "json",
+          "advanced": true,
+          "required": false,
+          "colSpan": 2,
+          "helpText": "Provide a JSON object with provider options. Example: {\"temperature\":0.7,\"max_tokens\":512}. OpenAI Chat Completions (/v1/chat/completions) supports extra fields such as top_k and chat_template_kwargs.enable_thinking; OpenAI Responses (/v1/responses) supports response-style options in the same JSON object."
+        }
+      ]
+    }
+  }
+]

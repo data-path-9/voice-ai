@@ -134,7 +134,7 @@ export function EndpointPage() {
         <EmptyState
           icon={Connect}
           title="No endpoints found"
-          subtitle="Deploy API endpoints with fine-grained governance, audit trails, and enterprise access control."
+          subtitle="Deploy governed APIs for client, brand, or business-unit workflows with audit trails and access control."
           action="Create new endpoint"
           onAction={() => navigate('/deployment/endpoint/create-endpoint')}
         />

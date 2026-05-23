@@ -6,10 +6,31 @@
 package internal_livekit
 
 import (
+	"context"
+	"errors"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+	"github.com/rapidaai/pkg/commons"
+	"github.com/rapidaai/pkg/utils"
 )
+
+type testPredictor struct {
+	predict func(string) (float64, error)
+}
+
+func (predictor testPredictor) Predict(text string) (float64, error) {
+	return predictor.predict(text)
+}
+
+func (predictor testPredictor) Destroy() {}
 
 // --- tokenizer tests ---
 
@@ -136,34 +157,587 @@ func TestFormatChatTemplateFromHistory_SkipsEmptyMessages(t *testing.T) {
 	assert.Contains(t, result, "real reply")
 }
 
-// --- history tracking tests ---
-
-func TestLivekitEOS_HistoryFromPackets(t *testing.T) {
-	eos := &LivekitEOS{
-		history: []chatMessage{},
+func TestLivekitEndOfSpeech_AssistantHistoryFromLLMResponseDonePacket(t *testing.T) {
+	endOfSpeech := &livekitEndOfSpeech{
+		commandCh: make(chan workerCommand, 1),
+		stopCh:    make(chan struct{}),
+		state:     &endOfSpeechState{segment: speechSegment{}},
 	}
+	defer func() { _ = endOfSpeech.Close(context.Background()) }()
 
-	// Simulate fire recording a user turn
-	eos.history = append(eos.history, chatMessage{Role: "user", Content: "hello"})
-	assert.Len(t, eos.history, 1)
-	assert.Equal(t, "user", eos.history[0].Role)
-	assert.Equal(t, "hello", eos.history[0].Content)
+	err := endOfSpeech.Execute(context.Background(), internal_type.LLMResponseDonePacket{
+		ContextID: "ctx-history",
+		Text:      "hi there",
+	})
+	require.NoError(t, err)
 
-	// Simulate LLMResponseDonePacket recording an assistant turn
-	eos.history = append(eos.history, chatMessage{Role: "assistant", Content: "hi there"})
-	assert.Len(t, eos.history, 2)
-	assert.Equal(t, "assistant", eos.history[1].Role)
+	assert.Len(t, endOfSpeech.history, 1)
+	assert.Equal(t, "assistant", endOfSpeech.history[0].Role)
+	assert.Equal(t, "hi there", endOfSpeech.history[0].Content)
 }
 
-func TestLivekitEOS_SendAfterClose_DoesNotEnqueueCommand(t *testing.T) {
-	eos := &LivekitEOS{
-		cmdCh:  make(chan command, 1),
-		stopCh: make(chan struct{}),
-		state:  &eosState{segment: SpeechSegment{}},
+func TestLivekitEndOfSpeech_EnqueueAfterClose_DoesNotEnqueueCommand(t *testing.T) {
+	endOfSpeech := &livekitEndOfSpeech{
+		commandCh: make(chan workerCommand, 1),
+		stopCh:    make(chan struct{}),
+		state:     &endOfSpeechState{segment: speechSegment{}},
 	}
-	close(eos.stopCh)
+	close(endOfSpeech.stopCh)
 
-	eos.send(command{fireNow: true})
+	endOfSpeech.enqueueCommand(workerCommand{fireImmediately: true})
 
-	assert.Equal(t, 0, len(eos.cmdCh))
+	assert.Equal(t, 0, len(endOfSpeech.commandCh))
+}
+
+func TestLivekitEndOfSpeech_UserInputImmediateTriggerUsesQueuedSegmentSnapshot(t *testing.T) {
+	called := make(chan internal_type.EndOfSpeechPacket, 2)
+	endOfSpeech := &livekitEndOfSpeech{
+		onPacket: func(ctx context.Context, packets ...internal_type.Packet) error {
+			for _, packet := range packets {
+				if endOfSpeechPacket, ok := packet.(internal_type.EndOfSpeechPacket); ok {
+					called <- endOfSpeechPacket
+				}
+			}
+			return nil
+		},
+		commandCh: make(chan workerCommand, 4),
+		stopCh:    make(chan struct{}),
+		state:     &endOfSpeechState{segment: speechSegment{}},
+	}
+	go endOfSpeech.worker()
+	defer func() { _ = endOfSpeech.Close(context.Background()) }()
+
+	require.NoError(t, endOfSpeech.Execute(context.Background(), internal_type.UserTextReceivedPacket{
+		ContextID: "ctx-first",
+		Text:      "first",
+	}))
+	require.NoError(t, endOfSpeech.Execute(context.Background(), internal_type.UserTextReceivedPacket{
+		ContextID: "ctx-second",
+		Text:      "second",
+	}))
+
+	select {
+	case packet := <-called:
+		assert.Equal(t, "ctx-first", packet.ContextID)
+		assert.Equal(t, "first", packet.Speech)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timeout waiting for first immediate callback")
+	}
+
+	select {
+	case packet := <-called:
+		assert.Equal(t, "ctx-second", packet.ContextID)
+		assert.Equal(t, "second", packet.Speech)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timeout waiting for second immediate callback")
+	}
+}
+
+func TestLivekitEndOfSpeech_EnqueueCommandBlocksUntilChannelHasSpace(t *testing.T) {
+	endOfSpeech := &livekitEndOfSpeech{
+		commandCh: make(chan workerCommand, 1),
+		stopCh:    make(chan struct{}),
+		state:     &endOfSpeechState{segment: speechSegment{}},
+	}
+	endOfSpeech.commandCh <- workerCommand{segment: speechSegment{Committed: "first"}}
+
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		endOfSpeech.enqueueCommand(workerCommand{segment: speechSegment{Committed: "second"}})
+		close(done)
+	}()
+
+	<-started
+	select {
+	case <-done:
+		t.Fatal("enqueueCommand should wait while channel is full")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	first := <-endOfSpeech.commandCh
+	assert.Equal(t, "first", first.segment.FullText())
+
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("enqueueCommand should resume after channel space is available")
+	}
+
+	second := <-endOfSpeech.commandCh
+	assert.Equal(t, "second", second.segment.FullText())
+}
+
+func TestLivekitEndOfSpeech_FinalSTTInferenceFailure_UsesFallbackTimeout(t *testing.T) {
+	endOfSpeech := &livekitEndOfSpeech{
+		onPacket: func(context.Context, ...internal_type.Packet) error { return nil },
+		predictor: testPredictor{
+			predict: func(string) (float64, error) {
+				return 0, errors.New("predict failed")
+			},
+		},
+		threshold:       defaultThreshold,
+		quickTimeout:    20 * time.Millisecond,
+		silenceTimeout:  900 * time.Millisecond,
+		fallbackTimeout: 60 * time.Millisecond,
+		maxHistory:      int(defaultMaxHistory),
+		commandCh:       make(chan workerCommand, 1),
+		stopCh:          make(chan struct{}),
+		state:           &endOfSpeechState{segment: speechSegment{}},
+	}
+
+	err := endOfSpeech.Execute(context.Background(), internal_type.SpeechToTextPacket{
+		ContextID: "ctx-fallback",
+		Script:    "fallback path",
+	})
+	require.NoError(t, err)
+
+	select {
+	case command := <-endOfSpeech.commandCh:
+		assert.Equal(t, 60*time.Millisecond, command.timeout)
+		assert.Equal(t, 0.0, command.confidence)
+		assert.Equal(t, "fallback path", command.segment.FullText())
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for fallback command")
+	}
+}
+
+func TestLivekitEndOfSpeech_VadSpeechActivityExtendsCurrentSegment(t *testing.T) {
+	endOfSpeech := &livekitEndOfSpeech{
+		commandCh: make(chan workerCommand, 1),
+		stopCh:    make(chan struct{}),
+		state: &endOfSpeechState{
+			segment:    speechSegment{ContextID: "ctx-vad", Committed: "hello"},
+			confidence: 0.73,
+		},
+		silenceTimeout: 250 * time.Millisecond,
+	}
+
+	err := endOfSpeech.Execute(context.Background(), internal_type.VadSpeechActivityPacket{})
+	require.NoError(t, err)
+
+	select {
+	case command := <-endOfSpeech.commandCh:
+		assert.Equal(t, 250*time.Millisecond, command.timeout)
+		assert.Equal(t, "hello", command.segment.FullText())
+		assert.InDelta(t, 0.73, command.confidence, 0.0001)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for VAD command")
+	}
+}
+
+func TestLivekitEndOfSpeech_PredictorSerializedUnderConcurrentExecute(t *testing.T) {
+	var inFlight int32
+	var maxInFlight int32
+
+	endOfSpeech := &livekitEndOfSpeech{
+		onPacket: func(context.Context, ...internal_type.Packet) error { return nil },
+		predictor: testPredictor{
+			predict: func(string) (float64, error) {
+				current := atomic.AddInt32(&inFlight, 1)
+				for {
+					maximum := atomic.LoadInt32(&maxInFlight)
+					if current <= maximum || atomic.CompareAndSwapInt32(&maxInFlight, maximum, current) {
+						break
+					}
+				}
+				time.Sleep(10 * time.Millisecond)
+				atomic.AddInt32(&inFlight, -1)
+				return 0.0, nil
+			},
+		},
+		threshold:       defaultThreshold,
+		quickTimeout:    20 * time.Millisecond,
+		silenceTimeout:  500 * time.Millisecond,
+		fallbackTimeout: 50 * time.Millisecond,
+		maxHistory:      int(defaultMaxHistory),
+		commandCh:       make(chan workerCommand, 16),
+		stopCh:          make(chan struct{}),
+		state:           &endOfSpeechState{segment: speechSegment{}},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = endOfSpeech.Execute(context.Background(), internal_type.SpeechToTextPacket{
+				ContextID: "ctx-serialized",
+				Script:    "hello",
+			})
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(1), atomic.LoadInt32(&maxInFlight))
+}
+
+func TestLivekitEndOfSpeech_DetectedEventIncludesModelConfidence(t *testing.T) {
+	events := make(chan internal_type.ConversationEventPacket, 1)
+	endOfSpeech := &livekitEndOfSpeech{
+		onPacket: func(ctx context.Context, packets ...internal_type.Packet) error {
+			for _, packet := range packets {
+				event, ok := packet.(internal_type.ConversationEventPacket)
+				if !ok || event.Data["type"] != "detected" {
+					continue
+				}
+
+				select {
+				case events <- event:
+				default:
+				}
+			}
+			return nil
+		},
+		predictor: testPredictor{
+			predict: func(string) (float64, error) {
+				return 0.42, nil
+			},
+		},
+		threshold:       0.2,
+		quickTimeout:    10 * time.Millisecond,
+		silenceTimeout:  100 * time.Millisecond,
+		fallbackTimeout: 50 * time.Millisecond,
+		maxHistory:      int(defaultMaxHistory),
+		commandCh:       make(chan workerCommand, 4),
+		stopCh:          make(chan struct{}),
+		state:           &endOfSpeechState{segment: speechSegment{}},
+	}
+	go endOfSpeech.worker()
+	defer func() { _ = endOfSpeech.Close(context.Background()) }()
+
+	err := endOfSpeech.Execute(context.Background(), internal_type.SpeechToTextPacket{
+		ContextID: "ctx-confidence",
+		Script:    "hello world",
+	})
+	require.NoError(t, err)
+
+	select {
+	case event := <-events:
+		assert.Equal(t, "ctx-confidence", event.ContextID)
+		assert.Equal(t, "0.4200", event.Data["confidence"])
+		assert.Equal(t, "hello world", event.Data["speech"])
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timeout waiting for detected event")
+	}
+}
+
+func TestLivekitEndOfSpeech_ConversationEventShape(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	events := make(chan internal_type.ConversationEventPacket, 4)
+	metrics := make(chan internal_type.UserMessageMetricPacket, 2)
+	callback := func(ctx context.Context, packets ...internal_type.Packet) error {
+		for _, packet := range packets {
+			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
+				select {
+				case events <- event:
+				default:
+				}
+			}
+			if metric, ok := packet.(internal_type.UserMessageMetricPacket); ok {
+				select {
+				case metrics <- metric:
+				default:
+				}
+			}
+		}
+		return nil
+	}
+
+	executor, err := NewLivekitEndOfSpeech(logger, callback, utils.Option{
+		"microphone.eos.events": "standard",
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer func() { _ = executor.Close(context.Background()) }()
+
+	if err := executor.Execute(context.Background(), internal_type.UserTextReceivedPacket{
+		ContextID: "ctx-events",
+		Text:      "hello world",
+	}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	timeout := time.After(500 * time.Millisecond)
+	var sawDetected, sawMetric bool
+	for !sawDetected || !sawMetric {
+		select {
+		case event := <-events:
+			if event.Data["type"] != "detected" {
+				t.Fatalf("unexpected eos event in standard mode: %+v", event)
+			}
+			assert.Equal(t, "ctx-events", event.ContextID)
+			assert.Equal(t, eosName, event.Data["provider"])
+			assert.Equal(t, "ctx-events", event.Data["context_id"])
+			assert.Equal(t, "hello world", event.Data["speech"])
+			assert.Equal(t, "0.0000", event.Data["confidence"])
+			_, parseErr := strconv.Atoi(event.Data["text_to_trigger_ms"])
+			assert.NoError(t, parseErr)
+			_, parseErr = strconv.Atoi(event.Data["wait_to_trigger_ms"])
+			assert.NoError(t, parseErr)
+			assert.False(t, event.Time.IsZero())
+			sawDetected = true
+		case metric := <-metrics:
+			if len(metric.Metrics) != 1 {
+				continue
+			}
+			if metric.Metrics[0].Name != "eos_latency_ms" {
+				continue
+			}
+			_, parseErr := strconv.Atoi(metric.Metrics[0].Value)
+			assert.NoError(t, parseErr)
+			sawMetric = true
+		case <-timeout:
+			t.Fatal("timeout waiting for eos conversation events")
+		}
+	}
+}
+
+func TestLivekitEndOfSpeech_DebugConversationEvents(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	events := make(chan internal_type.ConversationEventPacket, 8)
+	callback := func(ctx context.Context, packets ...internal_type.Packet) error {
+		for _, packet := range packets {
+			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
+				select {
+				case events <- event:
+				default:
+				}
+			}
+		}
+		return nil
+	}
+
+	executor, err := NewLivekitEndOfSpeech(logger, callback, utils.Option{
+		"microphone.eos.events": "debug",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, executor.Execute(context.Background(), internal_type.UserTextReceivedPacket{
+		ContextID: "ctx-debug",
+		Text:      "hello",
+	}))
+
+	sawInitialized := false
+	sawInterim := false
+	sawDetected := false
+	timeout := time.After(500 * time.Millisecond)
+	for !sawInitialized || !sawInterim || !sawDetected {
+		select {
+		case event := <-events:
+			switch event.Data["type"] {
+			case "initialized":
+				sawInitialized = true
+			case "interim":
+				sawInterim = true
+			case "detected":
+				sawDetected = true
+			default:
+				t.Fatalf("unexpected debug event: %+v", event)
+			}
+		case <-timeout:
+			t.Fatal("timeout waiting for debug eos events")
+		}
+	}
+
+	require.NoError(t, executor.Close(context.Background()))
+
+	timeout = time.After(500 * time.Millisecond)
+	for {
+		select {
+		case event := <-events:
+			if event.Data["type"] != "closed" {
+				continue
+			}
+			return
+		case <-timeout:
+			t.Fatal("timeout waiting for closed eos event")
+		}
+	}
+}
+
+func TestLivekitEndOfSpeech_EventLevelOffKeepsMetrics(t *testing.T) {
+	events := make(chan internal_type.ConversationEventPacket, 4)
+	metrics := make(chan internal_type.UserMessageMetricPacket, 2)
+	endOfSpeech := &livekitEndOfSpeech{
+		onPacket: func(ctx context.Context, packets ...internal_type.Packet) error {
+			for _, packet := range packets {
+				switch typed := packet.(type) {
+				case internal_type.ConversationEventPacket:
+					select {
+					case events <- typed:
+					default:
+					}
+				case internal_type.UserMessageMetricPacket:
+					select {
+					case metrics <- typed:
+					default:
+					}
+				}
+			}
+			return nil
+		},
+		eventLevel:      eventLevelOff,
+		threshold:       defaultThreshold,
+		quickTimeout:    10 * time.Millisecond,
+		silenceTimeout:  100 * time.Millisecond,
+		fallbackTimeout: 50 * time.Millisecond,
+		maxHistory:      int(defaultMaxHistory),
+		commandCh:       make(chan workerCommand, 4),
+		stopCh:          make(chan struct{}),
+		state:           &endOfSpeechState{segment: speechSegment{}},
+	}
+	go endOfSpeech.worker()
+	defer func() { _ = endOfSpeech.Close(context.Background()) }()
+
+	require.NoError(t, endOfSpeech.Execute(context.Background(), internal_type.UserTextReceivedPacket{
+		ContextID: "ctx-off",
+		Text:      "hello",
+	}))
+
+	select {
+	case metric := <-metrics:
+		require.Len(t, metric.Metrics, 1)
+		assert.Equal(t, "eos_latency_ms", metric.Metrics[0].Name)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for eos metric")
+	}
+
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected eos event in off mode: %+v", event)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestLivekitEndOfSpeech_MetricUsesLastTimerArm(t *testing.T) {
+	events := make(chan internal_type.ConversationEventPacket, 2)
+	metrics := make(chan internal_type.UserMessageMetricPacket, 1)
+	endOfSpeech := &livekitEndOfSpeech{
+		onPacket: func(ctx context.Context, packets ...internal_type.Packet) error {
+			for _, packet := range packets {
+				switch typed := packet.(type) {
+				case internal_type.ConversationEventPacket:
+					if typed.Data["type"] != "detected" {
+						continue
+					}
+					select {
+					case events <- typed:
+					default:
+					}
+				case internal_type.UserMessageMetricPacket:
+					select {
+					case metrics <- typed:
+					default:
+					}
+				}
+			}
+			return nil
+		},
+		predictor: testPredictor{
+			predict: func(string) (float64, error) {
+				return 0, errors.New("predict failed")
+			},
+		},
+		threshold:       defaultThreshold,
+		quickTimeout:    20 * time.Millisecond,
+		silenceTimeout:  900 * time.Millisecond,
+		fallbackTimeout: 120 * time.Millisecond,
+		maxHistory:      int(defaultMaxHistory),
+		commandCh:       make(chan workerCommand, 8),
+		stopCh:          make(chan struct{}),
+		state:           &endOfSpeechState{segment: speechSegment{}},
+	}
+	go endOfSpeech.worker()
+	defer func() { _ = endOfSpeech.Close(context.Background()) }()
+
+	ctx := context.Background()
+	require.NoError(t, endOfSpeech.Execute(ctx, internal_type.SpeechToTextPacket{
+		ContextID: "ctx-reset",
+		Script:    "hello",
+		Interim:   false,
+	}))
+	time.Sleep(80 * time.Millisecond)
+	require.NoError(t, endOfSpeech.Execute(ctx, internal_type.SpeechToTextPacket{
+		ContextID: "ctx-reset",
+		Script:    "...",
+		Interim:   true,
+	}))
+
+	timeout := time.After(800 * time.Millisecond)
+	var detected internal_type.ConversationEventPacket
+	var metric internal_type.UserMessageMetricPacket
+	for detected.Name == "" || len(metric.Metrics) == 0 {
+		select {
+		case detected = <-events:
+		case metric = <-metrics:
+		case <-timeout:
+			t.Fatal("timeout waiting for detected eos packets")
+		}
+	}
+
+	textMs, err := strconv.Atoi(detected.Data["text_to_trigger_ms"])
+	require.NoError(t, err)
+	waitMs, err := strconv.Atoi(detected.Data["wait_to_trigger_ms"])
+	require.NoError(t, err)
+	require.Len(t, metric.Metrics, 1)
+	assert.Equal(t, "eos_latency_ms", metric.Metrics[0].Name)
+	metricMs, err := strconv.Atoi(metric.Metrics[0].Value)
+	require.NoError(t, err)
+
+	assert.InDelta(t, waitMs, metricMs, 30)
+	assert.Greater(t, textMs, waitMs+40)
+}
+
+func TestLivekitEndOfSpeech_RespectsExplicitEmptyConcat(t *testing.T) {
+	called := make(chan internal_type.EndOfSpeechPacket, 1)
+	endOfSpeech := &livekitEndOfSpeech{
+		onPacket: func(ctx context.Context, packets ...internal_type.Packet) error {
+			for _, packet := range packets {
+				if endOfSpeechPacket, ok := packet.(internal_type.EndOfSpeechPacket); ok {
+					select {
+					case called <- endOfSpeechPacket:
+					default:
+					}
+				}
+			}
+			return nil
+		},
+		predictor: testPredictor{
+			predict: func(string) (float64, error) {
+				return 0, errors.New("predict failed")
+			},
+		},
+		eventLevel:      eventLevelOff,
+		threshold:       defaultThreshold,
+		quickTimeout:    20 * time.Millisecond,
+		silenceTimeout:  900 * time.Millisecond,
+		fallbackTimeout: 80 * time.Millisecond,
+		maxHistory:      int(defaultMaxHistory),
+		commandCh:       make(chan workerCommand, 8),
+		stopCh:          make(chan struct{}),
+		state:           &endOfSpeechState{segment: speechSegment{}},
+	}
+	go endOfSpeech.worker()
+	defer func() { _ = endOfSpeech.Close(context.Background()) }()
+
+	empty := ""
+	packets := []internal_type.SpeechToTextPacket{
+		{ContextID: "ctx-concat", Script: "I", Interim: false},
+		{ContextID: "ctx-concat", Script: "'m", Concat: &empty, Interim: false},
+		{ContextID: "ctx-concat", Script: "thinking", Interim: false},
+		{ContextID: "ctx-concat", Script: ".", Concat: &empty, Interim: false},
+	}
+	for _, packet := range packets {
+		require.NoError(t, endOfSpeech.Execute(context.Background(), packet))
+	}
+
+	select {
+	case result := <-called:
+		assert.Equal(t, "I'm thinking.", result.Speech)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for end of speech")
+	}
 }

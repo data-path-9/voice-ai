@@ -18,6 +18,14 @@ type ChatCompletionOptions struct {
 	ToolDefinitions []*ToolDefinition `json:"tool_definitions"`
 }
 
+type ChatStreamCompletionOptions struct {
+	AIOptions
+	// request identifier
+	Request *protos.StreamChatInput
+	// The available tool definitions that the chat completions request can use, including caller-defined functions.
+	ToolDefinitions []*ToolDefinition `json:"tool_definitions"`
+}
+
 type ToolDefinition struct {
 	// type of tool
 	Type string `json:"type"`
@@ -128,9 +136,34 @@ func NewChatOptions(
 			ModelParameter: irRequest.GetModelParameters(),
 		},
 	}
-	err := utils.Cast(irRequest.GetToolDefinitions(), &cc.ToolDefinitions)
+	cc.ToolDefinitions = castToolDefinitions(irRequest.GetToolDefinitions())
+	return cc
+}
+
+func NewChatStreamOptions(
+	uuID uint64,
+	irRequest *protos.StreamChatInput,
+	preHook func(rst map[string]interface{}),
+	postHook func(rst map[string]interface{}, metrics []*protos.Metric),
+) *ChatStreamCompletionOptions {
+	cc := &ChatStreamCompletionOptions{
+		Request: irRequest,
+		AIOptions: AIOptions{
+			RequestId:      uuID,
+			PreHook:        preHook,
+			PostHook:       postHook,
+			ModelParameter: irRequest.GetModelParameters(),
+		},
+	}
+	cc.ToolDefinitions = castToolDefinitions(irRequest.GetToolDefinitions())
+	return cc
+}
+
+func castToolDefinitions(toolDefinitions []*protos.ToolDefinition) []*ToolDefinition {
+	var casted []*ToolDefinition
+	err := utils.Cast(toolDefinitions, &casted)
 	if err != nil {
 		fmt.Printf("initializing function definition with err %+v", err)
 	}
-	return cc
+	return casted
 }

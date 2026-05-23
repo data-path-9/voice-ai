@@ -14,11 +14,15 @@ import {
   DeploymentViewAssistantPage,
   DeploymentCreateVersionAssistantPage,
   DeploymentConfigureAssistantWebDeploymentPage,
+  DeploymentEditAssistantWebDeploymentPage,
   DeploymentConfigureAssistantCallDeploymentPage,
+  DeploymentEditAssistantCallDeploymentPage,
   DeploymentConfigureAssistantToolPage,
   DeploymentConfigureAssistantAnalysisPage,
   DeploymentConfigureAssistantApiDeploymentPage,
+  DeploymentEditAssistantApiDeploymentPage,
   DeploymentConfigureAssistantDebuggerDeploymentPage,
+  DeploymentEditAssistantDebuggerDeploymentPage,
   DeploymentEditAssistantPage,
   DeploymentConfigureAssistantWebhookPage,
   DeploymentCreateAssistantWebhookPage,
@@ -26,6 +30,9 @@ import {
   DeploymentConfigureAssistantTelemetryPage,
   DeploymentCreateAssistantTelemetryPage,
   DeploymentUpdateAssistantTelemetryPage,
+  DeploymentConfigureAssistantAuthenticationPage,
+  DeploymentCreateAssistantAuthenticationPage,
+  DeploymentUpdateAssistantAuthenticationPage,
   DeploymentConversationDetailPage,
   DeploymentCreateAssistantAnalysisPage,
   DeploymentUpdateAssistantAnalysisPage,
@@ -175,6 +182,18 @@ export function DeploymentRoute() {
             element={<DeploymentUpdateAssistantWebhookPage />}
           />
           <Route
+            path={'configure-authentication/'}
+            element={<DeploymentConfigureAssistantAuthenticationPage />}
+          />
+          <Route
+            path={'configure-authentication/create'}
+            element={<DeploymentCreateAssistantAuthenticationPage />}
+          />
+          <Route
+            path={'configure-authentication/edit'}
+            element={<DeploymentUpdateAssistantAuthenticationPage />}
+          />
+          <Route
             path={'configure-telemetry/'}
             element={<DeploymentConfigureAssistantTelemetryPage />}
           />
@@ -195,16 +214,32 @@ export function DeploymentRoute() {
             element={<DeploymentConfigureAssistantWebDeploymentPage />}
           />
           <Route
+            path={'deployment/web/:deploymentId/'}
+            element={<DeploymentEditAssistantWebDeploymentPage />}
+          />
+          <Route
             path={'deployment/call/'}
             element={<DeploymentConfigureAssistantCallDeploymentPage />}
+          />
+          <Route
+            path={'deployment/call/:deploymentId/'}
+            element={<DeploymentEditAssistantCallDeploymentPage />}
           />
           <Route
             path={'deployment/api/'}
             element={<DeploymentConfigureAssistantApiDeploymentPage />}
           />
           <Route
+            path={'deployment/api/:deploymentId/'}
+            element={<DeploymentEditAssistantApiDeploymentPage />}
+          />
+          <Route
             path={'deployment/debugger/'}
             element={<DeploymentConfigureAssistantDebuggerDeploymentPage />}
+          />
+          <Route
+            path={'deployment/debugger/:deploymentId/'}
+            element={<DeploymentEditAssistantDebuggerDeploymentPage />}
           />
         </Route>
         <Route

@@ -39,10 +39,15 @@ import { TagInput } from '@/app/components/form/tag-input';
 import { AssistantTag } from '@/app/components/form/tag-input/assistant-tags';
 import {
   GetDefaultTextProviderConfigIfInvalid,
+  GetDefaultTextProviderConfigOnProviderSwitch,
   TextProvider,
   ValidateTextProviderDefaultOptions,
 } from '@/app/components/providers/text';
 import { BuildinToolConfig } from '@/app/components/tools';
+import {
+  getToolConditionSource,
+  getToolConditionSourceLabel,
+} from '@/app/components/tools/common';
 import { ArrowUpRight } from 'lucide-react';
 import { BUILDIN_TOOLS } from '@/llm-tools';
 import { EmptyState } from '@/app/components/carbon/empty-state';
@@ -210,14 +215,11 @@ export function CreateAssistantPage() {
     setTags(tags.filter(t => t !== tag));
   };
   const onChangeProvider = (providerName: string) => {
-    const parametersWithoutCredential = selectedModel.parameters.filter(
-      p => p.getKey() !== 'rapida.credential_id',
-    );
     setSelectedModel({
       provider: providerName,
-      parameters: GetDefaultTextProviderConfigIfInvalid(
+      parameters: GetDefaultTextProviderConfigOnProviderSwitch(
         providerName,
-        parametersWithoutCredential,
+        selectedModel.parameters,
       ),
     });
   };
@@ -622,6 +624,9 @@ export function CreateAssistantPage() {
                           );
                           const isMCP = method === 'mcp';
                           const selected = selectedToolName === itm.name;
+                          const conditionSource = getToolConditionSource(
+                            itm.buildinToolConfig.parameters,
+                          );
 
                           return (
                             <TableRow
@@ -665,6 +670,14 @@ export function CreateAssistantPage() {
                                   {!methodMeta && !isMCP && (
                                     <Tag size="sm" type="gray">
                                       {(method || 'Unknown').replace(/_/g, ' ')}
+                                    </Tag>
+                                  )}
+                                  {conditionSource !== 'all' && (
+                                    <Tag size="sm" type="blue">
+                                      Source:{' '}
+                                      {getToolConditionSourceLabel(
+                                        conditionSource,
+                                      )}
                                     </Tag>
                                   )}
                                 </div>

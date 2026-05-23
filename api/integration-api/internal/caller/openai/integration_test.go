@@ -1,5 +1,3 @@
-//go:build integration
-
 // Copyright (c) 2023-2025 RapidaAI
 // Author: Prashant Srivastav <prashant@rapida.ai>
 //
@@ -14,6 +12,8 @@ import (
 	"time"
 
 	testutil "github.com/rapidaai/api/integration-api/internal/caller/internal/testutil"
+	internal_openai_text_embedding "github.com/rapidaai/api/integration-api/internal/caller/openai/text_embedding"
+	internal_openai_verify_credential "github.com/rapidaai/api/integration-api/internal/caller/openai/verify_credential"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,10 +29,11 @@ func TestIntegration_ChatCompletion(t *testing.T) {
 	defer cancel()
 
 	cred := testutil.BuildCredential(pcfg.Credential)
-	caller := NewLargeLanguageCaller(testutil.NewTestLogger(), cred)
+	chat, err := NewChat(testutil.NewTestLogger(), cred, nil)
+	require.NoError(t, err)
 	opts := testutil.BuildChatOptions(pcfg)
 
-	msg, metrics, err := caller.GetChatCompletion(ctx, testutil.SimpleMessages(), opts)
+	msg, metrics, err := chat.ChatComplete(ctx, testutil.SimpleMessages(), opts)
 	require.NoError(t, err, "GetChatCompletion should succeed")
 	require.NotNil(t, msg, "response message should not be nil")
 
@@ -52,11 +53,18 @@ func TestIntegration_StreamChatCompletion(t *testing.T) {
 	defer cancel()
 
 	cred := testutil.BuildCredential(pcfg.Credential)
-	caller := NewLargeLanguageCaller(testutil.NewTestLogger(), cred)
-	opts := testutil.BuildChatOptions(pcfg)
+	stream, err := NewChatStream(testutil.NewTestLogger(), cred, map[string]string{
+		OptionTransportKey: TransportChatResp,
+	})
+	require.NoError(t, err)
+	opts := testutil.BuildChatStreamOptions(pcfg)
 	sc := &testutil.StreamCollector{}
 
-	err := caller.StreamChatCompletion(ctx, testutil.SimpleMessages(), opts, sc.OnStream, sc.OnMetrics, sc.OnError)
+	err = stream.Connect(ctx, nil)
+	require.NoError(t, err, "Connect should succeed")
+	defer func() { _ = stream.Close(ctx) }()
+
+	err = stream.Chat(ctx, testutil.SimpleMessages(), opts, sc.OnStream, sc.OnMetrics, sc.OnError)
 	require.NoError(t, err, "StreamChatCompletion should succeed")
 	sc.AssertStream(t)
 	t.Logf("provider=%s stream_tokens=%d", providerName, sc.StreamCount)
@@ -71,7 +79,7 @@ func TestIntegration_Embedding(t *testing.T) {
 	defer cancel()
 
 	cred := testutil.BuildCredential(pcfg.Credential)
-	caller := NewEmbeddingCaller(testutil.NewTestLogger(), cred)
+	caller := internal_openai_text_embedding.New(testutil.NewTestLogger(), cred)
 	opts := testutil.BuildEmbeddingOptions(pcfg)
 
 	embeddings, metrics, err := caller.GetEmbedding(ctx, testutil.EmbeddingContent(), opts)
@@ -93,7 +101,7 @@ func TestIntegration_VerifyCredential(t *testing.T) {
 	defer cancel()
 
 	cred := testutil.BuildCredential(pcfg.Credential)
-	verifier := NewVerifyCredentialCaller(testutil.NewTestLogger(), cred)
+	verifier := internal_openai_verify_credential.New(testutil.NewTestLogger(), cred)
 	_, err := verifier.CredentialVerifier(ctx, testutil.BuildVerifyOptions(pcfg))
 	require.NoError(t, err, "CredentialVerifier should succeed with valid credentials")
 	t.Logf("provider=%s credential_verification=ok", providerName)

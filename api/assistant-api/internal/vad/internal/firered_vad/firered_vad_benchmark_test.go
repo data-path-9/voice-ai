@@ -30,7 +30,7 @@ func newBenchmarkFireRedVAD(b *testing.B, threshold float64) *FireRedVAD {
 		}
 		b.Fatal(err)
 	}
-	b.Cleanup(func() { vad.Close() })
+	b.Cleanup(func() { vad.Close(context.Background()) })
 	return vad.(*FireRedVAD)
 }
 
@@ -56,7 +56,7 @@ func BenchmarkFireRedVAD_Process_Silence_80ms(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -67,7 +67,7 @@ func BenchmarkFireRedVAD_Process_Silence_100ms(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -78,7 +78,7 @@ func BenchmarkFireRedVAD_Process_Silence_500ms(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -89,7 +89,7 @@ func BenchmarkFireRedVAD_Process_Silence_1s(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -100,7 +100,7 @@ func BenchmarkFireRedVAD_Process_Speech_80ms(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -111,7 +111,7 @@ func BenchmarkFireRedVAD_Process_Speech_100ms(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -122,7 +122,7 @@ func BenchmarkFireRedVAD_Process_Speech_500ms(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -133,7 +133,7 @@ func BenchmarkFireRedVAD_Process_Speech_1s(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -146,7 +146,7 @@ func BenchmarkFireRedVAD_Process_ChunkSize_10ms(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -157,7 +157,7 @@ func BenchmarkFireRedVAD_Process_ChunkSize_50ms(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -168,7 +168,7 @@ func BenchmarkFireRedVAD_Process_ChunkSize_200ms(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -179,7 +179,7 @@ func BenchmarkFireRedVAD_Process_ChunkSize_2s(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 	}
 }
 
@@ -200,7 +200,7 @@ func BenchmarkFireRedVAD_Process_Parallel_2Streams(b *testing.B) {
 			b.Fatal(err)
 		}
 		vads[i] = vad.(*FireRedVAD)
-		b.Cleanup(func() { vad.Close() })
+		b.Cleanup(func() { vad.Close(context.Background()) })
 	}
 
 	data := generateBenchmarkSilence(8000)
@@ -213,7 +213,7 @@ func BenchmarkFireRedVAD_Process_Parallel_2Streams(b *testing.B) {
 			wg.Add(1)
 			go func(v *FireRedVAD) {
 				defer wg.Done()
-				_ = v.Process(context.Background(), data)
+				_ = v.Execute(context.Background(), data)
 			}(vad)
 		}
 		wg.Wait()
@@ -235,7 +235,7 @@ func BenchmarkFireRedVAD_Process_Parallel_8Streams(b *testing.B) {
 			b.Fatal(err)
 		}
 		vads[i] = vad.(*FireRedVAD)
-		b.Cleanup(func() { vad.Close() })
+		b.Cleanup(func() { vad.Close(context.Background()) })
 	}
 
 	data := generateBenchmarkSilence(8000)
@@ -248,7 +248,7 @@ func BenchmarkFireRedVAD_Process_Parallel_8Streams(b *testing.B) {
 			wg.Add(1)
 			go func(v *FireRedVAD) {
 				defer wg.Done()
-				_ = v.Process(context.Background(), data)
+				_ = v.Execute(context.Background(), data)
 			}(vad)
 		}
 		wg.Wait()
@@ -265,7 +265,7 @@ func BenchmarkFireRedVAD_Process_SequentialStream_10Chunks(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 10; j++ {
-			_ = vad.Process(context.Background(), data)
+			_ = vad.Execute(context.Background(), data)
 		}
 	}
 }
@@ -278,7 +278,7 @@ func BenchmarkFireRedVAD_Process_SequentialStream_50Chunks(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 50; j++ {
-			_ = vad.Process(context.Background(), data)
+			_ = vad.Execute(context.Background(), data)
 		}
 	}
 }
@@ -291,7 +291,7 @@ func BenchmarkFireRedVAD_Process_SequentialStream_100Chunks(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 100; j++ {
-			_ = vad.Process(context.Background(), data)
+			_ = vad.Execute(context.Background(), data)
 		}
 	}
 }
@@ -306,8 +306,8 @@ func BenchmarkFireRedVAD_Process_MixedContent_SpeechSilence(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), speech)
-		_ = vad.Process(context.Background(), silence)
+		_ = vad.Execute(context.Background(), speech)
+		_ = vad.Execute(context.Background(), silence)
 	}
 }
 
@@ -328,7 +328,7 @@ func BenchmarkFireRedVAD_Initialization(b *testing.B) {
 			}
 			b.Fatal(err)
 		}
-		_ = vad.Close()
+		_ = vad.Close(context.Background())
 	}
 }
 
@@ -343,7 +343,7 @@ func BenchmarkFireRedVAD_Throughput_RealTime(b *testing.B) {
 
 	var totalSamples int64
 	for i := 0; i < b.N; i++ {
-		_ = vad.Process(context.Background(), data)
+		_ = vad.Execute(context.Background(), data)
 		totalSamples += 16000
 	}
 

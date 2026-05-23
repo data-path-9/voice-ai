@@ -67,8 +67,10 @@ const normalizeMetadata = (source: Metadata[]): string[] =>
     .map(m => `${m.getKey()}=${m.getValue()}`)
     .sort((a, b) => a.localeCompare(b));
 
-const getMetadataValue = (source: Metadata[], key: string): string =>
-  source.find(m => m.getKey() === key)?.getValue() ?? '';
+const getMetadataValue = (source: Metadata[], key: string): string => {
+  const value = source.find(m => m.getKey() === key)?.getValue();
+  return value === undefined || value === null ? '' : String(value);
+};
 
 const legacyGetDefaultVADConfig = (
   provider: string,
@@ -223,6 +225,33 @@ describe('Audio input advanced defaults parity', () => {
     expect(getMetadataValue(defaults, 'microphone.eos.provider')).toBe(
       'pipecat_smart_turn_eos',
     );
+    expect(getMetadataValue(defaults, 'microphone.eos.fallback_timeout')).toBe(
+      '500',
+    );
+    expect(getMetadataValue(defaults, 'microphone.eos.threshold')).toBe('0.5');
+    expect(getMetadataValue(defaults, 'microphone.eos.quick_timeout')).toBe('250');
+    expect(getMetadataValue(defaults, 'microphone.eos.extended_timeout')).toBe(
+      '2000',
+    );
+  });
+
+  it('microphone defaults hydrate missing values for an existing eos provider', () => {
+    const defaults = GetDefaultMicrophoneConfig([
+      createMetadata('microphone.eos.provider', 'livekit_eos'),
+    ]);
+
+    expect(getMetadataValue(defaults, 'microphone.eos.provider')).toBe(
+      'livekit_eos',
+    );
+    expect(getMetadataValue(defaults, 'microphone.eos.fallback_timeout')).toBe(
+      '500',
+    );
+    expect(getMetadataValue(defaults, 'microphone.eos.threshold')).toBe('0.0289');
+    expect(getMetadataValue(defaults, 'microphone.eos.quick_timeout')).toBe('250');
+    expect(getMetadataValue(defaults, 'microphone.eos.extended_timeout')).toBe(
+      '3000',
+    );
+    expect(getMetadataValue(defaults, 'microphone.eos.model')).toBe('en');
   });
 
   it('noise provider update clears stale denoising params and keeps only provider', () => {

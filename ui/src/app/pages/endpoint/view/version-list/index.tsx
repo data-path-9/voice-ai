@@ -4,7 +4,7 @@ import { useRapidaStore } from '@/hooks';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast/headless';
-import { toHumanReadableRelativeTime } from '@/utils/date';
+import { toHumanReadableDateTime, toHumanReadableRelativeTime } from '@/utils/date';
 import { TableSection } from '@/app/components/sections/table-section';
 import { Pagination } from '@/app/components/carbon/pagination';
 import IconIndicator from '@carbon/react/es/components/IconIndicator';
@@ -43,7 +43,7 @@ function VersionId({ id }: { id: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <span className="inline-flex items-center gap-1 font-mono text-xs text-gray-600 dark:text-gray-400">
+    <span className="inline-flex items-center gap-1 font-mono text-[13px] text-gray-600 dark:text-gray-400">
       {version}
       <Button
         hasIconOnly
@@ -146,11 +146,9 @@ export function Version(props: {
           totalSelected={selectedVersionId ? 1 : 0}
           onCancel={() => setSelectedVersionId(null)}
           totalCount={filteredVersions.length}
-          className="[&_[class*=divider]]:hidden [&_.cds--btn]:transition-colors [&_.cds--btn:hover]:!bg-primary [&_.cds--btn:hover]:!text-white"
         >
           <TableBatchAction
             renderIcon={Rocket}
-            kind="ghost"
             onClick={() => {
               if (selectedVersionId) {
                 deployRevision(selectedVersionId);
@@ -213,25 +211,26 @@ export function Version(props: {
                     disabled={isDeployed}
                   />
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   {epm.getDescription() || 'Initial endpoint version'}
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   <VersionId id={epm.getId()} />
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   {isDeployed ? (
                     <IconIndicator kind="succeeded" label="In use" size={16} />
                   ) : (
                     <IconIndicator kind="incomplete" label="Available" size={16} />
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-sm">
                   {epm.getCreateduser()?.getName() || ''}
                 </TableCell>
-                <TableCell>
-                  {epm.getCreateddate() &&
-                    toHumanReadableRelativeTime(epm.getCreateddate()!)}
+                 <TableCell className="text-[13px] whitespace-nowrap">
+                    {epm.getCreateddate()
+                    ? toHumanReadableDateTime(epm.getCreateddate()!)
+                    : '—'}
                 </TableCell>
               </TableRow>
             );

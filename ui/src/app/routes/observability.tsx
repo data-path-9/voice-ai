@@ -4,8 +4,8 @@ import {
   ConversationActivityListingPage,
   KnowledgeActivityListingPage,
   LLMActivityListingPage,
+  RequestActivityListingPage,
   ToolActivityListingPage,
-  WebhookActivityListingPage,
 } from '@/app/pages/activities';
 import { Routes, Route, Outlet } from 'react-router-dom';
 import { CONFIG } from '@/configs';
@@ -25,9 +25,9 @@ export function ObservabilityRoute() {
       >
         <Route index key="logs" path="/" element={<LLMActivityListingPage />} />
         <Route
-          key="webhook-logs"
-          path="/webhook"
-          element={<WebhookActivityListingPage />}
+          key="request-logs"
+          path="/request"
+          element={<RequestActivityListingPage />}
         />
         {CONFIG.workspace.features?.knowledge !== false && (
           <Route

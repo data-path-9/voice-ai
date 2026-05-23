@@ -102,18 +102,11 @@ func (uds *unidirectionalStreamer) Send(out internal_type.Stream) error {
 			Data:    &protos.AssistantTalkResponse_ToolCall{ToolCall: out},
 		})
 
-	case *protos.ConversationToolResult:
+	case *protos.ConversationToolCallResult:
 		return uds.server.Send(&protos.AssistantTalkResponse{
 			Code:    200,
 			Success: true,
-			Data:    &protos.AssistantTalkResponse_ToolResult{ToolResult: out},
-		})
-
-	case *protos.ConversationDirective:
-		return uds.server.Send(&protos.AssistantTalkResponse{
-			Code:    200,
-			Success: true,
-			Data:    &protos.AssistantTalkResponse_Directive{Directive: out},
+			Data:    &protos.AssistantTalkResponse_ToolCallResult{ToolCallResult: out},
 		})
 
 	case *protos.ConversationMetadata:

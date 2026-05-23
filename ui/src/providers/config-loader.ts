@@ -17,6 +17,7 @@ export type ProviderConfigCategory =
   | 'stt'
   | 'tts'
   | 'text'
+  | 'telephony'
   | 'vad'
   | 'eos'
   | 'noise'
@@ -25,7 +26,15 @@ export type ProviderConfigCategory =
 export interface ParameterConfig {
   key: string;
   label: string;
-  type: 'dropdown' | 'slider' | 'number' | 'input' | 'textarea' | 'select' | 'json' | 'key_value';
+  type:
+    | 'dropdown'
+    | 'slider'
+    | 'number'
+    | 'input'
+    | 'textarea'
+    | 'select'
+    | 'json'
+    | 'key_value';
   required?: boolean;
   default?: string;
   errorMessage?: string;
@@ -49,6 +58,9 @@ export interface ParameterConfig {
   rows?: number;
   // select
   choices?: ParameterChoice[];
+  // custom editor rendering
+  editor?: 'websocket_dsl_json';
+  editorMode?: 'query_params' | 'request_rules' | 'response_rules';
 }
 
 export interface CategoryConfig {
@@ -61,6 +73,7 @@ export interface ProviderConfig {
   stt?: CategoryConfig;
   tts?: CategoryConfig;
   text?: CategoryConfig;
+  telephony?: CategoryConfig;
   vad?: CategoryConfig;
   eos?: CategoryConfig;
   noise?: CategoryConfig;
@@ -102,7 +115,12 @@ const MODEL_SELECTOR_CATEGORIES: ReadonlySet<ProviderConfigCategory> = new Set([
   'text',
 ]);
 const TEXT_MODEL_DATA_CANDIDATES = ['text-models.json', 'models.json'] as const;
-const TEXT_CUSTOM_MODEL_PROVIDERS = new Set(['azure-foundry', 'vertexai']);
+const TEXT_CUSTOM_MODEL_PROVIDERS = new Set([
+  'azure-foundry',
+  'vertexai',
+  'custom-llm',
+  'openrouter',
+]);
 
 function warnProviderLoadFailure(
   scope: 'config' | 'data',
@@ -118,10 +136,7 @@ function resolveProviderPath(provider: string): string {
   return PROVIDER_PATH_ALIASES[provider] ?? provider;
 }
 
-function tryLoadProviderJson<T>(
-  provider: string,
-  filename: string,
-): T | null {
+function tryLoadProviderJson<T>(provider: string, filename: string): T | null {
   try {
     return require(`./${provider}/${filename}`) as T;
   } catch {
@@ -207,6 +222,7 @@ export function loadProviderConfig(provider: string): ProviderConfig | null {
     'stt',
     'tts',
     'text',
+    'telephony',
     'vad',
     'eos',
     'noise',
@@ -312,7 +328,9 @@ function getModelSelectorParameter(
   category?: ProviderConfigCategory,
 ): ParameterConfig | null {
   if (config.modelSelectionKey) {
-    return config.parameters.find(p => p.key === config.modelSelectionKey) ?? null;
+    return (
+      config.parameters.find(p => p.key === config.modelSelectionKey) ?? null
+    );
   }
   if (category && !MODEL_SELECTOR_CATEGORIES.has(category)) return null;
   return config.parameters.find(isModelSelectorParameter) ?? null;
@@ -330,12 +348,17 @@ function getSelectedModelConfig(
   const valueField = modelParam.valueField || 'id';
   const nameField = modelParam.linkedField?.sourceField || 'name';
   const selectedValue =
-    getMetadataValue(currentMetadata, modelParam.key) || modelParam.default || '';
+    getMetadataValue(currentMetadata, modelParam.key) ||
+    modelParam.default ||
+    '';
   const selectedLinkedValue = modelParam.linkedField
     ? getMetadataValue(currentMetadata, modelParam.linkedField.key)
     : '';
 
-  const catalog = loadProviderData(provider, modelParam.data) as ProviderModelDataItem[];
+  const catalog = loadProviderData(
+    provider,
+    modelParam.data,
+  ) as ProviderModelDataItem[];
   if (!catalog || catalog.length === 0) return null;
 
   let selectedModel =

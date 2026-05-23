@@ -1,16 +1,17 @@
 import { create } from 'zustand';
 import {} from '@/types/types.activity-log';
 import { initialPaginated } from '@/types/types.paginated';
-import { ServiceError } from '@rapidaai/react';
 import {
   WebhookLogType,
   WebhookLogTypeProperty,
 } from '@/types/types.webhook-log';
 import {
-  AssistantWebhookLog,
-  GetAllAssistantWebhookLogResponse,
+  AssistantHTTPLog,
+  Criteria,
+  GetAllAssistantHTTPLogRequest,
+  Paginate,
 } from '@rapidaai/react';
-import { GetAllWebhookLog } from '@rapidaai/react';
+import { GetAllHTTPLog } from '@rapidaai/react';
 import { connectionConfig } from '@/configs';
 
 const intialActivityLog: WebhookLogTypeProperty = {
@@ -63,7 +64,7 @@ export const useWebhookLogPage = create<WebhookLogType>((set, get) => ({
    *
    * @param ep
    */
-  onChangeActivities: (lgs: AssistantWebhookLog[]) => {
+  onChangeActivities: (lgs: AssistantHTTPLog[]) => {
     set({
       webhookLogs: lgs,
     });
@@ -104,17 +105,36 @@ export const useWebhookLogPage = create<WebhookLogType>((set, get) => ({
    * @param token
    * @param userId
    */
-  getActivities: (
+  getActivities: async (
     projectId: string,
     token: string,
     userId: string,
     onError: (err: string) => void,
-    onSuccess: (e: AssistantWebhookLog[]) => void,
+    onSuccess: (e: AssistantHTTPLog[]) => void,
   ) => {
-    const afterGetAllActivityLog = (
-      err: ServiceError | null,
-      gur: GetAllAssistantWebhookLogResponse | null,
-    ) => {
+    const req = new GetAllAssistantHTTPLogRequest();
+    req.setProjectid(projectId);
+
+    const paginate = new Paginate();
+    paginate.setPage(get().page);
+    paginate.setPagesize(get().pageSize);
+    req.setPaginate(paginate);
+
+    get().criteria.forEach(({ key, value, logic }) => {
+      const ctr = new Criteria();
+      ctr.setKey(key);
+      ctr.setValue(value);
+      ctr.setLogic(logic);
+      req.addCriterias(ctr);
+    });
+
+    try {
+      const gur = await GetAllHTTPLog(connectionConfig, req, {
+        authorization: token,
+        'x-project-id': projectId,
+        'x-auth-id': userId,
+      });
+
       if (gur?.getSuccess()) {
         get().onChangeActivities(gur.getDataList());
         let paginated = gur.getPaginated();
@@ -128,23 +148,11 @@ export const useWebhookLogPage = create<WebhookLogType>((set, get) => ({
           onError(errorMessage.getHumanmessage());
           return;
         }
-        onError('Unable to get webhook activity logs, please try again later.');
+        onError('Unable to get request logs, please try again later.');
       }
-    };
-
-    GetAllWebhookLog(
-      connectionConfig,
-      projectId,
-      get().page,
-      get().pageSize,
-      get().criteria,
-      afterGetAllActivityLog,
-      {
-        authorization: token,
-        'x-project-id': projectId,
-        'x-auth-id': userId,
-      },
-    );
+    } catch {
+      onError('Unable to get request logs, please try again later.');
+    }
   },
 
   /**
@@ -167,14 +175,15 @@ export const useWebhookLogPage = create<WebhookLogType>((set, get) => ({
    * columns
    */
   columns: [
-    { name: 'WebhookID', key: 'webhookid', visible: true },
+    { name: 'Request ID', key: 'sourcerefid', visible: true },
     { name: 'Session ID', key: 'sessionid', visible: true },
     { name: 'Event', key: 'event', visible: true },
     { name: 'Endpoint', key: 'endpoint', visible: true },
+    { name: 'Actions', key: 'action', visible: true },
     { name: 'Http status', key: 'responsestatus', visible: true },
     { name: 'Time Taken', key: 'timetaken', visible: true },
     { name: 'Retry Count', key: 'retrycount', visible: true },
-    { name: 'Created Date', key: 'created_date', visible: true },
+    { name: 'Date', key: 'created_date', visible: true },
   ],
 
   /**

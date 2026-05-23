@@ -34,8 +34,6 @@ type auditServiceClient struct {
 }
 
 func NewAuditServiceClient(config *config.AppConfig, logger commons.Logger, redis connectors.RedisConnector) AuditServiceClient {
-	logger.Debugf("conntecting to integration client with %s", config.IntegrationHost)
-
 	grpcOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
@@ -43,9 +41,7 @@ func NewAuditServiceClient(config *config.AppConfig, logger commons.Logger, redi
 			grpc.MaxCallSendMsgSize(math.MaxInt64),
 		),
 	}
-	conn, err := grpc.NewClient(config.IntegrationHost,
-		grpcOpts...)
-
+	conn, err := grpc.NewClient(config.Integration.Host, grpcOpts...)
 	if err != nil {
 		logger.Errorf("Unable to create connection %v", err)
 	}

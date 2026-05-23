@@ -9,7 +9,7 @@ export const LLMActivityListingPage = lazyLoad(
   },
 );
 
-export const WebhookActivityListingPage = lazyLoad(
+export const RequestActivityListingPage = lazyLoad(
   () => import('./webhook-activities'),
   module => module.ListingPage,
   {

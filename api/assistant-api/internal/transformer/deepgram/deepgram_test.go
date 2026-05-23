@@ -3,6 +3,7 @@ package internal_transformer_deepgram
 import (
 	"testing"
 
+	testutil "github.com/rapidaai/api/assistant-api/internal/transformer/internal/testutil"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
@@ -18,7 +19,7 @@ func newVaultCredential(m map[string]interface{}) *protos.VaultCredential {
 
 func TestNewDeepgramOption_ValidCredentials(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{"key": "test-api-key"})
-	opt, err := NewDeepgramOption(newTestLogger(t), cred, utils.Option{})
+	opt, err := NewDeepgramOption(testutil.NewTestLogger(), cred, utils.Option{})
 	assert.NoError(t, err)
 	assert.NotNil(t, opt)
 	assert.Equal(t, "test-api-key", opt.GetKey())
@@ -26,7 +27,7 @@ func TestNewDeepgramOption_ValidCredentials(t *testing.T) {
 
 func TestNewDeepgramOption_MissingKey(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{"other": "value"})
-	opt, err := NewDeepgramOption(newTestLogger(t), cred, utils.Option{})
+	opt, err := NewDeepgramOption(testutil.NewTestLogger(), cred, utils.Option{})
 	assert.Error(t, err)
 	assert.Nil(t, opt)
 	assert.Contains(t, err.Error(), "illegal vault config")
@@ -34,7 +35,7 @@ func TestNewDeepgramOption_MissingKey(t *testing.T) {
 
 func TestNewDeepgramOption_EmptyVault(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{})
-	opt, err := NewDeepgramOption(newTestLogger(t), cred, utils.Option{})
+	opt, err := NewDeepgramOption(testutil.NewTestLogger(), cred, utils.Option{})
 	assert.Error(t, err)
 	assert.Nil(t, opt)
 }
@@ -43,7 +44,7 @@ func TestNewDeepgramOption_EmptyVault(t *testing.T) {
 
 func TestDeepgramGetEncoding(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{"key": "k"})
-	opt, _ := NewDeepgramOption(newTestLogger(t), cred, utils.Option{})
+	opt, _ := NewDeepgramOption(testutil.NewTestLogger(), cred, utils.Option{})
 	assert.Equal(t, "linear16", opt.GetEncoding())
 }
 
@@ -51,7 +52,7 @@ func TestDeepgramGetEncoding(t *testing.T) {
 
 func TestSpeechToTextOptions_Defaults(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{"key": "k"})
-	opt, _ := NewDeepgramOption(newTestLogger(t), cred, utils.Option{})
+	opt, _ := NewDeepgramOption(testutil.NewTestLogger(), cred, utils.Option{})
 	sttOpts := opt.SpeechToTextOptions()
 
 	assert.Equal(t, "nova", sttOpts.Model)
@@ -81,7 +82,7 @@ func TestSpeechToTextOptions_WithOverrides(t *testing.T) {
 		"listen.multichannel": true,
 		"listen.model":        "nova-2",
 	}
-	opt, _ := NewDeepgramOption(newTestLogger(t), cred, opts)
+	opt, _ := NewDeepgramOption(testutil.NewTestLogger(), cred, opts)
 	sttOpts := opt.SpeechToTextOptions()
 
 	assert.Equal(t, "fr-FR", sttOpts.Language)
@@ -102,7 +103,7 @@ func TestSpeechToTextOptions_KeywordsNova2(t *testing.T) {
 		"listen.model":   "nova-2",
 		"listen.keyword": []interface{}{"hello", "world"},
 	}
-	opt, _ := NewDeepgramOption(newTestLogger(t), cred, opts)
+	opt, _ := NewDeepgramOption(testutil.NewTestLogger(), cred, opts)
 	sttOpts := opt.SpeechToTextOptions()
 
 	assert.Equal(t, []string{"hello", "world"}, sttOpts.Keywords)
@@ -115,7 +116,7 @@ func TestSpeechToTextOptions_KeywordsNova3(t *testing.T) {
 		"listen.model":   "nova-3",
 		"listen.keyword": []interface{}{"alpha", "beta"},
 	}
-	opt, _ := NewDeepgramOption(newTestLogger(t), cred, opts)
+	opt, _ := NewDeepgramOption(testutil.NewTestLogger(), cred, opts)
 	sttOpts := opt.SpeechToTextOptions()
 
 	assert.Equal(t, []string{"alpha", "beta"}, sttOpts.Keyterm)
@@ -128,7 +129,7 @@ func TestSpeechToTextOptions_KeywordsAsString(t *testing.T) {
 		"listen.model":   "nova-2",
 		"listen.keyword": "[hello world]",
 	}
-	opt, _ := NewDeepgramOption(newTestLogger(t), cred, opts)
+	opt, _ := NewDeepgramOption(testutil.NewTestLogger(), cred, opts)
 	sttOpts := opt.SpeechToTextOptions()
 
 	assert.Equal(t, []string{"hello", "world"}, sttOpts.Keywords)
@@ -138,7 +139,7 @@ func TestSpeechToTextOptions_KeywordsAsString(t *testing.T) {
 
 func TestGetTextToSpeechConnectionString_Default(t *testing.T) {
 	cred := newVaultCredential(map[string]interface{}{"key": "k"})
-	opt, _ := NewDeepgramOption(newTestLogger(t), cred, utils.Option{})
+	opt, _ := NewDeepgramOption(testutil.NewTestLogger(), cred, utils.Option{})
 	connStr := opt.GetTextToSpeechConnectionString()
 
 	assert.Contains(t, connStr, "wss://api.deepgram.com/v1/speak?")
@@ -152,7 +153,7 @@ func TestGetTextToSpeechConnectionString_WithVoice(t *testing.T) {
 	opts := utils.Option{
 		"speak.voice.id": "aura-asteria-en",
 	}
-	opt, _ := NewDeepgramOption(newTestLogger(t), cred, opts)
+	opt, _ := NewDeepgramOption(testutil.NewTestLogger(), cred, opts)
 	connStr := opt.GetTextToSpeechConnectionString()
 
 	assert.Contains(t, connStr, "wss://api.deepgram.com/v1/speak?")

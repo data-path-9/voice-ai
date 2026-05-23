@@ -10,7 +10,8 @@ import (
 	"fmt"
 	"time"
 
-	obs "github.com/rapidaai/api/assistant-api/internal/observe"
+	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
+	observe "github.com/rapidaai/api/assistant-api/internal/observe"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -29,186 +30,135 @@ import (
 // or a ConversationDisconnection message. All streamer implementations
 // guarantee one of these when the connection ends.
 func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) error {
-	var initialized bool
 	totalTime := time.Now()
 	for {
 		req, err := t.streamer.Recv()
 		if err != nil {
-			if initialized {
-				t.emitCallCompletion(totalTime)
-				t.Disconnect(context.Background())
-			}
+			t.OnCallCompletion(totalTime)
+			t.OnDisconnect(context.Background())
 			return nil
 		}
-
 		switch payload := req.(type) {
 		case *protos.ConversationInitialization:
-			if err := t.Connect(t.streamer.Context(), auth, payload); err != nil {
-				t.OnPacket(context.Background(), internal_type.ConversationEventPacket{
-					ContextID: t.GetID(),
-					Name:      obs.ComponentSession,
-					Data:      map[string]string{obs.DataType: obs.EventConnectFailed, obs.DataError: err.Error()},
-					Time:      time.Now(),
-				})
-				t.onAddMetrics(context.Background(), &protos.Metric{
-					Name:        type_enums.CONVERSATION_STATUS.String(),
-					Value:       "FAILED",
-					Description: fmt.Sprintf("Connection failed: %v", err),
-				})
-				return fmt.Errorf("talking.Connect error: %w", err)
-			}
-			initialized = true
-			t.OnPacket(t.streamer.Context(), internal_type.ConversationEventPacket{
-				ContextID: t.GetID(),
-				Name:      obs.ComponentSession,
-				Data:      map[string]string{obs.DataType: obs.EventConnected, obs.DataMode: payload.GetStreamMode().String()},
-				Time:      time.Now(),
-			})
-			t.streamer.NotifyMode(payload.GetStreamMode())
-
+			t.OnConnect(t.streamer.Context(), auth, payload)
 		case *protos.ConversationConfiguration:
-			if initialized {
-				prevMode := t.GetMode().String()
-				switch payload.StreamMode {
-				case protos.StreamMode_STREAM_MODE_TEXT:
-					if t.speechToTextTransformer != nil {
-						utils.Go(t.streamer.Context(), func() {
-							t.disconnectSpeechToText(t.streamer.Context())
-						})
-					}
-					if t.textToSpeechTransformer != nil {
-						utils.Go(t.streamer.Context(), func() {
-							t.disconnectTextToSpeech(t.streamer.Context())
-						})
-					}
-					t.SwitchMode(type_enums.TextMode)
-				case protos.StreamMode_STREAM_MODE_AUDIO:
-					if t.textToSpeechTransformer == nil {
-						t.initializeTextToSpeech(t.streamer.Context())
-					}
-					if t.speechToTextTransformer == nil {
-						if err := t.initializeSpeechToText(t.streamer.Context()); err != nil {
-							t.logger.Errorf("failed to initialize speech-to-text on mode switch: %v", err)
-						}
-					}
-					t.SwitchMode(type_enums.AudioMode)
-				}
-				t.OnPacket(t.streamer.Context(), internal_type.ConversationEventPacket{
-					ContextID: t.GetID(),
-					Name:      obs.ComponentSession,
-					Data:      map[string]string{obs.DataType: obs.EventModeSwitch, obs.DataFrom: prevMode, obs.DataTo: payload.StreamMode.String()},
-					Time:      time.Now(),
-				})
-			}
-
+			t.OnStreamModeSwitch(t.streamer.Context(), payload)
 		case *protos.ConversationUserMessage:
-			if initialized {
-				switch msg := payload.GetMessage().(type) {
-				case *protos.ConversationUserMessage_Audio:
-					if err := t.OnPacket(t.streamer.Context(), internal_type.UserAudioReceivedPacket{ContextID: t.GetID(), Audio: msg.Audio}); err != nil {
-						t.logger.Errorf("error processing user audio: %v", err)
-					}
-				case *protos.ConversationUserMessage_Text:
-					if err := t.OnPacket(t.streamer.Context(), internal_type.UserTextReceivedPacket{ContextID: t.GetID(), Text: msg.Text}); err != nil {
-						t.logger.Errorf("error processing user text: %v", err)
-					}
-				default:
-					t.logger.Errorf("illegal input from the user %+v", msg)
-				}
-			}
-
+			t.OnStreamUserMessage(t.streamer.Context(), payload)
+		case *protos.ConversationToolCallResult:
+			t.OnPacket(t.streamer.Context(), internal_type.LLMToolResultPacket{
+				ToolID:    payload.GetToolId(),
+				Name:      payload.GetName(),
+				ContextID: payload.GetId(),
+				Action:    payload.GetAction(),
+				Result:    payload.GetResult(),
+			})
+		case *protos.ConversationBridgeUserAudio:
+			t.OnPacket(t.streamer.Context(), internal_type.RecordUserAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
+		case *protos.ConversationBridgeOperatorAudio:
+			t.OnPacket(t.streamer.Context(), internal_type.RecordAssistantAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
 		case *protos.ConversationMetadata:
-			if initialized {
-				if err := t.OnPacket(t.streamer.Context(),
-					internal_type.ConversationMetadataPacket{
-						ContextID: payload.GetAssistantConversationId(),
-						Metadata:  payload.GetMetadata(),
-					}); err != nil {
-					t.logger.Errorf("error while accepting metadata: %v", err)
-				}
-			}
-
+			t.OnPacket(t.streamer.Context(), internal_type.ConversationMetadataPacket{
+				ContextID: payload.GetAssistantConversationId(),
+				Metadata:  payload.GetMetadata(),
+			})
 		case *protos.ConversationMetric:
-			if initialized {
-				if err := t.OnPacket(t.streamer.Context(),
-					internal_type.ConversationMetricPacket{
-						ContextID: payload.GetAssistantConversationId(),
-						Metrics:   payload.GetMetrics(),
-					}); err != nil {
-					t.logger.Errorf("error while accepting metrics: %v", err)
-				}
-			}
-
+			t.OnPacket(t.streamer.Context(), internal_type.ConversationMetricPacket{
+				ContextID: payload.GetAssistantConversationId(),
+				Metrics:   payload.GetMetrics(),
+			})
 		case *protos.ConversationEvent:
-			if initialized {
-				if err := t.OnPacket(t.streamer.Context(), internal_type.ConversationEventPacket{
-					Name: payload.Name,
-					Data: payload.Data,
-					Time: payload.Time.AsTime(),
-				}); err != nil {
-					t.logger.Errorf("error processing channel event: %v", err)
-				}
+			eventTime := time.Now()
+			if payload.Time != nil {
+				eventTime = payload.Time.AsTime()
 			}
-
+			t.OnPacket(t.streamer.Context(), internal_type.ConversationEventPacket{
+				Name: payload.Name,
+				Data: payload.Data,
+				Time: eventTime,
+			})
 		case *protos.ConversationDisconnection:
-			if initialized {
-				t.OnPacket(context.Background(), internal_type.ConversationEventPacket{
-					ContextID: t.GetID(),
-					Name:      obs.ComponentSession,
-					Data:      map[string]string{obs.DataType: obs.EventDisconnectRequested, obs.DataReason: payload.GetType().String()},
-					Time:      time.Now(),
-				})
-				t.OnPacket(context.Background(),
-					internal_type.ConversationMetadataPacket{
-						ContextID: t.Conversation().Id,
-						Metadata: []*protos.Metadata{{
-							Key:   "disconnect_reason",
-							Value: payload.GetType().String(),
-						}},
-					},
-				)
+			if t.Conversation() == nil {
+				return nil
 			}
+			ctx := context.Background()
+			t.Notify(ctx, payload)
+			t.OnPacket(ctx,
+				internal_type.ConversationEventPacket{
+					ContextID: t.GetID(),
+					Name:      observe.ComponentSession,
+					Data: map[string]string{
+						observe.DataType:   observe.EventDisconnectRequested,
+						observe.DataReason: payload.GetType().String()},
+					Time: time.Now(),
+				},
+				internal_type.ConversationMetadataPacket{
+					ContextID: t.Conversation().Id,
+					Metadata: []*protos.Metadata{{
+						Key:   "disconnect_reason",
+						Value: payload.GetType().String(),
+					}},
+				})
 		}
+
 	}
 }
 
-// emitCallCompletion persists final metrics and events when the talk loop exits.
-// Written directly with a background context because the dispatcher goroutine's
-// context is already cancelled when Recv() returns an error.
-func (t *genericRequestor) emitCallCompletion(startTime time.Time) {
+func (t *genericRequestor) OnStreamModeSwitch(ctx context.Context, payload *protos.ConversationConfiguration) {
+	t.OnPacket(ctx, internal_type.ModeSwitchRequestedPacket{
+		ContextID:   t.GetID(),
+		StreamMode:  payload.GetStreamMode(),
+		RequestedAt: time.Now(),
+	})
+}
+
+func (t *genericRequestor) OnStreamUserMessage(ctx context.Context, payload *protos.ConversationUserMessage) {
+	switch msg := payload.GetMessage().(type) {
+	case *protos.ConversationUserMessage_Audio:
+		t.OnPacket(ctx, internal_type.UserAudioReceivedPacket{ContextID: t.GetID(), Audio: msg.Audio})
+	case *protos.ConversationUserMessage_Text:
+		t.OnPacket(ctx, internal_type.UserTextReceivedPacket{ContextID: t.GetID(), Text: msg.Text})
+	default:
+		t.logger.Errorf("illegal input from the user %+v", msg)
+	}
+}
+
+// OnCallCompletion emits final metrics + an EventCompleted event when the talk
+// loop exits. Persistence and telemetry collection happen in the existing
+// background-channel handlers, so this function only enqueues packets.
+func (t *genericRequestor) OnCallCompletion(startTime time.Time) {
+	conv := t.Conversation()
+	if conv == nil {
+		return
+	}
 	duration := time.Since(startTime)
-	completionMetrics := []*protos.Metric{
-		{
-			Name:        type_enums.CONVERSATION_STATUS.String(),
-			Value:       type_enums.CONVERSATION_COMPLETE.String(),
-			Description: "Status of current conversation",
+	t.OnPacket(context.Background(),
+		internal_type.ConversationMetricPacket{
+			ContextID: conv.Id,
+			Metrics: []*protos.Metric{
+				{
+					Name:        type_enums.CONVERSATION_STATUS.String(),
+					Value:       type_enums.CONVERSATION_COMPLETE.String(),
+					Description: "Status of current conversation",
+				},
+				{
+					Name:        type_enums.CONVERSATION_DURATION.String(),
+					Value:       fmt.Sprintf("%d", duration),
+					Description: "Conversation duration from first message to end",
+				},
+			},
 		},
-		{
-			Name:        type_enums.CONVERSATION_DURATION.String(),
-			Value:       fmt.Sprintf("%d", duration),
-			Description: "Conversation duration from first message to end",
-		},
-	}
-	if err := t.onAddMetrics(context.Background(), completionMetrics...); err != nil {
-		t.logger.Errorf("talk: failed to persist completion metrics: %v", err)
-	}
-	if t.observer != nil {
-		t.observer.MetricCollectors().Collect(context.Background(), obs.ConversationMetricRecord{
-			ConversationID: fmt.Sprintf("%d", t.Conversation().Id),
-			Metrics:        completionMetrics,
-			Time:           time.Now(),
-		})
-		t.observer.EventCollectors().Collect(context.Background(), obs.EventRecord{
-			MessageID: t.GetID(),
-			Name:      obs.ComponentSession,
+		internal_type.ConversationEventPacket{
+			ContextID: t.GetID(),
+			Name:      observe.ComponentSession,
 			Data: map[string]string{
-				obs.DataType:     obs.EventCompleted,
-				obs.DataDuration: fmt.Sprintf("%d", duration.Milliseconds()),
-				obs.DataMessages: fmt.Sprintf("%d", len(t.GetHistories())),
+				observe.DataType:     observe.EventCleanup,
+				observe.DataDuration: fmt.Sprintf("%d", duration.Milliseconds()),
+				observe.DataMessages: fmt.Sprintf("%d", len(t.GetHistories())),
 			},
 			Time: time.Now(),
-		})
-	}
+		},
+	)
 }
 
 // Notify sends notifications to websocket for various events.
@@ -217,4 +167,79 @@ func (t *genericRequestor) Notify(ctx context.Context, actionDatas ...internal_t
 		t.streamer.Send(actionData)
 	}
 	return nil
+}
+
+// =============================================================================
+// Session Lifecycle
+// =============================================================================
+
+// Connect starts bootstrap/background dispatchers and enqueues the init chain.
+// Runtime dispatchers (critical/ingress/egress) are started after
+// InitializationCompleted. Connect always returns nil because initialization
+// runs asynchronously on the bootstrap dispatcher goroutine.
+// The gRPC stream is already open by the time Connect is called; any init errors
+// are delivered to the client via InitializationFailedPacket → ConversationError
+// proto on the stream, not via this return value.
+func (r *genericRequestor) OnConnect(ctx context.Context, auth types.SimplePrinciple, config *protos.ConversationInitialization) {
+	if err := r.sessionLifecycle.Transition(adapter_lifecycle.EventConnectRequested); err != nil {
+		r.logger.Tracef(ctx, "connect ignored due to session lifecycle transition: %v", err)
+		return
+	}
+	r.SetAuth(auth)
+	utils.WithDeadline(r.sessionCtx, connectDeadline, func() {
+		if r.sessionLifecycle.Current() != adapter_lifecycle.StateInitializing {
+			return
+		}
+		if r.Conversation() != nil {
+			r.OnPacket(r.sessionCtx,
+				internal_type.ConversationEventPacket{
+					ContextID: r.GetID(),
+					Name:      observe.ComponentSession,
+					Data: map[string]string{
+						observe.DataType:   observe.EventDisconnectRequested,
+						observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String()},
+					Time: time.Now(),
+				},
+				internal_type.ConversationMetadataPacket{
+					ContextID: r.Conversation().Id,
+					Metadata: []*protos.Metadata{{
+						Key:   "disconnect_reason",
+						Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String(),
+					}},
+				},
+			)
+		}
+		r.Notify(r.sessionCtx,
+			&protos.ConversationError{Message: "initialization timeout"},
+			&protos.ConversationDisconnection{Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR},
+		)
+		r.cancelSession()
+	}, func(connectCtx context.Context) {
+		r.OnPacket(r.sessionCtx,
+			internal_type.ConversationEventPacket{
+				ContextID: r.GetID(),
+				Name:      observe.ComponentSession,
+				Data:      map[string]string{observe.DataType: observe.EventInitializing, observe.DataMode: config.GetStreamMode().String()},
+				Time:      time.Now(),
+			}, internal_type.InitializeAssistantPacket{
+				ContextID: r.GetID(),
+				Config:    config,
+			})
+	})
+}
+
+// OnDisconnect enqueues the disconnect chain. sessionCtx is cancelled either by
+// HandleFinalizationCompleted (normal completion) or by the watchdog if the
+// chain exceeds disconnectDeadline.
+func (r *genericRequestor) OnDisconnect(ctx context.Context) {
+	if err := r.sessionLifecycle.Transition(adapter_lifecycle.EventDisconnectRequested); err != nil {
+		r.logger.Tracef(ctx, "disconnect ignored due to session lifecycle transition: %v", err)
+		return
+	}
+	utils.WithDeadline(r.sessionCtx, disconnectDeadline, func() {
+		r.logger.Warnf("disconnect deadline %v exceeded, force-cancelling session", disconnectDeadline)
+		r.cancelSession()
+	}, func(disconnectCtx context.Context) {
+		r.OnPacket(disconnectCtx, internal_type.FinalizeBehaviorPacket{ContextID: r.GetID()})
+	})
 }

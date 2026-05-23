@@ -14,13 +14,13 @@
 //   - InputCh / OutputCh — ordered, typed message channels (sized via options)
 //   - inputAudioBuffer / outputAudioBuffer — PCM accumulation with configurable thresholds
 //   - FlushAudioCh — interrupt signalling for the output writer
-//   - PushInput / PushOutput — non-blocking sends into InputCh / OutputCh
+//   - Input / PushOutput — non-blocking type-routed sends into CriticalCh / InputCh / LowCh / OutputCh
 //   - BufferAndSendInput — accumulate input PCM, flush at threshold into InputCh
 //   - BufferAndSendOutput — accumulate output PCM, flush fixed-size 20 ms frames into OutputCh
 //   - ClearInputBuffer / ClearOutputBuffer — drain buffers and channels (interruption)
 //   - WithInputBuffer / WithOutputBuffer — synchronous buffer access under lock
 //   - ResetInputBuffer / ResetOutputBuffer — quick buffer reset under lock
-//   - PushDisconnection — idempotent disconnect signal
+//   - Disconnect — idempotent disconnect signal (returns message for caller to push)
 //   - Context / Recv — Streamer interface helpers consumed by the Talk loop
 //
 // # Configuration
@@ -63,39 +63,6 @@ import (
 	"github.com/rapidaai/protos"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-// ============================================================================
-// Frame pool — eliminates per-frame heap allocations in the output hot path.
-// ============================================================================
-
-// framePool recycles fixed-size byte slices used by BufferAndSendOutput.
-// The pool is sized to the output frame size (typically 160–1920 bytes
-// depending on codec/sample-rate). Callers must return slices via putFrame
-// after the downstream consumer has finished with the data.
-//
-// sync.Pool is safe for concurrent use and its per-P caching avoids
-// cross-goroutine contention on the hot path.
-var framePool = sync.Pool{
-	New: func() interface{} {
-		// Fallback: allocate a default-sized slice.
-		// In practice getFrame(n) always creates correctly-sized slices.
-		return make([]byte, 0)
-	},
-}
-
-// getFrame returns a []byte of exactly n bytes from the pool.
-// If the pooled slice is too small it is discarded and a fresh one allocated.
-func getFrame(n int) []byte {
-	if b, ok := framePool.Get().([]byte); ok && cap(b) >= n {
-		return b[:n]
-	}
-	return make([]byte, n)
-}
-
-// putFrame returns a frame slice to the pool for reuse.
-func putFrame(b []byte) {
-	framePool.Put(b) //nolint:staticcheck // slice is intentionally pooled
-}
 
 // ============================================================================
 // Default constants
@@ -264,9 +231,9 @@ func resolveConfig(opts []Option) streamerConfig {
 //   - InputCh / OutputCh: unified, ordered message channels
 //   - inputAudioBuffer / outputAudioBuffer: PCM accumulation with thresholds
 //   - FlushAudioCh: interrupt signalling for the output writer
-//   - PushInput / PushOutput: non-blocking channel sends
+//   - Input / PushOutput: non-blocking type-routed channel sends
 //   - ClearInputBuffer / ClearOutputBuffer: buffer + channel draining
-//   - PushDisconnection: idempotent disconnect signalling
+//   - Disconnect: idempotent disconnect (returns message for caller to push)
 //   - Recv / Context: Streamer interface helpers
 //
 // The concrete streamer embeds BaseStreamer and only implements
@@ -281,7 +248,7 @@ type BaseStreamer struct {
 	Ctx    context.Context
 	Cancel context.CancelFunc
 
-	// Disconnect tracking — true once PushDisconnection has run.
+	// Disconnect tracking — true once Disconnect has run.
 	Closed bool
 
 	// Resolved configuration (from options).
@@ -382,7 +349,7 @@ func (s *BaseStreamer) BufferAndSendInput(audio []byte) {
 	s.inputAudioBuffer = bytes.NewBuffer(make([]byte, 0, s.config.inputBufferThreshold*2))
 	s.inputAudioBufferLock.Unlock()
 
-	s.PushInput(&protos.ConversationUserMessage{
+	s.Input(&protos.ConversationUserMessage{
 		Message: &protos.ConversationUserMessage_Audio{Audio: audioData},
 		Time:    timestamppb.Now(),
 	})
@@ -418,9 +385,7 @@ func (s *BaseStreamer) ClearInputBuffer() {
 //   - Single lock acquisition: all frames are extracted under one lock, then
 //     pushed to the channel outside the lock. This reduces lock contention
 //     from N acquires to 1 per call.
-//   - sync.Pool frames: frame slices come from a pool and are recycled after
-//     the downstream consumer is done (see FrameRelease).
-//   - No intermediate copy: bytes.Buffer.Read fills the pooled slice directly.
+//   - No intermediate copy: bytes.Buffer.Read fills each frame slice directly.
 //
 // audio received -> outputAudioBuffer -> check threshold -> flush frames -> OutputCh
 func (s *BaseStreamer) BufferAndSendOutput(audio []byte) {
@@ -437,7 +402,7 @@ func (s *BaseStreamer) BufferAndSendOutput(audio []byte) {
 	// Collect all complete frames under a single lock acquisition.
 	var frames [][]byte
 	for s.outputAudioBuffer.Len() >= frameSize {
-		frame := getFrame(frameSize)
+		frame := make([]byte, frameSize)
 		s.outputAudioBuffer.Read(frame)
 		frames = append(frames, frame)
 	}
@@ -446,7 +411,7 @@ func (s *BaseStreamer) BufferAndSendOutput(audio []byte) {
 	// Push frames outside the lock — no contention with concurrent writers.
 	now := timestamppb.Now()
 	for _, frame := range frames {
-		s.PushOutput(&protos.ConversationAssistantMessage{
+		s.Output(&protos.ConversationAssistantMessage{
 			Message: &protos.ConversationAssistantMessage_Audio{Audio: frame},
 			Time:    now,
 		})
@@ -523,40 +488,39 @@ func (s *BaseStreamer) ResetInputBuffer() {
 // Channel push helpers
 // ============================================================================
 
-// PushInput sends a message to the normal-priority input channel (non-blocking).
-// Use for audio, initialization, configuration, and user messages.
-func (s *BaseStreamer) PushInput(msg internal_type.Stream) {
-	select {
-	case s.InputCh <- msg:
+// Input routes a message to the correct priority channel based on its type.
+//
+//	Critical — disconnection, tool call results (must-process-now)
+//	Low      — events, metrics, metadata (background observability)
+//	Normal   — everything else (audio, initialization, configuration, user messages)
+func (s *BaseStreamer) Input(msg internal_type.Stream) {
+	switch msg.(type) {
+	case *protos.ConversationDisconnection,
+		*protos.ConversationToolCallResult:
+		select {
+		case s.CriticalCh <- msg:
+		default:
+			s.Logger.Warnw("Critical input channel full, dropping message", "type", fmt.Sprintf("%T", msg))
+		}
+	case *protos.ConversationEvent,
+		*protos.ConversationMetric,
+		*protos.ConversationMetadata:
+		select {
+		case s.LowCh <- msg:
+		default:
+			s.Logger.Warnw("Low input channel full, dropping message", "type", fmt.Sprintf("%T", msg))
+		}
 	default:
-		s.Logger.Warnw("Normal input channel full, dropping message", "type", fmt.Sprintf("%T", msg))
-	}
-}
-
-// PushInputCritical sends a message to the critical-priority input channel (non-blocking).
-// Use for disconnection signals and must-process-now events. Recv() drains this
-// channel before InputCh or LowCh.
-func (s *BaseStreamer) PushInputCritical(msg internal_type.Stream) {
-	select {
-	case s.CriticalCh <- msg:
-	default:
-		s.Logger.Warnw("Critical input channel full, dropping message", "type", fmt.Sprintf("%T", msg))
-	}
-}
-
-// PushInputLow sends a message to the low-priority input channel (non-blocking).
-// Use for ConversationEvent observability packets that must not delay audio.
-// Recv() only drains this channel when CriticalCh and InputCh are empty.
-func (s *BaseStreamer) PushInputLow(msg internal_type.Stream) {
-	select {
-	case s.LowCh <- msg:
-	default:
-		s.Logger.Warnw("Low input channel full, dropping message", "type", fmt.Sprintf("%T", msg))
+		select {
+		case s.InputCh <- msg:
+		default:
+			s.Logger.Warnw("Normal input channel full, dropping message", "type", fmt.Sprintf("%T", msg))
+		}
 	}
 }
 
 // PushOutput sends a message to the unified output channel (non-blocking).
-func (s *BaseStreamer) PushOutput(msg internal_type.Stream) {
+func (s *BaseStreamer) Output(msg internal_type.Stream) {
 	select {
 	case s.OutputCh <- msg:
 	default:
@@ -568,23 +532,21 @@ func (s *BaseStreamer) PushOutput(msg internal_type.Stream) {
 // Disconnect helpers
 // ============================================================================
 
-// PushDisconnection pushes a ConversationDisconnection into CriticalCh.
-// It is idempotent — safe to call from multiple goroutines or multiple times.
-// Using CriticalCh ensures the Talk loop processes the disconnection signal
-// ahead of any pending audio or observability packets.
-func (s *BaseStreamer) PushDisconnection(reason protos.ConversationDisconnection_DisconnectionType) {
+// Disconnect marks the streamer as closed (idempotent) and returns the
+// disconnection message. Returns nil on subsequent calls. The caller is
+// responsible for pushing the message via Input().
+func (s *BaseStreamer) Disconnect(reason protos.ConversationDisconnection_DisconnectionType) *protos.ConversationDisconnection {
 	s.Mu.Lock()
 	alreadyClosed := s.Closed
 	s.Closed = true
 	s.Mu.Unlock()
 	if alreadyClosed {
-		return
+		return nil
 	}
-
-	s.PushInputCritical(&protos.ConversationDisconnection{
+	return &protos.ConversationDisconnection{
 		Type: reason,
 		Time: timestamppb.Now(),
-	})
+	}
 }
 
 // ============================================================================

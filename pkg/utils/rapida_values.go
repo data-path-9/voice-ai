@@ -419,6 +419,12 @@ func AnyToInterface(anyValue *anypb.Any) (interface{}, error) {
 			return nil, err
 		}
 		value = v.AsSlice()
+	case strings.HasSuffix(anyValue.TypeUrl, "type.googleapis.com/google.protobuf.Value"):
+		v := &structpb.Value{}
+		if err := anyValue.UnmarshalTo(v); err != nil {
+			return nil, err
+		}
+		value = v.AsInterface()
 	default:
 		jsonBytes, err := protojson.Marshal(anyValue)
 		if err != nil {

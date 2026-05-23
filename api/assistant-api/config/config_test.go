@@ -9,66 +9,77 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
 )
 
+const baseAssistantYAML = `
+service_name: "workflow-api"
+host: "0.0.0.0"
+port: 9007
+log_level: "debug"
+secret: "rpd_pks"
+env: "development"
+
+postgres:
+  host: "localhost"
+  port: 5432
+  db_name: "assistant_db"
+  auth:
+    user: "rapida_user"
+    password: "rapida_db_password"
+  max_open_connection: 50
+  max_ideal_connection: 25
+  ssl_mode: "disable"
+
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  db: 0
+  max_connection: 10
+  auth:
+    user: ""
+    password: ""
+
+asset_store:
+  storage_type: "local"
+  storage_path_prefix: "/tmp/rapida-data/assets/workflow"
+
+opensearch:
+  schema: "http"
+  host: "localhost"
+  port: 9200
+  max_retries: 3
+  max_connection: 10
+
+integration:
+  host: "localhost:9004"
+endpoint:
+  host: "localhost:9005"
+assistant:
+  host: "localhost:9007"
+  public: "integral-presently-cub.ngrok-free.app"
+web:
+  host: "localhost:9001"
+document:
+  host: "http://localhost:9010"
+ui:
+  host: "http://localhost:3000"
+`
+
 func TestInitConfig(t *testing.T) {
-	// Mock Environment setup
-	envPath := filepath.Join(os.TempDir(), ".assistant_test.env")
-	err := os.WriteFile(envPath, []byte(`
-		SERVICE_NAME="workflow-api"
-		HOST="0.0.0.0"
-		PORT=9007
-		LOG_LEVEL="debug"
-		SECRET="rpd_pks"
-		ENV="development"
-		
-		POSTGRES__HOST="localhost"
-		POSTGRES__DB_NAME="assistant_db"
-		POSTGRES__AUTH__USER="rapida_user"
-		POSTGRES__AUTH__PASSWORD="rapida_db_password"
-		POSTGRES__PORT=5432
-		POSTGRES__MAX_OPEN_CONNECTION=50
-		POSTGRES__MAX_IDEAL_CONNECTION=25
-		POSTGRES__SSL_MODE="disable"
-		POSTGRES__SLC_CACHE__HOST=127.0.0.1
-		POSTGRES__SLC_CACHE__PORT=6379
-		POSTGRES__SLC_CACHE__MAX_CONNECTION=10
-		POSTGRES__SLC_CACHE__MAX_DB=1
-		
-		REDIS__HOST=127.0.0.1
-		REDIS__PORT=6379
-		REDIS__MAX_CONNECTION=10
-		REDIS__MAX_DB=0
-		
-		ASSET_STORE__STORAGE_TYPE="local"
-		ASSET_STORE__STORAGE_PATH_PREFIX=${HOME}/rapida-data/assets/workflow
-		
-		OPENSEARCH__SCHEMA="http"
-		OPENSEARCH__HOST="localhost"
-		OPENSEARCH__PORT=9200
-		OPENSEARCH__MAX_RETRIES=3
-		OPENSEARCH__MAX_CONNECTION=10
-		
-		INTEGRATION_HOST=localhost:9004
-		ENDPOINT_HOST=localhost:9005
-		ASSISTANT_HOST=localhost:9007
-		WEB_HOST=localhost:9001
-		DOCUMENT_HOST=http://localhost:9010
-		UI_HOST=http://localhost:3000
-		PUBLIC_ASSISTANT_HOST=integral-presently-cub.ngrok-free.app
-	`), 0644)
+	configPath := filepath.Join(os.TempDir(), "assistant_test.yaml")
+	err := os.WriteFile(configPath, []byte(baseAssistantYAML), 0o644)
 	if err != nil {
-		t.Fatalf("Failed to create mock env file: %v", err)
+		t.Fatalf("Failed to create mock config file: %v", err)
 	}
-	defer os.Remove(envPath) // Clean up after test
+	defer os.Remove(configPath)
 
-	os.Setenv("ENV_PATH", envPath)
-	defer os.Unsetenv("ENV_PATH") // Reset ENV_PATH after test
+	os.Setenv("ENV_PATH", configPath)
+	defer os.Unsetenv("ENV_PATH")
 
-	// Test initializing configuration
 	vConfig, err := InitConfig()
 	if err != nil {
 		t.Fatalf("InitConfig returned an error: %v", err)
@@ -76,65 +87,30 @@ func TestInitConfig(t *testing.T) {
 	if vConfig == nil {
 		t.Fatalf("vConfig is nil")
 	}
+	if vConfig.ConfigFileUsed() != configPath {
+		t.Errorf("Expected config file used to be %v, but got %v", configPath, vConfig.ConfigFileUsed())
+	}
 
-	// Verify that viper has correctly read variables
-	if vConfig.ConfigFileUsed() != envPath {
-		t.Errorf("Expected config file used to be %v, but got %v", envPath, vConfig.ConfigFileUsed())
+	appConfig, err := GetApplicationConfig(vConfig)
+	if err != nil {
+		t.Fatalf("GetApplicationConfig returned an error: %v", err)
 	}
-	if vConfig.GetString("POSTGRES__DB_NAME") != "assistant_db" {
-		t.Errorf("Expected POSTGRES__DB_NAME to be 'assistant_db', but got %v", vConfig.GetString("POSTGRES__DB_NAME"))
+	if appConfig.PostgresConfig.DBName != "assistant_db" {
+		t.Errorf("Expected PostgresConfig.DBName to be 'assistant_db', but got %v", appConfig.PostgresConfig.DBName)
 	}
-	if vConfig.GetString("PUBLIC_ASSISTANT_HOST") != "integral-presently-cub.ngrok-free.app" {
-		t.Errorf("Expected PUBLIC_ASSISTANT_HOST to be 'integral-presently-cub.ngrok-free.app', but got %v", vConfig.GetString("PUBLIC_ASSISTANT_HOST"))
+	if appConfig.Assistant.Public != "integral-presently-cub.ngrok-free.app" {
+		t.Errorf("Expected Assistant.Public to be 'integral-presently-cub.ngrok-free.app', but got %v", appConfig.Assistant.Public)
 	}
 }
 
 func TestGetApplicationConfig(t *testing.T) {
-	// Mock viper setup
-	vConfig := viper.NewWithOptions(viper.KeyDelimiter("__"))
-	vConfig.Set("SERVICE_NAME", "workflow-api")
-	vConfig.Set("HOST", "0.0.0.0")
-	vConfig.Set("PORT", 9007)
-	vConfig.Set("LOG_LEVEL", "debug")
-	vConfig.Set("SECRET", "rpd_pks")
-	vConfig.Set("ENV", "development")
+	v := viper.New()
+	v.SetConfigType("yaml")
+	if err := v.ReadConfig(strings.NewReader(baseAssistantYAML)); err != nil {
+		t.Fatalf("ReadConfig returned an error: %v", err)
+	}
 
-	vConfig.Set("POSTGRES__HOST", "localhost")
-	vConfig.Set("POSTGRES__DB_NAME", "assistant_db")
-	vConfig.Set("POSTGRES__AUTH__USER", "rapida_user")
-	vConfig.Set("POSTGRES__AUTH__PASSWORD", "rapida_db_password")
-	vConfig.Set("POSTGRES__PORT", 5432)
-	vConfig.Set("POSTGRES__MAX_OPEN_CONNECTION", 50)
-	vConfig.Set("POSTGRES__MAX_IDEAL_CONNECTION", 25)
-	vConfig.Set("POSTGRES__SSL_MODE", "disable")
-	vConfig.Set("POSTGRES__SLC_CACHE__HOST", "127.0.0.1")
-	vConfig.Set("POSTGRES__SLC_CACHE__PORT", 6379)
-	vConfig.Set("POSTGRES__SLC_CACHE__MAX_CONNECTION", 10)
-	vConfig.Set("POSTGRES__SLC_CACHE__MAX_DB", 1)
-
-	vConfig.Set("REDIS__HOST", "127.0.0.1")
-	vConfig.Set("REDIS__PORT", 6379)
-	vConfig.Set("REDIS__MAX_CONNECTION", 10)
-	vConfig.Set("REDIS__MAX_DB", 0)
-
-	vConfig.Set("ASSET_STORE__STORAGE_TYPE", "local")
-	vConfig.Set("ASSET_STORE__STORAGE_PATH_PREFIX", os.Getenv("HOME")+"/rapida-data/assets/workflow")
-
-	vConfig.Set("OPENSEARCH__SCHEMA", "http")
-	vConfig.Set("OPENSEARCH__HOST", "localhost")
-	vConfig.Set("OPENSEARCH__PORT", 9200)
-	vConfig.Set("OPENSEARCH__MAX_RETRIES", 3)
-	vConfig.Set("OPENSEARCH__MAX_CONNECTION", 10)
-
-	vConfig.Set("INTEGRATION_HOST", "localhost:9004")
-	vConfig.Set("ENDPOINT_HOST", "localhost:9005")
-	vConfig.Set("ASSISTANT_HOST", "localhost:9007")
-	vConfig.Set("WEB_HOST", "localhost:9001")
-	vConfig.Set("DOCUMENT_HOST", "http://localhost:9010")
-	vConfig.Set("UI_HOST", "http://localhost:3000")
-	vConfig.Set("PUBLIC_ASSISTANT_HOST", "integral-presently-cub.ngrok-free.app")
-
-	appConfig, err := GetApplicationConfig(vConfig)
+	appConfig, err := GetApplicationConfig(v)
 	if err != nil {
 		t.Fatalf("GetApplicationConfig returned an error: %v", err)
 	}
@@ -142,59 +118,37 @@ func TestGetApplicationConfig(t *testing.T) {
 		t.Fatalf("appConfig is nil")
 	}
 
-	// Validate parsed configuration matches expectations
-	if appConfig.PublicAssistantHost != "integral-presently-cub.ngrok-free.app" {
-		t.Errorf("Expected PublicAssistantHost to be 'integral-presently-cub.ngrok-free.app', but got %v", appConfig.PublicAssistantHost)
-	}
 	if appConfig.PostgresConfig.DBName != "assistant_db" {
 		t.Errorf("Expected PostgresConfig.DBName to be 'assistant_db', but got %v", appConfig.PostgresConfig.DBName)
 	}
 	if appConfig.AssetStoreConfig.StorageType != "local" {
 		t.Errorf("Expected AssetStoreConfig.StorageType to be 'local', but got %v", appConfig.AssetStoreConfig.StorageType)
 	}
+	if appConfig.Assistant.Host != "localhost:9007" {
+		t.Errorf("Expected Assistant.Host to be 'localhost:9007', but got %v", appConfig.Assistant.Host)
+	}
+	if appConfig.Assistant.Public != "integral-presently-cub.ngrok-free.app" {
+		t.Errorf("Expected Assistant.Public to be 'integral-presently-cub.ngrok-free.app', but got %v", appConfig.Assistant.Public)
+	}
 }
 
-func TestGetApplicationConfig_TelemetryEnvParsing(t *testing.T) {
-	vConfig := viper.NewWithOptions(viper.KeyDelimiter("__"))
-	vConfig.Set("SERVICE_NAME", "workflow-api")
-	vConfig.Set("HOST", "0.0.0.0")
-	vConfig.Set("PORT", 9007)
-	vConfig.Set("LOG_LEVEL", "debug")
-	vConfig.Set("SECRET", "rpd_pks")
-	vConfig.Set("ENV", "development")
+func TestGetApplicationConfig_TelemetryParsing(t *testing.T) {
+	v := viper.New()
+	v.SetConfigType("yaml")
+	telemetryYAML := baseAssistantYAML + `
+telemetry:
+  type: "otlp_http"
+  otlp_http:
+    endpoint: "otel-collector:4318"
+    protocol: "http/protobuf"
+    headers: "Authorization=Bearer test-token"
+    insecure: true
+`
+	if err := v.ReadConfig(strings.NewReader(telemetryYAML)); err != nil {
+		t.Fatalf("ReadConfig returned an error: %v", err)
+	}
 
-	vConfig.Set("POSTGRES__HOST", "localhost")
-	vConfig.Set("POSTGRES__DB_NAME", "assistant_db")
-	vConfig.Set("POSTGRES__AUTH__USER", "rapida_user")
-	vConfig.Set("POSTGRES__AUTH__PASSWORD", "rapida_db_password")
-	vConfig.Set("POSTGRES__PORT", 5432)
-	vConfig.Set("POSTGRES__MAX_OPEN_CONNECTION", 50)
-	vConfig.Set("POSTGRES__MAX_IDEAL_CONNECTION", 25)
-	vConfig.Set("POSTGRES__SSL_MODE", "disable")
-
-	vConfig.Set("REDIS__HOST", "127.0.0.1")
-	vConfig.Set("REDIS__PORT", 6379)
-	vConfig.Set("REDIS__MAX_CONNECTION", 10)
-	vConfig.Set("REDIS__MAX_DB", 0)
-
-	vConfig.Set("ASSET_STORE__STORAGE_TYPE", "local")
-	vConfig.Set("ASSET_STORE__STORAGE_PATH_PREFIX", os.Getenv("HOME")+"/rapida-data/assets/workflow")
-
-	vConfig.Set("INTEGRATION_HOST", "localhost:9004")
-	vConfig.Set("ENDPOINT_HOST", "localhost:9005")
-	vConfig.Set("ASSISTANT_HOST", "localhost:9007")
-	vConfig.Set("WEB_HOST", "localhost:9001")
-	vConfig.Set("DOCUMENT_HOST", "http://localhost:9010")
-	vConfig.Set("UI_HOST", "http://localhost:3000")
-	vConfig.Set("PUBLIC_ASSISTANT_HOST", "integral-presently-cub.ngrok-free.app")
-
-	vConfig.Set("TELEMETRY__TYPE", "otlp_http")
-	vConfig.Set("TELEMETRY__OTLP_HTTP__ENDPOINT", "otel-collector:4318")
-	vConfig.Set("TELEMETRY__OTLP_HTTP__PROTOCOL", "http/protobuf")
-	vConfig.Set("TELEMETRY__OTLP_HTTP__HEADERS", "Authorization=Bearer test-token")
-	vConfig.Set("TELEMETRY__OTLP_HTTP__INSECURE", true)
-
-	appConfig, err := GetApplicationConfig(vConfig)
+	appConfig, err := GetApplicationConfig(v)
 	if err != nil {
 		t.Fatalf("GetApplicationConfig returned an error: %v", err)
 	}

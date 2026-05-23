@@ -34,8 +34,7 @@ type AuthClient interface {
 }
 
 func NewAuthenticator(config *config.AppConfig, logger commons.Logger, redis connectors.RedisConnector) AuthClient {
-	logger.Debugf("conntecting to authentication client with %s", config.WebHost)
-	conn, err := grpc.NewClient(config.WebHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(config.Web.Host, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		logger.Fatalf("Unable to create connection %v", err)
 	}

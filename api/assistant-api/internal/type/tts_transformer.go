@@ -13,5 +13,5 @@ type TextToSpeechTransformer interface {
 	Name() string
 
 	//
-	Transformers[LLMPacket]
+	Transformers[Packet]
 }

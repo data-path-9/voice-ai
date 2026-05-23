@@ -57,7 +57,7 @@ func (m *audioSocketEngine) Connect(ctx context.Context) error {
 		return fmt.Errorf("audiosocket listen failed: %w", err)
 	}
 	m.listener = listener
-	m.logger.Info("AudioSocket server started", "addr", addr)
+	m.logger.Infow("AudioSocket server started", "addr", addr)
 	go m.acceptLoop(ctx)
 	return nil
 }

@@ -11,6 +11,7 @@ import { EmptyState } from '@/app/components/carbon/empty-state';
 import { UpdateAssistantWebhook } from '@/app/pages/assistant/actions/configure-assistant-webhook/update-assistant-webhook';
 import { useAssistantWebhookPageStore } from '@/app/pages/assistant/actions/store/use-webhook-page-store';
 import { IconOnlyButton, PrimaryButton } from '@/app/components/carbon/button';
+import { UrlTableCell } from '@/app/components/carbon/url-table-cell';
 import { Pagination } from '@/app/components/carbon/pagination';
 import { Add, Renew, Webhook, Edit, TrashCan } from '@carbon/icons-react';
 import { Tag } from '@carbon/react';
@@ -31,7 +32,42 @@ import {
   Breadcrumb,
   BreadcrumbItem,
 } from '@carbon/react';
-import { TableSection } from '@/app/components/sections/table-section';
+import {
+  ScrollableTableSection,
+  TableSection,
+} from '@/app/components/sections/table-section';
+
+const getWebhookOptionMap = (row: any): Map<string, string> => {
+  const map = new Map<string, string>();
+  const options = row?.getOptionsList?.() || [];
+  options.forEach((option: any) => {
+    const key = option?.getKey?.();
+    const value = option?.getValue?.();
+    if (key && typeof value === 'string') {
+      map.set(key, value);
+    }
+  });
+  return map;
+};
+
+const getWebhookMethod = (row: any): string =>
+  getWebhookOptionMap(row).get('http_method') || '';
+
+const getWebhookUrl = (row: any): string =>
+  getWebhookOptionMap(row).get('http_url') || '';
+
+const getWebhookEvents = (row: any): string[] =>
+  row?.getAssistanteventsList?.() || [];
+
+const getWebhookRetryCount = (row: any): number => {
+  const value = Number(getWebhookOptionMap(row).get('max_retry_count'));
+  return Number.isFinite(value) ? value : 0;
+};
+
+const getWebhookTimeoutSecond = (row: any): number => {
+  const value = Number(getWebhookOptionMap(row).get('timeout_seconds'));
+  return Number.isFinite(value) ? value : 0;
+};
 
 export function ConfigureAssistantWebhookPage() {
   const { assistantId } = useParams();
@@ -71,7 +107,7 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
   useEffect(() => {
     showLoader('block');
     get();
-  }, []);
+  }, [assistantId, projectId, token, authId, axtion.page, axtion.pageSize]);
 
   const get = () => {
     axtion.getAssistantWebhook(
@@ -110,11 +146,11 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
   const filteredWebhooks = searchTerm.trim()
     ? axtion.webhooks.filter(row =>
         [
-          row.getHttpmethod(),
-          row.getHttpurl(),
+          getWebhookMethod(row),
+          getWebhookUrl(row),
           row.getExecutionpriority(),
           row.getStatus(),
-          ...row.getAssistanteventsList(),
+          ...getWebhookEvents(row),
         ]
           .join(' ')
           .toLowerCase()
@@ -208,109 +244,128 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
       <TableSection>
         {axtion.webhooks.length > 0 && filteredWebhooks.length > 0 ? (
           <>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableHeader className="!w-12" />
-                  <TableHeader>Endpoint</TableHeader>
-                  <TableHeader>Events</TableHeader>
-                  <TableHeader>Retries</TableHeader>
-                  <TableHeader>Timeout (s)</TableHeader>
-                  <TableHeader>Priority</TableHeader>
-                  <TableHeader>Created</TableHeader>
-                  <TableHeader>Actions</TableHeader>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredWebhooks.map(row => {
-                  const selected = selectedWebhookId === row.getId();
-                  return (
-                    <TableRow
-                      key={row.getId()}
-                      isSelected={selected}
-                      onClick={() =>
-                        setSelectedWebhookId(selected ? null : row.getId())
-                      }
-                      className="cursor-pointer"
-                    >
-                      <TableCell
-                        className="!w-12 !pr-0"
-                        onClick={e => e.stopPropagation()}
+            <ScrollableTableSection>
+              <Table className="min-w-max">
+                <TableHead>
+                  <TableRow>
+                    <TableHeader className="!w-12" />
+                    <TableHeader>Endpoint</TableHeader>
+                    <TableHeader>Events</TableHeader>
+                    <TableHeader>Retries</TableHeader>
+                    <TableHeader>Timeout (s)</TableHeader>
+                    <TableHeader>Priority</TableHeader>
+                    <TableHeader>Date</TableHeader>
+                    <TableHeader>Actions</TableHeader>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredWebhooks.map(row => {
+                    const selected = selectedWebhookId === row.getId();
+                    return (
+                      <TableRow
+                        key={row.getId()}
+                        isSelected={selected}
+                        onClick={() =>
+                          setSelectedWebhookId(selected ? null : row.getId())
+                        }
+                        className="cursor-pointer"
                       >
-                        <RadioButton
-                          id={`webhook-select-${row.getId()}`}
-                          name="webhook-select"
-                          labelText=""
-                          hideLabel
-                          checked={selected}
-                          onChange={() =>
-                            setSelectedWebhookId(selected ? null : row.getId())
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <span className="font-mono text-xs">
-                          {row.getHttpmethod()}
-                        </span>{' '}
-                        <span className="truncate">{row.getHttpurl()}</span>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {row.getAssistanteventsList().map((event, index) => (
-                            <Tag key={index} type="blue" size="sm">
-                              {event}
-                            </Tag>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell>{row.getRetrycount()}</TableCell>
-                      <TableCell>{row.getTimeoutsecond()}</TableCell>
-                      <TableCell>{row.getExecutionpriority()}</TableCell>
-                      <TableCell>
-                        {row.getCreateddate()
-                          ? toHumanReadableDateTime(row.getCreateddate()!)
-                          : '—'}
-                      </TableCell>
-                      <TableCell onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-0">
-                          <Button
-                            hasIconOnly
-                            renderIcon={Edit}
-                            iconDescription="Edit webhook"
-                            kind="ghost"
-                            size="sm"
-                            onClick={() =>
-                              navigation.goToEditAssistantWebhook(
-                                assistantId,
-                                row.getId(),
+                        <TableCell
+                          className="!w-12 !pr-0"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <RadioButton
+                            id={`webhook-select-${row.getId()}`}
+                            name="webhook-select"
+                            labelText=""
+                            hideLabel
+                            checked={selected}
+                            onChange={() =>
+                              setSelectedWebhookId(
+                                selected ? null : row.getId(),
                               )
                             }
                           />
-                          <Button
-                            hasIconOnly
-                            renderIcon={TrashCan}
-                            iconDescription="Delete webhook"
-                            kind="danger--ghost"
-                            size="sm"
-                            onClick={() =>
-                              deleteAssistantWebhook(assistantId, row.getId())
-                            }
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                        </TableCell>
+                        <UrlTableCell
+                          url={getWebhookUrl(row)}
+                          prefix={
+                            <span className="font-mono text-[13px] shrink-0">
+                              {getWebhookMethod(row)}
+                            </span>
+                          }
+                          maxWidthClassName="max-w-[560px]"
+                        />
+                        <TableCell className="text-sm">
+                          <div className="flex flex-wrap gap-1">
+                            {getWebhookEvents(row).map((event, index) => (
+                              <Tag key={index} type="blue" size="sm">
+                                {event}
+                              </Tag>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {getWebhookRetryCount(row)}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {getWebhookTimeoutSecond(row)}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {row.getExecutionpriority()}
+                        </TableCell>
+                        <TableCell className="text-[13px] whitespace-nowrap">
+                          {row.getCreateddate()
+                            ? toHumanReadableDateTime(row.getCreateddate()!)
+                            : '—'}
+                        </TableCell>
+                        <TableCell
+                          className="text-sm"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <div className="flex items-center gap-0">
+                            <Button
+                              hasIconOnly
+                              renderIcon={Edit}
+                              iconDescription="Edit webhook"
+                              kind="ghost"
+                              size="sm"
+                              onClick={() =>
+                                navigation.goToEditAssistantWebhook(
+                                  assistantId,
+                                  row.getId(),
+                                )
+                              }
+                            />
+                            <Button
+                              hasIconOnly
+                              renderIcon={TrashCan}
+                              iconDescription="Delete webhook"
+                              kind="danger--ghost"
+                              size="sm"
+                              onClick={() =>
+                                deleteAssistantWebhook(assistantId, row.getId())
+                              }
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </ScrollableTableSection>
             <Pagination
               totalItems={axtion.totalCount}
               page={axtion.page}
               pageSize={axtion.pageSize}
               pageSizes={[10, 20, 50]}
               onChange={({ page: newPage, pageSize: newSize }) => {
+                if (newSize !== axtion.pageSize) {
+                  axtion.setPageSize(newSize);
+                  return;
+                }
                 axtion.setPage(newPage);
-                if (newSize !== axtion.pageSize) axtion.setPageSize(newSize);
               }}
             />
           </>

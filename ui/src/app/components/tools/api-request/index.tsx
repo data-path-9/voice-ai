@@ -1,7 +1,8 @@
 import { FC } from 'react';
 import { Select, SelectItem } from '@carbon/react';
-import { TextInput } from '@/app/components/carbon/form';
+import { Stack, TextInput } from '@/app/components/carbon/form';
 import { APiStringHeader } from '@/app/components/external-api/api-header';
+import { InputGroup } from '../../input-group/index';
 import {
   ConfigureToolProps,
   ToolDefinitionForm,
@@ -28,8 +29,8 @@ export const ConfigureAPIRequest: FC<ConfigureToolProps> = ({
 
   return (
     <>
-      <div className="px-6 pb-6">
-        <div className="flex flex-col gap-6 max-w-6xl">
+      <InputGroup title="Action Definition">
+        <Stack gap={7}>
           <div className="flex space-x-2">
             <div className="relative w-40">
               <Select
@@ -68,8 +69,8 @@ export const ConfigureAPIRequest: FC<ConfigureToolProps> = ({
             onChange={value => updateParameter('tool.parameters', value)}
             inputClass={inputClass}
           />
-        </div>
-      </div>
+        </Stack>
+      </InputGroup>
 
       {toolDefinition && onChangeToolDefinition && (
         <ToolDefinitionForm

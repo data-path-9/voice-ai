@@ -44,7 +44,7 @@ type endpointServiceClient struct {
 }
 
 func NewEndpointServiceClientGRPC(config *config.AppConfig, logger commons.Logger, redis connectors.RedisConnector) EndpointServiceClient {
-	conn, err := grpc.NewClient(config.EndpointHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(config.Endpoint.Host, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		logger.Errorf("Unable to create connection %v", err)
 	}

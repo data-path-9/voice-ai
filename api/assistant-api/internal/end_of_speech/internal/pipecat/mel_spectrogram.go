@@ -40,6 +40,18 @@ type whisperFeatures struct {
 	hannWindow [whisperNFFT]float64
 }
 
+type whisperFeatureScratch struct {
+	prepared [whisperMaxSamples]float32
+	padded   [whisperMaxSamples + whisperNFFT]float32
+	logMel   [whisperNMels * whisperMaxFrames]float64
+	fftBuf   [whisperFFTSize]complex128
+	output   [whisperNMels * whisperMaxFrames]float32
+}
+
+func newWhisperFeatureScratch() *whisperFeatureScratch {
+	return &whisperFeatureScratch{}
+}
+
 func newWhisperFeatures() *whisperFeatures {
 	wf := &whisperFeatures{}
 	wf.initHannWindow()
@@ -51,102 +63,83 @@ func newWhisperFeatures() *whisperFeatures {
 // Returns a flat float32 slice of shape [whisperNMels * whisperMaxFrames] = [80*800].
 // Audio is truncated to last 8 seconds or zero-padded at the beginning.
 func (wf *whisperFeatures) Extract(audio []float32) []float32 {
-	// Truncate to last 8 seconds or pad at beginning
-	samples := prepareAudio(audio)
+	scratch := newWhisperFeatureScratch()
+	output := make([]float32, whisperNMels*whisperMaxFrames)
+	return wf.extractInto(audio, output, scratch)
+}
 
-	// Normalize: zero mean, unit variance
+func (wf *whisperFeatures) extractInto(audio []float32, output []float32, scratch *whisperFeatureScratch) []float32 {
+	samples := prepareAudioInto(audio, scratch.prepared[:])
 	normalize(samples)
+	padded := reflectPadInto(samples, whisperNFFT/2, scratch.padded[:])
+	logMel := scratch.logMel[:]
+	fftBuf := scratch.fftBuf[:]
+	output = output[:whisperNMels*whisperMaxFrames]
 
-	// Center pad with reflect for STFT
-	padded := reflectPad(samples, whisperNFFT/2)
-
-	// STFT → power spectrum → mel filterbank
-	numFrames := 1 + (len(padded)-whisperNFFT)/whisperHopLength
-	if numFrames > whisperMaxFrames+1 {
-		numFrames = whisperMaxFrames + 1
-	}
-	// Drop last frame (Whisper convention)
-	numFrames--
-	if numFrames > whisperMaxFrames {
-		numFrames = whisperMaxFrames
-	}
-
-	// Compute log mel spectrogram [nMels][numFrames]
-	logMel := make([]float64, whisperNMels*numFrames)
-	fftBuf := make([]complex128, whisperFFTSize)
 	globalMax := -math.MaxFloat64
-
-	for frame := 0; frame < numFrames; frame++ {
+	for frame := 0; frame < whisperMaxFrames; frame++ {
 		start := frame * whisperHopLength
 
-		// Apply Hann window and copy to FFT buffer
-		for k := range fftBuf {
-			fftBuf[k] = 0
-		}
+		clear(fftBuf)
 		for k := 0; k < whisperNFFT; k++ {
 			fftBuf[k] = complex(float64(padded[start+k])*wf.hannWindow[k], 0)
 		}
 
-		// In-place FFT
 		fft(fftBuf)
 
-		// Power spectrum for each mel filter
-		for m := 0; m < whisperNMels; m++ {
-			var melVal float64
-			for k := 0; k < whisperNFreqBins; k++ {
-				if wf.melFilters[m][k] == 0 {
+		for mel := 0; mel < whisperNMels; mel++ {
+			var melValue float64
+			for bin := 0; bin < whisperNFreqBins; bin++ {
+				if wf.melFilters[mel][bin] == 0 {
 					continue
 				}
-				r := real(fftBuf[k])
-				im := imag(fftBuf[k])
-				power := r*r + im*im
-				melVal += wf.melFilters[m][k] * power
+				realPart := real(fftBuf[bin])
+				imagPart := imag(fftBuf[bin])
+				power := realPart*realPart + imagPart*imagPart
+				melValue += wf.melFilters[mel][bin] * power
 			}
-			// Log10 with floor
-			if melVal < 1e-10 {
-				melVal = 1e-10
+			if melValue < 1e-10 {
+				melValue = 1e-10
 			}
-			lv := math.Log10(melVal)
-			logMel[m*numFrames+frame] = lv
-			if lv > globalMax {
-				globalMax = lv
+			logValue := math.Log10(melValue)
+			logMel[mel*whisperMaxFrames+frame] = logValue
+			if logValue > globalMax {
+				globalMax = logValue
 			}
 		}
 	}
 
-	// Dynamic range compression and normalization
 	clampMin := globalMax - 8.0
-	out := make([]float32, whisperNMels*whisperMaxFrames)
-	for m := 0; m < whisperNMels; m++ {
-		for f := 0; f < numFrames; f++ {
-			v := logMel[m*numFrames+f]
-			if v < clampMin {
-				v = clampMin
+	for mel := 0; mel < whisperNMels; mel++ {
+		offset := mel * whisperMaxFrames
+		for frame := 0; frame < whisperMaxFrames; frame++ {
+			value := logMel[offset+frame]
+			if value < clampMin {
+				value = clampMin
 			}
-			out[m*whisperMaxFrames+f] = float32((v + 4.0) / 4.0)
-		}
-		// Remaining frames (if numFrames < whisperMaxFrames) stay zero
-		// which corresponds to the clamped minimum after normalization
-		if numFrames < whisperMaxFrames {
-			fillVal := float32((clampMin + 4.0) / 4.0)
-			for f := numFrames; f < whisperMaxFrames; f++ {
-				out[m*whisperMaxFrames+f] = fillVal
-			}
+			output[offset+frame] = float32((value + 4.0) / 4.0)
 		}
 	}
 
-	return out
+	return output
 }
 
 // prepareAudio truncates to last 8 seconds or zero-pads at the beginning.
 func prepareAudio(audio []float32) []float32 {
-	if len(audio) >= whisperMaxSamples {
-		return audio[len(audio)-whisperMaxSamples:]
-	}
 	padded := make([]float32, whisperMaxSamples)
+	return prepareAudioInto(audio, padded)
+}
+
+func prepareAudioInto(audio []float32, padded []float32) []float32 {
+	samples := padded[:whisperMaxSamples]
+	if len(audio) >= whisperMaxSamples {
+		copy(samples, audio[len(audio)-whisperMaxSamples:])
+		return samples
+	}
 	offset := whisperMaxSamples - len(audio)
-	copy(padded[offset:], audio)
-	return padded
+	clear(samples[:offset])
+	copy(samples[offset:], audio)
+	return samples
 }
 
 // normalize applies zero-mean unit-variance normalization in-place.
@@ -177,31 +170,33 @@ func normalize(samples []float32) {
 
 // reflectPad applies reflect padding on both sides of the signal.
 func reflectPad(signal []float32, padSize int) []float32 {
-	n := len(signal)
-	out := make([]float32, padSize+n+padSize)
+	padded := make([]float32, padSize+len(signal)+padSize)
+	return reflectPadInto(signal, padSize, padded)
+}
 
-	// Left reflect: out[0]=signal[padSize], out[1]=signal[padSize-1], ...
+func reflectPadInto(signal []float32, padSize int, padded []float32) []float32 {
+	n := len(signal)
+	output := padded[:padSize+n+padSize]
+
 	for i := 0; i < padSize; i++ {
 		idx := padSize - i
 		if idx >= n {
 			idx = n - 1
 		}
-		out[i] = signal[idx]
+		output[i] = signal[idx]
 	}
 
-	// Center: copy signal
-	copy(out[padSize:], signal)
+	copy(output[padSize:], signal)
 
-	// Right reflect
 	for i := 0; i < padSize; i++ {
 		idx := n - 2 - i
 		if idx < 0 {
 			idx = 0
 		}
-		out[padSize+n+i] = signal[idx]
+		output[padSize+n+i] = signal[idx]
 	}
 
-	return out
+	return output
 }
 
 // fft performs in-place radix-2 Cooley-Tukey FFT.

@@ -135,27 +135,27 @@ export const EndpointTraces: FC<{ currentEndpoint: Endpoint }> = props => {
               {endpointLogs.map((row, idx) => (
                 <TableRow key={idx}>
                   {visibleColumn('id') && (
-                    <TableCell className="!font-mono !text-xs">{row.getId()}</TableCell>
+                    <TableCell className="font-mono text-[13px]">{row.getId()}</TableCell>
                   )}
                   {visibleColumn('version') && (
-                    <TableCell>
+                    <TableCell className="text-sm">
                       <Tag size="md" type="cool-gray">
-                        <span className="font-mono leading-none">vrsn_{row.getEndpointprovidermodelid()}</span>
+                        <span className="font-mono text-[13px] leading-none">vrsn_{row.getEndpointprovidermodelid()}</span>
                       </Tag>
                     </TableCell>
                   )}
                   {visibleColumn('source') && (
-                    <TableCell>
+                    <TableCell className="text-sm">
                       <SourceIndicator source={row.getSource()} />
                     </TableCell>
                   )}
                   {visibleColumn('status') && (
-                    <TableCell>
+                    <TableCell className="text-sm">
                       <CarbonStatusIndicator state={row.getStatus()} />
                     </TableCell>
                   )}
                   {visibleColumn('action') && (
-                    <TableCell>
+                    <TableCell className="text-sm">
                       <IconOnlyButton
                         kind="ghost"
                         size="md"
@@ -169,22 +169,22 @@ export const EndpointTraces: FC<{ currentEndpoint: Endpoint }> = props => {
                     </TableCell>
                   )}
                   {visibleColumn('timetaken') && (
-                    <TableCell className="!font-mono !text-xs tabular-nums">
+                    <TableCell className="font-mono text-[13px] tabular-nums">
                       {Number(row.getTimetaken()) / 1000000}ms
                     </TableCell>
                   )}
                   {visibleColumn('total_token') && (
-                    <TableCell className="tabular-nums">
+                    <TableCell className="text-sm tabular-nums">
                       {getTotalTokenMetric(row.getMetricsList())}
                     </TableCell>
                   )}
                   {visibleColumn('time_taken') && (
-                    <TableCell className="!font-mono !text-xs tabular-nums">
+                    <TableCell className="font-mono text-[13px] tabular-nums">
                       {getTimeTakenMetric(row.getMetricsList()) / 1000000}ms
                     </TableCell>
                   )}
                   {visibleColumn('created_date') && (
-                    <TableCell className="!text-xs whitespace-nowrap">
+                    <TableCell className="text-[13px] whitespace-nowrap">
                       {row.getCreateddate() && (
                         <DefinitionTooltip
                           definition={toDate(row.getCreateddate()!).toUTCString()}

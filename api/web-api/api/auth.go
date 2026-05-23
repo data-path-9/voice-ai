@@ -458,7 +458,7 @@ func (wAuthApi *webAuthGRPCApi) ForgotPassword(c context.Context, irRequest *pro
 		external_emailer_template.RESET_PASSWORD_TEMPLATE,
 		map[string]string{
 			"name":       aUser.Name,
-			"reset_link": fmt.Sprintf("%s/auth/change-password/%s", wAuthApi.cfg.UiHost, token.Token),
+			"reset_link": fmt.Sprintf("%s/auth/change-password/%s", wAuthApi.cfg.BaseUrl(), token.Token),
 		})
 	if err != nil {
 		wAuthApi.logger.Errorf("sending forgot password email failed with err %v", err)
@@ -867,7 +867,7 @@ func (wAuthApi *webAuthGRPCApi) GetAllUser(c context.Context, irRequest *protos.
 			Id:          member.Member.Id,
 			Email:       member.Member.Email,
 			Role:        member.Role,
-			Status:      member.Member.Status.String(),
+			Status:      member.Status.String(),
 			CreatedDate: timestamppb.New(time.Time(member.Member.CreatedDate)),
 		}
 	}

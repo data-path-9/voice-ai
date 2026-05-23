@@ -158,7 +158,7 @@ export const useAssistantConversationListPageStore =
       { name: 'Duration (in min)', key: 'duration', visible: true },
       { name: 'Action', key: 'action', visible: true },
       { name: 'Status', key: 'status', visible: true },
-      { name: 'Created Date', key: 'created_date', visible: true },
+      { name: 'Date', key: 'created_date', visible: true },
     ],
 
     /**

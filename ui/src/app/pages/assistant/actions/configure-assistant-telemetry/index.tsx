@@ -255,19 +255,19 @@ const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
                         }
                       />
                     </TableCell>
-                    <TableCell>{providerName}</TableCell>
-                    <TableCell>{String(row.getOptionsList().length)}</TableCell>
-                    <TableCell>
+                    <TableCell className="text-sm">{providerName}</TableCell>
+                    <TableCell className="text-sm">{String(row.getOptionsList().length)}</TableCell>
+                    <TableCell className="text-sm">
                       <Tag type={row.getEnabled() ? 'green' : 'gray'} size="sm">
                         {row.getEnabled() ? 'Yes' : 'No'}
                       </Tag>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-[13px] whitespace-nowrap">
                       {row.getCreateddate()
                         ? toHumanReadableDateTime(row.getCreateddate()!)
                         : '—'}
                     </TableCell>
-                    <TableCell onClick={e => e.stopPropagation()}>
+                    <TableCell className="text-sm" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-0">
                         <Button
                           hasIconOnly

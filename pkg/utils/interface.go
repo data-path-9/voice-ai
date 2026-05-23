@@ -92,6 +92,35 @@ func (m Option) GetUint64(key string) (uint64, error) {
 	}
 }
 
+func (m Option) GetStringSlice(key string) []string {
+	raw, err := m.GetString(key)
+	if err != nil {
+		return []string{}
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return []string{}
+	}
+
+	parsed := []string{}
+	if json.Unmarshal([]byte(trimmed), &parsed) == nil {
+		return parsed
+	}
+
+	if strings.Contains(trimmed, ",") {
+		out := []string{}
+		for _, item := range strings.Split(trimmed, ",") {
+			part := strings.TrimSpace(item)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+		return out
+	}
+
+	return []string{trimmed}
+}
+
 func parseUintString(s string) (uint64, error) {
 	s = strings.TrimSpace(s)
 	// base 0 lets strconv handle 0x..., 0..., etc.
@@ -335,11 +364,10 @@ func (m Option) GetBool(key string) (bool, error) {
 // keys (rapida.credential_id). Suitable for inclusion in event/metric data.
 func (m Option) ToStringMap() map[string]string {
 	result := make(map[string]string, len(m))
-	for k, v := range m {
-		if k == "rapida.credential_id" {
-			continue
+	for k := range m {
+		if s, err := m.GetString(k); err == nil {
+			result[k] = s
 		}
-		result[k] = fmt.Sprintf("%v", v)
 	}
 	return result
 }

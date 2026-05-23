@@ -16,6 +16,8 @@ export interface RapidaProvider {
     name: string;
     type: string;
     label: string;
+    required?: boolean;
+    choices?: { label: string; value: string }[];
   }[];
 }
 

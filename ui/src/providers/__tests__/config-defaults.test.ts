@@ -312,7 +312,7 @@ describe('getDefaultsFromConfig', () => {
     );
 
     expect(findMeta(result, 'model.temperature')?.getValue()).toBe('0.3');
-    expect(findMeta(result, 'model.max_completion_tokens')?.getValue()).toBe('2048');
+    expect(findMeta(result, 'model.max_completion_tokens')?.getValue()).toBe('1048');
   });
 
   it('preserves valid existing values and patches invalid values against model constraints', () => {
@@ -514,6 +514,41 @@ describe('validateFromConfig', () => {
     );
     expect(
       validateFromConfig(jsonConfig, 'text', 'openai', [cred, invalidJson]),
+    ).toBeDefined();
+  });
+
+  it('validates custom-llm model.parameters as JSON object', () => {
+    const customLLMConfig: ProviderConfig = {
+      text: {
+        parameters: [
+          {
+            key: 'model.parameters',
+            label: 'Model Parameters',
+            type: 'json',
+            required: false,
+          },
+        ],
+      },
+    };
+
+    const cred = createMetadata('rapida.credential_id', 'valid-cred');
+    const validObject = createMetadata(
+      'model.parameters',
+      '{"temperature":0.7}',
+    );
+    expect(
+      validateFromConfig(customLLMConfig, 'text', 'custom-llm', [
+        cred,
+        validObject,
+      ]),
+    ).toBeUndefined();
+
+    const invalidArray = createMetadata('model.parameters', '[1,2,3]');
+    expect(
+      validateFromConfig(customLLMConfig, 'text', 'custom-llm', [
+        cred,
+        invalidArray,
+      ]),
     ).toBeDefined();
   });
 

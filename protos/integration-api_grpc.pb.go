@@ -34,7 +34,7 @@ const (
 // Adding a new provider requires NO proto changes.
 type UnifiedProviderServiceClient interface {
 	Chat(ctx context.Context, in *ChatRequest, opts ...grpc.CallOption) (*ChatResponse, error)
-	StreamChat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ChatRequest, ChatResponse], error)
+	StreamChat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StreamChatRequest, StreamChatResponse], error)
 	Embedding(ctx context.Context, in *EmbeddingRequest, opts ...grpc.CallOption) (*EmbeddingResponse, error)
 	Reranking(ctx context.Context, in *RerankingRequest, opts ...grpc.CallOption) (*RerankingResponse, error)
 	VerifyCredential(ctx context.Context, in *VerifyCredentialRequest, opts ...grpc.CallOption) (*VerifyCredentialResponse, error)
@@ -58,18 +58,18 @@ func (c *unifiedProviderServiceClient) Chat(ctx context.Context, in *ChatRequest
 	return out, nil
 }
 
-func (c *unifiedProviderServiceClient) StreamChat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ChatRequest, ChatResponse], error) {
+func (c *unifiedProviderServiceClient) StreamChat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StreamChatRequest, StreamChatResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &UnifiedProviderService_ServiceDesc.Streams[0], UnifiedProviderService_StreamChat_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[ChatRequest, ChatResponse]{ClientStream: stream}
+	x := &grpc.GenericClientStream[StreamChatRequest, StreamChatResponse]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type UnifiedProviderService_StreamChatClient = grpc.BidiStreamingClient[ChatRequest, ChatResponse]
+type UnifiedProviderService_StreamChatClient = grpc.BidiStreamingClient[StreamChatRequest, StreamChatResponse]
 
 func (c *unifiedProviderServiceClient) Embedding(ctx context.Context, in *EmbeddingRequest, opts ...grpc.CallOption) (*EmbeddingResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -109,7 +109,7 @@ func (c *unifiedProviderServiceClient) VerifyCredential(ctx context.Context, in 
 // Adding a new provider requires NO proto changes.
 type UnifiedProviderServiceServer interface {
 	Chat(context.Context, *ChatRequest) (*ChatResponse, error)
-	StreamChat(grpc.BidiStreamingServer[ChatRequest, ChatResponse]) error
+	StreamChat(grpc.BidiStreamingServer[StreamChatRequest, StreamChatResponse]) error
 	Embedding(context.Context, *EmbeddingRequest) (*EmbeddingResponse, error)
 	Reranking(context.Context, *RerankingRequest) (*RerankingResponse, error)
 	VerifyCredential(context.Context, *VerifyCredentialRequest) (*VerifyCredentialResponse, error)
@@ -125,7 +125,7 @@ type UnimplementedUnifiedProviderServiceServer struct{}
 func (UnimplementedUnifiedProviderServiceServer) Chat(context.Context, *ChatRequest) (*ChatResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Chat not implemented")
 }
-func (UnimplementedUnifiedProviderServiceServer) StreamChat(grpc.BidiStreamingServer[ChatRequest, ChatResponse]) error {
+func (UnimplementedUnifiedProviderServiceServer) StreamChat(grpc.BidiStreamingServer[StreamChatRequest, StreamChatResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method StreamChat not implemented")
 }
 func (UnimplementedUnifiedProviderServiceServer) Embedding(context.Context, *EmbeddingRequest) (*EmbeddingResponse, error) {
@@ -176,11 +176,11 @@ func _UnifiedProviderService_Chat_Handler(srv interface{}, ctx context.Context, 
 }
 
 func _UnifiedProviderService_StreamChat_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(UnifiedProviderServiceServer).StreamChat(&grpc.GenericServerStream[ChatRequest, ChatResponse]{ServerStream: stream})
+	return srv.(UnifiedProviderServiceServer).StreamChat(&grpc.GenericServerStream[StreamChatRequest, StreamChatResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type UnifiedProviderService_StreamChatServer = grpc.BidiStreamingServer[ChatRequest, ChatResponse]
+type UnifiedProviderService_StreamChatServer = grpc.BidiStreamingServer[StreamChatRequest, StreamChatResponse]
 
 func _UnifiedProviderService_Embedding_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EmbeddingRequest)

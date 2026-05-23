@@ -15,6 +15,18 @@ jest.mock('@/utils', () => ({
   cn: (...inputs: any[]) => inputs.filter(Boolean).join(' '),
 }));
 
+jest.mock('@/app/components/json-editor', () => {
+  const React = require('react');
+  return {
+    JsonEditor: ({ value, onChange, placeholder }: any) =>
+      React.createElement('textarea', {
+        value: value ?? '',
+        placeholder,
+        onChange: (e: any) => onChange?.(e.target.value),
+      }),
+  };
+});
+
 jest.mock('@/app/components/dropdown', () => {
   const React = require('react');
   return {
@@ -152,11 +164,26 @@ jest.mock('@carbon/react', () => {
           ),
         ),
       ),
-    ComboBox: ({ id, titleText, items = [], selectedItem, onChange }: any) =>
+    ComboBox: ({
+      id,
+      titleText,
+      items = [],
+      selectedItem,
+      onChange,
+      onBlur,
+      placeholder,
+    }: any) =>
       React.createElement(
         'div',
         null,
         titleText ? React.createElement('span', null, titleText) : null,
+        React.createElement('input', {
+          id: `${id}-input`,
+          defaultValue: selectedItem?.name || '',
+          placeholder: placeholder || '',
+          onChange: () => {},
+          onBlur,
+        }),
         React.createElement(
           'select',
           {
@@ -265,6 +292,24 @@ jest.mock('@/providers/config-loader', () => {
                 type: 'number',
                 required: true,
                 default: '0.42',
+              },
+            ],
+          },
+        },
+        {
+          id: 'model-d',
+          name: 'Model D',
+          config: {
+            parameters: [
+              {
+                key: 'model.temperature',
+                label: 'Temperature',
+                type: 'slider',
+                required: true,
+                default: '0.33',
+                min: 0,
+                max: 1,
+                step: 0.01,
               },
             ],
           },
@@ -416,6 +461,21 @@ describe('ConfigRenderer', () => {
       const slider = screen.getByRole('slider') as HTMLInputElement;
       expect(slider).toBeInTheDocument();
       expect(slider).toHaveAttribute('type', 'range');
+      expect(slider.value).toBe('0.5');
+    });
+
+    it('uses slider default when metadata is missing', () => {
+      render(
+        <ConfigRenderer
+          provider="test"
+          category="stt"
+          config={sliderConfig}
+          parameters={[]}
+          onParameterChange={mockOnChange}
+        />,
+      );
+
+      const slider = screen.getByRole('slider') as HTMLInputElement;
       expect(slider.value).toBe('0.5');
     });
 
@@ -645,7 +705,7 @@ describe('ConfigRenderer', () => {
       ],
     };
 
-    it('renders textarea with JSON placeholder', () => {
+    it('renders json editor with JSON placeholder', () => {
       render(
         <ConfigRenderer
           provider="test"
@@ -823,6 +883,45 @@ describe('ConfigRenderer', () => {
       const button = screen.getByRole('button');
       expect(button).toBeInTheDocument();
     });
+
+    it('renders a single advanced json field full width', () => {
+      const singleAdvancedJsonConfig: CategoryConfig = {
+        parameters: [
+          {
+            key: 'model.id',
+            label: 'Model',
+            type: 'dropdown',
+            required: true,
+            data: 'models.json',
+            valueField: 'id',
+          },
+          {
+            key: 'model.parameters',
+            label: 'Model Parameters',
+            type: 'json',
+            required: false,
+            advanced: true,
+          },
+        ],
+      };
+
+      render(
+        <ConfigRenderer
+          provider="test"
+          category="text"
+          config={singleAdvancedJsonConfig}
+          parameters={[]}
+          onParameterChange={mockOnChange}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button'));
+
+      const label = screen.getByText('Model Parameters');
+      const wrapper = label.closest('div');
+      expect(wrapper).toBeInTheDocument();
+      expect(wrapper).toHaveClass('col-span-full');
+    });
   });
 
   describe('model-level overrides', () => {
@@ -974,6 +1073,78 @@ describe('ConfigRenderer', () => {
       expect(
         updated.find(m => m.getKey() === 'model.temperature')?.getValue(),
       ).toBe('1.1');
+    });
+
+    it('renders model override slider defaults for text configs', () => {
+      render(
+        <ConfigRenderer
+          provider="test"
+          category="text"
+          config={modelAwareConfig}
+          parameters={[
+            createMetadata('model.id', 'model-d'),
+            createMetadata('model.name', 'Model D'),
+          ]}
+          onParameterChange={mockOnChange}
+        />,
+      );
+
+      const slider = screen.getByRole('slider') as HTMLInputElement;
+      expect(slider.value).toBe('0.33');
+    });
+
+    it('accepts custom model value in combobox and preserves it on rerender', () => {
+      const customModelConfig: CategoryConfig = {
+        parameters: [
+          {
+            key: 'model.id',
+            label: 'Model',
+            type: 'dropdown',
+            required: true,
+            customValue: true,
+            data: 'models.json',
+            valueField: 'id',
+          },
+        ],
+      };
+
+      const { rerender } = render(
+        <ConfigRenderer
+          provider="test"
+          category="text"
+          config={customModelConfig}
+          parameters={[]}
+          onParameterChange={mockOnChange}
+        />,
+      );
+
+      const modelInput = screen.getByPlaceholderText('Select model');
+      fireEvent.change(modelInput, { target: { value: 'custom-model-x' } });
+      fireEvent.blur(modelInput);
+
+      expect(mockOnChange).toHaveBeenCalled();
+      const committedParams = mockOnChange.mock.calls
+        .map(call => call[0] as Metadata[])
+        .find(params =>
+          params.some(
+            m => m.getKey() === 'model.id' && m.getValue() === 'custom-model-x',
+          ),
+        );
+      expect(committedParams).toBeDefined();
+
+      rerender(
+        <ConfigRenderer
+          provider="test"
+          category="text"
+          config={customModelConfig}
+          parameters={committedParams!}
+          onParameterChange={mockOnChange}
+        />,
+      );
+
+      expect(screen.getByPlaceholderText('Select model')).toHaveValue(
+        'custom-model-x',
+      );
     });
   });
 

@@ -587,7 +587,7 @@ func (h *RTPHandler) receiveLoop() {
 			}
 			// Connection closed or other error
 			if h.running.Load() && h.logger != nil {
-				h.logger.Warnw("RTP receive error", "error", err, "from_send_conn", sendConn != nil)
+				// h.logger.Warnw("RTP receive error", "error", err, "from_send_conn", sendConn != nil)
 			}
 			continue
 		}

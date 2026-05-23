@@ -36,8 +36,7 @@ type vaultServiceClient struct {
 }
 
 func NewVaultClientGRPC(cfg *config.AppConfig, logger commons.Logger, redis connectors.RedisConnector) VaultClient {
-	logger.Debugf("conntecting to vault client with %s", cfg.WebHost)
-	conn, err := grpc.NewClient(cfg.WebHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(cfg.Web.Host, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		logger.Errorf("Unable to create connection for vault api %v", err)
 	}

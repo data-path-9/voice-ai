@@ -1,0 +1,298 @@
+[
+  {
+    "id": "openrouter/openai/gpt-4.1-mini",
+    "name": "openai/gpt-4.1-mini",
+    "config": {
+      "parameters": [
+        {
+          "key": "model.max_tokens",
+          "label": "Max Tokens",
+          "type": "number",
+          "advanced": true,
+          "required": false,
+          "default": "2048",
+          "min": 1,
+          "errorMessage": "Please provide a valid max_tokens value."
+        },
+        {
+          "key": "model.temperature",
+          "label": "Temperature",
+          "type": "slider",
+          "advanced": true,
+          "required": true,
+          "default": "0.7",
+          "min": 0,
+          "max": 2,
+          "step": 0.1,
+          "errorMessage": "Please provide a valid temperature value between 0 and 2."
+        },
+        {
+          "key": "model.top_p",
+          "label": "Top P",
+          "type": "slider",
+          "advanced": true,
+          "required": false,
+          "default": "1",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "errorMessage": "Please provide a valid top_p value between 0 and 1."
+        },
+        {
+          "key": "model.reasoning",
+          "label": "Reasoning",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "none",
+          "choices": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "Low",
+              "value": "low"
+            },
+            {
+              "label": "Medium",
+              "value": "medium"
+            },
+            {
+              "label": "High",
+              "value": "high"
+            }
+          ],
+          "helpText": "Internal reasoning mode for supported models."
+        },
+        {
+          "key": "model.include_reasoning",
+          "label": "Include Reasoning",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "false",
+          "choices": [
+            {
+              "label": "False",
+              "value": "false"
+            },
+            {
+              "label": "True",
+              "value": "true"
+            }
+          ],
+          "helpText": "Include reasoning output in the response when supported."
+        },
+        {
+          "key": "model.structured_outputs",
+          "label": "Structured Outputs",
+          "type": "json",
+          "advanced": true,
+          "required": false,
+          "colSpan": 2,
+          "helpText": "JSON schema enforcement settings."
+        },
+        {
+          "key": "model.response_format",
+          "label": "Response Format",
+          "type": "json",
+          "advanced": true,
+          "required": false,
+          "colSpan": 2,
+          "helpText": "Output format specification."
+        },
+        {
+          "key": "model.stop",
+          "label": "Stop",
+          "type": "input",
+          "advanced": true,
+          "required": false,
+          "placeholder": "Comma-separated stop sequences",
+          "helpText": "Custom stop sequences."
+        },
+        {
+          "key": "model.frequency_penalty",
+          "label": "Frequency Penalty",
+          "type": "slider",
+          "advanced": true,
+          "required": false,
+          "default": "0",
+          "min": -2,
+          "max": 2,
+          "step": 0.1,
+          "errorMessage": "Please provide a valid frequency_penalty value between -2 and 2."
+        },
+        {
+          "key": "model.presence_penalty",
+          "label": "Presence Penalty",
+          "type": "slider",
+          "advanced": true,
+          "required": false,
+          "default": "0",
+          "min": -2,
+          "max": 2,
+          "step": 0.1,
+          "errorMessage": "Please provide a valid presence_penalty value between -2 and 2."
+        },
+        {
+          "key": "model.seed",
+          "label": "Seed",
+          "type": "number",
+          "advanced": true,
+          "required": false,
+          "min": 0,
+          "errorMessage": "Please provide a valid seed value."
+        }
+      ]
+    }
+  },
+  {
+    "id": "openrouter/anthropic/claude-3.7-sonnet",
+    "name": "anthropic/claude-3.7-sonnet",
+    "config": {
+      "parameters": [
+        {
+          "key": "model.max_tokens",
+          "label": "Max Tokens",
+          "type": "number",
+          "advanced": true,
+          "required": false,
+          "default": "2048",
+          "min": 1,
+          "errorMessage": "Please provide a valid max_tokens value."
+        },
+        {
+          "key": "model.temperature",
+          "label": "Temperature",
+          "type": "slider",
+          "advanced": true,
+          "required": true,
+          "default": "0.7",
+          "min": 0,
+          "max": 2,
+          "step": 0.1,
+          "errorMessage": "Please provide a valid temperature value between 0 and 2."
+        },
+        {
+          "key": "model.top_p",
+          "label": "Top P",
+          "type": "slider",
+          "advanced": true,
+          "required": false,
+          "default": "1",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "errorMessage": "Please provide a valid top_p value between 0 and 1."
+        },
+        {
+          "key": "model.reasoning",
+          "label": "Reasoning",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "none",
+          "choices": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "Low",
+              "value": "low"
+            },
+            {
+              "label": "Medium",
+              "value": "medium"
+            },
+            {
+              "label": "High",
+              "value": "high"
+            }
+          ],
+          "helpText": "Internal reasoning mode for supported models."
+        },
+        {
+          "key": "model.include_reasoning",
+          "label": "Include Reasoning",
+          "type": "select",
+          "advanced": true,
+          "required": false,
+          "default": "false",
+          "choices": [
+            {
+              "label": "False",
+              "value": "false"
+            },
+            {
+              "label": "True",
+              "value": "true"
+            }
+          ],
+          "helpText": "Include reasoning output in the response when supported."
+        },
+        {
+          "key": "model.structured_outputs",
+          "label": "Structured Outputs",
+          "type": "json",
+          "advanced": true,
+          "required": false,
+          "colSpan": 2,
+          "helpText": "JSON schema enforcement settings."
+        },
+        {
+          "key": "model.response_format",
+          "label": "Response Format",
+          "type": "json",
+          "advanced": true,
+          "required": false,
+          "colSpan": 2,
+          "helpText": "Output format specification."
+        },
+        {
+          "key": "model.stop",
+          "label": "Stop",
+          "type": "input",
+          "advanced": true,
+          "required": false,
+          "placeholder": "Comma-separated stop sequences",
+          "helpText": "Custom stop sequences."
+        },
+        {
+          "key": "model.frequency_penalty",
+          "label": "Frequency Penalty",
+          "type": "slider",
+          "advanced": true,
+          "required": false,
+          "default": "0",
+          "min": -2,
+          "max": 2,
+          "step": 0.1,
+          "errorMessage": "Please provide a valid frequency_penalty value between -2 and 2."
+        },
+        {
+          "key": "model.presence_penalty",
+          "label": "Presence Penalty",
+          "type": "slider",
+          "advanced": true,
+          "required": false,
+          "default": "0",
+          "min": -2,
+          "max": 2,
+          "step": 0.1,
+          "errorMessage": "Please provide a valid presence_penalty value between -2 and 2."
+        },
+        {
+          "key": "model.seed",
+          "label": "Seed",
+          "type": "number",
+          "advanced": true,
+          "required": false,
+          "min": 0,
+          "errorMessage": "Please provide a valid seed value."
+        }
+      ]
+    }
+  }
+]

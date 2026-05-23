@@ -1,4 +1,4 @@
-import { FC, useState } from 'react';
+import { FC, ReactNode, useState } from 'react';
 import { Filter } from '@carbon/icons-react';
 import { Button, Checkbox } from '@carbon/react';
 import { cn } from '@/utils';
@@ -14,6 +14,11 @@ export interface TableToolbarFilterProps {
   onApplyFilter: (activeFilters: Set<string>) => void;
   onResetFilter: () => void;
   className?: string;
+  panelClassName?: string;
+  extraContent?: ReactNode;
+  onApply?: () => boolean | void;
+  onReset?: () => void;
+  filtersTitle?: string;
 }
 
 export const TableToolbarFilter: FC<TableToolbarFilterProps> = ({
@@ -22,6 +27,11 @@ export const TableToolbarFilter: FC<TableToolbarFilterProps> = ({
   onApplyFilter,
   onResetFilter,
   className,
+  panelClassName,
+  extraContent,
+  onApply,
+  onReset,
+  filtersTitle = 'Filter by type',
 }) => {
   const [open, setOpen] = useState(false);
   const [localFilters, setLocalFilters] = useState<Set<string>>(
@@ -38,6 +48,9 @@ export const TableToolbarFilter: FC<TableToolbarFilterProps> = ({
   };
 
   const handleApply = () => {
+    if (onApply?.() === false) {
+      return;
+    }
     onApplyFilter(localFilters);
     setOpen(false);
   };
@@ -45,6 +58,7 @@ export const TableToolbarFilter: FC<TableToolbarFilterProps> = ({
   const handleReset = () => {
     setLocalFilters(new Set());
     onResetFilter();
+    onReset?.();
     setOpen(false);
   };
 
@@ -68,24 +82,38 @@ export const TableToolbarFilter: FC<TableToolbarFilterProps> = ({
             className="fixed inset-0 z-40"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute right-0 top-full z-50 w-56 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-lg">
-            <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700">
-              <p className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                Filter by type
-              </p>
-            </div>
-            <div className="max-h-64 overflow-y-auto py-2">
-              {filters.map(f => (
-                <div key={f.id} className="px-4 py-0.5">
-                  <Checkbox
-                    id={`filter-${f.id}`}
-                    labelText={f.label}
-                    checked={localFilters.has(f.id)}
-                    onChange={() => handleToggle(f.id)}
-                  />
+          <div
+            className={cn(
+              'absolute right-0 top-full z-50 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-lg',
+              panelClassName,
+            )}
+          >
+            {extraContent && (
+              <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                {extraContent}
+              </div>
+            )}
+            {filters.length > 0 && (
+              <>
+                <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    {filtersTitle}
+                  </p>
                 </div>
-              ))}
-            </div>
+                <div className="max-h-64 overflow-y-auto py-2">
+                  {filters.map(f => (
+                    <div key={f.id} className="px-4 py-0.5">
+                      <Checkbox
+                        id={`filter-${f.id}`}
+                        labelText={f.label}
+                        checked={localFilters.has(f.id)}
+                        onChange={() => handleToggle(f.id)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
             <div className="flex border-t border-gray-200 dark:border-gray-700">
               <Button
                 size="md"
