@@ -187,6 +187,28 @@
         ]
     },
     {
+        "code": "telnyx",
+        "name": "Telnyx",
+        "description": "Programmable telephony platform offering Call Control API and bidirectional WebSocket media streaming.",
+        "image": "https://cdn-01.rapida.ai/partners/telnyx.png",
+        "featureList": [
+            "telephony",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "api_key",
+                "type": "string",
+                "label": "API key"
+            },
+            {
+                "name": "connection_id",
+                "type": "string",
+                "label": "Connection id"
+            }
+        ]
+    },
+    {
         "code": "aws",
         "name": "AWS",
         "description": "Amazon Web Services (AWS) offers a broad set of global cloud-based products including compute, storage, databases, analytics, and AI services.",

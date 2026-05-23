@@ -80,6 +80,7 @@ describe('Telephony provider runtime parity', () => {
 
   it.each([
     ['twilio', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
+    ['telnyx', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
     ['exotel', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
     ['vonage', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
     ['sip', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
