@@ -64,11 +64,13 @@ type AssistantConversationMessage struct {
 
 // AssistantConversationRecording defines model for AssistantConversationRecording.
 type AssistantConversationRecording struct {
-	AssistantConversationId *Uint64String `json:"assistantConversationId,omitempty"`
-	CreatedDate             *time.Time    `json:"createdDate,omitempty"`
-	Id                      *Uint64String `json:"id,omitempty"`
-	UpdatedDate             *time.Time    `json:"updatedDate,omitempty"`
-	Url                     *string       `json:"url,omitempty"`
+	AssistantConversationId  *Uint64String `json:"assistantConversationId,omitempty"`
+	AssistantRecordingUrl    *string       `json:"assistantRecordingUrl,omitempty"`
+	ConversationRecordingUrl *string       `json:"conversationRecordingUrl,omitempty"`
+	CreatedDate              *time.Time    `json:"createdDate,omitempty"`
+	Id                       *Uint64String `json:"id,omitempty"`
+	UpdatedDate              *time.Time    `json:"updatedDate,omitempty"`
+	UserRecordingUrl         *string       `json:"userRecordingUrl,omitempty"`
 }
 
 // AssistantConversationTelephonyEvent defines model for AssistantConversationTelephonyEvent.

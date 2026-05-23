@@ -114,8 +114,8 @@ type genericRequestor struct {
 	authenticationExecutor    internal_type.AuthenticationExecutor
 	assistantExecutor         internal_llm.AssistantExecutor
 	endOfSpeechExecutor       internal_type.EndOfSpeechExecutor
-	denoiser                  internal_type.VoiceDenoiserExecutor
-	vad                       internal_type.VoiceActivityDetectorExecutor
+	denoiserExecutor          internal_type.VoiceDenoiserExecutor
+	vadExecutor               internal_type.VoiceActivityDetectorExecutor
 	// states
 	assistant             *internal_assistant_entity.Assistant
 	assistantConversation *internal_conversation_entity.AssistantConversation
@@ -281,16 +281,6 @@ func (gr *genericRequestor) GetOptions() utils.Option {
 
 func (dm *genericRequestor) GetHistories() []internal_type.MessagePacket {
 	return dm.histories
-}
-
-func (gr *genericRequestor) CreateConversationRecording(_ context.Context, user, assistant []byte) error {
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-	defer cancel()
-	if _, err := gr.conversationService.CreateConversationRecording(dbCtx, gr.auth, gr.assistant.Id, gr.assistantConversation.Id, user, assistant); err != nil {
-		gr.logger.Errorf("unable to create recording for the conversation id %d with error : %v", err)
-		return err
-	}
-	return nil
 }
 
 // =============================================================================

@@ -74,7 +74,7 @@ func (h requestorDispatchHandler) HandleUserAudio(ctx context.Context, vl intern
 		h.r.logger.Tracef(ctx, "dropping user audio: session not ready, state=%s", h.r.getSessionState().String())
 		return
 	}
-	if h.r.denoiser != nil && !vl.NoiseReduced {
+	if h.r.denoiserExecutor != nil && !vl.NoiseReduced {
 		h.r.OnPacket(ctx, internal_type.DenoiseAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio})
 		return
 	}
@@ -104,7 +104,7 @@ func (h requestorDispatchHandler) HandleSpeechToTextAudio(ctx context.Context, v
 }
 
 func (h requestorDispatchHandler) HandleDenoise(ctx context.Context, vl internal_type.DenoiseAudioPacket) {
-	if err := h.r.denoiser.Execute(ctx, vl); err != nil {
+	if err := h.r.denoiserExecutor.Execute(ctx, vl); err != nil {
 		h.r.logger.Warnf("denoiser returned unexpected error: %+v", err)
 	}
 }
@@ -117,7 +117,7 @@ func (h requestorDispatchHandler) HandleDenoisedAudio(ctx context.Context, vl in
 }
 
 func (h requestorDispatchHandler) HandleVadAudio(ctx context.Context, vl internal_type.VadAudioPacket) {
-	vad := h.r.vad
+	vad := h.r.vadExecutor
 	if vad != nil {
 		if err := vad.Execute(ctx, internal_type.UserAudioReceivedPacket{ContextID: vl.ContextID, Audio: vl.Audio}); err != nil {
 			h.r.logger.Warnf("error while processing with vad %s", err.Error())
@@ -1273,7 +1273,7 @@ func (h requestorDispatchHandler) HandleInitializeDenoise(ctx context.Context, p
 		})
 		return
 	}
-	h.r.denoiser = denoise
+	h.r.denoiserExecutor = denoise
 }
 func (h requestorDispatchHandler) HandleInitializeTextToSpeech(ctx context.Context, p internal_type.InitializeTextToSpeechPacket) {
 	outputTransformer, err := h.r.GetTextToSpeechTransformer()
@@ -1354,7 +1354,7 @@ func (h requestorDispatchHandler) HandleInitializeVoiceActivityDetection(ctx con
 			})
 			return
 		}
-		h.r.vad = vad
+		h.r.vadExecutor = vad
 	}
 
 }
@@ -1617,7 +1617,7 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeVoiceActivityDetecti
 		})
 		return
 	}
-	h.r.vad = vad
+	h.r.vadExecutor = vad
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeDenoise(ctx context.Context, p internal_type.ModeSwitchInitializeDenoisePacket) {
@@ -1642,7 +1642,7 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeDenoise(ctx context.
 		})
 		return
 	}
-	h.r.denoiser = denoise
+	h.r.denoiserExecutor = denoise
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeEndOfSpeech(ctx context.Context, p internal_type.ModeSwitchInitializeEndOfSpeechPacket) {
@@ -1696,11 +1696,11 @@ func (h requestorDispatchHandler) HandleModeSwitchFinalizeTextToSpeech(ctx conte
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeVoiceActivityDetection(ctx context.Context, p internal_type.ModeSwitchFinalizeVoiceActivityDetectionPacket) {
-	if h.r.vad != nil {
-		if err := h.r.vad.Close(ctx); err != nil {
+	if h.r.vadExecutor != nil {
+		if err := h.r.vadExecutor.Close(ctx); err != nil {
 			h.r.logger.Warnf("mode-switch finalize voice activity detection: %v", err)
 		}
-		h.r.vad = nil
+		h.r.vadExecutor = nil
 	}
 }
 
@@ -1714,11 +1714,11 @@ func (h requestorDispatchHandler) HandleModeSwitchFinalizeEndOfSpeech(ctx contex
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeDenoise(ctx context.Context, p internal_type.ModeSwitchFinalizeDenoisePacket) {
-	if h.r.denoiser != nil {
-		if err := h.r.denoiser.Close(ctx); err != nil {
+	if h.r.denoiserExecutor != nil {
+		if err := h.r.denoiserExecutor.Close(ctx); err != nil {
 			h.r.logger.Warnf("mode-switch finalize denoiser: %v", err)
 		}
-		h.r.denoiser = nil
+		h.r.denoiserExecutor = nil
 	}
 }
 
@@ -1818,11 +1818,11 @@ func (h requestorDispatchHandler) HandleFinalizeEndOfSpeech(ctx context.Context,
 }
 
 func (h requestorDispatchHandler) HandleFinalizeVoiceActivityDetection(ctx context.Context, p internal_type.FinalizeVoiceActivityDetectionPacket) {
-	if h.r.vad != nil {
-		if err := h.r.vad.Close(ctx); err != nil {
+	if h.r.vadExecutor != nil {
+		if err := h.r.vadExecutor.Close(ctx); err != nil {
 			h.r.logger.Tracef(ctx, "failed to close voice activity detection: %+v", err)
 		}
-		h.r.vad = nil
+		h.r.vadExecutor = nil
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizeTextToSpeechPacket{ContextID: p.ContextID})
 }
@@ -1851,25 +1851,29 @@ func (h requestorDispatchHandler) HandleFinalizeAuthentication(ctx context.Conte
 }
 func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Context, p internal_type.FinalizeSessionRuntimePacket) {
 	if h.r.outputNormalizer != nil {
-		h.r.outputNormalizer.Close(ctx)
-		h.r.outputNormalizer = nil
+		utils.Go(ctx, func() {
+			h.r.outputNormalizer.Close(ctx)
+			h.r.outputNormalizer = nil
+		})
 	}
 
 	//
 	if h.r.inputNormalizer != nil {
-		h.r.inputNormalizer.Close(ctx)
-		h.r.inputNormalizer = nil
+		utils.Go(ctx, func() {
+			h.r.inputNormalizer.Close(ctx)
+			h.r.inputNormalizer = nil
+		})
 	}
 
 	//
 	if h.r.recorder != nil {
 		utils.Go(ctx, func() {
-			userAudio, systemAudio, err := h.r.recorder.Persist()
+			userAudio, systemAudio, conversationAudio, err := h.r.recorder.Persist()
 			if err != nil {
 				h.r.logger.Tracef(ctx, "failed to persist audio recording: %+v", err)
 				return
 			}
-			if err = h.r.CreateConversationRecording(ctx, userAudio, systemAudio); err != nil {
+			if err = h.r.CreateConversationRecording(ctx, userAudio, systemAudio, conversationAudio); err != nil {
 				h.r.logger.Tracef(ctx, "failed to create conversation recording record: %+v", err)
 			}
 		})

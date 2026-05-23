@@ -290,6 +290,17 @@ func (deb *genericRequestor) onAddMessageMetadata(_ context.Context, prefix stri
 	return nil
 }
 
+func (gr *genericRequestor) CreateConversationRecording(_ context.Context, user, assistant, conversation []byte) error {
+	utils.Go(context.Background(), func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		defer cancel()
+		if _, err := gr.conversationService.CreateConversationRecording(dbCtx, gr.auth, gr.assistant.Id, gr.assistantConversation.Id, user, assistant, conversation); err != nil {
+			gr.logger.Errorf("unable to create recording for the conversation id %d with error : %v", gr.assistantConversation.Id, err)
+		}
+	})
+	return nil
+}
+
 func (r *genericRequestor) identifier(config *protos.ConversationInitialization) string {
 	switch identity := config.GetUserIdentity().(type) {
 	case *protos.ConversationInitialization_Phone:

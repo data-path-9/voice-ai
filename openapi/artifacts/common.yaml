@@ -108,7 +108,11 @@ components:
           $ref: "#/components/schemas/Uint64String"
         assistantConversationId:
           $ref: "#/components/schemas/Uint64String"
-        url:
+        assistantRecordingUrl:
+          type: string
+        userRecordingUrl:
+          type: string
+        conversationRecordingUrl:
           type: string
         createdDate:
           type: string
