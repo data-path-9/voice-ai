@@ -59,6 +59,7 @@ const (
 
 const (
 	EventConnected            = "connected"
+	EventCallback             = "callback"
 	EventInitializing         = "initializing"
 	EventInitialized          = "initialized"
 	EventConnectFailed        = "connect_failed"
@@ -164,7 +165,9 @@ const (
 	MetricWebRTCOutputQueueDrops = "webrtc.output_queue_dropped_frames"
 
 	// --- Telephony ---
-	MetricTelephonyStatus = "telephony.status"
+	MetricTelephonyStatus   = "telephony.status"
+	MetricTelephonyDuration = "telephony.duration"
+	MetricTelephonyPrice    = "telephony.price"
 )
 
 // =============================================================================

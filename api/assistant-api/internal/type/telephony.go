@@ -23,8 +23,25 @@ type StatusInfo struct {
 	// (e.g. "completed", "ringing", "answered", "stream-started", "channel_destroyed").
 	Event string
 
+	// ChannelUUID is the provider-specific call identifier from the callback.
+	ChannelUUID string
+
+	// Error is set when the provider callback represents a failed terminal state.
+	Error *StatusError
+
+	// Duration is the provider-reported call duration, when present.
+	Duration string
+
+	// Price is the provider-reported call price, when present.
+	Price string
+
 	// Payload is the raw event payload from the provider (parsed body, form data, etc.).
 	Payload interface{}
+}
+
+type StatusError struct {
+	Error  string
+	Reason string
 }
 
 // CallInfo is the structured response returned by ReceiveCall and OutboundCall.

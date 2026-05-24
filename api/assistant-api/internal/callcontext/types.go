@@ -23,8 +23,9 @@ import (
 // consumes the context (typically at session establishment). Get reads
 // regardless of status, since async callbacks may arrive after claim.
 const (
-	StatusPending = "pending" // Context created, awaiting media-path consumption
-	StatusClaimed = "claimed" // Context consumed (media-path bound, or call ended unclaimed)
+	StatusPending   = "pending"   // Context created, awaiting media-path consumption
+	StatusClaimed   = "claimed"   // Context consumed (media-path bound, or call ended unclaimed)
+	StatusCompleted = "completed" // Provider reported a terminal completed state
 )
 
 // CallContext holds all the information needed to resolve a call session.

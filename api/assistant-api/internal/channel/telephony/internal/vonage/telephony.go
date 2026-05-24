@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
@@ -17,6 +18,7 @@ import (
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 	"github.com/vonage/vonage-go-sdk"
 	"github.com/vonage/vonage-go-sdk/ncco"
@@ -65,29 +67,133 @@ func vonageAuth(vaultCredential *protos.VaultCredential) (vonage.Auth, error) {
 }
 
 func (vng *vonageTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_type.StatusInfo, error) {
-	return nil, nil
+	eventDetails := make(map[string]interface{})
+	for key, values := range ctx.Request.URL.Query() {
+		if len(values) > 0 {
+			eventDetails[key] = values[0]
+		} else {
+			eventDetails[key] = nil
+		}
+	}
+
+	status, ok := eventDetails["status"].(string)
+	if !ok || !validator.NotBlank(status) {
+		vng.logger.Errorf("status not found or invalid in catch-all payload")
+		return nil, fmt.Errorf("status not found in callback")
+	}
+	channelUUID, ok := eventDetails["uuid"].(string)
+	if !ok || !validator.NotBlank(channelUUID) {
+		vng.logger.Errorf("uuid not found or invalid in catch-all payload")
+		return nil, fmt.Errorf("uuid not found in callback")
+	}
+	duration, _ := eventDetails["duration"].(string)
+	price, _ := eventDetails["price"].(string)
+
+	vng.logger.Debugf("catch-all event processed | status: %s, payload: %+v", status, eventDetails)
+	statusInfo := &internal_type.StatusInfo{
+		Event:       status,
+		ChannelUUID: channelUUID,
+		Duration:    duration,
+		Price:       price,
+		Payload:     eventDetails,
+	}
+
+	statusLower := strings.ToLower(status)
+	detail, _ := eventDetails["detail"].(string)
+	sipCode, _ := eventDetails["sip_code"].(string)
+	reason, _ := eventDetails["reason"].(string)
+	disconnectedBy, _ := eventDetails["disconnected_by"].(string)
+	failed := statusLower == "failed" ||
+		statusLower == "busy" ||
+		statusLower == "timeout" ||
+		statusLower == "unanswered" ||
+		statusLower == "rejected" ||
+		statusLower == "cancelled" ||
+		statusLower == "canceled" ||
+		(statusLower == "completed" && validator.NotBlank(detail) && duration == "0")
+	if failed {
+		failureReason := status
+		if validator.NotBlank(detail) {
+			failureReason = detail
+		} else if validator.NotBlank(reason) {
+			failureReason = reason
+		} else if validator.NotBlank(disconnectedBy) {
+			failureReason = disconnectedBy
+		} else if validator.NotBlank(sipCode) {
+			failureReason = sipCode
+		}
+		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: failureReason}
+	}
+	return statusInfo, nil
 }
 
 func (vng *vonageTelephony) StatusCallback(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_type.StatusInfo, error) {
-	body, err := c.GetRawData()
-	if err != nil {
-		vng.logger.Errorf("failed to read request body with error %+v", err)
-		return nil, fmt.Errorf("failed to read request body")
-	}
-
 	var payload map[string]interface{}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		vng.logger.Errorf("failed to parse request body: %+v", err)
-		return nil, fmt.Errorf("failed to parse request body")
+	if len(c.Request.URL.Query()) > 0 {
+		payload = make(map[string]interface{})
+		for key, values := range c.Request.URL.Query() {
+			if len(values) > 0 {
+				payload[key] = values[0]
+			} else {
+				payload[key] = nil
+			}
+		}
+	} else {
+		body, err := c.GetRawData()
+		if err != nil {
+			vng.logger.Errorf("failed to read request body with error %+v", err)
+			return nil, fmt.Errorf("failed to read request body")
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			vng.logger.Errorf("failed to parse request body: %+v", err)
+			return nil, fmt.Errorf("failed to parse request body")
+		}
 	}
 
 	status, ok := payload["status"].(string)
-	if !ok {
+	if !ok || !validator.NotBlank(status) {
 		vng.logger.Errorf("status not found or invalid in payload")
 		return nil, fmt.Errorf("status not found in payload")
 	}
 	vng.logger.Debugf("event processed | status: %s, payload: %+v", status, payload)
-	return &internal_type.StatusInfo{Event: status, Payload: payload}, nil
+	channelUUID, _ := payload["uuid"].(string)
+	duration, _ := payload["duration"].(string)
+	price, _ := payload["price"].(string)
+	statusInfo := &internal_type.StatusInfo{
+		Event:       status,
+		ChannelUUID: channelUUID,
+		Duration:    duration,
+		Price:       price,
+		Payload:     payload,
+	}
+
+	statusLower := strings.ToLower(status)
+	detail, _ := payload["detail"].(string)
+	sipCode, _ := payload["sip_code"].(string)
+	reason, _ := payload["reason"].(string)
+	disconnectedBy, _ := payload["disconnected_by"].(string)
+	failed := statusLower == "failed" ||
+		statusLower == "busy" ||
+		statusLower == "timeout" ||
+		statusLower == "unanswered" ||
+		statusLower == "rejected" ||
+		statusLower == "cancelled" ||
+		statusLower == "canceled" ||
+		(statusLower == "completed" && validator.NotBlank(detail) && duration == "0")
+	if failed {
+		failureReason := status
+		if validator.NotBlank(detail) {
+			failureReason = detail
+		} else if validator.NotBlank(reason) {
+			failureReason = reason
+		} else if validator.NotBlank(disconnectedBy) {
+			failureReason = disconnectedBy
+		} else if validator.NotBlank(sipCode) {
+			failureReason = sipCode
+		}
+		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: failureReason}
+	}
+	return statusInfo, nil
 }
 
 func (vng *vonageTelephony) OutboundCall(
@@ -124,9 +230,11 @@ func (vng *vonageTelephony) OutboundCall(
 	connectAction.AddAction(nccoConnect)
 	result, vErr, apiError := ct.CreateCall(
 		vonage.CreateCallOpts{
-			From: vonage.CallFrom{Type: "phone", Number: fromPhone},
-			To:   vonage.CallTo{Type: "phone", Number: toPhone},
-			Ncco: connectAction,
+			From:        vonage.CallFrom{Type: "phone", Number: fromPhone},
+			To:          vonage.CallTo{Type: "phone", Number: toPhone},
+			Ncco:        connectAction,
+			EventUrl:    []string{fmt.Sprintf("https://%s/%s", vng.appCfg.Assistant.Public, internal_type.GetContextEventPath(vonageProvider, contextID))},
+			EventMethod: "GET",
 		})
 
 	if apiError != nil {
