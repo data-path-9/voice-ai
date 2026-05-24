@@ -12,17 +12,20 @@ import { toDate, toDateString, toHumanReadableDateTime } from '@/utils/date';
 import { useAssistantConversationListPageStore } from '@/hooks/use-assistant-conversation-list-page-store';
 import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
 import SourceIndicator from '@/app/components/indicators/source';
-import {
-  getStatusMetric,
-  getConversationDuration,
-  getMetadataValueOrDefault,
-} from '@/utils/metadata';
+import { getStatusMetric, getConversationDuration } from '@/utils/metadata';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { ConversationDirectionIndicator } from '@/app/components/indicators/conversation-direction';
 import { ConversationTelemetryDialog } from '@/app/components/base/modal/conversation-telemetry-modal';
 import { CONFIG } from '@/configs';
 import { AssistantConversationTelephonyEventDialog } from '@/app/components/base/modal/assistant-conversation-telephony-event-modal';
+import { ChannelIndicator } from './channel-indicator';
 import { normalizeDisconnectReason } from './disconnect-reason';
+import { DisconnectReasonIndicator } from './disconnect-reason-indicator';
+import { DurationBreakdownToggletip } from './duration-breakdown-toggletip';
+import {
+  getChannelValue,
+  getDisconnectReasonValue,
+} from './session-list.helpers';
 
 import {
   Table,
@@ -36,8 +39,6 @@ import {
   TableToolbarSearch,
   Loading,
   Link,
-  Tag,
-  Tooltip,
 } from '@carbon/react';
 import { Pagination } from '@/app/components/carbon/pagination';
 import { IconOnlyButton } from '@/app/components/carbon/button';
@@ -55,32 +56,6 @@ import {
 interface ConversationProps {
   currentAssistant: Assistant;
 }
-
-const DISCONNECT_REASON_KEY = 'disconnect_reason';
-const UNKNOWN_DISCONNECT_REASON = 'unknown';
-
-const getDisconnectReasonValue = (
-  conversation: AssistantConversation,
-): string => {
-  const value = getMetadataValueOrDefault(
-    conversation.getMetadataList(),
-    DISCONNECT_REASON_KEY,
-    UNKNOWN_DISCONNECT_REASON,
-  );
-  return value?.trim() ? value : UNKNOWN_DISCONNECT_REASON;
-};
-
-const DisconnectReasonIndicator = ({ reason }: { reason: string }) => {
-  const display = normalizeDisconnectReason(reason);
-
-  return (
-    <Tooltip align="bottom" label={display.tooltip}>
-      <Tag size="md" type="gray" className="inline-flex whitespace-nowrap">
-        {display.label}
-      </Tag>
-    </Tooltip>
-  );
-};
 
 export function Conversations({ currentAssistant }: ConversationProps) {
   const [userId, token, projectId] = useCredential();
@@ -217,6 +192,8 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                   return row.getAssistantid();
                 case 'assistant_provider_model_id':
                   return `vrsn_${row.getAssistantprovidermodelid()}`;
+                case 'channel':
+                  return getChannelValue(row);
                 case 'identifier':
                   return csvEscape(row.getIdentifier());
                 case 'source':
@@ -356,9 +333,16 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                       </TableCell>
                     )}
                     {assistantConversationListAction.visibleColumn(
+                      'channel',
+                    ) && (
+                      <TableCell className="min-w-[130px] whitespace-nowrap text-sm">
+                        <ChannelIndicator channel={getChannelValue(row)} />
+                      </TableCell>
+                    )}
+                    {assistantConversationListAction.visibleColumn(
                       'identifier',
                     ) && (
-                      <TableCell className="max-w-[160px] truncate text-sm">
+                      <TableCell className="min-w-[220px] max-w-[280px] truncate text-sm">
                         {row.getIdentifier()}
                       </TableCell>
                     )}
@@ -373,8 +357,13 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                     {assistantConversationListAction.visibleColumn(
                       'duration',
                     ) && (
-                      <TableCell className="text-sm tabular-nums">
-                        {getConversationDuration(row.getMetricsList())}
+                      <TableCell className="min-w-[150px] whitespace-nowrap text-sm tabular-nums">
+                        <div className="flex items-center gap-1.5">
+                          <span>
+                            {getConversationDuration(row.getMetricsList())}
+                          </span>
+                          <DurationBreakdownToggletip conversation={row} />
+                        </div>
                       </TableCell>
                     )}
 
@@ -431,7 +420,7 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                     {assistantConversationListAction.visibleColumn(
                       'disconnect_reason',
                     ) && (
-                      <TableCell className="text-sm">
+                      <TableCell className="min-w-[180px] whitespace-nowrap text-sm">
                         <DisconnectReasonIndicator
                           reason={getDisconnectReasonValue(row)}
                         />

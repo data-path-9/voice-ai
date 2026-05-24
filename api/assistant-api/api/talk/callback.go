@@ -63,8 +63,8 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 		}
 	}
 	metrics := make([]*protos.Metric, 0, 2)
-	if validator.NotBlank(statusInfo.Duration) {
-		metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyDuration, Value: statusInfo.Duration})
+	if statusInfo.Duration != nil {
+		metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10)})
 	}
 	if validator.NotBlank(statusInfo.Price) {
 		metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyPrice, Value: statusInfo.Price})
@@ -117,8 +117,8 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 			}
 		}
 		metrics := make([]*protos.Metric, 0, 2)
-		if validator.NotBlank(statusInfo.Duration) {
-			metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyDuration, Value: statusInfo.Duration, Description: "Call duration in seconds"})
+		if statusInfo.Duration != nil {
+			metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10), Description: "Call duration in nanoseconds"})
 		}
 		if validator.NotBlank(statusInfo.Price) {
 			metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyPrice, Value: statusInfo.Price, Description: "Call price"})

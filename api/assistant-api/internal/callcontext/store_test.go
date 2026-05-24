@@ -44,7 +44,6 @@ func newTestStore(t *testing.T) (Store, context.Context) {
 			provider TEXT NOT NULL DEFAULT '',
 			direction TEXT NOT NULL DEFAULT '',
 			caller_number TEXT NOT NULL DEFAULT '',
-			callee_number TEXT NOT NULL DEFAULT '',
 			from_number TEXT NOT NULL DEFAULT '',
 			created_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_date DATETIME DEFAULT NULL,

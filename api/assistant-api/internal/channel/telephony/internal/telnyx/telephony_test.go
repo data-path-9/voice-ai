@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
@@ -90,8 +91,11 @@ func TestCatchAllStatusCallback(t *testing.T) {
 		if statusInfo.ChannelUUID != "call-control-123" {
 			t.Fatalf("expected call-control-123, got %s", statusInfo.ChannelUUID)
 		}
-		if statusInfo.Duration != "0" {
-			t.Fatalf("expected duration 0, got %s", statusInfo.Duration)
+		if statusInfo.Duration == nil {
+			t.Fatal("expected duration 0, got nil")
+		}
+		if *statusInfo.Duration != 0 {
+			t.Fatalf("expected duration 0, got %s", statusInfo.Duration.String())
 		}
 		if statusInfo.Price != "0.0000" {
 			t.Fatalf("expected price 0.0000, got %s", statusInfo.Price)
@@ -224,8 +228,11 @@ func TestStatusCallback(t *testing.T) {
 				if statusInfo.ChannelUUID != "call-control-456" {
 					t.Errorf("expected call-control-456, got %s", statusInfo.ChannelUUID)
 				}
-				if statusInfo.Duration != "0" {
-					t.Errorf("expected duration 0, got %s", statusInfo.Duration)
+				if statusInfo.Duration == nil {
+					t.Fatal("expected duration 0, got nil")
+				}
+				if *statusInfo.Duration != time.Duration(0) {
+					t.Errorf("expected duration 0, got %s", statusInfo.Duration.String())
 				}
 				if statusInfo.Price != "0" {
 					t.Errorf("expected price 0, got %s", statusInfo.Price)

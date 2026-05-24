@@ -8,6 +8,7 @@ package internal_type
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
@@ -30,7 +31,9 @@ type StatusInfo struct {
 	Error *StatusError
 
 	// Duration is the provider-reported call duration, when present.
-	Duration string
+	// A pointer keeps explicit zero-duration callbacks distinguishable from
+	// callbacks that did not include a duration.
+	Duration *time.Duration
 
 	// Price is the provider-reported call price, when present.
 	Price string

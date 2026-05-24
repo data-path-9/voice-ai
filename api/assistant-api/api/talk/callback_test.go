@@ -125,7 +125,8 @@ func TestUnviersalCallback_VonageResolvesCallContextByUUID(t *testing.T) {
 			ChannelUUID:    "6fbb257e-75e5-4c68-a5f2-bc560fa200d3",
 		},
 	}
-	api := newCallbackTestAPI(t, store)
+	persist := &callbackTestPersister{}
+	api := newCallbackTestAPIWithPersister(t, store, persist)
 
 	req := httptest.NewRequest(http.MethodGet, "/vonage/event/2276223893754609664?status=completed&uuid=6fbb257e-75e5-4c68-a5f2-bc560fa200d3", nil)
 	rec := httptest.NewRecorder()
@@ -214,7 +215,7 @@ func TestUnviersalCallback_VonageFailedEventPersistsMetricsAndReason(t *testing.
 		t.Fatalf("expected disconnect_reason metadata, got %+v", persist.metadata)
 	}
 	assertMetricValue(t, persist.metrics, "status", "FAILED")
-	assertMetricValue(t, persist.metrics, "telephony.duration", "0")
+	assertMetricValue(t, persist.metrics, observe.MetricTelephonyDuration, "0")
 	assertMetricValue(t, persist.metrics, "telephony.price", "0.00000000")
 	if store.updateFieldCalled {
 		t.Fatal("expected failed completed event not to mark context completed")
@@ -234,7 +235,8 @@ func TestCallbackByContext_VonageCompletedEventMarksContextComplete(t *testing.T
 			ChannelUUID:    "f9abbc8a-457a-40b2-a8bf-3717c0abc918",
 		},
 	}
-	api := newCallbackTestAPI(t, store)
+	persist := &callbackTestPersister{}
+	api := newCallbackTestAPIWithPersister(t, store, persist)
 
 	req := httptest.NewRequest(http.MethodGet, "/vonage/ctx/ctx-1/event?status=completed&uuid=f9abbc8a-457a-40b2-a8bf-3717c0abc918&duration=12&price=0.12000000", nil)
 	rec := httptest.NewRecorder()
@@ -253,6 +255,8 @@ func TestCallbackByContext_VonageCompletedEventMarksContextComplete(t *testing.T
 	if store.updatedContextID != "ctx-1" || store.updatedField != "status" || store.updatedValue != callcontext.StatusCompleted {
 		t.Fatalf("unexpected update: context=%s field=%s value=%s", store.updatedContextID, store.updatedField, store.updatedValue)
 	}
+	assertMetricValue(t, persist.metrics, observe.MetricTelephonyDuration, "12000000000")
+	assertMetricValue(t, persist.metrics, observe.MetricTelephonyPrice, "0.12000000")
 }
 
 func assertMetricValue(t *testing.T, metrics []*types.Metric, name, value string) {

@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_twilio "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
@@ -74,7 +74,7 @@ func twilioClientParams(vaultCredential *protos.VaultCredential) (*twilio.Client
 }
 
 func (tpc *twilioTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_type.StatusInfo, error) {
-	eventDetails := make(map[string]interface{})
+	eventDetails := utils.Option{}
 	if len(ctx.Request.URL.Query()) > 0 {
 		for key, values := range ctx.Request.URL.Query() {
 			if len(values) > 0 {
@@ -103,53 +103,20 @@ func (tpc *twilioTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 		}
 	}
 
-	event, _ := eventDetails["CallStatus"].(string)
-	if streamEvent, ok := eventDetails["StreamEvent"].(string); ok && validator.NotBlank(streamEvent) {
-		event = streamEvent
+	callback, err := internal_twilio.NewStatusCallback(eventDetails)
+	if err != nil {
+		tpc.logger.Errorf("failed to parse status callback: %+v", err)
+		return nil, err
 	}
-	if !validator.NotBlank(event) {
-		tpc.logger.Errorf("status not found or invalid in catch-all payload")
-		return nil, fmt.Errorf("status not found in callback")
-	}
-	channelUUID, ok := eventDetails["CallSid"].(string)
-	if !ok || !validator.NotBlank(channelUUID) {
+	if !validator.NotBlank(callback.ChannelUUID) {
 		tpc.logger.Errorf("call sid not found or invalid in catch-all payload")
 		return nil, fmt.Errorf("call sid not found in callback")
 	}
-	duration, _ := eventDetails["CallDuration"].(string)
-	if !validator.NotBlank(duration) {
-		duration, _ = eventDetails["Duration"].(string)
-	}
-	price, _ := eventDetails["Price"].(string)
-
-	statusInfo := &internal_type.StatusInfo{Event: event, ChannelUUID: channelUUID, Duration: duration, Price: price, Payload: eventDetails}
-	eventLower := strings.ToLower(event)
-	errorCode, _ := eventDetails["ErrorCode"].(string)
-	errorMessage, _ := eventDetails["ErrorMessage"].(string)
-	streamError, _ := eventDetails["StreamError"].(string)
-	failed := eventLower == "failed" ||
-		eventLower == "busy" ||
-		eventLower == "no-answer" ||
-		eventLower == "canceled" ||
-		eventLower == "cancelled" ||
-		validator.NotBlank(errorCode) ||
-		validator.NotBlank(errorMessage) ||
-		validator.NotBlank(streamError)
-	if failed {
-		failureReason := event
-		if validator.NotBlank(errorMessage) {
-			failureReason = errorMessage
-		} else if validator.NotBlank(streamError) {
-			failureReason = streamError
-		} else if validator.NotBlank(errorCode) {
-			failureReason = errorCode
-		}
-		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: failureReason}
-	}
-	return statusInfo, nil
+	return callback.StatusInfo(), nil
 }
+
 func (tpc *twilioTelephony) StatusCallback(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_type.StatusInfo, error) {
-	eventDetails := make(map[string]interface{})
+	eventDetails := utils.Option{}
 	if len(c.Request.URL.Query()) > 0 {
 		for key, values := range c.Request.URL.Query() {
 			if len(values) > 0 {
@@ -178,46 +145,12 @@ func (tpc *twilioTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 		}
 	}
 
-	event, _ := eventDetails["CallStatus"].(string)
-	if streamEvent, ok := eventDetails["StreamEvent"].(string); ok && validator.NotBlank(streamEvent) {
-		event = streamEvent
+	callback, err := internal_twilio.NewStatusCallback(eventDetails)
+	if err != nil {
+		tpc.logger.Errorf("failed to parse status callback: %+v", err)
+		return nil, err
 	}
-	if !validator.NotBlank(event) {
-		tpc.logger.Errorf("status not found or invalid in payload")
-		return nil, fmt.Errorf("status not found in payload")
-	}
-	channelUUID, _ := eventDetails["CallSid"].(string)
-	duration, _ := eventDetails["CallDuration"].(string)
-	if !validator.NotBlank(duration) {
-		duration, _ = eventDetails["Duration"].(string)
-	}
-	price, _ := eventDetails["Price"].(string)
-
-	statusInfo := &internal_type.StatusInfo{Event: event, ChannelUUID: channelUUID, Duration: duration, Price: price, Payload: eventDetails}
-	eventLower := strings.ToLower(event)
-	errorCode, _ := eventDetails["ErrorCode"].(string)
-	errorMessage, _ := eventDetails["ErrorMessage"].(string)
-	streamError, _ := eventDetails["StreamError"].(string)
-	failed := eventLower == "failed" ||
-		eventLower == "busy" ||
-		eventLower == "no-answer" ||
-		eventLower == "canceled" ||
-		eventLower == "cancelled" ||
-		validator.NotBlank(errorCode) ||
-		validator.NotBlank(errorMessage) ||
-		validator.NotBlank(streamError)
-	if failed {
-		failureReason := event
-		if validator.NotBlank(errorMessage) {
-			failureReason = errorMessage
-		} else if validator.NotBlank(streamError) {
-			failureReason = streamError
-		} else if validator.NotBlank(errorCode) {
-			failureReason = errorCode
-		}
-		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: failureReason}
-	}
-	return statusInfo, nil
+	return callback.StatusInfo(), nil
 }
 
 func (tpc *twilioTelephony) OutboundCall(auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, opts utils.Option) (*internal_type.CallInfo, error) {

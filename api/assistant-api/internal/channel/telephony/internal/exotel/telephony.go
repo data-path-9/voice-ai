@@ -42,7 +42,7 @@ func NewExotelTelephony(config *config.AssistantConfig, logger commons.Logger) (
 }
 
 func (exo *exotelTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_type.StatusInfo, error) {
-	eventDetails := make(map[string]interface{})
+	eventDetails := utils.Option{}
 	if len(ctx.Request.URL.Query()) > 0 {
 		for key, values := range ctx.Request.URL.Query() {
 			if len(values) > 0 {
@@ -76,55 +76,20 @@ func (exo *exotelTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 		}
 	}
 
-	event, _ := eventDetails["Status"].(string)
-	if !validator.NotBlank(event) {
-		exo.logger.Errorf("status not found or invalid in catch-all payload")
-		return nil, fmt.Errorf("status not found in callback")
+	callback, err := internal_exotel.NewStatusCallback(eventDetails)
+	if err != nil {
+		exo.logger.Errorf("failed to parse status callback: %+v", err)
+		return nil, err
 	}
-	channelUUID, ok := eventDetails["CallSid"].(string)
-	if !ok || !validator.NotBlank(channelUUID) {
+	if !validator.NotBlank(callback.ChannelUUID) {
 		exo.logger.Errorf("call sid not found or invalid in catch-all payload")
 		return nil, fmt.Errorf("call sid not found in callback")
 	}
-	duration, _ := eventDetails["ConversationDuration"].(string)
-	if !validator.NotBlank(duration) {
-		duration, _ = eventDetails["Duration"].(string)
-	}
-	if !validator.NotBlank(duration) {
-		duration, _ = eventDetails["CallDuration"].(string)
-	}
-	price, _ := eventDetails["Price"].(string)
-	statusInfo := &internal_type.StatusInfo{Event: event, ChannelUUID: channelUUID, Duration: duration, Price: price, Payload: eventDetails}
-
-	statusLower := strings.ToLower(event)
-	cause, _ := eventDetails["Cause"].(string)
-	errorMessage, _ := eventDetails["ErrorMessage"].(string)
-	errorCode, _ := eventDetails["ErrorCode"].(string)
-	failed := statusLower == "failed" ||
-		statusLower == "busy" ||
-		statusLower == "no-answer" ||
-		statusLower == "no_answer" ||
-		statusLower == "canceled" ||
-		statusLower == "cancelled" ||
-		validator.NotBlank(cause) ||
-		validator.NotBlank(errorMessage) ||
-		validator.NotBlank(errorCode)
-	if failed {
-		failureReason := event
-		if validator.NotBlank(cause) {
-			failureReason = cause
-		} else if validator.NotBlank(errorMessage) {
-			failureReason = errorMessage
-		} else if validator.NotBlank(errorCode) {
-			failureReason = errorCode
-		}
-		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: failureReason}
-	}
-	return statusInfo, nil
+	return callback.StatusInfo(), nil
 }
 
 func (exo *exotelTelephony) StatusCallback(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_type.StatusInfo, error) {
-	eventDetails := make(map[string]interface{})
+	eventDetails := utils.Option{}
 	if len(c.Request.URL.Query()) > 0 {
 		for key, values := range c.Request.URL.Query() {
 			if len(values) > 0 {
@@ -157,47 +122,12 @@ func (exo *exotelTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 			}
 		}
 	}
-	event, _ := eventDetails["Status"].(string)
-	if !validator.NotBlank(event) {
-		exo.logger.Errorf("status not found or invalid in payload")
-		return nil, fmt.Errorf("status not found in payload")
+	callback, err := internal_exotel.NewStatusCallback(eventDetails)
+	if err != nil {
+		exo.logger.Errorf("failed to parse status callback: %+v", err)
+		return nil, err
 	}
-	channelUUID, _ := eventDetails["CallSid"].(string)
-	duration, _ := eventDetails["ConversationDuration"].(string)
-	if !validator.NotBlank(duration) {
-		duration, _ = eventDetails["Duration"].(string)
-	}
-	if !validator.NotBlank(duration) {
-		duration, _ = eventDetails["CallDuration"].(string)
-	}
-	price, _ := eventDetails["Price"].(string)
-	statusInfo := &internal_type.StatusInfo{Event: event, ChannelUUID: channelUUID, Duration: duration, Price: price, Payload: eventDetails}
-
-	statusLower := strings.ToLower(event)
-	cause, _ := eventDetails["Cause"].(string)
-	errorMessage, _ := eventDetails["ErrorMessage"].(string)
-	errorCode, _ := eventDetails["ErrorCode"].(string)
-	failed := statusLower == "failed" ||
-		statusLower == "busy" ||
-		statusLower == "no-answer" ||
-		statusLower == "no_answer" ||
-		statusLower == "canceled" ||
-		statusLower == "cancelled" ||
-		validator.NotBlank(cause) ||
-		validator.NotBlank(errorMessage) ||
-		validator.NotBlank(errorCode)
-	if failed {
-		failureReason := event
-		if validator.NotBlank(cause) {
-			failureReason = cause
-		} else if validator.NotBlank(errorMessage) {
-			failureReason = errorMessage
-		} else if validator.NotBlank(errorCode) {
-			failureReason = errorCode
-		}
-		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: failureReason}
-	}
-	return statusInfo, nil
+	return callback.StatusInfo(), nil
 }
 
 func (exo *exotelTelephony) ClientUrl(vaultCredential *protos.VaultCredential, opts utils.Option) (*string, error) {

@@ -6,10 +6,13 @@
 package internal_vonage_telephony
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -128,7 +131,8 @@ func TestCatchAllStatusCallback(t *testing.T) {
 				require.NotNil(t, statusInfo)
 				assert.Equal(t, "completed", statusInfo.Event)
 				assert.Equal(t, "f9abbc8a-457a-40b2-a8bf-3717c0abc918", statusInfo.ChannelUUID)
-				assert.Equal(t, "0", statusInfo.Duration)
+				require.NotNil(t, statusInfo.Duration)
+				assert.Equal(t, time.Duration(0), *statusInfo.Duration)
 				assert.Equal(t, "0.00000000", statusInfo.Price)
 				require.NotNil(t, statusInfo.Error)
 				assert.Equal(t, "failed", statusInfo.Error.Error)
@@ -218,8 +222,40 @@ func TestStatusCallback_QueryPayload(t *testing.T) {
 	require.NotNil(t, statusInfo)
 	assert.Equal(t, "completed", statusInfo.Event)
 	assert.Equal(t, "f9abbc8a-457a-40b2-a8bf-3717c0abc918", statusInfo.ChannelUUID)
-	assert.Equal(t, "0", statusInfo.Duration)
+	require.NotNil(t, statusInfo.Duration)
+	assert.Equal(t, time.Duration(0), *statusInfo.Duration)
 	assert.Equal(t, "0.00000000", statusInfo.Price)
+	require.NotNil(t, statusInfo.Error)
+	assert.Equal(t, "failed", statusInfo.Error.Error)
+	assert.Equal(t, "remote_busy", statusInfo.Error.Reason)
+}
+
+func TestStatusCallback_JSONNumericZeroDuration(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger, err := commons.NewApplicationLogger()
+	require.NoError(t, err)
+	telephony, err := NewVonageTelephony(&config.AssistantConfig{}, logger)
+	require.NoError(t, err)
+
+	body, err := json.Marshal(map[string]interface{}{
+		"status":   "completed",
+		"uuid":     "f9abbc8a-457a-40b2-a8bf-3717c0abc918",
+		"detail":   "remote_busy",
+		"duration": float64(0),
+		"price":    "0.00000000",
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+
+	statusInfo, err := telephony.StatusCallback(c, nil, 1, 1)
+
+	require.NoError(t, err)
+	require.NotNil(t, statusInfo)
+	require.NotNil(t, statusInfo.Duration)
+	assert.Equal(t, time.Duration(0), *statusInfo.Duration)
 	require.NotNil(t, statusInfo.Error)
 	assert.Equal(t, "failed", statusInfo.Error.Error)
 	assert.Equal(t, "remote_busy", statusInfo.Error.Reason)

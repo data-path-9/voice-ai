@@ -9,10 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_vonage "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
@@ -67,7 +67,7 @@ func vonageAuth(vaultCredential *protos.VaultCredential) (vonage.Auth, error) {
 }
 
 func (vng *vonageTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_type.StatusInfo, error) {
-	eventDetails := make(map[string]interface{})
+	eventDetails := map[string]interface{}{}
 	for key, values := range ctx.Request.URL.Query() {
 		if len(values) > 0 {
 			eventDetails[key] = values[0]
@@ -76,55 +76,18 @@ func (vng *vonageTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 		}
 	}
 
-	status, ok := eventDetails["status"].(string)
-	if !ok || !validator.NotBlank(status) {
-		vng.logger.Errorf("status not found or invalid in catch-all payload")
-		return nil, fmt.Errorf("status not found in callback")
+	callback, err := internal_vonage.NewStatusCallback(eventDetails)
+	if err != nil {
+		vng.logger.Errorf("failed to parse status callback: %+v", err)
+		return nil, err
 	}
-	channelUUID, ok := eventDetails["uuid"].(string)
-	if !ok || !validator.NotBlank(channelUUID) {
+	if !validator.NotBlank(callback.ChannelUUID) {
 		vng.logger.Errorf("uuid not found or invalid in catch-all payload")
 		return nil, fmt.Errorf("uuid not found in callback")
 	}
-	duration, _ := eventDetails["duration"].(string)
-	price, _ := eventDetails["price"].(string)
 
-	vng.logger.Debugf("catch-all event processed | status: %s, payload: %+v", status, eventDetails)
-	statusInfo := &internal_type.StatusInfo{
-		Event:       status,
-		ChannelUUID: channelUUID,
-		Duration:    duration,
-		Price:       price,
-		Payload:     eventDetails,
-	}
-
-	statusLower := strings.ToLower(status)
-	detail, _ := eventDetails["detail"].(string)
-	sipCode, _ := eventDetails["sip_code"].(string)
-	reason, _ := eventDetails["reason"].(string)
-	disconnectedBy, _ := eventDetails["disconnected_by"].(string)
-	failed := statusLower == "failed" ||
-		statusLower == "busy" ||
-		statusLower == "timeout" ||
-		statusLower == "unanswered" ||
-		statusLower == "rejected" ||
-		statusLower == "cancelled" ||
-		statusLower == "canceled" ||
-		(statusLower == "completed" && validator.NotBlank(detail) && duration == "0")
-	if failed {
-		failureReason := status
-		if validator.NotBlank(detail) {
-			failureReason = detail
-		} else if validator.NotBlank(reason) {
-			failureReason = reason
-		} else if validator.NotBlank(disconnectedBy) {
-			failureReason = disconnectedBy
-		} else if validator.NotBlank(sipCode) {
-			failureReason = sipCode
-		}
-		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: failureReason}
-	}
-	return statusInfo, nil
+	vng.logger.Debugf("catch-all event processed | status: %s, payload: %+v", callback.Status, eventDetails)
+	return callback.StatusInfo(), nil
 }
 
 func (vng *vonageTelephony) StatusCallback(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_type.StatusInfo, error) {
@@ -150,50 +113,13 @@ func (vng *vonageTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 		}
 	}
 
-	status, ok := payload["status"].(string)
-	if !ok || !validator.NotBlank(status) {
-		vng.logger.Errorf("status not found or invalid in payload")
-		return nil, fmt.Errorf("status not found in payload")
+	callback, err := internal_vonage.NewStatusCallback(payload)
+	if err != nil {
+		vng.logger.Errorf("failed to parse status callback: %+v", err)
+		return nil, err
 	}
-	vng.logger.Debugf("event processed | status: %s, payload: %+v", status, payload)
-	channelUUID, _ := payload["uuid"].(string)
-	duration, _ := payload["duration"].(string)
-	price, _ := payload["price"].(string)
-	statusInfo := &internal_type.StatusInfo{
-		Event:       status,
-		ChannelUUID: channelUUID,
-		Duration:    duration,
-		Price:       price,
-		Payload:     payload,
-	}
-
-	statusLower := strings.ToLower(status)
-	detail, _ := payload["detail"].(string)
-	sipCode, _ := payload["sip_code"].(string)
-	reason, _ := payload["reason"].(string)
-	disconnectedBy, _ := payload["disconnected_by"].(string)
-	failed := statusLower == "failed" ||
-		statusLower == "busy" ||
-		statusLower == "timeout" ||
-		statusLower == "unanswered" ||
-		statusLower == "rejected" ||
-		statusLower == "cancelled" ||
-		statusLower == "canceled" ||
-		(statusLower == "completed" && validator.NotBlank(detail) && duration == "0")
-	if failed {
-		failureReason := status
-		if validator.NotBlank(detail) {
-			failureReason = detail
-		} else if validator.NotBlank(reason) {
-			failureReason = reason
-		} else if validator.NotBlank(disconnectedBy) {
-			failureReason = disconnectedBy
-		} else if validator.NotBlank(sipCode) {
-			failureReason = sipCode
-		}
-		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: failureReason}
-	}
-	return statusInfo, nil
+	vng.logger.Debugf("event processed | status: %s, payload: %+v", callback.Status, payload)
+	return callback.StatusInfo(), nil
 }
 
 func (vng *vonageTelephony) OutboundCall(

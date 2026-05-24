@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
@@ -266,7 +267,8 @@ func TestStatusCallback(t *testing.T) {
 				require.NotNil(t, info)
 				assert.Equal(t, "completed", info.Event)
 				assert.Equal(t, "exotel-call-sid-12345", info.ChannelUUID)
-				assert.Equal(t, "17", info.Duration)
+				require.NotNil(t, info.Duration)
+				assert.Equal(t, 17*time.Second, *info.Duration)
 				assert.Equal(t, "0.0500", info.Price)
 				assert.Nil(t, info.Error)
 			},
