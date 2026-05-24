@@ -1013,7 +1013,6 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		})
 	}
 	for _, analysis := range h.r.assistant.AssistantAnalyses {
-		h.r.logger.Tracef(ctx, "initializing analysis: %s %+v", analysis.Id, analysis)
 		exec, err := internal_analysis.NewExecutor(h.r.logger, ctx, analysis, h.r, h.r)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{

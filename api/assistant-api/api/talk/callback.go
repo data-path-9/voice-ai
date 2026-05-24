@@ -19,7 +19,6 @@ import (
 )
 
 func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
-	cApi.logger.Debugf("Received UnviersalCallback for contextId: %s and body: %+v", c.Param("contextId"), c)
 	provider := c.Param("telephony")
 	if !validator.NotBlank(provider) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing telephony provider"})
@@ -83,7 +82,6 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 
 // CallbackByContext handles status callback webhooks using a contextId stored in Postgres.
 func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
-	cApi.logger.Debugf("Received callback for contextId: %s and body: %+v", c.Param("contextId"), c)
 	contextID := c.Param("contextId")
 	if !validator.NotBlank(contextID) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing contextId"})
