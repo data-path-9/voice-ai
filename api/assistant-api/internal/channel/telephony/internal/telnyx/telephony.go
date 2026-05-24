@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,7 @@ import (
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
 
@@ -46,7 +48,15 @@ func NewTelnyxTelephony(config *config.AssistantConfig, logger commons.Logger) (
 
 // CatchAllStatusCallback handles catch-all event callbacks.
 func (tpc *telnyxTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_type.StatusInfo, error) {
-	return nil, nil
+	statusInfo, err := tpc.StatusCallback(ctx, nil, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	if statusInfo == nil || !validator.NotBlank(statusInfo.ChannelUUID) {
+		tpc.logger.Errorf("call control id not found or invalid in catch-all payload")
+		return nil, fmt.Errorf("call control id not found in callback")
+	}
+	return statusInfo, nil
 }
 
 // StatusCallback handles a status/event callback for a conversation.
@@ -72,13 +82,94 @@ func (tpc *telnyxTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 	}
 
 	eventType, ok := data["event_type"].(string)
-	if !ok {
+	if !ok || !validator.NotBlank(eventType) {
 		tpc.logger.Errorf("event_type not found or invalid in payload")
 		return nil, fmt.Errorf("event_type not found in payload")
 	}
 
 	tpc.logger.Debugf("event processed | event_type: %s, payload: %+v", eventType, payload)
-	return &internal_type.StatusInfo{Event: eventType, Payload: payload}, nil
+	channelUUID := ""
+	duration := ""
+	price := ""
+	reason := ""
+	errorCode := ""
+	errorMessage := ""
+	if payloadData, ok := data["payload"].(map[string]interface{}); ok {
+		if v, ok := payloadData["call_control_id"].(string); ok {
+			channelUUID = v
+		}
+		if !validator.NotBlank(channelUUID) {
+			if v, ok := payloadData["call_session_id"].(string); ok {
+				channelUUID = v
+			}
+		}
+		if v, ok := payloadData["duration"].(string); ok {
+			duration = v
+		} else if v, ok := payloadData["duration_secs"].(string); ok {
+			duration = v
+		} else if v, ok := payloadData["call_duration"].(string); ok {
+			duration = v
+		} else if v, ok := payloadData["duration"].(float64); ok {
+			duration = fmt.Sprintf("%g", v)
+		}
+		if v, ok := payloadData["price"].(string); ok {
+			price = v
+		} else if v, ok := payloadData["cost"].(string); ok {
+			price = v
+		} else if v, ok := payloadData["price"].(float64); ok {
+			price = fmt.Sprintf("%g", v)
+		}
+		if v, ok := payloadData["hangup_cause"].(string); ok {
+			reason = v
+		} else if v, ok := payloadData["cause"].(string); ok {
+			reason = v
+		} else if v, ok := payloadData["sip_hangup_cause"].(string); ok {
+			reason = v
+		}
+		if v, ok := payloadData["error_code"].(string); ok {
+			errorCode = v
+		}
+		if v, ok := payloadData["error_message"].(string); ok {
+			errorMessage = v
+		}
+	}
+	if !validator.NotBlank(channelUUID) {
+		if v, ok := data["call_control_id"].(string); ok {
+			channelUUID = v
+		} else if v, ok := data["id"].(string); ok {
+			channelUUID = v
+		}
+	}
+
+	statusInfo := &internal_type.StatusInfo{Event: eventType, ChannelUUID: channelUUID, Duration: duration, Price: price, Payload: payload}
+	eventLower := strings.ToLower(eventType)
+	failed := eventLower == "call.failed" ||
+		eventLower == "call.rejected" ||
+		eventLower == "call.bridging.failed" ||
+		validator.NotBlank(errorCode) ||
+		validator.NotBlank(errorMessage)
+	if eventLower == "call.hangup" {
+		lowerReason := strings.ToLower(reason)
+		failed = failed ||
+			lowerReason == "busy" ||
+			lowerReason == "no_answer" ||
+			lowerReason == "no-answer" ||
+			lowerReason == "rejected" ||
+			lowerReason == "failed" ||
+			lowerReason == "timeout"
+	}
+	if failed {
+		failureReason := eventType
+		if validator.NotBlank(reason) {
+			failureReason = reason
+		} else if validator.NotBlank(errorMessage) {
+			failureReason = errorMessage
+		} else if validator.NotBlank(errorCode) {
+			failureReason = errorCode
+		}
+		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: failureReason}
+	}
+	return statusInfo, nil
 }
 
 // ReceiveCall processes an incoming call webhook and returns structured call info.

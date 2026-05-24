@@ -59,19 +59,68 @@ func TestCatchAllStatusCallback(t *testing.T) {
 	logger := newTelnyxTestLogger(t)
 	telephony, _ := NewTelnyxTelephony(cfg, logger)
 
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("POST", "/telnyx/event", nil)
+	t.Run("valid Telnyx global event", func(t *testing.T) {
+		payload := map[string]interface{}{
+			"data": map[string]interface{}{
+				"event_type": "call.hangup",
+				"payload": map[string]interface{}{
+					"call_control_id": "call-control-123",
+					"hangup_cause":    "busy",
+					"duration":        "0",
+					"price":           "0.0000",
+				},
+			},
+		}
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/telnyx/event", strings.NewReader(string(body)))
 
-	statusInfo, err := telephony.CatchAllStatusCallback(c)
+		statusInfo, err := telephony.CatchAllStatusCallback(c)
 
-	if err != nil {
-		t.Errorf("CatchAllStatusCallback returned error: %v", err)
-	}
+		if err != nil {
+			t.Fatalf("CatchAllStatusCallback returned error: %v", err)
+		}
+		if statusInfo == nil {
+			t.Fatal("expected StatusInfo")
+		}
+		if statusInfo.Event != "call.hangup" {
+			t.Fatalf("expected call.hangup, got %s", statusInfo.Event)
+		}
+		if statusInfo.ChannelUUID != "call-control-123" {
+			t.Fatalf("expected call-control-123, got %s", statusInfo.ChannelUUID)
+		}
+		if statusInfo.Duration != "0" {
+			t.Fatalf("expected duration 0, got %s", statusInfo.Duration)
+		}
+		if statusInfo.Price != "0.0000" {
+			t.Fatalf("expected price 0.0000, got %s", statusInfo.Price)
+		}
+		if statusInfo.Error == nil || statusInfo.Error.Reason != "busy" {
+			t.Fatalf("expected busy error, got %+v", statusInfo.Error)
+		}
+	})
 
-	if statusInfo != nil {
-		t.Errorf("CatchAllStatusCallback should return nil, got: %v", statusInfo)
-	}
+	t.Run("missing call control id", func(t *testing.T) {
+		payload := map[string]interface{}{
+			"data": map[string]interface{}{
+				"event_type": "call.hangup",
+			},
+		}
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/telnyx/event", strings.NewReader(string(body)))
+
+		statusInfo, err := telephony.CatchAllStatusCallback(c)
+
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if statusInfo != nil {
+			t.Fatalf("expected nil StatusInfo, got %+v", statusInfo)
+		}
+	})
 }
 
 func TestStatusCallback(t *testing.T) {
@@ -98,6 +147,22 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.answered",
+		},
+		{
+			name: "valid call.hangup failure event",
+			payload: map[string]interface{}{
+				"data": map[string]interface{}{
+					"event_type": "call.hangup",
+					"payload": map[string]interface{}{
+						"call_control_id": "call-control-456",
+						"hangup_cause":    "no_answer",
+						"duration":        float64(0),
+						"price":           float64(0),
+					},
+				},
+			},
+			expectErr:   false,
+			expectEvent: "call.hangup",
 		},
 		{
 			name: "valid call.hangup event",
@@ -151,6 +216,23 @@ func TestStatusCallback(t *testing.T) {
 
 			if statusInfo.Event != tt.expectEvent {
 				t.Errorf("expected event %s, got %s", tt.expectEvent, statusInfo.Event)
+			}
+			if tt.name == "valid call.answered event" && statusInfo.ChannelUUID != "call-control-123" {
+				t.Errorf("expected call-control-123, got %s", statusInfo.ChannelUUID)
+			}
+			if tt.name == "valid call.hangup failure event" {
+				if statusInfo.ChannelUUID != "call-control-456" {
+					t.Errorf("expected call-control-456, got %s", statusInfo.ChannelUUID)
+				}
+				if statusInfo.Duration != "0" {
+					t.Errorf("expected duration 0, got %s", statusInfo.Duration)
+				}
+				if statusInfo.Price != "0" {
+					t.Errorf("expected price 0, got %s", statusInfo.Price)
+				}
+				if statusInfo.Error == nil || statusInfo.Error.Reason != "no_answer" {
+					t.Errorf("expected no_answer error, got %+v", statusInfo.Error)
+				}
 			}
 		})
 	}
