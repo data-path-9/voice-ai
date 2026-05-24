@@ -120,10 +120,10 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 		}
 		metrics := make([]*protos.Metric, 0, 2)
 		if validator.NotBlank(statusInfo.Duration) {
-			metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyDuration, Value: statusInfo.Duration})
+			metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyDuration, Value: statusInfo.Duration, Description: "Call duration in seconds"})
 		}
 		if validator.NotBlank(statusInfo.Price) {
-			metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyPrice, Value: statusInfo.Price})
+			metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyPrice, Value: statusInfo.Price, Description: "Call price"})
 		}
 		observer.EmitMetric(c, metrics)
 		if strings.EqualFold(statusInfo.Event, "completed") && statusInfo.Error == nil {

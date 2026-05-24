@@ -149,6 +149,9 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 				})
 			case "MEDIA_STOP":
 				aws.Logger.Info("Asterisk media stopped")
+				if msg := aws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
+					aws.Input(msg)
+				}
 				aws.Cancel()
 				return
 			case "MEDIA_XON":

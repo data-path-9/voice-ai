@@ -177,6 +177,9 @@ func (tws *telnyxWebsocketStreamer) runWebSocketReader() {
 			})
 		case "stop":
 			tws.Logger.Info("Telnyx stream stopped")
+			if msg := tws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
+				tws.Input(msg)
+			}
 			tws.Cancel()
 			return
 		default:

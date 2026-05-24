@@ -110,6 +110,9 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 					Time: timestamppb.Now(),
 				})
 			case "stop":
+				if msg := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
+					vng.Input(msg)
+				}
 				vng.Cancel()
 				return
 			default:

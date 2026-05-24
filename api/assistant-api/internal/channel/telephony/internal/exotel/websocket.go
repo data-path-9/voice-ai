@@ -119,6 +119,9 @@ func (exotel *exotelWebsocketStreamer) runWebSocketReader() {
 				Time: timestamppb.Now(),
 			})
 		case "stop":
+			if msg := exotel.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
+				exotel.Input(msg)
+			}
 			exotel.Cancel()
 			return
 		default:

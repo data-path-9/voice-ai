@@ -166,7 +166,7 @@ const (
 
 	// --- Telephony ---
 	MetricTelephonyStatus   = "telephony.status"
-	MetricTelephonyDuration = "telephony.duration"
+	MetricTelephonyDuration = "telephony_duration"
 	MetricTelephonyPrice    = "telephony.price"
 )
 
