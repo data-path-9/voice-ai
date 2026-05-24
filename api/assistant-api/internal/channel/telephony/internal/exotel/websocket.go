@@ -29,13 +29,11 @@ var exotelLinear8kConfig = internal_audio.NewLinear8khzMonoAudioConfig()
 
 type exotelWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
-
 	mediaSession *internal_telephony_media.MediaSession
-
-	connection *websocket.Conn
-	writeMu    sync.Mutex
-	closed     atomic.Bool
-	streamID   string
+	connection   *websocket.Conn
+	writeMu      sync.Mutex
+	closed       atomic.Bool
+	streamID     string
 }
 
 func NewExotelWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential,

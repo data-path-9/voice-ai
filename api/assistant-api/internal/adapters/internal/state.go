@@ -30,6 +30,10 @@ func (gr *genericRequestor) Conversation() *internal_conversation_entity.Assista
 	return gr.assistantConversation
 }
 
+func (gr *genericRequestor) Ready() bool {
+	return gr.Conversation() != nil && gr.Assistant() != nil
+}
+
 func (gr *genericRequestor) GetSpeechToTextTransformer() (
 	*internal_assistant_entity.AssistantDeploymentAudio,
 	error,
