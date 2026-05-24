@@ -179,11 +179,6 @@ export const ConversationMessages: FC<{
                       .map((m, mi) => {
                         const key = m.getName?.() || m.getName?.() || '';
                         const val = m.getValue?.() || '';
-                        const tagType = key.includes('latency')
-                          ? 'teal'
-                          : key.includes('turn')
-                            ? 'purple'
-                            : 'blue';
                         const displayVal = key.includes('latency')
                           ? `${val} ms`
                           : val;
@@ -193,11 +188,7 @@ export const ConversationMessages: FC<{
                             definition={`${key}: ${val}`}
                             openOnHover
                           >
-                            <Tag
-                              size="sm"
-                              type={tagType}
-                              className="!cursor-help"
-                            >
+                            <Tag size="sm" type="gray" className="!cursor-help">
                               {key}: {displayVal}
                             </Tag>
                           </DefinitionTooltip>

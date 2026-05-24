@@ -12,12 +12,17 @@ import { toDate, toDateString, toHumanReadableDateTime } from '@/utils/date';
 import { useAssistantConversationListPageStore } from '@/hooks/use-assistant-conversation-list-page-store';
 import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
 import SourceIndicator from '@/app/components/indicators/source';
-import { getStatusMetric, getConversationDuration } from '@/utils/metadata';
+import {
+  getStatusMetric,
+  getConversationDuration,
+  getMetadataValueOrDefault,
+} from '@/utils/metadata';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { ConversationDirectionIndicator } from '@/app/components/indicators/conversation-direction';
 import { ConversationTelemetryDialog } from '@/app/components/base/modal/conversation-telemetry-modal';
 import { CONFIG } from '@/configs';
 import { AssistantConversationTelephonyEventDialog } from '@/app/components/base/modal/assistant-conversation-telephony-event-modal';
+import { normalizeDisconnectReason } from './disconnect-reason';
 
 import {
   Table,
@@ -31,6 +36,8 @@ import {
   TableToolbarSearch,
   Loading,
   Link,
+  Tag,
+  Tooltip,
 } from '@carbon/react';
 import { Pagination } from '@/app/components/carbon/pagination';
 import { IconOnlyButton } from '@/app/components/carbon/button';
@@ -48,6 +55,32 @@ import {
 interface ConversationProps {
   currentAssistant: Assistant;
 }
+
+const DISCONNECT_REASON_KEY = 'disconnect_reason';
+const UNKNOWN_DISCONNECT_REASON = 'unknown';
+
+const getDisconnectReasonValue = (
+  conversation: AssistantConversation,
+): string => {
+  const value = getMetadataValueOrDefault(
+    conversation.getMetadataList(),
+    DISCONNECT_REASON_KEY,
+    UNKNOWN_DISCONNECT_REASON,
+  );
+  return value?.trim() ? value : UNKNOWN_DISCONNECT_REASON;
+};
+
+const DisconnectReasonIndicator = ({ reason }: { reason: string }) => {
+  const display = normalizeDisconnectReason(reason);
+
+  return (
+    <Tooltip align="bottom" label={display.tooltip}>
+      <Tag size="md" type="gray" className="inline-flex whitespace-nowrap">
+        {display.label}
+      </Tag>
+    </Tooltip>
+  );
+};
 
 export function Conversations({ currentAssistant }: ConversationProps) {
   const [userId, token, projectId] = useCredential();
@@ -190,6 +223,10 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                   return row.getSource();
                 case 'status':
                   return getStatusMetric(row.getMetricsList());
+                case 'disconnect_reason':
+                  return normalizeDisconnectReason(
+                    getDisconnectReasonValue(row),
+                  ).label;
                 case 'created_date':
                   return row.getCreateddate()
                     ? toDate(row.getCreateddate()!)
@@ -388,6 +425,16 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                             }}
                           />
                         </div>
+                      </TableCell>
+                    )}
+
+                    {assistantConversationListAction.visibleColumn(
+                      'disconnect_reason',
+                    ) && (
+                      <TableCell className="text-sm">
+                        <DisconnectReasonIndicator
+                          reason={getDisconnectReasonValue(row)}
+                        />
                       </TableCell>
                     )}
 
