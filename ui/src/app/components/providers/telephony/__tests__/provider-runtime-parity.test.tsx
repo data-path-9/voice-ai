@@ -80,7 +80,6 @@ describe('Telephony provider runtime parity', () => {
 
   it.each([
     ['twilio', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
-    ['telnyx', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
     ['exotel', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
     ['vonage', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
     ['sip', [meta('rapida.credential_id', 'cred-1'), meta('phone', '+15551234567')]],
@@ -99,6 +98,15 @@ describe('Telephony provider runtime parity', () => {
 
   it('returns false for unknown telephony provider', () => {
     expect(ValidateTelephonyOptions('unknown-telephony', [])).toBe(false);
+  });
+
+  it('returns false for telnyx until config-backed telephony schema is added', () => {
+    expect(
+      ValidateTelephonyOptions('telnyx', [
+        meta('rapida.credential_id', 'cred-1'),
+        meta('phone', '+15551234567'),
+      ]),
+    ).toBe(false);
   });
 
   it('returns false for invalid vonage phone number format', () => {
