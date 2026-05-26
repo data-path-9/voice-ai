@@ -1,3 +1,6 @@
+//go:build integration && cgo
+// +build integration,cgo
+
 package web_api
 
 import (
