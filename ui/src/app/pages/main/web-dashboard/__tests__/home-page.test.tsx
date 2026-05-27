@@ -130,6 +130,8 @@ jest.mock('@carbon/react', () => ({
     onClick,
     className,
     renderIcon,
+    iconDescription,
+    hasIconOnly,
     ...props
   }: any) =>
     href ? (
@@ -149,6 +151,8 @@ jest.mock('@carbon/react', () => ({
   Tile: ({ children, className }: any) => (
     <section className={className}>{children}</section>
   ),
+  SkeletonText: ({ className }: any) => <div className={className} />,
+  SkeletonPlaceholder: ({ className }: any) => <div className={className} />,
 }));
 
 describe('Dashboard HomePage', () => {

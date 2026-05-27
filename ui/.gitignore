@@ -38,3 +38,4 @@ yarn-error.log*
 
 src/app/clients/protos/*.js
 src/app/clients/protos/*.ts
+agent.md
