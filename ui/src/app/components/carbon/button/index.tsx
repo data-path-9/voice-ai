@@ -40,6 +40,8 @@ export interface CarbonButtonProps {
   hasIconOnly?: boolean;
   as?: ElementType;
   href?: string;
+  target?: string;
+  rel?: string;
   tabIndex?: number;
   tooltipPosition?: 'top' | 'bottom' | 'left' | 'right';
 }
