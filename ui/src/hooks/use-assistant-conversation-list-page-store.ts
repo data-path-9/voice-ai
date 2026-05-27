@@ -142,6 +142,14 @@ export const useAssistantConversationListPageStore =
 
     columns: [
       { name: 'Session ID', key: 'id', visible: true },
+      { name: 'Date', key: 'created_date', visible: true },
+      { name: 'User Identifier', key: 'identifier', visible: true },
+      { name: 'Status', key: 'status', visible: true },
+      { name: 'Disconnect Reason', key: 'disconnect_reason', visible: true },
+      { name: 'Action', key: 'action', visible: true },
+      { name: 'Total Duration', key: 'duration', visible: true },
+      { name: 'Direction', key: 'direction', visible: true },
+      { name: 'Channel', key: 'channel', visible: true },
       {
         name: 'Assistant ID',
         key: 'assistant_id',
@@ -152,15 +160,7 @@ export const useAssistantConversationListPageStore =
         key: 'assistant_provider_model_id',
         visible: false,
       },
-      { name: 'Direction', key: 'direction', visible: true },
-      { name: 'Channel', key: 'channel', visible: true },
-      { name: 'User Identifier', key: 'identifier', visible: true },
       { name: 'Source', key: 'source', visible: false },
-      { name: 'Total Duration', key: 'duration', visible: true },
-      { name: 'Action', key: 'action', visible: true },
-      { name: 'Disconnect Reason', key: 'disconnect_reason', visible: true },
-      { name: 'Status', key: 'status', visible: true },
-      { name: 'Date', key: 'created_date', visible: true },
     ],
 
     /**

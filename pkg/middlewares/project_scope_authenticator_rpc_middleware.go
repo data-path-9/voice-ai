@@ -10,16 +10,19 @@ import (
 
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
+	"github.com/rapidaai/pkg/validator"
 )
 
 func NewProjectAuthenticatorMiddleware(resolver types.ClaimAuthenticator[*types.ProjectScope], logger commons.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var authToken string
-		authToken, ok := c.GetQuery(types.PROJECT_SCOPE_KEY)
-		if !ok || authToken == "" {
-			authToken = c.Param(types.PROJECT_SCOPE_KEY)
+		authToken := c.GetHeader(types.PROJECT_SCOPE_KEY)
+		if !validator.NotBlank(authToken) {
+			authToken = c.Query(types.PROJECT_SCOPE_KEY)
+			if !validator.NotBlank(authToken) {
+				authToken = c.Param(types.PROJECT_SCOPE_KEY)
+			}
 		}
-		if authToken == "" {
+		if !validator.NotBlank(authToken) {
 			c.Next()
 			return
 		}

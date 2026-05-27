@@ -308,35 +308,12 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                       </TableCell>
                     )}
                     {assistantConversationListAction.visibleColumn(
-                      'assistant_id',
+                      'created_date',
                     ) && (
-                      <TableCell className="text-sm">
-                        {row.getAssistantid()}
-                      </TableCell>
-                    )}
-
-                    {assistantConversationListAction.visibleColumn(
-                      'assistant_provider_model_id',
-                    ) && (
-                      <TableCell className="font-mono text-[13px]">
-                        vrsn_{row.getAssistantprovidermodelid()}
-                      </TableCell>
-                    )}
-
-                    {assistantConversationListAction.visibleColumn(
-                      'direction',
-                    ) && (
-                      <TableCell className="text-sm">
-                        <ConversationDirectionIndicator
-                          direction={row.getDirection() || 'inbound'}
-                        />
-                      </TableCell>
-                    )}
-                    {assistantConversationListAction.visibleColumn(
-                      'channel',
-                    ) && (
-                      <TableCell className="min-w-[130px] whitespace-nowrap text-sm">
-                        <ChannelIndicator channel={getChannelValue(row)} />
+                      <TableCell className="text-[13px] whitespace-nowrap">
+                        {row.getCreateddate()
+                          ? toHumanReadableDateTime(row.getCreateddate()!)
+                          : '—'}
                       </TableCell>
                     )}
                     {assistantConversationListAction.visibleColumn(
@@ -347,26 +324,23 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                       </TableCell>
                     )}
                     {assistantConversationListAction.visibleColumn(
-                      'source',
+                      'status',
                     ) && (
                       <TableCell className="text-sm">
-                        <SourceIndicator source={row.getSource()} />
+                        <CarbonStatusIndicator
+                          state={getStatusMetric(row.getMetricsList())}
+                        />
                       </TableCell>
                     )}
-
                     {assistantConversationListAction.visibleColumn(
-                      'duration',
+                      'disconnect_reason',
                     ) && (
-                      <TableCell className="min-w-[150px] whitespace-nowrap text-sm tabular-nums">
-                        <div className="flex items-center gap-1.5">
-                          <span>
-                            {getConversationDuration(row.getMetricsList())}
-                          </span>
-                          <DurationBreakdownToggletip conversation={row} />
-                        </div>
+                      <TableCell className="min-w-[180px] whitespace-nowrap text-sm">
+                        <DisconnectReasonIndicator
+                          reason={getDisconnectReasonValue(row)}
+                        />
                       </TableCell>
                     )}
-
                     {assistantConversationListAction.visibleColumn(
                       'action',
                     ) && (
@@ -416,34 +390,54 @@ export function Conversations({ currentAssistant }: ConversationProps) {
                         </div>
                       </TableCell>
                     )}
-
                     {assistantConversationListAction.visibleColumn(
-                      'disconnect_reason',
+                      'duration',
                     ) && (
-                      <TableCell className="min-w-[180px] whitespace-nowrap text-sm">
-                        <DisconnectReasonIndicator
-                          reason={getDisconnectReasonValue(row)}
-                        />
+                      <TableCell className="min-w-[150px] whitespace-nowrap text-sm tabular-nums">
+                        <div className="flex items-center gap-1.5">
+                          <span>
+                            {getConversationDuration(row.getMetricsList())}
+                          </span>
+                          <DurationBreakdownToggletip conversation={row} />
+                        </div>
                       </TableCell>
                     )}
-
                     {assistantConversationListAction.visibleColumn(
-                      'status',
+                      'direction',
                     ) && (
                       <TableCell className="text-sm">
-                        <CarbonStatusIndicator
-                          state={getStatusMetric(row.getMetricsList())}
+                        <ConversationDirectionIndicator
+                          direction={row.getDirection() || 'inbound'}
                         />
+                      </TableCell>
+                    )}
+                    {assistantConversationListAction.visibleColumn(
+                      'channel',
+                    ) && (
+                      <TableCell className="min-w-[130px] whitespace-nowrap text-sm">
+                        <ChannelIndicator channel={getChannelValue(row)} />
+                      </TableCell>
+                    )}
+                    {assistantConversationListAction.visibleColumn(
+                      'assistant_id',
+                    ) && (
+                      <TableCell className="text-sm">
+                        {row.getAssistantid()}
                       </TableCell>
                     )}
 
                     {assistantConversationListAction.visibleColumn(
-                      'created_date',
+                      'assistant_provider_model_id',
                     ) && (
-                      <TableCell className="text-[13px] whitespace-nowrap">
-                        {row.getCreateddate()
-                          ? toHumanReadableDateTime(row.getCreateddate()!)
-                          : '—'}
+                      <TableCell className="font-mono text-[13px]">
+                        vrsn_{row.getAssistantprovidermodelid()}
+                      </TableCell>
+                    )}
+                    {assistantConversationListAction.visibleColumn(
+                      'source',
+                    ) && (
+                      <TableCell className="text-sm">
+                        <SourceIndicator source={row.getSource()} />
                       </TableCell>
                     )}
                   </TableRow>
