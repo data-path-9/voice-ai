@@ -22,10 +22,14 @@ var mockCallback = func(ctx context.Context, result ...internal_type.Packet) err
 	return nil
 }
 
+func pipecatOptions() utils.Option {
+	return utils.Option{EndOfSpeechOptionsKeyProvider: PipecatSmartTurnEndOfSpeech}
+}
+
 func TestGetEndOfSpeech_ReturnsPipecat(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	endOfSpeech, err := GetEndOfSpeech(context.Background(), logger, mockCallback, nil)
+	endOfSpeech, err := GetEndOfSpeech(context.Background(), logger, mockCallback, pipecatOptions())
 
 	require.NoError(t, err)
 	assert.NotNil(t, endOfSpeech)
@@ -48,11 +52,12 @@ func TestGetEndOfSpeech_ReturnsErrorForUnsupportedProvider(t *testing.T) {
 func TestEndOfSpeechIdentifier_Constants(t *testing.T) {
 	assert.Equal(t, EndOfSpeechIdentifier("silence_based_eos"), SilenceBasedEndOfSpeech)
 	assert.Equal(t, EndOfSpeechIdentifier("livekit_eos"), LiveKitEndOfSpeech)
+	assert.Equal(t, EndOfSpeechIdentifier("pipecat_smart_turn_eos"), PipecatSmartTurnEndOfSpeech)
 	assert.NotEqual(t, SilenceBasedEndOfSpeech, LiveKitEndOfSpeech)
 }
 
 func TestGetEndOfSpeech_WithNilLogger(t *testing.T) {
-	endOfSpeech, err := GetEndOfSpeech(t.Context(), nil, mockCallback, nil)
+	endOfSpeech, err := GetEndOfSpeech(t.Context(), nil, mockCallback, pipecatOptions())
 
 	require.NoError(t, err)
 	assert.NotNil(t, endOfSpeech)
@@ -62,19 +67,19 @@ func TestGetEndOfSpeech_WithNilLogger(t *testing.T) {
 func TestGetEndOfSpeech_WithNilCallback(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	endOfSpeech, err := GetEndOfSpeech(t.Context(), logger, nil, nil)
+	endOfSpeech, err := GetEndOfSpeech(t.Context(), logger, nil, pipecatOptions())
 
 	require.NoError(t, err)
 	assert.NotNil(t, endOfSpeech)
 	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
 }
 
-func TestGetEndOfSpeech_WithNilOptions(t *testing.T) {
+func TestGetEndOfSpeech_WithNilOptionsReturnsError(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
 	endOfSpeech, err := GetEndOfSpeech(t.Context(), logger, mockCallback, nil)
 
-	require.NoError(t, err)
-	assert.NotNil(t, endOfSpeech)
-	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
+	require.Error(t, err)
+	assert.Nil(t, endOfSpeech)
+	assert.EqualError(t, err, `end_of_speech: unsupported provider ""`)
 }
