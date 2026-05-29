@@ -72,6 +72,7 @@ func NewRnnoiseDenoiser(
 		denoiserConfig: &protos.AudioConfig{
 			SampleRate:  48000,
 			AudioFormat: protos.AudioConfig_LINEAR16,
+			Channels:    1,
 		},
 		inputConfig: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
 		logger:      logger,

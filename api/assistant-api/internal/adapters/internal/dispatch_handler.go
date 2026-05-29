@@ -75,12 +75,12 @@ func (h requestorDispatchHandler) HandleUserAudio(ctx context.Context, vl intern
 		h.r.logger.Tracef(ctx, "dropping user audio: session not ready, state=%s", h.r.getSessionState().String())
 		return
 	}
-	// if h.r.denoiserExecutor != nil {
-	// 	h.r.OnPacket(ctx,
-	// 		internal_type.DenoiseAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
-	// 	)
-	// 	return
-	// }
+	if h.r.denoiserExecutor != nil {
+		h.r.OnPacket(ctx,
+			internal_type.DenoiseAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
+		)
+		return
+	}
 	h.r.OnPacket(ctx,
 		internal_type.VadAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 		internal_type.SpeechToTextAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
