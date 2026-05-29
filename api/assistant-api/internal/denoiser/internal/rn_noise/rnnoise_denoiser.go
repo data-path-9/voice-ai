@@ -111,9 +111,8 @@ func (rnd *rnnoiseDenoiser) Execute(ctx context.Context, pkt internal_type.Denoi
 	input := pkt.Audio
 	if rnd.inputConfig == nil || rnd.denoiserConfig == nil {
 		_ = rnd.onPacket(ctx, internal_type.DenoisedAudioPacket{
-			ContextID:    pkt.ContextID,
-			Audio:        input,
-			NoiseReduced: false,
+			ContextID: pkt.ContextID,
+			Audio:     input,
 		}, internal_type.ConversationEventPacket{
 			ContextID: pkt.ContextID,
 			Name:      "denoise",
@@ -129,9 +128,8 @@ func (rnd *rnnoiseDenoiser) Execute(ctx context.Context, pkt internal_type.Denoi
 	resampledInput, err := rnd.audioResampler.Resample(input, rnd.inputConfig, rnd.denoiserConfig)
 	if err != nil {
 		_ = rnd.onPacket(ctx, internal_type.DenoisedAudioPacket{
-			ContextID:    pkt.ContextID,
-			Audio:        input,
-			NoiseReduced: false,
+			ContextID: pkt.ContextID,
+			Audio:     input,
 		}, internal_type.ConversationEventPacket{
 			ContextID: pkt.ContextID,
 			Name:      "denoise",
@@ -147,9 +145,8 @@ func (rnd *rnnoiseDenoiser) Execute(ctx context.Context, pkt internal_type.Denoi
 	floatSamples, err := rnd.audioConverter.ConvertToFloat32Samples(resampledInput, rnd.denoiserConfig)
 	if err != nil {
 		_ = rnd.onPacket(ctx, internal_type.DenoisedAudioPacket{
-			ContextID:    pkt.ContextID,
-			Audio:        input,
-			NoiseReduced: false,
+			ContextID: pkt.ContextID,
+			Audio:     input,
 		}, internal_type.ConversationEventPacket{
 			ContextID: pkt.ContextID,
 			Name:      "denoise",
@@ -165,9 +162,8 @@ func (rnd *rnnoiseDenoiser) Execute(ctx context.Context, pkt internal_type.Denoi
 	confidence, cleanedSamples, err := rnd.rnNoise.ProcessAudio(floatSamples)
 	if err != nil {
 		_ = rnd.onPacket(ctx, internal_type.DenoisedAudioPacket{
-			ContextID:    pkt.ContextID,
-			Audio:        input,
-			NoiseReduced: false,
+			ContextID: pkt.ContextID,
+			Audio:     input,
 		}, internal_type.ConversationEventPacket{
 			ContextID: pkt.ContextID,
 			Name:      "denoise",
@@ -183,9 +179,8 @@ func (rnd *rnnoiseDenoiser) Execute(ctx context.Context, pkt internal_type.Denoi
 	denoisedBytes, err := rnd.audioConverter.ConvertToByteSamples(cleanedSamples, rnd.denoiserConfig)
 	if err != nil {
 		_ = rnd.onPacket(ctx, internal_type.DenoisedAudioPacket{
-			ContextID:    pkt.ContextID,
-			Audio:        input,
-			NoiseReduced: false,
+			ContextID: pkt.ContextID,
+			Audio:     input,
 		}, internal_type.ConversationEventPacket{
 			ContextID: pkt.ContextID,
 			Name:      "denoise",
@@ -201,9 +196,8 @@ func (rnd *rnnoiseDenoiser) Execute(ctx context.Context, pkt internal_type.Denoi
 	restoredInputRate, err := rnd.audioResampler.Resample(denoisedBytes, rnd.denoiserConfig, rnd.inputConfig)
 	if err != nil {
 		_ = rnd.onPacket(ctx, internal_type.DenoisedAudioPacket{
-			ContextID:    pkt.ContextID,
-			Audio:        input,
-			NoiseReduced: false,
+			ContextID: pkt.ContextID,
+			Audio:     input,
 		}, internal_type.ConversationEventPacket{
 			ContextID: pkt.ContextID,
 			Name:      "denoise",
@@ -218,10 +212,9 @@ func (rnd *rnnoiseDenoiser) Execute(ctx context.Context, pkt internal_type.Denoi
 
 	if rnd.onPacket != nil {
 		_ = rnd.onPacket(ctx, internal_type.DenoisedAudioPacket{
-			ContextID:    pkt.ContextID,
-			Audio:        restoredInputRate,
-			Confidence:   confidence,
-			NoiseReduced: true,
+			ContextID:  pkt.ContextID,
+			Audio:      restoredInputRate,
+			Confidence: confidence,
 		})
 	}
 	return nil

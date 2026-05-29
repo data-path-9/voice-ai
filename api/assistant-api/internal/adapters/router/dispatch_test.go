@@ -8,7 +8,8 @@ import (
 )
 
 type dispatchHandlerStub struct {
-	calledUserText bool
+	calledUserText                  bool
+	calledConversationRecordingDone bool
 }
 
 func (s *dispatchHandlerStub) HandleUserText(context.Context, internal_type.UserTextReceivedPacket) {
@@ -60,6 +61,9 @@ func (s *dispatchHandlerStub) HandleLLMToolResult(context.Context, internal_type
 func (s *dispatchHandlerStub) HandleRecordUserAudio(context.Context, internal_type.RecordUserAudioPacket) {
 }
 func (s *dispatchHandlerStub) HandleRecordAssistantAudio(context.Context, internal_type.RecordAssistantAudioPacket) {
+}
+func (s *dispatchHandlerStub) HandleConversationRecordingCompleted(context.Context, internal_type.ConversationRecordingCompletedPacket) {
+	s.calledConversationRecordingDone = true
 }
 func (s *dispatchHandlerStub) HandleMessageCreate(context.Context, internal_type.MessageCreatePacket) {
 }
@@ -185,6 +189,18 @@ func TestDispatchPacket_DispatchesKnownPacket(t *testing.T) {
 	}
 	if !handler.calledUserText {
 		t.Fatalf("expected HandleUserText to be called")
+	}
+}
+
+func TestDispatchPacket_DispatchesConversationRecordingCompleted(t *testing.T) {
+	handler := &dispatchHandlerStub{}
+
+	err := DispatchPacket(context.Background(), internal_type.ConversationRecordingCompletedPacket{ContextID: "c"}, handler)
+	if err != nil {
+		t.Fatalf("expected known packet to not return an error, got: %v", err)
+	}
+	if !handler.calledConversationRecordingDone {
+		t.Fatalf("expected HandleConversationRecordingCompleted to be called")
 	}
 }
 

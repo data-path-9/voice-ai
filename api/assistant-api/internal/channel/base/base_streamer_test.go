@@ -303,15 +303,24 @@ func TestRecv_BlocksUntilMessageAvailable(t *testing.T) {
 
 func TestBufferAndSendInput_BuffersUntilThreshold(t *testing.T) {
 	bs, _ := newTestStreamer()
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
 
 	// Send less than threshold (480 bytes)
 	chunk := make([]byte, 200)
-	bs.BufferAndSendInput(chunk)
+	bs.BufferAndSendInput(chunk, inputAudioReceivedAt)
 
-	// Nothing should be on the channel yet
 	select {
-	case <-bs.InputCh:
-		t.Fatal("Should not send before reaching threshold")
+	case msg := <-bs.InputCh:
+		recordedAudio := msg.(*protos.ConversationBridgeUserAudio)
+		assert.Equal(t, chunk, recordedAudio.GetAudio())
+		assert.Equal(t, inputAudioReceivedAt, recordedAudio.GetTime().AsTime())
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Expected recorded input audio on InputCh")
+	}
+
+	select {
+	case msg := <-bs.InputCh:
+		t.Fatalf("Should not send another input message before reaching threshold: %T", msg)
 	default:
 	}
 }
@@ -319,19 +328,31 @@ func TestBufferAndSendInput_BuffersUntilThreshold(t *testing.T) {
 func TestBufferAndSendInput_FlushesAtThreshold(t *testing.T) {
 	bs, _ := newTestStreamer()
 	threshold := 480
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 1, 0, time.UTC)
 
 	// Send exactly the threshold
 	chunk := make([]byte, threshold)
 	for i := range chunk {
 		chunk[i] = byte(i % 256)
 	}
-	bs.BufferAndSendInput(chunk)
+	bs.BufferAndSendInput(chunk, inputAudioReceivedAt)
 
 	select {
 	case msg := <-bs.InputCh:
-		audio := msg.(*protos.ConversationUserMessage).GetAudio()
+		recordedAudio := msg.(*protos.ConversationBridgeUserAudio)
+		assert.Equal(t, chunk, recordedAudio.GetAudio())
+		assert.Equal(t, inputAudioReceivedAt, recordedAudio.GetTime().AsTime())
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Expected recorded input audio on InputCh")
+	}
+
+	select {
+	case msg := <-bs.InputCh:
+		userMessage := msg.(*protos.ConversationUserMessage)
+		audio := userMessage.GetAudio()
 		assert.Equal(t, threshold, len(audio), "Should flush all buffered audio at threshold")
 		assert.Equal(t, chunk, audio, "Audio data should match")
+		assert.Equal(t, inputAudioReceivedAt, userMessage.GetTime().AsTime())
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Expected flushed message on InputCh")
 	}
@@ -339,10 +360,20 @@ func TestBufferAndSendInput_FlushesAtThreshold(t *testing.T) {
 
 func TestBufferAndSendInput_AccumulatesMultipleChunks(t *testing.T) {
 	bs, _ := newTestStreamer()
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 2, 0, time.UTC)
 
 	// Send two chunks that together exceed threshold
-	bs.BufferAndSendInput(make([]byte, 300))
-	bs.BufferAndSendInput(make([]byte, 300)) // total=600 > 480
+	bs.BufferAndSendInput(make([]byte, 300), inputAudioReceivedAt)
+	bs.BufferAndSendInput(make([]byte, 300), inputAudioReceivedAt.Add(20*time.Millisecond)) // total=600 > 480
+
+	for i := 0; i < 2; i++ {
+		select {
+		case msg := <-bs.InputCh:
+			require.IsType(t, &protos.ConversationBridgeUserAudio{}, msg)
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Expected recorded input audio on InputCh")
+		}
+	}
 
 	select {
 	case msg := <-bs.InputCh:
@@ -440,18 +471,26 @@ done:
 
 func TestClearInputBuffer_ResetsBuffer(t *testing.T) {
 	bs, _ := newTestStreamer()
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 3, 0, time.UTC)
 
 	// Partially fill the input buffer (below threshold)
-	bs.BufferAndSendInput(make([]byte, 100))
+	bs.BufferAndSendInput(make([]byte, 100), inputAudioReceivedAt)
 
 	bs.ClearInputBuffer()
 
 	// After clearing, sending more data should start from zero — not accumulate with old data.
-	bs.BufferAndSendInput(make([]byte, 100))
+	bs.BufferAndSendInput(make([]byte, 100), inputAudioReceivedAt.Add(20*time.Millisecond))
 
 	select {
-	case <-bs.InputCh:
-		t.Fatal("Should not flush: only 100 bytes (not 200) after clear")
+	case msg := <-bs.InputCh:
+		require.IsType(t, &protos.ConversationBridgeUserAudio{}, msg)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Expected recorded input audio on InputCh")
+	}
+
+	select {
+	case msg := <-bs.InputCh:
+		t.Fatalf("Should not send another input message after clear: %T", msg)
 	default:
 		// expected
 	}
@@ -695,9 +734,10 @@ func TestDisconnect_ConcurrentCalls(t *testing.T) {
 
 func TestBufferAndSendInput_ClearAndReaccumulate(t *testing.T) {
 	bs, _ := newTestStreamer()
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 4, 0, time.UTC)
 
 	// Buffer 300 bytes (below 480 threshold)
-	bs.BufferAndSendInput(make([]byte, 300))
+	bs.BufferAndSendInput(make([]byte, 300), inputAudioReceivedAt)
 
 	// Clear
 	bs.ClearInputBuffer()
@@ -707,7 +747,14 @@ func TestBufferAndSendInput_ClearAndReaccumulate(t *testing.T) {
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
-	bs.BufferAndSendInput(data)
+	bs.BufferAndSendInput(data, inputAudioReceivedAt.Add(20*time.Millisecond))
+
+	select {
+	case msg := <-bs.InputCh:
+		require.IsType(t, &protos.ConversationBridgeUserAudio{}, msg)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Expected recorded input audio on InputCh")
+	}
 
 	select {
 	case msg := <-bs.InputCh:
@@ -769,13 +816,14 @@ func TestBufferAndSendInput_ConcurrentWrites(t *testing.T) {
 	var wg sync.WaitGroup
 	writers := 10
 	chunksPerWriter := 50
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 5, 0, time.UTC)
 
 	for i := 0; i < writers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := 0; j < chunksPerWriter; j++ {
-				bs.BufferAndSendInput(make([]byte, 20))
+				bs.BufferAndSendInput(make([]byte, 20), inputAudioReceivedAt)
 			}
 		}()
 	}
@@ -788,8 +836,9 @@ func TestBufferAndSendInput_ConcurrentWrites(t *testing.T) {
 	for {
 		select {
 		case msg := <-bs.InputCh:
-			audio := msg.(*protos.ConversationUserMessage).GetAudio()
-			totalAudioBytes += len(audio)
+			if userMessage, ok := msg.(*protos.ConversationUserMessage); ok {
+				totalAudioBytes += len(userMessage.GetAudio())
+			}
 		default:
 			goto done
 		}
@@ -866,9 +915,17 @@ func TestBufferAndSendInput_ZeroThreshold_FlushesImmediately(t *testing.T) {
 		WithOutputChannelSize(10),
 		WithInputBufferThreshold(0),
 	)
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 6, 0, time.UTC)
 
 	// Any data should flush immediately since 0 threshold
-	bs.BufferAndSendInput([]byte{1})
+	bs.BufferAndSendInput([]byte{1}, inputAudioReceivedAt)
+
+	select {
+	case msg := <-bs.InputCh:
+		require.IsType(t, &protos.ConversationBridgeUserAudio{}, msg)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Expected recorded input audio on InputCh")
+	}
 
 	select {
 	case msg := <-bs.InputCh:
@@ -1079,13 +1136,21 @@ func TestNewBaseStreamer_BufferPreAllocation_Fallback(t *testing.T) {
 
 func TestBufferAndSendInput_BufferSwap(t *testing.T) {
 	bs, _ := newTestStreamer()
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 7, 0, time.UTC)
 
 	// Fill to threshold (480 bytes).
 	data := make([]byte, 480)
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
-	bs.BufferAndSendInput(data)
+	bs.BufferAndSendInput(data, inputAudioReceivedAt)
+
+	select {
+	case msg := <-bs.InputCh:
+		require.IsType(t, &protos.ConversationBridgeUserAudio{}, msg)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected recorded input audio on InputCh")
+	}
 
 	// The message should be on InputCh.
 	select {
@@ -1181,11 +1246,12 @@ func BenchmarkBufferAndSendInput(b *testing.B) {
 
 	// Send 160-byte chunks (20ms of µ-law 8kHz); every 3rd call triggers flush.
 	audio := make([]byte, 160)
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 8, 0, time.UTC)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		bs.BufferAndSendInput(audio)
+		bs.BufferAndSendInput(audio, inputAudioReceivedAt)
 		// Drain inside loop to prevent channel overflow and WARN log noise.
 		for len(bs.InputCh) > 0 {
 			<-bs.InputCh

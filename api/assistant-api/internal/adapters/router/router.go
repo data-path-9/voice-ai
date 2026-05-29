@@ -101,6 +101,7 @@ func Classify(p internal_type.Packet) Route {
 	// dispatcher starts at NewGenericRequestor.
 	case internal_type.RecordUserAudioPacket,
 		internal_type.RecordAssistantAudioPacket,
+		internal_type.ConversationRecordingCompletedPacket,
 		internal_type.MessageCreatePacket,
 		internal_type.ConversationMetadataPacket,
 		internal_type.UserMessageMetadataPacket,

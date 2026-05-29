@@ -47,6 +47,7 @@ type DispatchHandler interface {
 	HandleLLMToolResult(context.Context, internal_type.LLMToolResultPacket)
 	HandleRecordUserAudio(context.Context, internal_type.RecordUserAudioPacket)
 	HandleRecordAssistantAudio(context.Context, internal_type.RecordAssistantAudioPacket)
+	HandleConversationRecordingCompleted(context.Context, internal_type.ConversationRecordingCompletedPacket)
 	HandleMessageCreate(context.Context, internal_type.MessageCreatePacket)
 	HandleConversationMetric(context.Context, internal_type.ConversationMetricPacket)
 	HandleConversationMetadata(context.Context, internal_type.ConversationMetadataPacket)
@@ -165,6 +166,10 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleRecordUserAudio(ctx, vl)
 	case internal_type.RecordAssistantAudioPacket:
 		handler.HandleRecordAssistantAudio(ctx, vl)
+	case internal_type.ConversationRecordingCompletedPacket:
+		handler.HandleConversationRecordingCompleted(ctx, vl)
+	case internal_type.InitializeDenoisePacket:
+		handler.HandleInitializeDenoise(ctx, vl)
 	case internal_type.MessageCreatePacket:
 		handler.HandleMessageCreate(ctx, vl)
 	case internal_type.ConversationMetricPacket:
@@ -267,7 +272,6 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleExecuteAnalysis(ctx, vl)
 	case internal_type.ExecuteWebhookPacket:
 		handler.HandleExecuteWebhook(ctx, vl)
-
 	case internal_type.EndOfSpeechInterruptionPacket:
 		handler.HandleEndOfSpeechInterruption(ctx, vl)
 	case internal_type.EndOfSpeechAudioPacket:

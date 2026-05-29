@@ -75,17 +75,17 @@ func (h requestorDispatchHandler) HandleUserAudio(ctx context.Context, vl intern
 		h.r.logger.Tracef(ctx, "dropping user audio: session not ready, state=%s", h.r.getSessionState().String())
 		return
 	}
-	if h.r.denoiserExecutor != nil && !vl.NoiseReduced {
-		h.r.OnPacket(ctx, internal_type.DenoiseAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio})
-		return
-	}
+	// if h.r.denoiserExecutor != nil {
+	// 	h.r.OnPacket(ctx,
+	// 		internal_type.DenoiseAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
+	// 	)
+	// 	return
+	// }
 	h.r.OnPacket(ctx,
-		internal_type.RecordUserAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 		internal_type.VadAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 		internal_type.SpeechToTextAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 		internal_type.EndOfSpeechAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 	)
-	// h.callEndOfSpeech(ctx, vl)
 }
 
 func (h requestorDispatchHandler) HandleEndOfSpeechAudio(ctx context.Context, vl internal_type.EndOfSpeechAudioPacket) {
@@ -110,11 +110,11 @@ func (h requestorDispatchHandler) HandleDenoise(ctx context.Context, vl internal
 	}
 }
 func (h requestorDispatchHandler) HandleDenoisedAudio(ctx context.Context, vl internal_type.DenoisedAudioPacket) {
-	h.r.OnPacket(ctx, internal_type.UserAudioReceivedPacket{
-		ContextID:    vl.ContextID,
-		Audio:        vl.Audio,
-		NoiseReduced: true,
-	})
+	h.r.OnPacket(ctx,
+		internal_type.VadAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
+		internal_type.SpeechToTextAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
+		internal_type.EndOfSpeechAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
+	)
 }
 
 func (h requestorDispatchHandler) HandleVadAudio(ctx context.Context, vl internal_type.VadAudioPacket) {
@@ -223,7 +223,6 @@ func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context
 			return
 		}
 		h.r.OnPacket(ctx,
-			internal_type.RecordAssistantAudioPacket{ContextID: p.ContextID, Truncate: true},
 			internal_type.TextToSpeechInterruptPacket{ContextID: p.ContextID, StartAt: p.StartAt, EndAt: p.EndAt},
 			internal_type.LLMInterruptPacket{ContextID: p.ContextID},
 		)
@@ -620,7 +619,6 @@ func (h requestorDispatchHandler) HandleTextToSpeechAudio(ctx context.Context, p
 	}); err != nil {
 		h.r.logger.Tracef(ctx, "error while outputting chunk to the user: %w", err)
 	}
-	h.r.OnPacket(ctx, internal_type.RecordAssistantAudioPacket{ContextID: p.ContextID, Audio: p.AudioChunk})
 }
 func (h requestorDispatchHandler) HandleTextToSpeechEnd(ctx context.Context, p internal_type.TextToSpeechEndPacket) {
 	if p.ContextID != h.r.GetID() {
@@ -776,17 +774,22 @@ func (h requestorDispatchHandler) HandleLLMToolResult(ctx context.Context, p int
 	}
 }
 func (h requestorDispatchHandler) HandleRecordUserAudio(ctx context.Context, p internal_type.RecordUserAudioPacket) {
-	if h.r.recorder != nil {
-		if err := h.r.recorder.Record(ctx, p); err != nil {
+	if h.r.conversationRecordingExecutor != nil {
+		if err := h.r.conversationRecordingExecutor.Execute(ctx, p); err != nil {
 			h.r.logger.Errorf("recorder error: %v", err)
 		}
 	}
 }
 func (h requestorDispatchHandler) HandleRecordAssistantAudio(ctx context.Context, p internal_type.RecordAssistantAudioPacket) {
-	if h.r.recorder != nil {
-		if err := h.r.recorder.Record(ctx, p); err != nil {
+	if h.r.conversationRecordingExecutor != nil {
+		if err := h.r.conversationRecordingExecutor.Execute(ctx, p); err != nil {
 			h.r.logger.Errorf("recorder error: %v", err)
 		}
+	}
+}
+func (h requestorDispatchHandler) HandleConversationRecordingCompleted(ctx context.Context, p internal_type.ConversationRecordingCompletedPacket) {
+	if err := h.r.CreateConversationRecording(ctx, p.Audio.UserAudio, p.Audio.AssistantAudio, p.Audio.MixedAudio); err != nil {
+		h.r.logger.Tracef(ctx, "failed to create conversation recording record: %+v", err)
 	}
 }
 func (h requestorDispatchHandler) HandleMessageCreate(ctx context.Context, p internal_type.MessageCreatePacket) {
@@ -1013,11 +1016,10 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 		internal_type.InitializeTelemetryPacket{ContextID: vl.ContextID})
 }
 func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Context, p internal_type.InitializeSessionRuntimePacket) {
-	if rc, err := internal_audio_recorder.GetRecorder(h.r.logger); err != nil {
+	if recordingExecutor, err := internal_audio_recorder.GetConversationRecordingExecutor(p.ContextID, h.r.OnPacket); err != nil {
 		h.r.logger.Tracef(ctx, "failed to initialize audio recorder: %+v", err)
 	} else {
-		h.r.recorder = rc
-		h.r.recorder.Start()
+		h.r.conversationRecordingExecutor = recordingExecutor
 		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
 			Name: observe.ComponentRecording,
 			Data: map[string]string{observe.DataType: observe.EventRecordingStarted},
@@ -1877,15 +1879,11 @@ func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Conte
 	}
 
 	//
-	if h.r.recorder != nil {
+	if h.r.conversationRecordingExecutor != nil {
 		utils.Go(ctx, func() {
-			userAudio, systemAudio, conversationAudio, err := h.r.recorder.Persist()
-			if err != nil {
+			if err := h.r.conversationRecordingExecutor.Close(ctx); err != nil {
 				h.r.logger.Tracef(ctx, "failed to persist audio recording: %+v", err)
 				return
-			}
-			if err = h.r.CreateConversationRecording(ctx, userAudio, systemAudio, conversationAudio); err != nil {
-				h.r.logger.Tracef(ctx, "failed to create conversation recording record: %+v", err)
 			}
 		})
 	}

@@ -54,9 +54,9 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 				Result:    payload.GetResult(),
 			})
 		case *protos.ConversationBridgeUserAudio:
-			t.OnPacket(t.streamer.Context(), internal_type.RecordUserAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
+			t.OnPacket(t.streamer.Context(), internal_type.RecordUserAudioPacket{ContextID: t.GetID(), Audio: payload.Audio, Timestamp: payload.Time.AsTime()})
 		case *protos.ConversationBridgeOperatorAudio:
-			t.OnPacket(t.streamer.Context(), internal_type.RecordAssistantAudioPacket{ContextID: t.GetID(), Audio: payload.Audio})
+			t.OnPacket(t.streamer.Context(), internal_type.RecordAssistantAudioPacket{ContextID: t.GetID(), Audio: payload.Audio, Timestamp: payload.Time.AsTime()})
 		case *protos.ConversationMetadata:
 			t.OnPacket(t.streamer.Context(), internal_type.ConversationMetadataPacket{
 				ContextID: payload.GetAssistantConversationId(),
@@ -82,7 +82,6 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 				return nil
 			}
 			ctx := context.Background()
-			t.Notify(ctx, payload)
 			t.OnPacket(ctx,
 				internal_type.ConversationEventPacket{
 					ContextID: t.GetID(),

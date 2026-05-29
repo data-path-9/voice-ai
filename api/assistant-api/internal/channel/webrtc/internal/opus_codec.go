@@ -14,14 +14,9 @@ import (
 	"gopkg.in/hraban/opus.v2"
 )
 
-const (
-	opusFrameSamples    = 960  // 20ms at 48kHz
-	opusMaxFrameSamples = 5760 // 120ms at 48kHz — max Opus frame size per RFC 6716
-)
-
 // OpusCodec handles Opus audio encoding/decoding for WebRTC (48kHz mono)
 type OpusCodec struct {
-	mu sync.Mutex
+	codecLock sync.Mutex
 
 	encoder *opus.Encoder
 	decoder *opus.Decoder
@@ -33,7 +28,7 @@ type OpusCodec struct {
 }
 
 func NewOpusDecoder() (*OpusCodec, error) {
-	dec, err := opus.NewDecoder(OpusSampleRate, 1)
+	dec, err := opus.NewDecoder(OpusSampleRate, OpusVoiceChannels)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Opus decoder: %w", err)
 	}
@@ -42,17 +37,17 @@ func NewOpusDecoder() (*OpusCodec, error) {
 
 // NewOpusCodec creates a new Opus codec optimized for voice
 func NewOpusCodec() (*OpusCodec, error) {
-	enc, err := opus.NewEncoder(OpusSampleRate, 1, opus.AppVoIP)
+	enc, err := opus.NewEncoder(OpusSampleRate, OpusVoiceChannels, opus.AppVoIP)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Opus encoder: %w", err)
 	}
 
-	enc.SetBitrate(32000)
-	enc.SetComplexity(8)
+	enc.SetBitrate(OpusVoiceBitrate)
+	enc.SetComplexity(OpusVoiceComplexity)
 	enc.SetInBandFEC(true)
-	enc.SetPacketLossPerc(10)
+	enc.SetPacketLossPerc(OpusExpectedPacketLossPercent)
 
-	dec, err := opus.NewDecoder(OpusSampleRate, 1)
+	dec, err := opus.NewDecoder(OpusSampleRate, OpusVoiceChannels)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Opus decoder: %w", err)
 	}
@@ -69,21 +64,22 @@ func (c *OpusCodec) Encode(pcm []byte) ([]byte, error) {
 		return nil, nil
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.codecLock.Lock()
+	defer c.codecLock.Unlock()
 
-	numSamples := len(pcm) / 2
+	numSamples := len(pcm) / OpusPCMBytesPerSample
 	if cap(c.encodeSamples) < numSamples {
 		c.encodeSamples = make([]int16, numSamples)
 	}
 	samples := c.encodeSamples[:numSamples]
 	for i := 0; i < numSamples; i++ {
-		samples[i] = int16(binary.LittleEndian.Uint16(pcm[i*2 : i*2+2]))
+		sampleOffset := i * OpusPCMBytesPerSample
+		samples[i] = int16(binary.LittleEndian.Uint16(pcm[sampleOffset : sampleOffset+OpusPCMBytesPerSample]))
 	}
-	if cap(c.encodeOutput) < 1000 {
-		c.encodeOutput = make([]byte, 1000)
+	if cap(c.encodeOutput) < OpusEncoderOutputMaxBytes {
+		c.encodeOutput = make([]byte, OpusEncoderOutputMaxBytes)
 	}
-	output := c.encodeOutput[:1000]
+	output := c.encodeOutput[:OpusEncoderOutputMaxBytes]
 	n, err := c.encoder.Encode(samples, output)
 	if err != nil {
 		return nil, fmt.Errorf("Opus encode failed: %w", err)
@@ -105,25 +101,26 @@ func (c *OpusCodec) Decode(encoded []byte) ([]byte, error) {
 		return nil, nil
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.codecLock.Lock()
+	defer c.codecLock.Unlock()
 
-	if cap(c.decodeSamples) < opusMaxFrameSamples {
-		c.decodeSamples = make([]int16, opusMaxFrameSamples)
+	if cap(c.decodeSamples) < OpusMaxFrameSamples {
+		c.decodeSamples = make([]int16, OpusMaxFrameSamples)
 	}
-	samples := c.decodeSamples[:opusMaxFrameSamples]
+	samples := c.decodeSamples[:OpusMaxFrameSamples]
 	n, err := c.decoder.Decode(encoded, samples)
 	if err != nil {
 		return nil, fmt.Errorf("Opus decode failed (payload=%d bytes): %w", len(encoded), err)
 	}
 
-	pcmLen := n * 2
+	pcmLen := n * OpusPCMBytesPerSample
 	if cap(c.decodePCM) < pcmLen {
 		c.decodePCM = make([]byte, pcmLen)
 	}
 	pcm := c.decodePCM[:pcmLen]
 	for i := 0; i < n; i++ {
-		binary.LittleEndian.PutUint16(pcm[i*2:i*2+2], uint16(samples[i]))
+		sampleOffset := i * OpusPCMBytesPerSample
+		binary.LittleEndian.PutUint16(pcm[sampleOffset:sampleOffset+OpusPCMBytesPerSample], uint16(samples[i]))
 	}
 
 	out := make([]byte, pcmLen)

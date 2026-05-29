@@ -629,7 +629,8 @@ type ConversationBridgeUserAudio struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Audio []byte `protobuf:"bytes,1,opt,name=audio,proto3" json:"audio,omitempty"`
+	Audio []byte                 `protobuf:"bytes,1,opt,name=audio,proto3" json:"audio,omitempty"`
+	Time  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=time,proto3" json:"time,omitempty"`
 }
 
 func (x *ConversationBridgeUserAudio) Reset() {
@@ -671,6 +672,13 @@ func (x *ConversationBridgeUserAudio) GetAudio() []byte {
 	return nil
 }
 
+func (x *ConversationBridgeUserAudio) GetTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Time
+	}
+	return nil
+}
+
 // Transfer target (operator) audio during a bridge transfer. Routed to recording only.
 // Pushed by the SIP streamer via the bridge audio callback.
 type ConversationBridgeOperatorAudio struct {
@@ -678,7 +686,8 @@ type ConversationBridgeOperatorAudio struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Audio []byte `protobuf:"bytes,1,opt,name=audio,proto3" json:"audio,omitempty"`
+	Audio []byte                 `protobuf:"bytes,1,opt,name=audio,proto3" json:"audio,omitempty"`
+	Time  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=time,proto3" json:"time,omitempty"`
 }
 
 func (x *ConversationBridgeOperatorAudio) Reset() {
@@ -716,6 +725,13 @@ func (*ConversationBridgeOperatorAudio) Descriptor() ([]byte, []int) {
 func (x *ConversationBridgeOperatorAudio) GetAudio() []byte {
 	if x != nil {
 		return x.Audio
+	}
+	return nil
+}
+
+func (x *ConversationBridgeOperatorAudio) GetTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Time
 	}
 	return nil
 }
@@ -1132,10 +1148,10 @@ type ConversationInitialization struct {
 	AssistantConversationId uint64                 `protobuf:"varint,1,opt,name=assistantConversationId,proto3" json:"assistantConversationId,omitempty"`
 	Assistant               *AssistantDefinition   `protobuf:"bytes,2,opt,name=assistant,proto3" json:"assistant,omitempty"`
 	Time                    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=time,proto3" json:"time,omitempty"`
-	Metadata                map[string]*anypb.Any  `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
-	Args                    map[string]*anypb.Any  `protobuf:"bytes,5,rep,name=args,proto3" json:"args,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
-	Options                 map[string]*anypb.Any  `protobuf:"bytes,6,rep,name=options,proto3" json:"options,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
-	StreamMode              StreamMode             `protobuf:"varint,7,opt,name=streamMode,proto3,enum=talk_api.StreamMode" json:"streamMode,omitempty"`
+	Metadata   map[string]*anypb.Any `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	Args       map[string]*anypb.Any `protobuf:"bytes,5,rep,name=args,proto3" json:"args,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	Options    map[string]*anypb.Any `protobuf:"bytes,6,rep,name=options,proto3" json:"options,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	StreamMode StreamMode            `protobuf:"varint,7,opt,name=streamMode,proto3,enum=talk_api.StreamMode" json:"streamMode,omitempty"`
 	// Types that are assignable to UserIdentity:
 	//
 	//	*ConversationInitialization_Phone
@@ -2776,14 +2792,20 @@ var file_talk_api_proto_rawDesc = []byte{
 	0x61, 0x6e, 0x74, 0x43, 0x6f, 0x6e, 0x76, 0x65, 0x72, 0x73, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x49,
 	0x64, 0x12, 0x25, 0x0a, 0x08, 0x6d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x18, 0x02, 0x20,
 	0x03, 0x28, 0x0b, 0x32, 0x09, 0x2e, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x52, 0x08,
-	0x6d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x22, 0x33, 0x0a, 0x1b, 0x43, 0x6f, 0x6e, 0x76,
+	0x6d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x22, 0x63, 0x0a, 0x1b, 0x43, 0x6f, 0x6e, 0x76,
 	0x65, 0x72, 0x73, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x42, 0x72, 0x69, 0x64, 0x67, 0x65, 0x55, 0x73,
 	0x65, 0x72, 0x41, 0x75, 0x64, 0x69, 0x6f, 0x12, 0x14, 0x0a, 0x05, 0x61, 0x75, 0x64, 0x69, 0x6f,
-	0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x61, 0x75, 0x64, 0x69, 0x6f, 0x22, 0x37, 0x0a,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x05, 0x61, 0x75, 0x64, 0x69, 0x6f, 0x12, 0x2e, 0x0a,
+	0x04, 0x74, 0x69, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x67, 0x6f,
+	0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x54, 0x69,
+	0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x52, 0x04, 0x74, 0x69, 0x6d, 0x65, 0x22, 0x67, 0x0a,
 	0x1f, 0x43, 0x6f, 0x6e, 0x76, 0x65, 0x72, 0x73, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x42, 0x72, 0x69,
 	0x64, 0x67, 0x65, 0x4f, 0x70, 0x65, 0x72, 0x61, 0x74, 0x6f, 0x72, 0x41, 0x75, 0x64, 0x69, 0x6f,
 	0x12, 0x14, 0x0a, 0x05, 0x61, 0x75, 0x64, 0x69, 0x6f, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52,
-	0x05, 0x61, 0x75, 0x64, 0x69, 0x6f, 0x22, 0xeb, 0x01, 0x0a, 0x11, 0x43, 0x6f, 0x6e, 0x76, 0x65,
+	0x05, 0x61, 0x75, 0x64, 0x69, 0x6f, 0x12, 0x2e, 0x0a, 0x04, 0x74, 0x69, 0x6d, 0x65, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x54, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70,
+	0x52, 0x04, 0x74, 0x69, 0x6d, 0x65, 0x22, 0xeb, 0x01, 0x0a, 0x11, 0x43, 0x6f, 0x6e, 0x76, 0x65,
 	0x72, 0x73, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x12, 0x3c, 0x0a, 0x17,
 	0x61, 0x73, 0x73, 0x69, 0x73, 0x74, 0x61, 0x6e, 0x74, 0x43, 0x6f, 0x6e, 0x76, 0x65, 0x72, 0x73,
 	0x61, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x42, 0x02, 0x30,
@@ -3322,90 +3344,92 @@ var file_talk_api_proto_depIdxs = []int32{
 	46, // 5: talk_api.ConversationToolCallResult.time:type_name -> google.protobuf.Timestamp
 	47, // 6: talk_api.ConversationMetric.metrics:type_name -> Metric
 	48, // 7: talk_api.ConversationMetadata.metadata:type_name -> Metadata
-	38, // 8: talk_api.ConversationError.details:type_name -> talk_api.ConversationError.DetailsEntry
-	39, // 9: talk_api.ConversationEvent.data:type_name -> talk_api.ConversationEvent.DataEntry
-	46, // 10: talk_api.ConversationEvent.time:type_name -> google.protobuf.Timestamp
-	2,  // 11: talk_api.AudioConfig.audioFormat:type_name -> talk_api.AudioConfig.AudioFormat
-	14, // 12: talk_api.StreamConfig.audio:type_name -> talk_api.AudioConfig
-	15, // 13: talk_api.StreamConfig.text:type_name -> talk_api.TextConfig
-	49, // 14: talk_api.ConversationInitialization.assistant:type_name -> AssistantDefinition
-	46, // 15: talk_api.ConversationInitialization.time:type_name -> google.protobuf.Timestamp
-	40, // 16: talk_api.ConversationInitialization.metadata:type_name -> talk_api.ConversationInitialization.MetadataEntry
-	41, // 17: talk_api.ConversationInitialization.args:type_name -> talk_api.ConversationInitialization.ArgsEntry
-	42, // 18: talk_api.ConversationInitialization.options:type_name -> talk_api.ConversationInitialization.OptionsEntry
-	1,  // 19: talk_api.ConversationInitialization.streamMode:type_name -> talk_api.StreamMode
-	18, // 20: talk_api.ConversationInitialization.phone:type_name -> talk_api.PhoneIdentity
-	17, // 21: talk_api.ConversationInitialization.web:type_name -> talk_api.WebIdentity
-	1,  // 22: talk_api.ConversationConfiguration.streamMode:type_name -> talk_api.StreamMode
-	3,  // 23: talk_api.ConversationInterruption.type:type_name -> talk_api.ConversationInterruption.InterruptionType
-	46, // 24: talk_api.ConversationInterruption.time:type_name -> google.protobuf.Timestamp
-	4,  // 25: talk_api.ConversationDisconnection.type:type_name -> talk_api.ConversationDisconnection.DisconnectionType
-	46, // 26: talk_api.ConversationDisconnection.time:type_name -> google.protobuf.Timestamp
-	46, // 27: talk_api.ConversationAssistantMessage.time:type_name -> google.protobuf.Timestamp
-	46, // 28: talk_api.ConversationUserMessage.time:type_name -> google.protobuf.Timestamp
-	5,  // 29: talk_api.ConversationModeChange.mode:type_name -> talk_api.ConversationModeChange.ModeType
-	46, // 30: talk_api.ConversationModeChange.time:type_name -> google.protobuf.Timestamp
-	19, // 31: talk_api.AssistantTalkRequest.initialization:type_name -> talk_api.ConversationInitialization
-	20, // 32: talk_api.AssistantTalkRequest.configuration:type_name -> talk_api.ConversationConfiguration
-	24, // 33: talk_api.AssistantTalkRequest.message:type_name -> talk_api.ConversationUserMessage
-	9,  // 34: talk_api.AssistantTalkRequest.metadata:type_name -> talk_api.ConversationMetadata
-	8,  // 35: talk_api.AssistantTalkRequest.metric:type_name -> talk_api.ConversationMetric
-	22, // 36: talk_api.AssistantTalkRequest.disconnection:type_name -> talk_api.ConversationDisconnection
-	7,  // 37: talk_api.AssistantTalkRequest.toolCallResult:type_name -> talk_api.ConversationToolCallResult
-	11, // 38: talk_api.AssistantTalkRequest.bridgeOperatorAudio:type_name -> talk_api.ConversationBridgeOperatorAudio
-	10, // 39: talk_api.AssistantTalkRequest.bridgeUserAudio:type_name -> talk_api.ConversationBridgeUserAudio
-	19, // 40: talk_api.AssistantTalkResponse.initialization:type_name -> talk_api.ConversationInitialization
-	20, // 41: talk_api.AssistantTalkResponse.configuration:type_name -> talk_api.ConversationConfiguration
-	21, // 42: talk_api.AssistantTalkResponse.interruption:type_name -> talk_api.ConversationInterruption
-	24, // 43: talk_api.AssistantTalkResponse.user:type_name -> talk_api.ConversationUserMessage
-	23, // 44: talk_api.AssistantTalkResponse.assistant:type_name -> talk_api.ConversationAssistantMessage
-	6,  // 45: talk_api.AssistantTalkResponse.toolCall:type_name -> talk_api.ConversationToolCall
-	7,  // 46: talk_api.AssistantTalkResponse.toolCallResult:type_name -> talk_api.ConversationToolCallResult
-	9,  // 47: talk_api.AssistantTalkResponse.metadata:type_name -> talk_api.ConversationMetadata
-	8,  // 48: talk_api.AssistantTalkResponse.metric:type_name -> talk_api.ConversationMetric
-	22, // 49: talk_api.AssistantTalkResponse.disconnection:type_name -> talk_api.ConversationDisconnection
-	13, // 50: talk_api.AssistantTalkResponse.event:type_name -> talk_api.ConversationEvent
-	12, // 51: talk_api.AssistantTalkResponse.error:type_name -> talk_api.ConversationError
-	47, // 52: talk_api.CreateMessageMetricRequest.metrics:type_name -> Metric
-	47, // 53: talk_api.CreateMessageMetricResponse.data:type_name -> Metric
-	50, // 54: talk_api.CreateMessageMetricResponse.error:type_name -> Error
-	47, // 55: talk_api.CreateConversationMetricRequest.metrics:type_name -> Metric
-	47, // 56: talk_api.CreateConversationMetricResponse.data:type_name -> Metric
-	50, // 57: talk_api.CreateConversationMetricResponse.error:type_name -> Error
-	49, // 58: talk_api.CreatePhoneCallRequest.assistant:type_name -> AssistantDefinition
-	43, // 59: talk_api.CreatePhoneCallRequest.metadata:type_name -> talk_api.CreatePhoneCallRequest.MetadataEntry
-	44, // 60: talk_api.CreatePhoneCallRequest.args:type_name -> talk_api.CreatePhoneCallRequest.ArgsEntry
-	45, // 61: talk_api.CreatePhoneCallRequest.options:type_name -> talk_api.CreatePhoneCallRequest.OptionsEntry
-	51, // 62: talk_api.CreatePhoneCallResponse.data:type_name -> AssistantConversation
-	50, // 63: talk_api.CreatePhoneCallResponse.error:type_name -> Error
-	32, // 64: talk_api.CreateBulkPhoneCallRequest.phoneCalls:type_name -> talk_api.CreatePhoneCallRequest
-	51, // 65: talk_api.CreateBulkPhoneCallResponse.data:type_name -> AssistantConversation
-	50, // 66: talk_api.CreateBulkPhoneCallResponse.error:type_name -> Error
-	52, // 67: talk_api.ConversationInitialization.MetadataEntry.value:type_name -> google.protobuf.Any
-	52, // 68: talk_api.ConversationInitialization.ArgsEntry.value:type_name -> google.protobuf.Any
-	52, // 69: talk_api.ConversationInitialization.OptionsEntry.value:type_name -> google.protobuf.Any
-	52, // 70: talk_api.CreatePhoneCallRequest.MetadataEntry.value:type_name -> google.protobuf.Any
-	52, // 71: talk_api.CreatePhoneCallRequest.ArgsEntry.value:type_name -> google.protobuf.Any
-	52, // 72: talk_api.CreatePhoneCallRequest.OptionsEntry.value:type_name -> google.protobuf.Any
-	26, // 73: talk_api.TalkService.AssistantTalk:input_type -> talk_api.AssistantTalkRequest
-	53, // 74: talk_api.TalkService.GetAllAssistantConversation:input_type -> GetAllAssistantConversationRequest
-	54, // 75: talk_api.TalkService.GetAllConversationMessage:input_type -> GetAllConversationMessageRequest
-	28, // 76: talk_api.TalkService.CreateMessageMetric:input_type -> talk_api.CreateMessageMetricRequest
-	30, // 77: talk_api.TalkService.CreateConversationMetric:input_type -> talk_api.CreateConversationMetricRequest
-	32, // 78: talk_api.TalkService.CreatePhoneCall:input_type -> talk_api.CreatePhoneCallRequest
-	34, // 79: talk_api.TalkService.CreateBulkPhoneCall:input_type -> talk_api.CreateBulkPhoneCallRequest
-	27, // 80: talk_api.TalkService.AssistantTalk:output_type -> talk_api.AssistantTalkResponse
-	55, // 81: talk_api.TalkService.GetAllAssistantConversation:output_type -> GetAllAssistantConversationResponse
-	56, // 82: talk_api.TalkService.GetAllConversationMessage:output_type -> GetAllConversationMessageResponse
-	29, // 83: talk_api.TalkService.CreateMessageMetric:output_type -> talk_api.CreateMessageMetricResponse
-	31, // 84: talk_api.TalkService.CreateConversationMetric:output_type -> talk_api.CreateConversationMetricResponse
-	33, // 85: talk_api.TalkService.CreatePhoneCall:output_type -> talk_api.CreatePhoneCallResponse
-	35, // 86: talk_api.TalkService.CreateBulkPhoneCall:output_type -> talk_api.CreateBulkPhoneCallResponse
-	80, // [80:87] is the sub-list for method output_type
-	73, // [73:80] is the sub-list for method input_type
-	73, // [73:73] is the sub-list for extension type_name
-	73, // [73:73] is the sub-list for extension extendee
-	0,  // [0:73] is the sub-list for field type_name
+	46, // 8: talk_api.ConversationBridgeUserAudio.time:type_name -> google.protobuf.Timestamp
+	46, // 9: talk_api.ConversationBridgeOperatorAudio.time:type_name -> google.protobuf.Timestamp
+	38, // 10: talk_api.ConversationError.details:type_name -> talk_api.ConversationError.DetailsEntry
+	39, // 11: talk_api.ConversationEvent.data:type_name -> talk_api.ConversationEvent.DataEntry
+	46, // 12: talk_api.ConversationEvent.time:type_name -> google.protobuf.Timestamp
+	2,  // 13: talk_api.AudioConfig.audioFormat:type_name -> talk_api.AudioConfig.AudioFormat
+	14, // 14: talk_api.StreamConfig.audio:type_name -> talk_api.AudioConfig
+	15, // 15: talk_api.StreamConfig.text:type_name -> talk_api.TextConfig
+	49, // 16: talk_api.ConversationInitialization.assistant:type_name -> AssistantDefinition
+	46, // 17: talk_api.ConversationInitialization.time:type_name -> google.protobuf.Timestamp
+	40, // 18: talk_api.ConversationInitialization.metadata:type_name -> talk_api.ConversationInitialization.MetadataEntry
+	41, // 19: talk_api.ConversationInitialization.args:type_name -> talk_api.ConversationInitialization.ArgsEntry
+	42, // 20: talk_api.ConversationInitialization.options:type_name -> talk_api.ConversationInitialization.OptionsEntry
+	1,  // 21: talk_api.ConversationInitialization.streamMode:type_name -> talk_api.StreamMode
+	18, // 22: talk_api.ConversationInitialization.phone:type_name -> talk_api.PhoneIdentity
+	17, // 23: talk_api.ConversationInitialization.web:type_name -> talk_api.WebIdentity
+	1,  // 24: talk_api.ConversationConfiguration.streamMode:type_name -> talk_api.StreamMode
+	3,  // 25: talk_api.ConversationInterruption.type:type_name -> talk_api.ConversationInterruption.InterruptionType
+	46, // 26: talk_api.ConversationInterruption.time:type_name -> google.protobuf.Timestamp
+	4,  // 27: talk_api.ConversationDisconnection.type:type_name -> talk_api.ConversationDisconnection.DisconnectionType
+	46, // 28: talk_api.ConversationDisconnection.time:type_name -> google.protobuf.Timestamp
+	46, // 29: talk_api.ConversationAssistantMessage.time:type_name -> google.protobuf.Timestamp
+	46, // 30: talk_api.ConversationUserMessage.time:type_name -> google.protobuf.Timestamp
+	5,  // 31: talk_api.ConversationModeChange.mode:type_name -> talk_api.ConversationModeChange.ModeType
+	46, // 32: talk_api.ConversationModeChange.time:type_name -> google.protobuf.Timestamp
+	19, // 33: talk_api.AssistantTalkRequest.initialization:type_name -> talk_api.ConversationInitialization
+	20, // 34: talk_api.AssistantTalkRequest.configuration:type_name -> talk_api.ConversationConfiguration
+	24, // 35: talk_api.AssistantTalkRequest.message:type_name -> talk_api.ConversationUserMessage
+	9,  // 36: talk_api.AssistantTalkRequest.metadata:type_name -> talk_api.ConversationMetadata
+	8,  // 37: talk_api.AssistantTalkRequest.metric:type_name -> talk_api.ConversationMetric
+	22, // 38: talk_api.AssistantTalkRequest.disconnection:type_name -> talk_api.ConversationDisconnection
+	7,  // 39: talk_api.AssistantTalkRequest.toolCallResult:type_name -> talk_api.ConversationToolCallResult
+	11, // 40: talk_api.AssistantTalkRequest.bridgeOperatorAudio:type_name -> talk_api.ConversationBridgeOperatorAudio
+	10, // 41: talk_api.AssistantTalkRequest.bridgeUserAudio:type_name -> talk_api.ConversationBridgeUserAudio
+	19, // 42: talk_api.AssistantTalkResponse.initialization:type_name -> talk_api.ConversationInitialization
+	20, // 43: talk_api.AssistantTalkResponse.configuration:type_name -> talk_api.ConversationConfiguration
+	21, // 44: talk_api.AssistantTalkResponse.interruption:type_name -> talk_api.ConversationInterruption
+	24, // 45: talk_api.AssistantTalkResponse.user:type_name -> talk_api.ConversationUserMessage
+	23, // 46: talk_api.AssistantTalkResponse.assistant:type_name -> talk_api.ConversationAssistantMessage
+	6,  // 47: talk_api.AssistantTalkResponse.toolCall:type_name -> talk_api.ConversationToolCall
+	7,  // 48: talk_api.AssistantTalkResponse.toolCallResult:type_name -> talk_api.ConversationToolCallResult
+	9,  // 49: talk_api.AssistantTalkResponse.metadata:type_name -> talk_api.ConversationMetadata
+	8,  // 50: talk_api.AssistantTalkResponse.metric:type_name -> talk_api.ConversationMetric
+	22, // 51: talk_api.AssistantTalkResponse.disconnection:type_name -> talk_api.ConversationDisconnection
+	13, // 52: talk_api.AssistantTalkResponse.event:type_name -> talk_api.ConversationEvent
+	12, // 53: talk_api.AssistantTalkResponse.error:type_name -> talk_api.ConversationError
+	47, // 54: talk_api.CreateMessageMetricRequest.metrics:type_name -> Metric
+	47, // 55: talk_api.CreateMessageMetricResponse.data:type_name -> Metric
+	50, // 56: talk_api.CreateMessageMetricResponse.error:type_name -> Error
+	47, // 57: talk_api.CreateConversationMetricRequest.metrics:type_name -> Metric
+	47, // 58: talk_api.CreateConversationMetricResponse.data:type_name -> Metric
+	50, // 59: talk_api.CreateConversationMetricResponse.error:type_name -> Error
+	49, // 60: talk_api.CreatePhoneCallRequest.assistant:type_name -> AssistantDefinition
+	43, // 61: talk_api.CreatePhoneCallRequest.metadata:type_name -> talk_api.CreatePhoneCallRequest.MetadataEntry
+	44, // 62: talk_api.CreatePhoneCallRequest.args:type_name -> talk_api.CreatePhoneCallRequest.ArgsEntry
+	45, // 63: talk_api.CreatePhoneCallRequest.options:type_name -> talk_api.CreatePhoneCallRequest.OptionsEntry
+	51, // 64: talk_api.CreatePhoneCallResponse.data:type_name -> AssistantConversation
+	50, // 65: talk_api.CreatePhoneCallResponse.error:type_name -> Error
+	32, // 66: talk_api.CreateBulkPhoneCallRequest.phoneCalls:type_name -> talk_api.CreatePhoneCallRequest
+	51, // 67: talk_api.CreateBulkPhoneCallResponse.data:type_name -> AssistantConversation
+	50, // 68: talk_api.CreateBulkPhoneCallResponse.error:type_name -> Error
+	52, // 69: talk_api.ConversationInitialization.MetadataEntry.value:type_name -> google.protobuf.Any
+	52, // 70: talk_api.ConversationInitialization.ArgsEntry.value:type_name -> google.protobuf.Any
+	52, // 71: talk_api.ConversationInitialization.OptionsEntry.value:type_name -> google.protobuf.Any
+	52, // 72: talk_api.CreatePhoneCallRequest.MetadataEntry.value:type_name -> google.protobuf.Any
+	52, // 73: talk_api.CreatePhoneCallRequest.ArgsEntry.value:type_name -> google.protobuf.Any
+	52, // 74: talk_api.CreatePhoneCallRequest.OptionsEntry.value:type_name -> google.protobuf.Any
+	26, // 75: talk_api.TalkService.AssistantTalk:input_type -> talk_api.AssistantTalkRequest
+	53, // 76: talk_api.TalkService.GetAllAssistantConversation:input_type -> GetAllAssistantConversationRequest
+	54, // 77: talk_api.TalkService.GetAllConversationMessage:input_type -> GetAllConversationMessageRequest
+	28, // 78: talk_api.TalkService.CreateMessageMetric:input_type -> talk_api.CreateMessageMetricRequest
+	30, // 79: talk_api.TalkService.CreateConversationMetric:input_type -> talk_api.CreateConversationMetricRequest
+	32, // 80: talk_api.TalkService.CreatePhoneCall:input_type -> talk_api.CreatePhoneCallRequest
+	34, // 81: talk_api.TalkService.CreateBulkPhoneCall:input_type -> talk_api.CreateBulkPhoneCallRequest
+	27, // 82: talk_api.TalkService.AssistantTalk:output_type -> talk_api.AssistantTalkResponse
+	55, // 83: talk_api.TalkService.GetAllAssistantConversation:output_type -> GetAllAssistantConversationResponse
+	56, // 84: talk_api.TalkService.GetAllConversationMessage:output_type -> GetAllConversationMessageResponse
+	29, // 85: talk_api.TalkService.CreateMessageMetric:output_type -> talk_api.CreateMessageMetricResponse
+	31, // 86: talk_api.TalkService.CreateConversationMetric:output_type -> talk_api.CreateConversationMetricResponse
+	33, // 87: talk_api.TalkService.CreatePhoneCall:output_type -> talk_api.CreatePhoneCallResponse
+	35, // 88: talk_api.TalkService.CreateBulkPhoneCall:output_type -> talk_api.CreateBulkPhoneCallResponse
+	82, // [82:89] is the sub-list for method output_type
+	75, // [75:82] is the sub-list for method input_type
+	75, // [75:75] is the sub-list for extension type_name
+	75, // [75:75] is the sub-list for extension extendee
+	0,  // [0:75] is the sub-list for field type_name
 }
 
 func init() { file_talk_api_proto_init() }

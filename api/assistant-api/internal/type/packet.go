@@ -85,9 +85,8 @@ func (f UserTextReceivedPacket) Role() string      { return "user" }
 
 // UserAudioReceivedPacket carries raw audio input from the user (e.g. via WebRTC).
 type UserAudioReceivedPacket struct {
-	ContextID    string
-	Audio        []byte
-	NoiseReduced bool
+	ContextID string
+	Audio     []byte
 }
 
 func (f UserAudioReceivedPacket) ContextId() string { return f.ContextID }
@@ -115,10 +114,9 @@ func (f DenoiseAudioPacket) ContextId() string { return f.ContextID }
 // The denoiser pushes this via onPacket instead of returning bytes to the caller.
 // On error the denoiser falls back to the original audio with NoiseReduced=false.
 type DenoisedAudioPacket struct {
-	ContextID    string
-	Audio        []byte
-	Confidence   float64
-	NoiseReduced bool
+	ContextID  string
+	Audio      []byte
+	Confidence float64
 }
 
 func (f DenoisedAudioPacket) ContextId() string { return f.ContextID }
@@ -993,20 +991,27 @@ func (f TextToSpeechEndPacket) ContextId() string { return f.ContextID }
 type RecordUserAudioPacket struct {
 	ContextID string
 	Audio     []byte
+	Timestamp time.Time
 }
 
 func (f RecordUserAudioPacket) ContextId() string { return f.ContextID }
 
 // RecordAssistantAudioPacket carries an assistant audio chunk to the recorder.
-// When Truncate is true, the recorder trims buffered assistant audio at the current
-// wall-clock position, mirroring the streamer's ClearOutputBuffer on interruption.
 type RecordAssistantAudioPacket struct {
 	ContextID string
 	Audio     []byte
-	Truncate  bool
+	Timestamp time.Time
 }
 
 func (f RecordAssistantAudioPacket) ContextId() string { return f.ContextID }
+
+// ConversationRecordingCompletedPacket carries finalized recording audio for persistence.
+type ConversationRecordingCompletedPacket struct {
+	ContextID string
+	Audio     ConversationRecordingAudio
+}
+
+func (f ConversationRecordingCompletedPacket) ContextId() string { return f.ContextID }
 
 // =============================================================================
 // Persistence

@@ -51,7 +51,6 @@ func NewDeploymentServiceClientGRPC(config *config.AppConfig, logger commons.Log
 }
 
 func (dsc *deploymentServiceClient) Invoke(ctx context.Context, auth types.SimplePrinciple, iRequest *endpoint_api.InvokeRequest) (*endpoint_api.InvokeResponse, error) {
-	dsc.logger.Debugf("invoke api for endpoint")
 	res, err := dsc.deploymentClient.Invoke(dsc.WithAuth(ctx, auth), iRequest)
 	if err != nil {
 		dsc.logger.Errorf("error while calling invoke endpoint %v", err)

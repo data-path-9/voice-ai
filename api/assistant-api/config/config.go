@@ -27,12 +27,20 @@ type SIPConfig struct {
 }
 
 // WebRTCConfig holds WebRTC ICE configuration for production cloud deployments.
-// On EC2, Pion only sees the private IP; set PublicIP to the instance's public/elastic IP
+// On EC2, Pion only sees the private IP; set ExternalIP to the public/elastic IP
 // so Pion advertises it in host candidates instead of the unreachable private IP.
 type WebRTCConfig struct {
-	ExternalIP        string `mapstructure:"external_ip"`
-	UDPPortRangeStart int    `mapstructure:"udp_port_range_start"`
-	UDPPortRangeEnd   int    `mapstructure:"udp_port_range_end"`
+	ExternalIP         string            `mapstructure:"external_ip"`
+	UDPPortRangeStart  int               `mapstructure:"udp_port_range_start"`
+	UDPPortRangeEnd    int               `mapstructure:"udp_port_range_end"`
+	ICEServers         []WebRTCICEServer `mapstructure:"ice_servers"`
+	ICETransportPolicy string            `mapstructure:"ice_transport_policy"`
+}
+
+type WebRTCICEServer struct {
+	URLs       []string `mapstructure:"urls"`
+	Username   string   `mapstructure:"username"`
+	Credential string   `mapstructure:"credential"`
 }
 
 type AudioSocketConfig struct {

@@ -15,7 +15,7 @@
 //   - inputAudioBuffer / outputAudioBuffer — PCM accumulation with configurable thresholds
 //   - FlushAudioCh — interrupt signalling for the output writer
 //   - Input / PushOutput — non-blocking type-routed sends into CriticalCh / InputCh / LowCh / OutputCh
-//   - BufferAndSendInput — accumulate input PCM, flush at threshold into InputCh
+//   - BufferAndSendInput — record input PCM, then flush buffered audio into InputCh
 //   - BufferAndSendOutput — accumulate output PCM, flush fixed-size 20 ms frames into OutputCh
 //   - ClearInputBuffer / ClearOutputBuffer — drain buffers and channels (interruption)
 //   - WithInputBuffer / WithOutputBuffer — synchronous buffer access under lock
@@ -56,6 +56,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -326,14 +327,22 @@ func NewBaseStreamer(logger commons.Logger, opts ...Option) BaseStreamer {
 // Input buffer helpers
 // ============================================================================
 
-// BufferAndSendInput accumulates resampled audio and sends it to InputCh
-// when the buffer reaches the configured input threshold.
+// BufferAndSendInput records resampled input audio, then sends buffered audio
+// to InputCh when the configured input threshold is reached.
 //
 // Hot-path optimisation: instead of make([]byte)+copy on every flush, we
 // swap the filled buffer with a pre-allocated empty one. The old buffer's
 // backing array is consumed by the channel reader and eventually GC'd —
 // but the swap avoids an explicit copy (the buffer already owns the data).
-func (s *BaseStreamer) BufferAndSendInput(audio []byte) {
+func (s *BaseStreamer) BufferAndSendInput(audio []byte, inputAudioReceivedAt time.Time) {
+	if inputAudioReceivedAt.IsZero() {
+		inputAudioReceivedAt = time.Now()
+	}
+	s.Input(&protos.ConversationBridgeUserAudio{
+		Audio: audio,
+		Time:  timestamppb.New(inputAudioReceivedAt),
+	})
+
 	s.inputAudioBufferLock.Lock()
 	s.inputAudioBuffer.Write(audio)
 
@@ -351,7 +360,7 @@ func (s *BaseStreamer) BufferAndSendInput(audio []byte) {
 
 	s.Input(&protos.ConversationUserMessage{
 		Message: &protos.ConversationUserMessage_Audio{Audio: audioData},
-		Time:    timestamppb.Now(),
+		Time:    timestamppb.New(inputAudioReceivedAt),
 	})
 }
 

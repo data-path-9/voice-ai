@@ -95,16 +95,20 @@ class ConversationMetadata(_message.Message):
     def __init__(self, assistantConversationId: _Optional[int] = ..., metadata: _Optional[_Iterable[_Union[_common_pb2.Metadata, _Mapping]]] = ...) -> None: ...
 
 class ConversationBridgeUserAudio(_message.Message):
-    __slots__ = ("audio",)
+    __slots__ = ("audio", "time")
     AUDIO_FIELD_NUMBER: _ClassVar[int]
+    TIME_FIELD_NUMBER: _ClassVar[int]
     audio: bytes
-    def __init__(self, audio: _Optional[bytes] = ...) -> None: ...
+    time: _timestamp_pb2.Timestamp
+    def __init__(self, audio: _Optional[bytes] = ..., time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class ConversationBridgeOperatorAudio(_message.Message):
-    __slots__ = ("audio",)
+    __slots__ = ("audio", "time")
     AUDIO_FIELD_NUMBER: _ClassVar[int]
+    TIME_FIELD_NUMBER: _ClassVar[int]
     audio: bytes
-    def __init__(self, audio: _Optional[bytes] = ...) -> None: ...
+    time: _timestamp_pb2.Timestamp
+    def __init__(self, audio: _Optional[bytes] = ..., time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class ConversationError(_message.Message):
     __slots__ = ("assistantConversationId", "message", "details")

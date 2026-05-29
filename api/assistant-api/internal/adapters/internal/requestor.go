@@ -106,7 +106,7 @@ type genericRequestor struct {
 	inputNormalizer  internal_type.PacketNormalizer
 	outputNormalizer internal_type.PacketNormalizer
 
-	recorder internal_type.Recorder
+	conversationRecordingExecutor internal_type.ConversationRecordingExecutor
 
 	// executor
 	assistantAnalyseExecutors []internal_type.AnalysisExecutor

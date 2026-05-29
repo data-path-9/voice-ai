@@ -87,7 +87,6 @@ func TestRnnoiseDenoiser_PreservesLengthOnFirstChunk(t *testing.T) {
 
 	output, ok := captureDenoisedAudio(packets)
 	require.True(t, ok, "expected denoised audio packet")
-	assert.True(t, output.NoiseReduced)
 	assert.Len(t, output.Audio, len(input))
 	assert.False(t, hasDenoiseErrorEvent(packets), "unexpected denoise error event")
 }
@@ -127,7 +126,6 @@ func TestRnnoiseDenoiser_PreservesLengthAcrossCalls(t *testing.T) {
 
 		output, ok := captureDenoisedAudio(packets)
 		require.True(t, ok, "expected denoised audio packet for %s", chunk.name)
-		assert.True(t, output.NoiseReduced, chunk.name)
 		assert.Len(t, output.Audio, len(chunk.audio), chunk.name)
 		assert.False(t, hasDenoiseErrorEvent(packets), chunk.name)
 	}

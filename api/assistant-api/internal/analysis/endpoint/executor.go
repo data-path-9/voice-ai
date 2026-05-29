@@ -73,7 +73,6 @@ func (e *runtimeExecutor) GetEndpointVersion() (string, error) {
 
 // Execute runs one analysis and pushes metadata via callback packet.
 func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.ExecuteAnalysisPacket) error {
-
 	endpointID, err := e.GetEndpointId()
 	if err != nil {
 		return fmt.Errorf("failed to get endpoint ID: %w", err)
