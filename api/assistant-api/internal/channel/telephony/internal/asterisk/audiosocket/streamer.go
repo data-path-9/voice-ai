@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
@@ -85,33 +86,32 @@ func NewStreamer(
 		initialUUID:    cc.ContextID,
 	}
 	as.ctx, as.cancel = context.WithCancel(as.Ctx)
-
-	audioProcessor.SetOutputChunkCallback(as.sendAudioChunk)
-	as.mediaSession = internal_telephony_media.NewMediaSession(as.ctx, logger, audioProcessor, nil)
-	as.mediaSession.SetInputSink(func(audio []byte) {
-		as.Input(&protos.ConversationUserMessage{
-			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
-		})
-	})
-	as.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
-		if event != nil {
-			if event.Data == nil {
-				event.Data = map[string]string{}
+	as.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     as.ctx,
+		Logger:      logger,
+		MediaEngine: audioProcessor,
+		StreamSink:  as.Input,
+		OutputSink:  as.sendOutputFrame,
+		EventSink: func(event *protos.ConversationEvent) {
+			if event != nil {
+				if event.Data == nil {
+					event.Data = map[string]string{}
+				}
+				event.Data["provider"] = "asterisk_as"
 			}
-			event.Data["provider"] = "asterisk_as"
-		}
-		as.Input(event)
+			as.Input(event)
+		},
 	})
 	as.mediaSession.Start()
 	go as.runFrameReader()
 	return as, nil
 }
 
-func (as *Streamer) sendAudioChunk(chunk *internal_asterisk.AudioChunk) error {
-	if as.conn == nil {
+func (as *Streamer) sendOutputFrame(frame internal_telephony_media.AssistantOutputFrame) error {
+	if as.conn == nil || len(frame.ProviderAudio) == 0 {
 		return nil
 	}
-	if err := as.writeFrame(FrameTypeAudio, chunk.Data); err != nil {
+	if err := as.writeFrame(FrameTypeAudio, frame.ProviderAudio); err != nil {
 		// Connection dead — stop media session output sender.
 		if as.mediaSession != nil {
 			as.mediaSession.Shutdown()
@@ -175,7 +175,10 @@ func (as *Streamer) runFrameReader() {
 			if as.mediaSession == nil {
 				continue
 			}
-			if err := as.mediaSession.HandleProviderAudio(frame.Payload); err != nil {
+			if err := as.mediaSession.HandleProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+				Audio:      frame.Payload,
+				ReceivedAt: time.Now(),
+			}); err != nil {
 				as.Logger.Debug("Failed to process input audio", "error", err.Error())
 				continue
 			}

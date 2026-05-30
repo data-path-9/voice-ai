@@ -1,4 +1,4 @@
-package internal_exotel
+package internal_telnyx
 
 import (
 	"testing"

@@ -7,11 +7,11 @@
 package internal_twilio_telephony
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
@@ -27,13 +27,11 @@ import (
 
 type twilioWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
-
 	mediaSession *internal_telephony_media.MediaSession
-
-	streamID   string
-	connection *websocket.Conn
-	writeMu    sync.Mutex
-	closed     atomic.Bool
+	streamID     string
+	connection   *websocket.Conn
+	writeMu      sync.Mutex
+	closed       atomic.Bool
 }
 
 func NewTwilioWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential) (internal_type.Streamer, error) {
@@ -48,23 +46,24 @@ func NewTwilioWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 		streamID:   "",
 		connection: connection,
 	}
-	audioProcessor.SetOutputChunkCallback(tws.sendAudioChunk)
-	tws.mediaSession = internal_telephony_media.NewMediaSession(context.Background(), logger, audioProcessor, func() error {
-		return tws.sendTwilioMessage("clear", nil)
-	})
-	tws.mediaSession.SetInputSink(func(audio []byte) {
-		tws.Input(&protos.ConversationUserMessage{
-			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
-		})
-	})
-	tws.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
-		if event != nil {
-			if event.Data == nil {
-				event.Data = map[string]string{}
+	tws.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     tws.Ctx,
+		Logger:      logger,
+		MediaEngine: audioProcessor,
+		SendProviderClear: func() error {
+			return tws.sendTwilioMessage("clear", nil)
+		},
+		StreamSink: tws.Input,
+		OutputSink: tws.sendOutputFrame,
+		EventSink: func(event *protos.ConversationEvent) {
+			if event != nil {
+				if event.Data == nil {
+					event.Data = map[string]string{}
+				}
+				event.Data["provider"] = "twilio"
 			}
-			event.Data["provider"] = "twilio"
-		}
-		tws.Input(event)
+			tws.Input(event)
+		},
 	})
 	go tws.runWebSocketReader()
 	return tws, nil
@@ -78,16 +77,15 @@ func (tws *twilioWebsocketStreamer) runWebSocketReader() {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			tws.stopAudioProcessing()
 			if msg := tws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				tws.Input(msg)
 			}
-			tws.BaseStreamer.Cancel()
+			tws.Cancel()
 			return
 		}
 		var mediaEvent internal_twilio.TwilioMediaEvent
 		if err := json.Unmarshal(message, &mediaEvent); err != nil {
-			tws.Logger.Error("Failed to unmarshal Twilio media event", "error", err.Error())
+			tws.Logger.Errorw("Failed to unmarshal Twilio media event", "error", err)
 			continue
 		}
 		switch mediaEvent.Event {
@@ -109,7 +107,13 @@ func (tws *twilioWebsocketStreamer) runWebSocketReader() {
 				Time: timestamppb.Now(),
 			})
 		case "media":
-			_ = tws.handleMediaEvent(mediaEvent)
+			if err := tws.handleMediaEvent(mediaEvent); err != nil {
+				tws.Logger.Errorw("Failed to process Twilio media frame",
+					"error", err,
+					"stream_id", tws.streamID,
+					"conversation_uuid", tws.GetConversationUuid(),
+				)
+			}
 		case "stop":
 			tws.Logger.Info("Twilio stream stopped")
 			if msg := tws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
@@ -124,9 +128,6 @@ func (tws *twilioWebsocketStreamer) runWebSocketReader() {
 }
 
 func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
-	if tws.connection == nil {
-		return nil
-	}
 	switch data := response.(type) {
 	case *protos.ConversationInitialization:
 		if tws.mediaSession != nil {
@@ -154,11 +155,25 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 		// (it called Notify with it). No need to round-trip back through
 		// CriticalCh — just notify the carrier via Hangup and clean up.
 		_ = tws.Disconnect(data.GetType())
-		if tws.GetConversationUuid() != "" {
-			if client, err := twilioClient(tws.VaultCredential()); err == nil {
-				params := &openapi.UpdateCallParams{}
-				params.SetStatus("completed")
-				client.Api.UpdateCall(tws.GetConversationUuid(), params)
+		conversationUUID := tws.GetConversationUuid()
+		if conversationUUID != "" {
+			twilioRestClient, err := twilioClient(tws.VaultCredential())
+			if err != nil {
+				tws.Logger.Errorw("Failed to create Twilio client for server-side disconnect",
+					"error", err,
+					"conversation_uuid", conversationUUID,
+					"disconnection_type", data.GetType().String(),
+				)
+			} else {
+				updateCallParams := &openapi.UpdateCallParams{}
+				updateCallParams.SetStatus("completed")
+				if _, err := twilioRestClient.Api.UpdateCall(conversationUUID, updateCallParams); err != nil {
+					tws.Logger.Errorw("Failed to end Twilio call on server-side disconnect",
+						"error", err,
+						"conversation_uuid", conversationUUID,
+						"disconnection_type", data.GetType().String(),
+					)
+				}
 			}
 		}
 		tws.stopAudioProcessing()
@@ -167,16 +182,23 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 		switch data.GetAction() {
 		case protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION:
 			result := map[string]string{"status": "completed"}
-			if tws.GetConversationUuid() != "" {
+			conversationUUID := tws.GetConversationUuid()
+			if conversationUUID != "" {
 				client, err := twilioClient(tws.VaultCredential())
 				if err != nil {
-					tws.Logger.Errorf("Error creating Twilio client:", err)
+					tws.Logger.Errorw("Failed to create Twilio client for end conversation",
+						"error", err,
+						"conversation_uuid", conversationUUID,
+					)
 					result = map[string]string{"status": "failed", "reason": fmt.Sprintf("twilio client error: %v", err)}
 				} else {
 					params := &openapi.UpdateCallParams{}
 					params.SetStatus("completed")
-					if _, err := client.Api.UpdateCall(tws.GetConversationUuid(), params); err != nil {
-						tws.Logger.Errorf("Error ending Twilio call:", err)
+					if _, err := client.Api.UpdateCall(conversationUUID, params); err != nil {
+						tws.Logger.Errorw("Failed to end Twilio call",
+							"error", err,
+							"conversation_uuid", conversationUUID,
+						)
 						result = map[string]string{"status": "failed", "reason": fmt.Sprintf("end call failed: %v", err)}
 					}
 				}
@@ -189,19 +211,8 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 				Result: result,
 			})
 		case protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION:
-			// Twilio transfer is a blind transfer via REST `UpdateCall` with TwiML
-			// `<Dial>`. Twilio takes over the leg; the AI WebSocket is closed by
-			// Cancel() below and cannot be resumed. As a result, only
-			// post_transfer_action=end_call is meaningful — resume_ai is NOT
-			// supported on Twilio. Supporting resume_ai would require a TwiML
-			// `<Dial action="...">` callback that hands the leg back to a fresh
-			// assistant Stream on hangup (not implemented).
-			//
-			// Multi-target failover (try t1, on failure try t2 …) is NOT
-			// supported either: once the redirect is dispatched, the WebSocket
-			// is closed and we lose the ability to retry. Only the first
-			// target from a SEPARATOR-joined transfer_to is dialed; the rest
-			// are dropped with a warning.
+			// Twilio transfer is one-way: the carrier owns the leg after REST redirect.
+			// Only the first transfer target is attempted; resume/failover is unsupported.
 			raw := data.GetArgs()["transfer_to"]
 			targets := tws.SplitTransferTargets(raw)
 			if raw == "" || len(targets) == 0 || tws.GetConversationUuid() == "" {
@@ -277,12 +288,12 @@ func (tws *twilioWebsocketStreamer) Cancel() error {
 	return nil
 }
 
-func (tws *twilioWebsocketStreamer) sendAudioChunk(chunk *internal_twilio.AudioChunk) error {
-	if chunk == nil || len(chunk.Data) == 0 {
+func (tws *twilioWebsocketStreamer) sendOutputFrame(frame internal_telephony_media.AssistantOutputFrame) error {
+	if len(frame.ProviderAudio) == 0 {
 		return nil
 	}
-	return tws.sendTwilioMessage("media", map[string]interface{}{
-		"payload": tws.Encoder().EncodeToString(chunk.Data),
+	return tws.sendTwilioMessage("media", &internal_twilio.TwilioOutboundMedia{
+		Payload: tws.Encoder().EncodeToString(frame.ProviderAudio),
 	})
 }
 
@@ -293,6 +304,10 @@ func (tws *twilioWebsocketStreamer) stopAudioProcessing() {
 }
 
 func (tws *twilioWebsocketStreamer) handleMediaEvent(mediaEvent internal_twilio.TwilioMediaEvent) error {
+	if mediaEvent.Media == nil {
+		tws.Logger.Warn("Twilio media event missing media payload")
+		return nil
+	}
 	payloadBytes, err := tws.Encoder().DecodeString(mediaEvent.Media.Payload)
 	if err != nil {
 		tws.Logger.Warn("Failed to decode media payload", "error", err.Error())
@@ -302,7 +317,10 @@ func (tws *twilioWebsocketStreamer) handleMediaEvent(mediaEvent internal_twilio.
 	if tws.mediaSession == nil {
 		return nil
 	}
-	if err := tws.mediaSession.HandleProviderAudio(payloadBytes); err != nil {
+	if err := tws.mediaSession.HandleProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+		Audio:      payloadBytes,
+		ReceivedAt: time.Now(),
+	}); err != nil {
 		return err
 	}
 	return nil
@@ -310,21 +328,19 @@ func (tws *twilioWebsocketStreamer) handleMediaEvent(mediaEvent internal_twilio.
 
 func (tws *twilioWebsocketStreamer) sendTwilioMessage(
 	eventType string,
-	mediaData map[string]interface{}) error {
-	if tws.connection == nil || tws.streamID == "" {
+	mediaData *internal_twilio.TwilioOutboundMedia,
+) error {
+	if tws.streamID == "" {
 		return nil
 	}
-	message := map[string]interface{}{
-		"event":     eventType,
-		"streamSid": tws.streamID,
-	}
-	if mediaData != nil {
-		message["media"] = mediaData
-	}
-
-	twilioMessageJSON, err := json.Marshal(message)
+	twilioMessageJSON, err := json.Marshal(internal_twilio.TwilioOutboundMessage{
+		Event:    eventType,
+		StreamID: tws.streamID,
+		Media:    mediaData,
+	})
 	if err != nil {
-		return tws.handleError("Failed to marshal Twilio message", err)
+		tws.Logger.Errorw("Failed to marshal Twilio message", "error", err)
+		return err
 	}
 
 	tws.writeMu.Lock()
@@ -333,13 +349,9 @@ func (tws *twilioWebsocketStreamer) sendTwilioMessage(
 		return nil
 	}
 	if err := tws.connection.WriteMessage(websocket.TextMessage, twilioMessageJSON); err != nil {
-		return tws.handleError("Failed to send message to Twilio", err)
+		tws.Logger.Errorw("Failed to send message to Twilio", "error", err)
+		return err
 	}
 
 	return nil
-}
-
-func (tws *twilioWebsocketStreamer) handleError(message string, err error) error {
-	tws.Logger.Error(message, "error", err.Error())
-	return err
 }

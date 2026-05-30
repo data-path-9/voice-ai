@@ -1,64 +1,31 @@
 package internal_vonage
 
 import (
-	"context"
-	"sync/atomic"
 	"testing"
-	"time"
+
+	internal_telephony_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
 )
 
-func TestRunOutputSender_IsIdempotent(t *testing.T) {
-	p, err := NewAudioProcessor(nil)
+func TestAudioProcessor_OutputHealthObserverRecordsTicks(t *testing.T) {
+	audioProcessor, err := NewAudioProcessor(nil)
 	if err != nil {
 		t.Fatalf("NewAudioProcessor error: %v", err)
 	}
 
-	var inFlight atomic.Int32
-	var maxInFlight atomic.Int32
+	audioProcessor.OnTickHealth(internal_telephony_output.TickHealth{Active: true})
+	audioProcessor.OnTickHealth(internal_telephony_output.TickHealth{Idle: true, SendError: true})
 
-	p.SetOutputChunkCallback(func(_ *AudioChunk) error {
-		cur := inFlight.Add(1)
-		for {
-			prev := maxInFlight.Load()
-			if cur <= prev || maxInFlight.CompareAndSwap(prev, cur) {
-				break
-			}
-		}
-		time.Sleep(30 * time.Millisecond)
-		inFlight.Add(-1)
-		return nil
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done1 := make(chan struct{})
-	done2 := make(chan struct{})
-	go func() {
-		p.RunOutputSender(ctx)
-		close(done1)
-	}()
-	go func() {
-		p.RunOutputSender(ctx)
-		close(done2)
-	}()
-
-	time.Sleep(110 * time.Millisecond)
-	cancel()
-
-	select {
-	case <-done1:
-	case <-time.After(300 * time.Millisecond):
-		t.Fatal("first sender did not stop")
+	stats := audioProcessor.OutputHealthSnapshot()
+	if stats.Ticks != 2 {
+		t.Fatalf("ticks=%d want=2", stats.Ticks)
 	}
-	select {
-	case <-done2:
-	case <-time.After(300 * time.Millisecond):
-		t.Fatal("second sender did not stop")
+	if stats.ActiveTicks != 1 {
+		t.Fatalf("activeTicks=%d want=1", stats.ActiveTicks)
 	}
-
-	if got := maxInFlight.Load(); got > 1 {
-		t.Fatalf("expected at most one sender loop; max concurrent callbacks=%d", got)
+	if stats.IdleTicks != 1 {
+		t.Fatalf("idleTicks=%d want=1", stats.IdleTicks)
 	}
-	if stats := p.OutputHealthSnapshot(); stats.Ticks == 0 {
-		t.Fatal("expected output health ticks to be recorded")
+	if stats.SendErrors != 1 {
+		t.Fatalf("sendErrors=%d want=1", stats.SendErrors)
 	}
 }

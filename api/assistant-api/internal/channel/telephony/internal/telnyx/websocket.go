@@ -7,11 +7,11 @@
 package internal_telnyx_telephony
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
@@ -23,39 +23,6 @@ import (
 	"github.com/rapidaai/protos"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-// TelnyxWebSocketEvent represents a Telnyx WebSocket event.
-type TelnyxWebSocketEvent struct {
-	Event    string            `json:"event"`
-	StreamID string            `json:"stream_id"`
-	Start    *TelnyxStartEvent `json:"start,omitempty"`
-	Media    *TelnyxMediaEvent `json:"media,omitempty"`
-	Stop     *TelnyxStopEvent  `json:"stop,omitempty"`
-}
-
-// TelnyxStartEvent contains the start event details.
-type TelnyxStartEvent struct {
-	CallControlID string            `json:"call_control_id"`
-	MediaFormat   TelnyxMediaFormat `json:"media_format"`
-}
-
-// TelnyxMediaFormat describes the audio format.
-type TelnyxMediaFormat struct {
-	Encoding   string `json:"encoding"`
-	SampleRate int    `json:"sample_rate"`
-	Channels   int    `json:"channels"`
-}
-
-// TelnyxMediaEvent contains the media event details.
-type TelnyxMediaEvent struct {
-	Track   string `json:"track"`
-	Payload string `json:"payload"`
-}
-
-// TelnyxStopEvent contains the stop event details.
-type TelnyxStopEvent struct {
-	CallControlID string `json:"call_control_id"`
-}
 
 type telnyxWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
@@ -72,10 +39,10 @@ type telnyxWebsocketStreamer struct {
 
 // NewTelnyxWebsocketStreamer creates a Telnyx WebSocket streamer.
 // Telnyx sends PCMU 8kHz, matching Twilio's provider audio format.
-func NewTelnyxWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential) internal_type.Streamer {
+func NewTelnyxWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential) (internal_type.Streamer, error) {
 	audioProcessor, err := internal_telnyx.NewAudioProcessor(logger)
 	if err != nil {
-		logger.Errorf("failed to initialize Telnyx audio processor: %v", err)
+		return nil, fmt.Errorf("failed to initialize Telnyx audio processor: %w", err)
 	}
 
 	tws := &telnyxWebsocketStreamer{
@@ -89,17 +56,16 @@ func NewTelnyxWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 		},
 	}
 
-	if audioProcessor != nil {
-		audioProcessor.SetOutputChunkCallback(tws.sendAudioChunk)
-		tws.mediaSession = internal_telephony_media.NewMediaSession(context.Background(), logger, audioProcessor, func() error {
+	tws.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     tws.Ctx,
+		Logger:      logger,
+		MediaEngine: audioProcessor,
+		SendProviderClear: func() error {
 			return tws.sendTelnyxMessage("clear", nil)
-		})
-		tws.mediaSession.SetInputSink(func(audio []byte) {
-			tws.Input(&protos.ConversationUserMessage{
-				Message: &protos.ConversationUserMessage_Audio{Audio: audio},
-			})
-		})
-		tws.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
+		},
+		StreamSink: tws.Input,
+		OutputSink: tws.sendOutputFrame,
+		EventSink: func(event *protos.ConversationEvent) {
 			if event != nil {
 				if event.Data == nil {
 					event.Data = map[string]string{}
@@ -107,11 +73,11 @@ func NewTelnyxWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 				event.Data["provider"] = "telnyx"
 			}
 			tws.Input(event)
-		})
-	}
+		},
+	})
 
 	go tws.runWebSocketReader()
-	return tws
+	return tws, nil
 }
 
 func (tws *telnyxWebsocketStreamer) runWebSocketReader() {
@@ -136,7 +102,7 @@ func (tws *telnyxWebsocketStreamer) runWebSocketReader() {
 			continue
 		}
 
-		var mediaEvent TelnyxWebSocketEvent
+		var mediaEvent internal_telnyx.TelnyxWebSocketEvent
 		if err := json.Unmarshal(message, &mediaEvent); err != nil {
 			tws.Logger.Error("Failed to unmarshal Telnyx media event", "error", err.Error())
 			continue
@@ -166,7 +132,14 @@ func (tws *telnyxWebsocketStreamer) runWebSocketReader() {
 				Time: timestamppb.Now(),
 			})
 		case "media":
-			_ = tws.handleMediaEvent(mediaEvent)
+			if err := tws.handleMediaEvent(mediaEvent); err != nil {
+				tws.Logger.Errorw("Failed to process Telnyx media frame",
+					"error", err,
+					"stream_id", tws.streamID,
+					"call_control_id", tws.callControlID,
+					"conversation_uuid", tws.GetConversationUuid(),
+				)
+			}
 		case "dtmf":
 			tws.Input(&protos.ConversationEvent{
 				Name: "channel",
@@ -252,7 +225,7 @@ func (tws *telnyxWebsocketStreamer) Send(response internal_type.Stream) error {
 	return nil
 }
 
-func (tws *telnyxWebsocketStreamer) handleStartEvent(mediaEvent TelnyxWebSocketEvent) {
+func (tws *telnyxWebsocketStreamer) handleStartEvent(mediaEvent internal_telnyx.TelnyxWebSocketEvent) {
 	tws.streamID = mediaEvent.StreamID
 	if mediaEvent.Start == nil {
 		return
@@ -261,10 +234,11 @@ func (tws *telnyxWebsocketStreamer) handleStartEvent(mediaEvent TelnyxWebSocketE
 	tws.ChannelUUID = mediaEvent.Start.CallControlID
 }
 
-func (tws *telnyxWebsocketStreamer) handleMediaEvent(mediaEvent TelnyxWebSocketEvent) error {
+func (tws *telnyxWebsocketStreamer) handleMediaEvent(mediaEvent internal_telnyx.TelnyxWebSocketEvent) error {
 	if mediaEvent.Media == nil {
 		return nil
 	}
+	receivedAt := time.Now()
 	payloadBytes, err := tws.Encoder().DecodeString(mediaEvent.Media.Payload)
 	if err != nil {
 		tws.Logger.Warn("Failed to decode media payload", "error", err.Error())
@@ -274,31 +248,32 @@ func (tws *telnyxWebsocketStreamer) handleMediaEvent(mediaEvent TelnyxWebSocketE
 	if tws.mediaSession == nil {
 		return nil
 	}
-	if err := tws.mediaSession.HandleProviderAudio(payloadBytes); err != nil {
+	if err := tws.mediaSession.HandleProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+		Audio:      payloadBytes,
+		ReceivedAt: receivedAt,
+	}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tws *telnyxWebsocketStreamer) sendAudioChunk(chunk *internal_telnyx.AudioChunk) error {
-	if chunk == nil || len(chunk.Data) == 0 {
+func (tws *telnyxWebsocketStreamer) sendOutputFrame(frame internal_telephony_media.AssistantOutputFrame) error {
+	if len(frame.ProviderAudio) == 0 {
 		return nil
 	}
-	return tws.sendTelnyxMessage("media", map[string]interface{}{
-		"payload": tws.Encoder().EncodeToString(chunk.Data),
+	return tws.sendTelnyxMessage("media", &internal_telnyx.TelnyxOutboundMedia{
+		Payload: tws.Encoder().EncodeToString(frame.ProviderAudio),
 	})
 }
 
-func (tws *telnyxWebsocketStreamer) sendTelnyxMessage(eventType string, mediaData map[string]interface{}) error {
+func (tws *telnyxWebsocketStreamer) sendTelnyxMessage(eventType string, mediaData *internal_telnyx.TelnyxOutboundMedia) error {
 	if tws.connection == nil || tws.streamID == "" {
 		return nil
 	}
-	message := map[string]interface{}{
-		"event":     eventType,
-		"stream_id": tws.streamID,
-	}
-	if mediaData != nil {
-		message["media"] = mediaData
+	message := internal_telnyx.TelnyxOutboundMessage{
+		Event:    eventType,
+		StreamID: tws.streamID,
+		Media:    mediaData,
 	}
 
 	messageJSON, err := json.Marshal(message)

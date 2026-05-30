@@ -65,7 +65,12 @@ func newTestStreamer(t *testing.T) (*Streamer, net.Conn) {
 		cancel:         cancel,
 		initialUUID:    "test-uuid",
 	}
-	as.mediaSession = internal_telephony_media.NewMediaSession(ctx, logger, audioProcessor, nil)
+	as.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     ctx,
+		Logger:      logger,
+		MediaEngine: audioProcessor,
+		OutputSink:  as.sendOutputFrame,
+	})
 
 	t.Cleanup(func() {
 		cancel()

@@ -65,39 +65,40 @@ func NewAsteriskWebsocketStreamer(
 		audioProcessor: audioProcessor,
 		connection:     connection,
 	}
-	audioProcessor.SetOutputChunkCallback(aws.sendAudioChunk)
-	aws.mediaSession = internal_telephony_media.NewMediaSession(aws.Ctx, logger, audioProcessor, func() error {
-		if aws.isMediaBuffering() {
-			return aws.sendCommand("STOP_MEDIA_BUFFERING")
-		}
-		return nil
-	})
-	aws.mediaSession.SetInputSink(func(audio []byte) {
-		aws.Input(&protos.ConversationUserMessage{
-			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
-		})
-	})
-	aws.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
-		if event != nil {
-			if event.Data == nil {
-				event.Data = map[string]string{}
+	aws.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     aws.Ctx,
+		Logger:      logger,
+		MediaEngine: audioProcessor,
+		SendProviderClear: func() error {
+			if aws.isMediaBuffering() {
+				return aws.sendCommand("STOP_MEDIA_BUFFERING")
 			}
-			event.Data["provider"] = "asterisk_ws"
-		}
-		aws.Input(event)
+			return nil
+		},
+		StreamSink: aws.Input,
+		OutputSink: aws.sendOutputFrame,
+		EventSink: func(event *protos.ConversationEvent) {
+			if event != nil {
+				if event.Data == nil {
+					event.Data = map[string]string{}
+				}
+				event.Data["provider"] = "asterisk_ws"
+			}
+			aws.Input(event)
+		},
 	})
 
 	go aws.runWebSocketReader()
 	return aws, nil
 }
 
-func (aws *asteriskWebsocketStreamer) sendAudioChunk(chunk *internal_asterisk.AudioChunk) error {
-	if aws.connection == nil {
+func (aws *asteriskWebsocketStreamer) sendOutputFrame(frame internal_telephony_media.AssistantOutputFrame) error {
+	if aws.connection == nil || len(frame.ProviderAudio) == 0 {
 		return nil
 	}
 	aws.writeMu.Lock()
 	defer aws.writeMu.Unlock()
-	return aws.connection.WriteMessage(websocket.BinaryMessage, chunk.Data)
+	return aws.connection.WriteMessage(websocket.BinaryMessage, frame.ProviderAudio)
 }
 
 func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
@@ -116,7 +117,14 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 		}
 		switch messageType {
 		case websocket.BinaryMessage:
-			_ = aws.handleAudioData(message)
+			if err := aws.handleAudioData(message); err != nil {
+				aws.Logger.Errorw("Failed to process Asterisk media frame",
+					"error", err,
+					"conversation_uuid", aws.ChannelUUID,
+					"channel_name", aws.channelName,
+					"payload_bytes", len(message),
+				)
+			}
 		case websocket.TextMessage:
 			event, err := internal_asterisk.ParseAsteriskEvent(string(message))
 			if err != nil {
@@ -190,9 +198,11 @@ func (aws *asteriskWebsocketStreamer) handleAudioData(audio []byte) error {
 	if aws.mediaSession == nil {
 		return nil
 	}
-	if err := aws.mediaSession.HandleProviderAudio(audio); err != nil {
-		aws.Logger.Debug("Failed to process input audio", "error", err.Error())
-		return nil
+	if err := aws.mediaSession.HandleProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+		Audio:      audio,
+		ReceivedAt: time.Now(),
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -249,18 +259,8 @@ func (aws *asteriskWebsocketStreamer) Send(response internal_type.Stream) error 
 				Result: result,
 			})
 		case protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION:
-			// Asterisk transfer is a blind transfer via ARI `channels/{id}/redirect`
-			// — the channel leaves Stasis for the dialplan extension we redirect
-			// to, and the AI WebSocket is closed by Cancel() below. The leg
-			// cannot be resumed by the AI. Only post_transfer_action=end_call is
-			// meaningful — resume_ai is NOT supported here. Supporting resume_ai
-			// would require an ARI Bridge + outbound channel + StasisEnd watch
-			// (B2BUA pattern, similar to sip/infra/bridge.go).
-			//
-			// Multi-target failover (try t1, on failure try t2 …) is NOT
-			// supported either: once the redirect is dispatched, the channel
-			// leaves Stasis. Only the first target from a SEPARATOR-joined
-			// transfer_to is dialed; the rest are dropped with a warning.
+			// Asterisk transfer is one-way: redirect leaves Stasis and closes the AI leg.
+			// Only the first transfer target is attempted; resume/failover is unsupported.
 			raw := data.GetArgs()["transfer_to"]
 			targets := aws.SplitTransferTargets(raw)
 			if raw == "" || len(targets) == 0 || aws.channelName == "" {

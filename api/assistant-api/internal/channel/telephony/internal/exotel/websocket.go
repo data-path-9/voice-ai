@@ -7,11 +7,11 @@
 package internal_exotel_telephony
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
@@ -46,23 +46,24 @@ func NewExotelWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 		streamID:   "",
 		connection: connection,
 	}
-	audioProcessor.SetOutputChunkCallback(exotel.sendAudioChunk)
-	exotel.mediaSession = internal_telephony_media.NewMediaSession(context.Background(), logger, audioProcessor, func() error {
-		return exotel.sendExotelMessage("clear", nil)
-	})
-	exotel.mediaSession.SetInputSink(func(audio []byte) {
-		exotel.Input(&protos.ConversationUserMessage{
-			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
-		})
-	})
-	exotel.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
-		if event != nil {
-			if event.Data == nil {
-				event.Data = map[string]string{}
+	exotel.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     exotel.Ctx,
+		Logger:      logger,
+		MediaEngine: audioProcessor,
+		SendProviderClear: func() error {
+			return exotel.sendExotelMessage("clear", nil)
+		},
+		StreamSink: exotel.Input,
+		OutputSink: exotel.sendOutputFrame,
+		EventSink: func(event *protos.ConversationEvent) {
+			if event != nil {
+				if event.Data == nil {
+					event.Data = map[string]string{}
+				}
+				event.Data["provider"] = "exotel"
 			}
-			event.Data["provider"] = "exotel"
-		}
-		exotel.Input(event)
+			exotel.Input(event)
+		},
 	})
 	go exotel.runWebSocketReader()
 	return exotel, nil
@@ -107,7 +108,13 @@ func (exotel *exotelWebsocketStreamer) runWebSocketReader() {
 				Time: timestamppb.Now(),
 			})
 		case "media":
-			_ = exotel.handleMediaEvent(mediaEvent)
+			if err := exotel.handleMediaEvent(mediaEvent); err != nil {
+				exotel.Logger.Errorw("Failed to process Exotel media frame",
+					"error", err,
+					"stream_id", exotel.streamID,
+					"conversation_uuid", exotel.ChannelUUID,
+				)
+			}
 		case "dtmf":
 			exotel.Input(&protos.ConversationEvent{
 				Name: "channel",
@@ -177,7 +184,9 @@ func (exotel *exotelWebsocketStreamer) Send(response internal_type.Stream) error
 			exotel.Logger.Warnw("Call transfer not supported for Exotel")
 			exotel.Input(&protos.ConversationToolCallResult{
 				Id:     data.GetId(),
-				ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
+				ToolId: data.GetToolId(),
+				Name:   data.GetName(),
+				Action: data.GetAction(),
 				Result: map[string]string{"status": "failed", "reason": "transfer not supported for Exotel", "next_action": "end_call"},
 			})
 		}
@@ -192,6 +201,11 @@ func (exotel *exotelWebsocketStreamer) handleStartEvent(mediaEvent internal_exot
 }
 
 func (exotel *exotelWebsocketStreamer) handleMediaEvent(mediaEvent internal_exotel.ExotelMediaEvent) error {
+	if mediaEvent.Media == nil {
+		exotel.Logger.Warn("Exotel media event missing media payload")
+		return nil
+	}
+	receivedAt := time.Now()
 	payloadBytes, err := exotel.Encoder().DecodeString(mediaEvent.Media.Payload)
 	if err != nil {
 		exotel.Logger.Warn("Failed to decode media payload", "error", err.Error())
@@ -201,22 +215,23 @@ func (exotel *exotelWebsocketStreamer) handleMediaEvent(mediaEvent internal_exot
 	if exotel.mediaSession == nil {
 		return nil
 	}
-	if err := exotel.mediaSession.HandleProviderAudio(payloadBytes); err != nil {
+	if err := exotel.mediaSession.HandleProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+		Audio:      payloadBytes,
+		ReceivedAt: receivedAt,
+	}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (exotel *exotelWebsocketStreamer) sendExotelMessage(eventType string, mediaData map[string]interface{}) error {
+func (exotel *exotelWebsocketStreamer) sendExotelMessage(eventType string, mediaData *internal_exotel.ExotelOutboundMedia) error {
 	if exotel.streamID == "" {
 		return nil
 	}
-	message := map[string]interface{}{
-		"event":     eventType,
-		"streamSid": exotel.streamID,
-	}
-	if mediaData != nil {
-		message["media"] = mediaData
+	message := internal_exotel.ExotelOutboundMessage{
+		Event:    eventType,
+		StreamID: exotel.streamID,
+		Media:    mediaData,
 	}
 	exotelMessageJSON, err := json.Marshal(message)
 	if err != nil {
@@ -254,12 +269,12 @@ func (exotel *exotelWebsocketStreamer) Cancel() error {
 	return nil
 }
 
-func (exotel *exotelWebsocketStreamer) sendAudioChunk(chunk *internal_exotel.AudioChunk) error {
-	if chunk == nil || len(chunk.Data) == 0 {
+func (exotel *exotelWebsocketStreamer) sendOutputFrame(frame internal_telephony_media.AssistantOutputFrame) error {
+	if len(frame.ProviderAudio) == 0 {
 		return nil
 	}
-	return exotel.sendExotelMessage("media", map[string]interface{}{
-		"payload": exotel.Encoder().EncodeToString(chunk.Data),
+	return exotel.sendExotelMessage("media", &internal_exotel.ExotelOutboundMedia{
+		Payload: exotel.Encoder().EncodeToString(frame.ProviderAudio),
 	})
 }
 

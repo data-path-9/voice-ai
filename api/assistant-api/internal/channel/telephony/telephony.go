@@ -140,7 +140,7 @@ func (at Telephony) NewStreamer(
 		}
 		return internal_asterisk_websocket.NewAsteriskWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred)
 	case Telnyx:
-		return internal_telnyx_telephony.NewTelnyxWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred), nil
+		return internal_telnyx_telephony.NewTelnyxWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred)
 	case SIP:
 		return internal_sip_telephony.NewStreamer(opt.Ctx, logger, opt.SIPSession, cc, vaultCred)
 	default:

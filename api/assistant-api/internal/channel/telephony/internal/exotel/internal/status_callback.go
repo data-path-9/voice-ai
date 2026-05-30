@@ -3,7 +3,7 @@
 //
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
-package internal_twilio
+package internal_exotel
 
 import (
 	"fmt"
@@ -15,42 +15,30 @@ import (
 	"github.com/rapidaai/pkg/validator"
 )
 
-type TwilioMediaEvent struct {
-	Event string `json:"event"`
-	Media struct {
-		Track     string `json:"track"`
-		Chunk     string `json:"chunk"`
-		Timestamp string `json:"timestamp"`
-		Payload   string `json:"payload"`
-	} `json:"media"`
-	StreamSid string `json:"streamSid"`
-}
-
 type StatusCallback struct {
 	Event        string
 	ChannelUUID  string
 	Duration     *time.Duration
 	Price        string
+	Cause        string
 	ErrorCode    string
 	ErrorMessage string
-	StreamError  string
 	Payload      utils.Option
 }
 
 func NewStatusCallback(eventDetails utils.Option) (*StatusCallback, error) {
-	event, _ := eventDetails.GetString("CallStatus")
-	streamEvent, _ := eventDetails.GetString("StreamEvent")
-	if validator.NotBlank(streamEvent) {
-		event = streamEvent
-	}
+	event, _ := eventDetails.GetString("Status")
 	if !validator.NotBlank(event) {
 		return nil, fmt.Errorf("status not found in payload")
 	}
 
 	channelUUID, _ := eventDetails.GetString("CallSid")
-	duration, err := eventDetails.GetDuration("CallDuration")
+	duration, err := eventDetails.GetDuration("ConversationDuration")
 	if err != nil {
 		duration, err = eventDetails.GetDuration("Duration")
+	}
+	if err != nil {
+		duration, err = eventDetails.GetDuration("CallDuration")
 	}
 	var durationPtr *time.Duration
 	if err == nil {
@@ -58,18 +46,18 @@ func NewStatusCallback(eventDetails utils.Option) (*StatusCallback, error) {
 	}
 
 	price, _ := eventDetails.GetString("Price")
-	errorCode, _ := eventDetails.GetString("ErrorCode")
+	cause, _ := eventDetails.GetString("Cause")
 	errorMessage, _ := eventDetails.GetString("ErrorMessage")
-	streamError, _ := eventDetails.GetString("StreamError")
+	errorCode, _ := eventDetails.GetString("ErrorCode")
 
 	return &StatusCallback{
 		Event:        event,
 		ChannelUUID:  channelUUID,
 		Duration:     durationPtr,
 		Price:        price,
+		Cause:        cause,
 		ErrorCode:    errorCode,
 		ErrorMessage: errorMessage,
-		StreamError:  streamError,
 		Payload:      eventDetails,
 	}, nil
 }
@@ -89,23 +77,24 @@ func (s *StatusCallback) StatusInfo() *internal_type.StatusInfo {
 }
 
 func (s *StatusCallback) Failed() bool {
-	eventLower := strings.ToLower(s.Event)
-	return eventLower == "failed" ||
-		eventLower == "busy" ||
-		eventLower == "no-answer" ||
-		eventLower == "canceled" ||
-		eventLower == "cancelled" ||
-		validator.NotBlank(s.ErrorCode) ||
+	statusLower := strings.ToLower(s.Event)
+	return statusLower == "failed" ||
+		statusLower == "busy" ||
+		statusLower == "no-answer" ||
+		statusLower == "no_answer" ||
+		statusLower == "canceled" ||
+		statusLower == "cancelled" ||
+		validator.NotBlank(s.Cause) ||
 		validator.NotBlank(s.ErrorMessage) ||
-		validator.NotBlank(s.StreamError)
+		validator.NotBlank(s.ErrorCode)
 }
 
 func (s *StatusCallback) FailureReason() string {
+	if validator.NotBlank(s.Cause) {
+		return s.Cause
+	}
 	if validator.NotBlank(s.ErrorMessage) {
 		return s.ErrorMessage
-	}
-	if validator.NotBlank(s.StreamError) {
-		return s.StreamError
 	}
 	if validator.NotBlank(s.ErrorCode) {
 		return s.ErrorCode

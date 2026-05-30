@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -495,6 +497,63 @@ func TestSend_EndConversation_NilConnection(t *testing.T) {
 	default:
 		// expected
 	}
+}
+
+func TestSend_Disconnection_LogsVonageAuthError(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[len("http"):]
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	logDirectory := t.TempDir()
+	logger, err := commons.NewApplicationLogger(
+		commons.EnableConsole(false),
+		commons.EnableFile(true),
+		commons.Path(logDirectory),
+		commons.Name("vonage-disconnection"),
+	)
+	require.NoError(t, err)
+
+	vng := &vonageWebsocketStreamer{
+		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
+			logger,
+			&callcontext.CallContext{
+				AssistantID:    1,
+				ConversationID: 2,
+				ChannelUUID:    "vonage-call-id",
+			},
+			nil,
+		),
+		connection: conn,
+	}
+
+	err = vng.Send(&protos.ConversationDisconnection{
+		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_USER,
+	})
+	require.NoError(t, err)
+	require.NoError(t, logger.Sync())
+
+	logBytes, err := os.ReadFile(filepath.Join(logDirectory, "vonage-disconnection.log"))
+	require.NoError(t, err)
+	logContent := string(logBytes)
+	assert.Contains(t, logContent, "Failed to create Vonage client for server-side disconnect")
+	assert.Contains(t, logContent, "vonage-call-id")
+	assert.Contains(t, logContent, protos.ConversationDisconnection_DISCONNECTION_TYPE_USER.String())
 }
 
 // TestSend_TransferConversation_PushesFailedResult verifies that the

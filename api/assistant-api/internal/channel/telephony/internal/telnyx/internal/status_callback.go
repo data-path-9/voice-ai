@@ -16,11 +16,6 @@ import (
 	"github.com/rapidaai/pkg/validator"
 )
 
-type AudioChunk struct {
-	Data     []byte
-	Duration time.Duration
-}
-
 type StatusCallback struct {
 	EventType    string
 	ChannelUUID  string

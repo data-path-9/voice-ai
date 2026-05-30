@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telnyx "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	configs "github.com/rapidaai/config"
 	"github.com/rapidaai/pkg/commons"
@@ -359,17 +360,17 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 	tests := []struct {
 		name     string
 		jsonStr  string
-		expected TelnyxWebSocketEvent
+		expected internal_telnyx.TelnyxWebSocketEvent
 	}{
 		{
 			name:    "start event",
 			jsonStr: `{"event":"start","stream_id":"stream-123","start":{"call_control_id":"call-456","media_format":{"encoding":"PCMU","sample_rate":8000,"channels":1}}}`,
-			expected: TelnyxWebSocketEvent{
+			expected: internal_telnyx.TelnyxWebSocketEvent{
 				Event:    "start",
 				StreamID: "stream-123",
-				Start: &TelnyxStartEvent{
+				Start: &internal_telnyx.TelnyxStartEvent{
 					CallControlID: "call-456",
-					MediaFormat: TelnyxMediaFormat{
+					MediaFormat: internal_telnyx.TelnyxMediaFormat{
 						Encoding:   "PCMU",
 						SampleRate: 8000,
 						Channels:   1,
@@ -380,10 +381,10 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 		{
 			name:    "media event",
 			jsonStr: `{"event":"media","stream_id":"stream-123","media":{"track":"inbound","payload":"dGVzdA=="}}`,
-			expected: TelnyxWebSocketEvent{
+			expected: internal_telnyx.TelnyxWebSocketEvent{
 				Event:    "media",
 				StreamID: "stream-123",
-				Media: &TelnyxMediaEvent{
+				Media: &internal_telnyx.TelnyxMediaEvent{
 					Track:   "inbound",
 					Payload: "dGVzdA==",
 				},
@@ -392,10 +393,10 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 		{
 			name:    "stop event",
 			jsonStr: `{"event":"stop","stream_id":"stream-123","stop":{"call_control_id":"call-456"}}`,
-			expected: TelnyxWebSocketEvent{
+			expected: internal_telnyx.TelnyxWebSocketEvent{
 				Event:    "stop",
 				StreamID: "stream-123",
-				Stop: &TelnyxStopEvent{
+				Stop: &internal_telnyx.TelnyxStopEvent{
 					CallControlID: "call-456",
 				},
 			},
@@ -404,7 +405,7 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var event TelnyxWebSocketEvent
+			var event internal_telnyx.TelnyxWebSocketEvent
 			if err := json.Unmarshal([]byte(tt.jsonStr), &event); err != nil {
 				t.Fatalf("failed to unmarshal: %v", err)
 			}
