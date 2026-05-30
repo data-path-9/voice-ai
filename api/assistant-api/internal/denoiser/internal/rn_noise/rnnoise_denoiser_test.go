@@ -60,6 +60,35 @@ func generatePCM16Sine(samples int) []byte {
 	return data
 }
 
+func TestRNNoise_ProcessAudioUsesPCMScaleBoundary(t *testing.T) {
+	rn, err := NewRNNoise()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rn.Close()) })
+
+	input := make([]float32, frameSize*4)
+	for i := 0; i < len(input); i++ {
+		input[i] = float32(math.Sin(float64(i)*2*math.Pi/120.0) * 0.85)
+	}
+
+	confidence, output, err := rn.ProcessAudio(input)
+	require.NoError(t, err)
+
+	var outputEnergy float64
+	var outputMaxAbsoluteValue float64
+	for _, sample := range output {
+		outputEnergy += float64(sample) * float64(sample)
+		if absoluteValue := math.Abs(float64(sample)); absoluteValue > outputMaxAbsoluteValue {
+			outputMaxAbsoluteValue = absoluteValue
+		}
+	}
+	outputRMS := math.Sqrt(outputEnergy / float64(len(output)))
+
+	assert.Len(t, output, len(input))
+	assert.Greater(t, confidence, 0.5, "expected RNNoise to see PCM-amplitude samples, not near-silence")
+	assert.Greater(t, outputRMS, 0.25, "expected denoised audio to remain audible")
+	assert.LessOrEqual(t, outputMaxAbsoluteValue, 1.0, "wrapper must return normalized samples")
+}
+
 func TestRnnoiseDenoiser_PreservesLengthOnFirstChunk(t *testing.T) {
 	logger := testLogger(t)
 	var packets []internal_type.Packet
@@ -88,6 +117,51 @@ func TestRnnoiseDenoiser_PreservesLengthOnFirstChunk(t *testing.T) {
 	output, ok := captureDenoisedAudio(packets)
 	require.True(t, ok, "expected denoised audio packet")
 	assert.Len(t, output.Audio, len(input))
+	assert.False(t, hasDenoiseErrorEvent(packets), "unexpected denoise error event")
+}
+
+func TestRnnoiseDenoiser_EmitsNonSilentAudio(t *testing.T) {
+	logger := testLogger(t)
+	var packets []internal_type.Packet
+
+	denoiser, err := NewRnnoiseDenoiser(
+		t.Context(),
+		logger,
+		func(_ context.Context, pkt ...internal_type.Packet) error {
+			packets = append(packets, pkt...)
+			return nil
+		},
+		nil,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, denoiser.Close(t.Context())) })
+
+	input := generatePCM16Sine(960) // 60ms at 16kHz
+
+	err = denoiser.Execute(t.Context(), internal_type.DenoiseAudioPacket{
+		ContextID: "ctx-audible",
+		Audio:     input,
+	})
+	require.NoError(t, err)
+
+	output, ok := captureDenoisedAudio(packets)
+	require.True(t, ok, "expected denoised audio packet")
+
+	var outputEnergy float64
+	zeroSamples := 0
+	for i := 0; i < len(output.Audio)/2; i++ {
+		sample := int16(binary.LittleEndian.Uint16(output.Audio[i*2 : i*2+2]))
+		outputEnergy += float64(sample) * float64(sample)
+		if sample == 0 {
+			zeroSamples++
+		}
+	}
+	outputRMS := math.Sqrt(outputEnergy / float64(len(output.Audio)/2))
+	outputZeroRatio := float64(zeroSamples) / float64(len(output.Audio)/2)
+
+	assert.Len(t, output.Audio, len(input))
+	assert.Greater(t, outputRMS, 1000.0, "expected denoiser output to remain audible")
+	assert.Less(t, outputZeroRatio, 0.5, "expected denoiser output not to be mostly silence")
 	assert.False(t, hasDenoiseErrorEvent(packets), "unexpected denoise error event")
 }
 

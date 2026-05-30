@@ -38,8 +38,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var webRTCOutputPCM16kFrameBytes = internal_audio.BytesPerMs(internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG) * webrtc_internal.OpusFrameDuration
-
 // webrtcStreamer implements Streamer using Pion WebRTC for media and gRPC for signaling.
 type webrtcStreamer struct {
 	channel_base.BaseStreamer
@@ -64,18 +62,23 @@ type webrtcStreamer struct {
 	cancelMedia  context.CancelFunc
 	mediaWorkers sync.WaitGroup
 
-	currentMode protos.StreamMode
+	streamModeTransitionMu sync.Mutex
+	currentMode            protos.StreamMode
 
-	sessionState     webrtc_internal.SessionState
-	mediaHealthState webrtc_internal.MediaHealthState
-	peerEventCh      chan peerEvent
-	mediaLifecycleCh chan mediaLifecycleEvent
+	sessionState      webrtc_internal.SessionState
+	mediaHealthState  webrtc_internal.MediaHealthState
+	peerEventCh       chan webrtc_internal.PeerEvent
+	mediaLifecycleCh  chan webrtc_internal.MediaLifecycleEvent
+	webrtcOperationCh chan webrtc_internal.WebRTCOperation
 
 	ambientMixer internal_ambient.Mixer
 	outputHealth *internal_output.HealthStats
 
 	outputAudioQueueMu sync.Mutex
 	outputAudioQueue   []webrtc_internal.OutputAudioFrame
+
+	audioBufferState webrtc_internal.WebRTCAudioBufferState
+	flushAudioCh     chan struct{}
 }
 
 // NewWebRTCStreamer creates a WebRTC media stream with gRPC signaling.
@@ -136,28 +139,30 @@ func NewWebRTCStreamer(
 	}
 
 	s := &webrtcStreamer{
-		BaseStreamer: channel_base.NewBaseStreamer(logger,
-			channel_base.WithInputChannelSize(webrtc_internal.InputChannelSize),
-			channel_base.WithOutputChannelSize(webrtc_internal.OutputChannelSize),
-			channel_base.WithInputBufferThreshold(webrtc_internal.InputBufferThreshold),
-			channel_base.WithOutputAudioConfig(internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG),
+		BaseStreamer: channel_base.NewBaseStreamerWithChannelCapacity(
+			logger,
+			webrtc_internal.InputChannelSize,
+			webrtc_internal.OutputChannelSize,
 		),
-		peerConfig:       peerConfig,
-		serverConfig:     serverConfig,
-		grpcStream:       grpcStream,
-		sessionID:        uuid.New().String(),
-		resampler:        resampler,
-		opusCodec:        opusCodec,
-		currentMode:      protos.StreamMode_STREAM_MODE_TEXT,
-		peerEventCh:      make(chan peerEvent, webrtc_internal.PeerEventChannelSize),
-		mediaLifecycleCh: make(chan mediaLifecycleEvent, webrtc_internal.MediaLifecycleChannelSize),
-		outputHealth:     internal_output.NewHealthStats(),
+		peerConfig:        peerConfig,
+		serverConfig:      serverConfig,
+		grpcStream:        grpcStream,
+		sessionID:         uuid.New().String(),
+		resampler:         resampler,
+		opusCodec:         opusCodec,
+		currentMode:       protos.StreamMode_STREAM_MODE_TEXT,
+		peerEventCh:       make(chan webrtc_internal.PeerEvent, webrtc_internal.PeerEventChannelSize),
+		mediaLifecycleCh:  make(chan webrtc_internal.MediaLifecycleEvent, webrtc_internal.MediaLifecycleChannelSize),
+		webrtcOperationCh: make(chan webrtc_internal.WebRTCOperation, webrtc_internal.WebRTCOperationChannelSize),
+		outputHealth:      internal_output.NewHealthStats(),
+		audioBufferState:  newWebRTCAudioBufferState(),
+		flushAudioCh:      make(chan struct{}, 1),
 	}
 	ambientMixer, err := internal_ambient.NewLoopMixer(internal_ambient.MixerSpec{
 		Logger:            logger,
 		Resampler:         resampler,
 		TargetAudioConfig: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
-		FrameBytes:        webRTCOutputPCM16kFrameBytes,
+		FrameBytes:        webrtc_internal.WebRTCOutputPCM16kFrameBytes,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ambient mixer: %w", err)
@@ -167,11 +172,11 @@ func NewWebRTCStreamer(
 	go s.runGrpcReader()
 	go s.runPeerEventLoop()
 	go s.runMediaLifecycleLoop()
+	go s.runWebRTCOperationLoop()
 	go s.runOutputWriter()
 	go s.runAudioPacer()
 	go s.runOutputHealthReporter()
 	go s.runHealthWatchdog()
-
 	go s.watchCallerContext(ctx)
 
 	return s, nil
@@ -228,6 +233,7 @@ func (s *webrtcStreamer) createPeer(mediaSessionID uint64) error {
 	settingEngine := pionwebrtc.SettingEngine{}
 	settingEngine.SetDTLSEllipticCurves(elliptic.X25519, elliptic.P384, elliptic.P256)
 	settingEngine.DisableCloseByDTLS(true)
+	settingEngine.SetFireOnTrackBeforeFirstRTP(true)
 	settingEngine.SetDTLSRetransmissionInterval(webrtc_internal.DTLSRetransmissionInterval)
 	settingEngine.SetDTLSConnectContextMaker(func() (context.Context, func()) {
 		return context.WithTimeout(context.Background(), webrtc_internal.DTLSHandshakeTimeout)
@@ -297,16 +303,26 @@ func (s *webrtcStreamer) bindPeerHandlers(peerConnection *pionwebrtc.PeerConnect
 		s.queueLocalICECandidate(candidate.ToJSON(), mediaSessionID)
 	})
 
+	peerConnection.OnICEGatheringStateChange(func(state pionwebrtc.ICEGatheringState) {
+		if state != pionwebrtc.ICEGatheringStateComplete || !s.sessionState.IsActiveMediaSession(mediaSessionID) {
+			return
+		}
+		s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+			Kind:           webrtc_internal.WebRTCOperationICEGatheringComplete,
+			MediaSessionID: mediaSessionID,
+		})
+	})
+
 	peerConnection.OnConnectionStateChange(func(state pionwebrtc.PeerConnectionState) {
 		if !s.sessionState.IsActiveMediaSession(mediaSessionID) {
 			return
 		}
 
-		s.enqueuePeerEvent(peerEvent{
-			kind:               peerEventStateChanged,
-			mediaSessionID:     mediaSessionID,
-			peerState:          state,
-			peerStateChangedAt: time.Now(),
+		s.enqueuePeerEvent(webrtc_internal.PeerEvent{
+			Kind:               webrtc_internal.PeerEventStateChanged,
+			MediaSessionID:     mediaSessionID,
+			PeerState:          state,
+			PeerStateChangedAt: time.Now(),
 		})
 	})
 
@@ -315,37 +331,64 @@ func (s *webrtcStreamer) bindPeerHandlers(peerConnection *pionwebrtc.PeerConnect
 			return
 		}
 
-		s.enqueuePeerEvent(peerEvent{
-			kind:                  peerEventICEConnectionStateChanged,
-			mediaSessionID:        mediaSessionID,
-			peerICEState:          state,
-			peerICEStateChangedAt: time.Now(),
+		s.enqueuePeerEvent(webrtc_internal.PeerEvent{
+			Kind:                  webrtc_internal.PeerEventICEConnectionStateChanged,
+			MediaSessionID:        mediaSessionID,
+			PeerICEState:          state,
+			PeerICEStateChangedAt: time.Now(),
 		})
 	})
 
-	peerConnection.OnTrack(func(track *pionwebrtc.TrackRemote, _ *pionwebrtc.RTPReceiver) {
+	peerConnection.OnTrack(func(track *pionwebrtc.TrackRemote, rtpReceiver *pionwebrtc.RTPReceiver) {
 		if track.Kind() != pionwebrtc.RTPCodecTypeAudio {
 			return
 		}
-		s.Mu.Lock()
-		if !s.sessionState.IsActiveMediaSession(mediaSessionID) || s.peerConnection != peerConnection {
-			s.Mu.Unlock()
+
+		remoteAudioTrack := webrtc_internal.WebRTCRemoteAudioTrack{
+			TrackCodec: track.Codec(),
+		}
+		if rtpReceiver != nil {
+			remoteAudioTrack.ReceiverCodecs = rtpReceiver.GetParameters().Codecs
+		}
+		remoteAudioCodec, ok := remoteAudioTrack.SelectedCodec()
+		if !ok {
+			s.Logger.Errorw("No negotiated audio codec for WebRTC remote track")
 			return
 		}
-		s.mediaWorkers.Add(1)
-		s.Mu.Unlock()
-		s.Logger.Infow("Remote audio track received", webrtc_internal.DataCodec, track.Codec().MimeType)
+		if !strings.EqualFold(remoteAudioCodec.MimeType, pionwebrtc.MimeTypeOpus) {
+			s.Logger.Errorw("Unsupported codec, only Opus is supported", webrtc_internal.DataCodec, remoteAudioCodec.MimeType)
+			return
+		}
+		if !s.tryStartRemoteAudioReader(peerConnection, mediaSessionID) {
+			return
+		}
+
+		s.Logger.Infow("Remote audio track received", webrtc_internal.DataCodec, remoteAudioCodec.MimeType)
 		s.Input(&protos.ConversationEvent{
 			Name: observe.ComponentWebRTC,
 			Data: map[string]string{
 				webrtc_internal.DataType:      observe.EventAudioTrackReceived,
 				webrtc_internal.DataSessionID: s.sessionID,
-				webrtc_internal.DataCodec:     track.Codec().MimeType,
+				webrtc_internal.DataCodec:     remoteAudioCodec.MimeType,
 			},
 			Time: timestamppb.Now(),
 		})
-		go s.readRemoteAudio(track, mediaSessionID)
+		go s.readRemoteAudio(track, mediaSessionID, remoteAudioCodec)
 	})
+}
+
+func (s *webrtcStreamer) tryStartRemoteAudioReader(peerConnection *pionwebrtc.PeerConnection, mediaSessionID uint64) bool {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+
+	if !s.sessionState.IsActiveMediaSession(mediaSessionID) || s.peerConnection != peerConnection {
+		return false
+	}
+	if !s.sessionState.TryStartRemoteAudioReader(mediaSessionID) {
+		return false
+	}
+	s.mediaWorkers.Add(1)
+	return true
 }
 
 func (s *webrtcStreamer) queueLocalICECandidate(candidateInit pionwebrtc.ICECandidateInit, mediaSessionID uint64) {
@@ -353,40 +396,10 @@ func (s *webrtcStreamer) queueLocalICECandidate(candidateInit pionwebrtc.ICECand
 		return
 	}
 
-	iceCandidate := &protos.ICECandidate{
-		Candidate: candidateInit.Candidate,
-	}
-	if candidateInit.SDPMid != nil {
-		iceCandidate.SdpMid = *candidateInit.SDPMid
-	}
-	if candidateInit.SDPMLineIndex != nil {
-		iceCandidate.SdpMLineIndex = int32(*candidateInit.SDPMLineIndex)
-	}
-	if candidateInit.UsernameFragment != nil {
-		iceCandidate.UsernameFragment = *candidateInit.UsernameFragment
-	}
-
-	s.Mu.Lock()
-	if !s.sessionState.IsActiveMediaSession(mediaSessionID) {
-		s.Mu.Unlock()
-		return
-	}
-	signalingSessionID := s.signalingSessionID
-	if !s.signalOfferSent {
-		s.signalPendingLocalICECandidates = append(s.signalPendingLocalICECandidates, iceCandidate)
-		s.Mu.Unlock()
-		return
-	}
-	s.Mu.Unlock()
-	if signalingSessionID == "" {
-		signalingSessionID = s.sessionID
-	}
-
-	s.Output(&protos.ServerSignaling{
-		SessionId: signalingSessionID,
-		Message: &protos.ServerSignaling_IceCandidate{
-			IceCandidate: iceCandidate,
-		},
+	s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:              webrtc_internal.WebRTCOperationSendLocalICECandidate,
+		MediaSessionID:    mediaSessionID,
+		LocalICECandidate: candidateInit,
 	})
 }
 
@@ -426,8 +439,8 @@ func (s *webrtcStreamer) createAssistantAudioTrack(peerConnection *pionwebrtc.Pe
 	return nil
 }
 
-// readRemoteAudio converts browser Opus/48k input into Rapida PCM16k audio.
-func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote, mediaSessionID uint64) {
+// readRemoteAudio converts browser Opus/48k inputAudioBuffer into Rapida PCM16k audio.
+func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote, mediaSessionID uint64, remoteAudioCodec pionwebrtc.RTPCodecParameters) {
 	defer s.mediaWorkers.Done()
 
 	s.Mu.Lock()
@@ -441,9 +454,8 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote, mediaSes
 		return
 	}
 
-	mimeType := track.Codec().MimeType
-	if mimeType != pionwebrtc.MimeTypeOpus {
-		s.Logger.Errorw("Unsupported codec, only Opus is supported", webrtc_internal.DataCodec, mimeType)
+	if !strings.EqualFold(remoteAudioCodec.MimeType, pionwebrtc.MimeTypeOpus) {
+		s.Logger.Errorw("Unsupported codec, only Opus is supported", webrtc_internal.DataCodec, remoteAudioCodec.MimeType)
 		return
 	}
 
@@ -543,8 +555,7 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote, mediaSes
 		s.Mu.Lock()
 		s.mediaHealthState.RecordUserAudioReceived(userAudioReceivedAt)
 		s.Mu.Unlock()
-
-		s.BufferAndSendInput(userPCM16k, userAudioReceivedAt)
+		s.bufferAndSendInput(userPCM16k, userAudioReceivedAt)
 	}
 }
 
@@ -868,25 +879,39 @@ func (s *webrtcStreamer) ConsumeFrame(assistantPCM16k []byte) error {
 
 // handleConfigurationMessage switches the WebRTC media mode without changing the conversation.
 func (s *webrtcStreamer) handleConfigurationMessage(mode protos.StreamMode) {
+	s.streamModeTransitionMu.Lock()
+	defer s.streamModeTransitionMu.Unlock()
+
 	s.Mu.Lock()
 	currentMode := s.currentMode
 	s.Mu.Unlock()
 
-	if mode == currentMode {
+	if mode == protos.StreamMode_STREAM_MODE_UNSPECIFIED {
 		return
 	}
 
-	s.ClearOutputBuffer()
-	s.signalClear()
+	mediaState := s.sessionState.MediaState()
+	if mode == currentMode && !(mode == protos.StreamMode_STREAM_MODE_TEXT && mediaState != webrtc_internal.MediaStateText) {
+		return
+	}
 
 	switch mode {
 	case protos.StreamMode_STREAM_MODE_AUDIO:
+		if mediaState == webrtc_internal.MediaStateAudioNegotiating || mediaState == webrtc_internal.MediaStateAudioConnected {
+			return
+		}
+		s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioNegotiating)
+
+		s.clearBufferedOutputAudio()
+		s.signalClear()
 		s.sessionState.ResetMediaRestartAttempts()
 		if err := s.startMediaSession(); err != nil {
 			s.Logger.Errorw("Failed to setup audio", "error", err)
 			s.stopMediaSessionAndFallbackToText()
 		}
 	case protos.StreamMode_STREAM_MODE_TEXT:
+		s.clearBufferedOutputAudio()
+		s.signalClear()
 		s.stopMediaSessionAndFallbackToText()
 	}
 }
@@ -895,14 +920,14 @@ func (s *webrtcStreamer) queueClientSignal(signaling *protos.ClientSignaling) {
 	if signaling == nil {
 		return
 	}
-	s.enqueuePeerEvent(peerEvent{
-		kind:                signalEventClientMessage,
-		signalClientMessage: signaling,
+	s.enqueuePeerEvent(webrtc_internal.PeerEvent{
+		Kind:                webrtc_internal.SignalEventClientMessage,
+		SignalClientMessage: signaling,
 	})
 }
 
 func (s *webrtcStreamer) stopMediaSessionAndFallbackToText() {
-	s.ClearOutputBuffer()
+	s.clearBufferedOutputAudio()
 	s.clearOutputAudio()
 	if s.ambientMixer != nil {
 		s.ambientMixer.Reset()
@@ -916,6 +941,7 @@ func (s *webrtcStreamer) stopMediaSessionAndFallbackToText() {
 	s.signalPendingLocalICECandidates = nil
 	s.signalPendingRemoteICECandidates = nil
 	s.currentMode = protos.StreamMode_STREAM_MODE_TEXT
+	s.sessionState.SetMediaState(webrtc_internal.MediaStateText)
 	s.mediaHealthState.Reset()
 	s.sessionState.SetPeerConnected(false)
 }
@@ -925,6 +951,7 @@ func (s *webrtcStreamer) startMediaSession() error {
 	s.stopMediaSession()
 
 	mediaSessionID := s.sessionState.StartMediaSession()
+	s.sessionState.ResetICERestartAttempts()
 	s.Mu.Lock()
 	s.signalingSessionID = uuid.New().String()
 	s.signalOfferSent = false
@@ -937,44 +964,68 @@ func (s *webrtcStreamer) startMediaSession() error {
 		return fmt.Errorf("failed to create peer connection: %w", err)
 	}
 
-	if err := s.sendOffer(mediaSessionID); err != nil {
-		return err
-	}
+	s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:              webrtc_internal.WebRTCOperationSendOffer,
+		MediaSessionID:    mediaSessionID,
+		SignalMediaConfig: true,
+	})
 	go s.runMediaSessionDeadlines(mediaSessionID)
 	return nil
 }
 
-// sendOffer sends config and the SDP offer; ICE candidates trickle separately.
-func (s *webrtcStreamer) sendOffer(mediaSessionID uint64) error {
+// sendWebRTCOffer sends an SDP offer; initial media negotiation also sends media config.
+func (s *webrtcStreamer) sendWebRTCOffer(operation webrtc_internal.WebRTCOperation) (bool, error) {
+	mediaSessionID := operation.MediaSessionID
 	if !s.sessionState.IsActiveMediaSession(mediaSessionID) {
-		return nil
+		return false, nil
 	}
 
 	s.Mu.Lock()
 	peerConnection := s.peerConnection
-	s.Mu.Unlock()
 	if peerConnection == nil {
-		return fmt.Errorf("WebRTC media session is not ready")
+		s.Mu.Unlock()
+		return false, fmt.Errorf("WebRTC media session is not ready")
+	}
+	offerOptions := operation.OfferOptions
+	iceRestart := offerOptions != nil && offerOptions.ICERestart
+	negotiationStarted, retryPending := s.sessionState.BeginNegotiation(iceRestart)
+	if !negotiationStarted {
+		s.Mu.Unlock()
+		if retryPending {
+			s.emitWebRTCNegotiationEvent(webrtc_internal.EventNegotiationRetryQueued, operation, iceRestart, true, time.Now())
+		}
+		return false, nil
+	}
+	s.signalOfferSent = false
+	if iceRestart {
+		s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioNegotiating)
+		s.mediaHealthState.StartICERestart(time.Now())
+	}
+	s.Mu.Unlock()
+
+	if operation.SignalMediaConfig {
+		s.signalConfig()
 	}
 
-	s.signalConfig()
-
-	offer, err := peerConnection.CreateOffer(nil)
+	offer, err := peerConnection.CreateOffer(offerOptions)
 	if err != nil {
-		return fmt.Errorf("failed to create offer: %w", err)
+		s.clearNegotiationState(peerConnection)
+		return false, fmt.Errorf("failed to create offer: %w", err)
 	}
 	if !s.sessionState.IsActiveMediaSession(mediaSessionID) {
-		return nil
+		return false, nil
 	}
 	if err := peerConnection.SetLocalDescription(offer); err != nil {
-		return fmt.Errorf("failed to set local description: %w", err)
+		s.clearNegotiationState(peerConnection)
+		return false, fmt.Errorf("failed to set local description: %w", err)
 	}
+	s.sessionState.SetICEGatheringActive(true)
 	if !s.sessionState.IsActiveMediaSession(mediaSessionID) {
-		return nil
+		return false, nil
 	}
 	localDescription := peerConnection.LocalDescription()
 	if localDescription == nil {
-		return fmt.Errorf("local description is nil after local offer")
+		return false, fmt.Errorf("local description is nil after local offer")
 	}
 	offerSentAt := time.Now()
 	s.Mu.Lock()
@@ -987,7 +1038,7 @@ func (s *webrtcStreamer) sendOffer(mediaSessionID uint64) error {
 	s.Mu.Lock()
 	if !s.sessionState.IsActiveMediaSession(mediaSessionID) {
 		s.Mu.Unlock()
-		return nil
+		return false, nil
 	}
 	signalingSessionID := s.signalingSessionID
 	s.signalOfferSent = true
@@ -1007,7 +1058,20 @@ func (s *webrtcStreamer) sendOffer(mediaSessionID uint64) error {
 		})
 	}
 
-	return nil
+	s.emitWebRTCNegotiationEvent(webrtc_internal.EventNegotiationOfferSent, operation, iceRestart, false, offerSentAt)
+	return true, nil
+}
+
+func (s *webrtcStreamer) clearNegotiationState(peerConnection *pionwebrtc.PeerConnection) {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	if s.peerConnection != peerConnection {
+		return
+	}
+	s.sessionState.ResetNegotiation()
+	s.sessionState.SetICEGatheringActive(false)
+	s.signalPendingLocalICECandidates = nil
+	s.signalOfferSent = true
 }
 
 func (s *webrtcStreamer) Send(response internal_type.Stream) error {
@@ -1015,7 +1079,7 @@ func (s *webrtcStreamer) Send(response internal_type.Stream) error {
 	case *protos.ConversationAssistantMessage:
 		switch content := data.Message.(type) {
 		case *protos.ConversationAssistantMessage_Audio:
-			s.BufferAndSendOutput(content.Audio)
+			s.bufferAndSendOutput(content.Audio)
 			return nil
 		case *protos.ConversationAssistantMessage_Text:
 			s.Output(data)
@@ -1033,7 +1097,7 @@ func (s *webrtcStreamer) Send(response internal_type.Stream) error {
 		s.Output(data)
 	case *protos.ConversationInterruption:
 		if data.Type == protos.ConversationInterruption_INTERRUPTION_TYPE_WORD {
-			s.ClearOutputBuffer()
+			s.clearBufferedOutputAudio()
 			clearedFrames := s.clearOutputAudio()
 			if clearedFrames > 0 {
 				s.Input(&protos.ConversationEvent{

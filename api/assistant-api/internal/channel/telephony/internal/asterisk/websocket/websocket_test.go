@@ -87,7 +87,7 @@ func TestSend_EndConversation_DoesNotCancelStreamer(t *testing.T) {
 
 	// Context should remain open; disconnect is owned by handleToolResult in adapter layer.
 	select {
-	case <-aws.Context().Done():
+	case <-aws.Ctx.Done():
 		t.Fatal("streamer context should remain open after end-conversation")
 	default:
 	}

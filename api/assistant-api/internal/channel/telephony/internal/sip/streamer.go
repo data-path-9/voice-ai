@@ -13,10 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
-	channel_base "github.com/rapidaai/api/assistant-api/internal/channel/base"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
 	"github.com/rapidaai/api/assistant-api/internal/observe"
@@ -56,8 +54,6 @@ func NewStreamer(ctx context.Context,
 	s := &Streamer{
 		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
 			logger, cc, vaultCred,
-			internal_telephony_base.WithSourceAudioConfig(internal_audio.NewMulaw8khzMonoAudioConfig()),
-			internal_telephony_base.WithBaseOption(channel_base.WithInputAudioConfig(internal_audio.NewLinear16khzMonoAudioConfig())),
 		),
 	}
 
@@ -380,7 +376,6 @@ func (s *Streamer) Close() error {
 	s.emitChannelEvent("media_stopped", nil)
 
 	s.BaseStreamer.Cancel()
-	s.ResetInputBuffer()
 	if s.media != nil {
 		s.media.Shutdown()
 	}

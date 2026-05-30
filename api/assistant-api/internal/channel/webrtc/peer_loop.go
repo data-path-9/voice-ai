@@ -17,51 +17,33 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type peerEventKind int
-
-const (
-	signalEventClientMessage peerEventKind = iota + 1
-	peerEventStateChanged
-	peerEventICEConnectionStateChanged
-)
-
-type peerEvent struct {
-	kind                  peerEventKind
-	mediaSessionID        uint64
-	signalClientMessage   *protos.ClientSignaling
-	peerState             pionwebrtc.PeerConnectionState
-	peerStateChangedAt    time.Time
-	peerICEState          pionwebrtc.ICEConnectionState
-	peerICEStateChangedAt time.Time
-}
-
 func (s *webrtcStreamer) runPeerEventLoop() {
 	for {
 		select {
 		case <-s.Ctx.Done():
 			return
 		case event := <-s.peerEventCh:
-			switch event.kind {
-			case signalEventClientMessage:
-				s.handleClientSignal(event.signalClientMessage)
-			case peerEventStateChanged:
-				s.handlePeerState(event.mediaSessionID, event.peerState, event.peerStateChangedAt)
-			case peerEventICEConnectionStateChanged:
-				s.handlePeerICEConnectionState(event.mediaSessionID, event.peerICEState, event.peerICEStateChangedAt)
+			switch event.Kind {
+			case webrtc_internal.SignalEventClientMessage:
+				s.handleClientSignal(event.SignalClientMessage)
+			case webrtc_internal.PeerEventStateChanged:
+				s.handlePeerState(event.MediaSessionID, event.PeerState, event.PeerStateChangedAt)
+			case webrtc_internal.PeerEventICEConnectionStateChanged:
+				s.handlePeerICEConnectionState(event.MediaSessionID, event.PeerICEState, event.PeerICEStateChangedAt)
 			}
 		}
 	}
 }
 
-func (s *webrtcStreamer) enqueuePeerEvent(event peerEvent) {
+func (s *webrtcStreamer) enqueuePeerEvent(event webrtc_internal.PeerEvent) {
 	if s.peerEventCh == nil {
-		switch event.kind {
-		case signalEventClientMessage:
-			s.handleClientSignal(event.signalClientMessage)
-		case peerEventStateChanged:
-			s.handlePeerState(event.mediaSessionID, event.peerState, event.peerStateChangedAt)
-		case peerEventICEConnectionStateChanged:
-			s.handlePeerICEConnectionState(event.mediaSessionID, event.peerICEState, event.peerICEStateChangedAt)
+		switch event.Kind {
+		case webrtc_internal.SignalEventClientMessage:
+			s.handleClientSignal(event.SignalClientMessage)
+		case webrtc_internal.PeerEventStateChanged:
+			s.handlePeerState(event.MediaSessionID, event.PeerState, event.PeerStateChangedAt)
+		case webrtc_internal.PeerEventICEConnectionStateChanged:
+			s.handlePeerICEConnectionState(event.MediaSessionID, event.PeerICEState, event.PeerICEStateChangedAt)
 		}
 		return
 	}
@@ -83,9 +65,11 @@ func (s *webrtcStreamer) handlePeerState(mediaSessionID uint64, state pionwebrtc
 	switch state {
 	case pionwebrtc.PeerConnectionStateConnected:
 		s.currentMode = protos.StreamMode_STREAM_MODE_AUDIO
+		s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioConnected)
 		s.mediaHealthState.RecordPeerConnected(peerStateChangedAt)
 	case pionwebrtc.PeerConnectionStateFailed,
 		pionwebrtc.PeerConnectionStateDisconnected:
+		s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioNegotiating)
 		if state == pionwebrtc.PeerConnectionStateFailed {
 			s.mediaHealthState.RecordPeerFailed(peerStateChangedAt)
 		} else {
@@ -93,6 +77,7 @@ func (s *webrtcStreamer) handlePeerState(mediaSessionID uint64, state pionwebrtc
 		}
 	case pionwebrtc.PeerConnectionStateClosed:
 		s.currentMode = protos.StreamMode_STREAM_MODE_TEXT
+		s.sessionState.SetMediaState(webrtc_internal.MediaStateText)
 		s.mediaHealthState.RecordPeerClosed(peerStateChangedAt)
 	}
 	iceLatencyMs := peerStateChangedAt.Sub(s.mediaHealthState.ICEStartedAt).Milliseconds()
@@ -102,6 +87,7 @@ func (s *webrtcStreamer) handlePeerState(mediaSessionID uint64, state pionwebrtc
 	switch state {
 	case pionwebrtc.PeerConnectionStateConnected:
 		s.sessionState.SetPeerConnected(true)
+		s.sessionState.ResetICERestartAttempts()
 		s.Input(&protos.ConversationEvent{
 			Name: observe.ComponentWebRTC,
 			Data: map[string]string{
@@ -115,7 +101,8 @@ func (s *webrtcStreamer) handlePeerState(mediaSessionID uint64, state pionwebrtc
 		s.signalReady()
 
 	case pionwebrtc.PeerConnectionStateFailed:
-		s.Logger.Warnw("WebRTC peer failed, restarting media session", "session", s.sessionID)
+		s.sessionState.SetPeerConnected(false)
+		s.Logger.Warnw("WebRTC peer failed, restarting ICE", "session", s.sessionID)
 		s.Input(&protos.ConversationEvent{
 			Name: observe.ComponentWebRTC,
 			Data: map[string]string{
@@ -125,10 +112,11 @@ func (s *webrtcStreamer) handlePeerState(mediaSessionID uint64, state pionwebrtc
 			},
 			Time: timestamppb.Now(),
 		})
-		s.queueMediaSessionRestart(mediaSessionID, webrtc_internal.ReasonPeerFailed, peerStateChangedAt)
+		s.queueMediaSessionRecovery(mediaSessionID, webrtc_internal.ReasonPeerFailed, peerStateChangedAt)
 
 	case pionwebrtc.PeerConnectionStateDisconnected:
-		s.Logger.Warnw("WebRTC peer disconnected, restarting media session", "session", s.sessionID)
+		s.sessionState.SetPeerConnected(false)
+		s.Logger.Warnw("WebRTC peer disconnected, restarting ICE", "session", s.sessionID)
 		s.Input(&protos.ConversationEvent{
 			Name: observe.ComponentWebRTC,
 			Data: map[string]string{
@@ -137,7 +125,7 @@ func (s *webrtcStreamer) handlePeerState(mediaSessionID uint64, state pionwebrtc
 			},
 			Time: timestamppb.Now(),
 		})
-		s.queueMediaSessionRestart(mediaSessionID, webrtc_internal.ReasonPeerDisconnected, peerStateChangedAt)
+		s.queueMediaSessionRecovery(mediaSessionID, webrtc_internal.ReasonPeerDisconnected, peerStateChangedAt)
 
 	case pionwebrtc.PeerConnectionStateClosed:
 		s.Logger.Infow("WebRTC peer closed, resetting audio", "session", s.sessionID)
@@ -175,8 +163,12 @@ func (s *webrtcStreamer) handlePeerICEConnectionState(mediaSessionID uint64, sta
 		Time: timestamppb.New(iceStateChangedAt),
 	})
 
+	if state == pionwebrtc.ICEConnectionStateConnected || state == pionwebrtc.ICEConnectionStateCompleted {
+		s.sessionState.ResetICERestartAttempts()
+	}
 	if state == pionwebrtc.ICEConnectionStateFailed {
-		s.queueMediaSessionRestart(mediaSessionID, webrtc_internal.ReasonICEFailed, iceStateChangedAt)
+		s.sessionState.SetPeerConnected(false)
+		s.queueMediaSessionRecovery(mediaSessionID, webrtc_internal.ReasonICEFailed, iceStateChangedAt)
 	}
 }
 
@@ -255,8 +247,8 @@ func (s *webrtcStreamer) handleClientSignal(signaling *protos.ClientSignaling) {
 	}
 
 	s.Mu.Lock()
-	peerConnection := s.peerConnection
 	signalingSessionID := s.signalingSessionID
+	mediaSessionID := s.sessionState.ActiveMediaSessionID()
 	s.Mu.Unlock()
 
 	switch msg := signaling.GetMessage().(type) {
@@ -266,41 +258,16 @@ func (s *webrtcStreamer) handleClientSignal(signaling *protos.ClientSignaling) {
 			return
 		}
 		if msg.Sdp.GetType() == protos.WebRTCSDP_ANSWER {
-			if peerConnection == nil {
-				s.Logger.Warnw("Received SDP answer but peer connection is nil, ignoring")
-				return
-			}
-			if err := peerConnection.SetRemoteDescription(pionwebrtc.SessionDescription{
-				Type: pionwebrtc.SDPTypeAnswer,
-				SDP:  msg.Sdp.GetSdp(),
-			}); err != nil {
-				s.Logger.Errorw("Failed to set remote description", "error", err)
-				return
-			}
-
-			remoteDescriptionSetAt := time.Now()
-			s.Mu.Lock()
-			if s.peerConnection != peerConnection {
-				s.Mu.Unlock()
-				return
-			}
-			s.mediaHealthState.RecordRemoteDescriptionSet(remoteDescriptionSetAt)
-			pendingRemoteICECandidates := append([]pionwebrtc.ICECandidateInit(nil), s.signalPendingRemoteICECandidates...)
-			s.signalPendingRemoteICECandidates = nil
-			s.Mu.Unlock()
-
-			for _, candidate := range pendingRemoteICECandidates {
-				s.addRemoteICECandidate(peerConnection, candidate)
-			}
+			s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+				Kind:            webrtc_internal.WebRTCOperationApplyRemoteAnswer,
+				MediaSessionID:  mediaSessionID,
+				RemoteAnswerSDP: msg.Sdp.GetSdp(),
+			})
 		}
 
 	case *protos.ClientSignaling_IceCandidate:
 		if signalingSessionID != "" && signaling.GetSessionId() != signalingSessionID {
 			s.Logger.Warnw("Received ICE candidate for stale WebRTC signaling session, ignoring", "session", s.sessionID)
-			return
-		}
-		if peerConnection == nil {
-			s.Logger.Warnw("Received ICE candidate but peer connection is nil, ignoring")
 			return
 		}
 		ice := msg.IceCandidate
@@ -316,23 +283,11 @@ func (s *webrtcStreamer) handleClientSignal(signaling *protos.ClientSignaling) {
 			SDPMLineIndex:    &idx,
 			UsernameFragment: &usernameFragment,
 		}
-
-		if peerConnection.RemoteDescription() == nil {
-			s.Mu.Lock()
-			if s.peerConnection == peerConnection && peerConnection.RemoteDescription() == nil {
-				if len(s.signalPendingRemoteICECandidates) >= webrtc_internal.PendingRemoteICECandidateLimit {
-					s.Mu.Unlock()
-					s.Logger.Warnw("WebRTC pending remote ICE candidate queue full, dropping candidate", "session", s.sessionID, "limit", webrtc_internal.PendingRemoteICECandidateLimit)
-					return
-				}
-				s.signalPendingRemoteICECandidates = append(s.signalPendingRemoteICECandidates, candidate)
-				s.Mu.Unlock()
-				return
-			}
-			s.Mu.Unlock()
-		}
-
-		s.addRemoteICECandidate(peerConnection, candidate)
+		s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+			Kind:               webrtc_internal.WebRTCOperationAddRemoteICECandidate,
+			MediaSessionID:     mediaSessionID,
+			RemoteICECandidate: candidate,
+		})
 
 	case *protos.ClientSignaling_Disconnect:
 		if msg.Disconnect {

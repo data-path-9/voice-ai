@@ -31,7 +31,6 @@ func newTestExotelStreamer(t *testing.T) *exotelWebsocketStreamer {
 	return &exotelWebsocketStreamer{
 		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
 			logger, cc, nil,
-			internal_telephony_base.WithSourceAudioConfig(exotelLinear8kConfig),
 		),
 		streamID:   "test-stream",
 		connection: nil, // nil so Cancel() skips conn.Close()

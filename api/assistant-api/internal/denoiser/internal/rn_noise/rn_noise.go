@@ -21,6 +21,8 @@ import (
 
 var frameSize int
 
+const pcm16AmplitudeScale = float32(32768.0)
+
 func init() {
 	frameSize = int(C.rnnoise_get_frame_size())
 }
@@ -57,22 +59,28 @@ func (st *RNNoise) SuppressNoise(input []float32) (float64, []float32, error) {
 		return 0, nil, fmt.Errorf("input must be exactly %d samples, got %d", frameSize, len(input))
 	}
 
-	output := make([]float32, frameSize)
-	copy(output, input) // Copy input to output for in-place processing
+	pcmAmplitudeInputFrame := make([]float32, frameSize)
+	pcmAmplitudeOutputFrame := make([]float32, frameSize)
+	// Match upstream rnnoise_demo.c: it copies int16 PCM samples directly into float before rnnoise_process_frame.
+	// Reference: https://github.com/xiph/rnnoise/blob/main/examples/rnnoise_demo.c
+	for i, sample := range input {
+		pcmAmplitudeInputFrame[i] = sample * pcm16AmplitudeScale
+	}
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
-	// Process frame - rnnoise_process_frame modifies the output buffer in-place
-	// and returns the VAD probability (0.0 = noise, 1.0 = speech)
-	inputPtr := (*C.float)(unsafe.Pointer(&input[0]))
-	outputPtr := (*C.float)(unsafe.Pointer(&output[0]))
+	inputPtr := (*C.float)(unsafe.Pointer(&pcmAmplitudeInputFrame[0]))
+	outputPtr := (*C.float)(unsafe.Pointer(&pcmAmplitudeOutputFrame[0]))
 
-	vad := C.rnnoise_process_frame(st.denoiseState, outputPtr, inputPtr)
+	speechConfidence := C.rnnoise_process_frame(st.denoiseState, outputPtr, inputPtr)
 
 	st.frameCount++
 
-	return float64(vad), output, nil
+	output := make([]float32, frameSize)
+	copyPCMAmplitudeSamplesToNormalized(output, pcmAmplitudeOutputFrame)
+
+	return float64(speechConfidence), output, nil
 }
 
 // ProcessAudio processes multiple frames, preserving the exact input length
@@ -93,8 +101,8 @@ func (st *RNNoise) ProcessAudio(input []float32) (float64, []float32, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
-	var paddedInput []float32
-	var paddedOutput []float32
+	pcmAmplitudeInputFrame := make([]float32, frameSize)
+	pcmAmplitudeOutputFrame := make([]float32, frameSize)
 
 	for i := 0; i < len(input); i += frameSize {
 		end := i + frameSize
@@ -105,36 +113,38 @@ func (st *RNNoise) ProcessAudio(input []float32) (float64, []float32, error) {
 		chunk := input[i:end]
 		outputChunk := cleanedAudio[i:end]
 
-		var (
-			inputPtr  *C.float
-			outputPtr *C.float
-		)
-
-		if len(chunk) == frameSize {
-			inputPtr = (*C.float)(unsafe.Pointer(&chunk[0]))
-			outputPtr = (*C.float)(unsafe.Pointer(&outputChunk[0]))
-		} else {
-			if paddedInput == nil {
-				paddedInput = make([]float32, frameSize)
-				paddedOutput = make([]float32, frameSize)
-			}
-			clear(paddedInput)
-			copy(paddedInput, chunk)
-			inputPtr = (*C.float)(unsafe.Pointer(&paddedInput[0]))
-			outputPtr = (*C.float)(unsafe.Pointer(&paddedOutput[0]))
+		clear(pcmAmplitudeInputFrame)
+		clear(pcmAmplitudeOutputFrame)
+		for j, sample := range chunk {
+			pcmAmplitudeInputFrame[j] = sample * pcm16AmplitudeScale
 		}
 
-		vad := C.rnnoise_process_frame(st.denoiseState, outputPtr, inputPtr)
-		totalConfidence += float64(vad)
+		inputPtr := (*C.float)(unsafe.Pointer(&pcmAmplitudeInputFrame[0]))
+		outputPtr := (*C.float)(unsafe.Pointer(&pcmAmplitudeOutputFrame[0]))
 
-		if len(chunk) < frameSize {
-			copy(outputChunk, paddedOutput[:len(chunk)])
-		}
+		speechConfidence := C.rnnoise_process_frame(st.denoiseState, outputPtr, inputPtr)
+		totalConfidence += float64(speechConfidence)
+
+		copyPCMAmplitudeSamplesToNormalized(outputChunk, pcmAmplitudeOutputFrame[:len(chunk)])
 
 		st.frameCount++
 	}
 
 	return totalConfidence / float64(frameCount), cleanedAudio, nil
+}
+
+func copyPCMAmplitudeSamplesToNormalized(dst, src []float32) {
+	for i, sample := range src {
+		normalized := sample / pcm16AmplitudeScale
+		switch {
+		case normalized > 1:
+			dst[i] = 1
+		case normalized < -1:
+			dst[i] = -1
+		default:
+			dst[i] = normalized
+		}
+	}
 }
 
 // Close cleans up resources

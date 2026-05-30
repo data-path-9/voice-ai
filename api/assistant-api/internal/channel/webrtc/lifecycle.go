@@ -11,24 +11,12 @@ import (
 	"fmt"
 	"time"
 
+	pionwebrtc "github.com/pion/webrtc/v4"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
 	"github.com/rapidaai/api/assistant-api/internal/observe"
 	"github.com/rapidaai/protos"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-type mediaLifecycleEventKind int
-
-const (
-	mediaLifecycleEventRestart mediaLifecycleEventKind = iota + 1
-)
-
-type mediaLifecycleEvent struct {
-	kind           mediaLifecycleEventKind
-	mediaSessionID uint64
-	reason         string
-	requestedAt    time.Time
-}
 
 func (s *webrtcStreamer) watchCallerContext(callerCtx context.Context) {
 	select {
@@ -48,20 +36,42 @@ func (s *webrtcStreamer) runMediaLifecycleLoop() {
 		case <-s.Ctx.Done():
 			return
 		case event := <-s.mediaLifecycleCh:
-			switch event.kind {
-			case mediaLifecycleEventRestart:
-				s.restartMediaSessionOrFallbackToText(event.mediaSessionID, event.reason, event.requestedAt)
+			switch event.Kind {
+			case webrtc_internal.MediaLifecycleEventRestart:
+				s.restartMediaSessionOrFallbackToText(event.MediaSessionID, event.Reason, event.RequestedAt)
+			case webrtc_internal.MediaLifecycleEventRecover:
+				s.restartICEOrMediaSessionFallback(event.MediaSessionID, event.Reason, event.RequestedAt)
 			}
 		}
 	}
 }
 
+func (s *webrtcStreamer) queueMediaSessionRecovery(mediaSessionID uint64, reason string, requestedAt time.Time) {
+	event := webrtc_internal.MediaLifecycleEvent{
+		Kind:           webrtc_internal.MediaLifecycleEventRecover,
+		MediaSessionID: mediaSessionID,
+		Reason:         reason,
+		RequestedAt:    requestedAt,
+	}
+	if s.mediaLifecycleCh == nil {
+		go s.restartICEOrMediaSessionFallback(mediaSessionID, reason, requestedAt)
+		return
+	}
+
+	select {
+	case s.mediaLifecycleCh <- event:
+	case <-s.Ctx.Done():
+	default:
+		s.Logger.Warnw("WebRTC media lifecycle queue full, dropping recovery request", "session", s.sessionID, "reason", reason)
+	}
+}
+
 func (s *webrtcStreamer) queueMediaSessionRestart(mediaSessionID uint64, reason string, requestedAt time.Time) {
-	event := mediaLifecycleEvent{
-		kind:           mediaLifecycleEventRestart,
-		mediaSessionID: mediaSessionID,
-		reason:         reason,
-		requestedAt:    requestedAt,
+	event := webrtc_internal.MediaLifecycleEvent{
+		Kind:           webrtc_internal.MediaLifecycleEventRestart,
+		MediaSessionID: mediaSessionID,
+		Reason:         reason,
+		RequestedAt:    requestedAt,
 	}
 	if s.mediaLifecycleCh == nil {
 		go s.restartMediaSessionOrFallbackToText(mediaSessionID, reason, requestedAt)
@@ -125,6 +135,47 @@ func (s *webrtcStreamer) runMediaSessionDeadlines(mediaSessionID uint64) {
 	}
 }
 
+func (s *webrtcStreamer) restartICEOrMediaSessionFallback(mediaSessionID uint64, reason string, restartedAt time.Time) {
+	if !s.sessionState.IsActiveMediaSession(mediaSessionID) || s.sessionState.PeerConnected() {
+		return
+	}
+
+	if s.sessionState.ICERestartPending() || s.sessionState.DeferredICERestartPending(mediaSessionID) {
+		return
+	}
+
+	iceRestartAttempt, ok := s.sessionState.TryBeginICERestart(webrtc_internal.ICERestartAttemptLimit)
+	if !ok {
+		s.restartMediaSessionOrFallbackToText(mediaSessionID, reason, restartedAt)
+		return
+	}
+
+	s.Input(&protos.ConversationEvent{
+		Name: observe.ComponentWebRTC,
+		Data: map[string]string{
+			webrtc_internal.DataType:           webrtc_internal.EventICERestarting,
+			webrtc_internal.DataSessionID:      s.sessionID,
+			webrtc_internal.DataReason:         reason,
+			webrtc_internal.DataRestartAttempt: fmt.Sprintf("%d", iceRestartAttempt),
+			webrtc_internal.DataRestartLimit:   fmt.Sprintf("%d", webrtc_internal.ICERestartAttemptLimit),
+		},
+		Time: timestamppb.New(restartedAt),
+	})
+
+	s.clearBufferedOutputAudio()
+	s.clearOutputAudio()
+
+	s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioNegotiating)
+	s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:           webrtc_internal.WebRTCOperationRestartICE,
+		MediaSessionID: mediaSessionID,
+		Reason:         reason,
+		RequestedAt:    restartedAt,
+		OfferOptions:   &pionwebrtc.OfferOptions{ICERestart: true},
+	})
+	go s.runMediaSessionDeadlines(mediaSessionID)
+}
+
 func (s *webrtcStreamer) restartMediaSessionOrFallbackToText(mediaSessionID uint64, reason string, restartedAt time.Time) {
 	if !s.sessionState.IsActiveMediaSession(mediaSessionID) {
 		return
@@ -149,7 +200,7 @@ func (s *webrtcStreamer) restartMediaSessionOrFallbackToText(mediaSessionID uint
 		Time: timestamppb.New(restartedAt),
 	})
 
-	s.ClearOutputBuffer()
+	s.clearBufferedOutputAudio()
 	s.clearOutputAudio()
 	if s.ambientMixer != nil {
 		s.ambientMixer.Reset()

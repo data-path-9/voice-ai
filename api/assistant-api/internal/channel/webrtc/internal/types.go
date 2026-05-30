@@ -7,8 +7,15 @@
 package webrtc_internal
 
 import (
+	"bytes"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	pionwebrtc "github.com/pion/webrtc/v4"
+	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
+	"github.com/rapidaai/protos"
 )
 
 // Opus audio constants (WebRTC standard: 48kHz)
@@ -28,6 +35,9 @@ const (
 	RTCPFeedbackNACK = "nack"
 )
 
+// WebRTCOutputPCM16kFrameBytes is the 20ms PCM16k frame size used for assistant audio.
+var WebRTCOutputPCM16kFrameBytes = internal_audio.BytesPerMs(internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG) * OpusFrameDuration
+
 // Opus codec tuning for Rapida voice audio.
 const (
 	OpusVoiceChannels             = 1
@@ -40,15 +50,16 @@ const (
 
 // Channel and buffer sizes
 const (
-	InternalPCM16BytesPerMs   = 32
-	InputBufferThresholdMs    = 60
-	InputChannelSize          = 500
-	OutputChannelSize         = 1500
-	PeerEventChannelSize      = 128
-	MediaLifecycleChannelSize = 32
-	RTPBufferSize             = 1500
-	MaxConsecutiveReadErrors  = 50
-	InputBufferThreshold      = InternalPCM16BytesPerMs * InputBufferThresholdMs
+	InternalPCM16BytesPerMs    = 32
+	InputBufferThresholdMs     = 60
+	InputChannelSize           = 500
+	OutputChannelSize          = 1500
+	PeerEventChannelSize       = 128
+	MediaLifecycleChannelSize  = 32
+	WebRTCOperationChannelSize = 128
+	RTPBufferSize              = 1500
+	MaxConsecutiveReadErrors   = 50
+	InputBufferThreshold       = InternalPCM16BytesPerMs * InputBufferThresholdMs
 
 	OutputPaceInterval             = OpusFrameDuration // milliseconds (20ms per frame)
 	OutputAudioQueueMaxFrames      = 4000
@@ -72,6 +83,7 @@ const (
 	WebTalkSuccessCode             = 200
 	OutputAudioDropOldestSize      = 1
 	OutputAudioQueueEmptySize      = 0
+	ICERestartAttemptLimit         = 1
 	MediaRestartAttemptLimit       = 1
 )
 
@@ -119,6 +131,12 @@ const (
 	EventRTCPFeedbackMissing         = "rtcp_feedback_missing"
 	EventRepeatedWriteFailures       = "repeated_write_failures"
 	EventICEConnectionState          = "ice_connection_state"
+	EventICERestarting               = "ice_restarting"
+	EventNegotiationOfferSent        = "negotiation_offer_sent"
+	EventNegotiationAnswerReceived   = "negotiation_answer_received"
+	EventNegotiationRetryQueued      = "negotiation_retry_queued"
+	EventNegotiationRetrySent        = "negotiation_retry_sent"
+	EventICERestartDeferred          = "ice_restart_deferred"
 	EventHandshakeDeadlineExceeded   = "handshake_deadline_exceeded"
 	EventMediaSessionRestarting      = "media_session_restarting"
 
@@ -131,6 +149,10 @@ const (
 const (
 	DataType                        = "type"
 	DataSessionID                   = "session_id"
+	DataMediaSessionID              = "media_session_id"
+	DataOperation                   = "operation"
+	DataICERestart                  = "ice_restart"
+	DataRetryPending                = "retry_pending"
 	DataICELatencyMs                = "ice_latency_ms"
 	DataReason                      = "reason"
 	DataCodec                       = "codec"
@@ -226,14 +248,148 @@ const (
 	ICETransportPolicyRelay = "relay"
 )
 
+type MediaState int32
+
+const (
+	MediaStateText MediaState = iota
+	MediaStateAudioNegotiating
+	MediaStateAudioConnected
+)
+
+type NegotiationState int32
+
+const (
+	NegotiationStateIdle NegotiationState = iota
+	NegotiationStateOfferSent
+	NegotiationStateRetryPending
+)
+
+type MediaLifecycleEventKind int
+
+const (
+	MediaLifecycleEventRestart MediaLifecycleEventKind = iota + 1
+	MediaLifecycleEventRecover
+)
+
+type MediaLifecycleEvent struct {
+	Kind           MediaLifecycleEventKind
+	MediaSessionID uint64
+	Reason         string
+	RequestedAt    time.Time
+}
+
+// WebRTCOperationKind identifies serialized WebRTC signaling and ICE mutations.
+type WebRTCOperationKind int
+
+const (
+	WebRTCOperationSendOffer WebRTCOperationKind = iota + 1
+	WebRTCOperationApplyRemoteAnswer
+	WebRTCOperationAddRemoteICECandidate
+	WebRTCOperationSendLocalICECandidate
+	WebRTCOperationRestartICE
+	WebRTCOperationICEGatheringComplete
+)
+
+func (k WebRTCOperationKind) String() string {
+	switch k {
+	case WebRTCOperationSendOffer:
+		return "send_offer"
+	case WebRTCOperationApplyRemoteAnswer:
+		return "apply_remote_answer"
+	case WebRTCOperationAddRemoteICECandidate:
+		return "add_remote_ice_candidate"
+	case WebRTCOperationSendLocalICECandidate:
+		return "send_local_ice_candidate"
+	case WebRTCOperationRestartICE:
+		return "restart_ice"
+	case WebRTCOperationICEGatheringComplete:
+		return "ice_gathering_complete"
+	default:
+		return "unknown"
+	}
+}
+
+// WebRTCOperation carries one ordered WebRTC mutation for the operation loop.
+type WebRTCOperation struct {
+	Kind               WebRTCOperationKind
+	MediaSessionID     uint64
+	Reason             string
+	RequestedAt        time.Time
+	OfferOptions       *pionwebrtc.OfferOptions
+	SignalMediaConfig  bool
+	LocalICECandidate  pionwebrtc.ICECandidateInit
+	RemoteAnswerSDP    string
+	RemoteICECandidate pionwebrtc.ICECandidateInit
+}
+
+type WebRTCDeferredICERestart struct {
+	MediaSessionID uint64
+	Reason         string
+	RequestedAt    time.Time
+}
+
+// WebRTCAudioBufferState owns input and output PCM buffers for a WebRTC streamer.
+type WebRTCAudioBufferState struct {
+	InputAudioBufferMu  sync.Mutex
+	InputAudioBuffer    *bytes.Buffer
+	OutputAudioBufferMu sync.Mutex
+	OutputAudioBuffer   *bytes.Buffer
+}
+
+type WebRTCRemoteAudioTrack struct {
+	TrackCodec     pionwebrtc.RTPCodecParameters
+	ReceiverCodecs []pionwebrtc.RTPCodecParameters
+}
+
+func (t WebRTCRemoteAudioTrack) SelectedCodec() (pionwebrtc.RTPCodecParameters, bool) {
+	if t.TrackCodec.MimeType != "" {
+		return t.TrackCodec, true
+	}
+	for _, receiverCodec := range t.ReceiverCodecs {
+		if strings.EqualFold(receiverCodec.MimeType, pionwebrtc.MimeTypeOpus) {
+			return receiverCodec, true
+		}
+	}
+	if len(t.ReceiverCodecs) > 0 {
+		return t.ReceiverCodecs[0], true
+	}
+	return pionwebrtc.RTPCodecParameters{}, false
+}
+
+type PeerEventKind int
+
+const (
+	SignalEventClientMessage PeerEventKind = iota + 1
+	PeerEventStateChanged
+	PeerEventICEConnectionStateChanged
+)
+
+type PeerEvent struct {
+	Kind                  PeerEventKind
+	MediaSessionID        uint64
+	SignalClientMessage   *protos.ClientSignaling
+	PeerState             pionwebrtc.PeerConnectionState
+	PeerStateChangedAt    time.Time
+	PeerICEState          pionwebrtc.ICEConnectionState
+	PeerICEStateChangedAt time.Time
+}
+
 // SessionState owns WebRTC lifecycle flags shared across goroutines.
 type SessionState struct {
 	closeStarted                      atomic.Bool
 	peerConnected                     atomic.Bool
+	mediaState                        atomic.Int32
+	negotiationState                  atomic.Int32
+	negotiationRetryICE               atomic.Bool
+	iceGatheringActive                atomic.Bool
 	activeMediaSessionID              atomic.Uint64
 	pacedAssistantFrameMediaSessionID atomic.Uint64
+	remoteAudioReaderMediaSessionID   atomic.Uint64
 	outputAudioDroppedFrames          atomic.Uint64
+	iceRestartAttempts                atomic.Uint64
 	mediaRestartAttempts              atomic.Uint64
+	deferredICERestartMu              sync.Mutex
+	deferredICERestart                WebRTCDeferredICERestart
 }
 
 func (s *SessionState) BeginClose() bool {
@@ -252,13 +408,43 @@ func (s *SessionState) PeerConnected() bool {
 	return s.peerConnected.Load()
 }
 
+func (s *SessionState) SetMediaState(state MediaState) {
+	s.mediaState.Store(int32(state))
+}
+
+func (s *SessionState) MediaState() MediaState {
+	return MediaState(s.mediaState.Load())
+}
+
+func (s *SessionState) TryStartRemoteAudioReader(mediaSessionID uint64) bool {
+	return s.remoteAudioReaderMediaSessionID.CompareAndSwap(0, mediaSessionID)
+}
+
+func (s *SessionState) RemoteAudioReaderMediaSessionID() uint64 {
+	return s.remoteAudioReaderMediaSessionID.Load()
+}
+
+func (s *SessionState) ResetRemoteAudioReader() {
+	s.remoteAudioReaderMediaSessionID.Store(0)
+}
+
 func (s *SessionState) InvalidateMediaSession() uint64 {
 	s.SetPeerConnected(false)
+	s.SetMediaState(MediaStateText)
+	s.SetICEGatheringActive(false)
+	s.ClearDeferredICERestart()
+	s.ResetRemoteAudioReader()
+	s.ResetNegotiation()
 	return s.activeMediaSessionID.Add(1)
 }
 
 func (s *SessionState) StartMediaSession() uint64 {
 	s.SetPeerConnected(false)
+	s.SetMediaState(MediaStateAudioNegotiating)
+	s.SetICEGatheringActive(false)
+	s.ClearDeferredICERestart()
+	s.ResetRemoteAudioReader()
+	s.ResetNegotiation()
 	return s.activeMediaSessionID.Add(1)
 }
 
@@ -294,8 +480,122 @@ func (s *SessionState) OutputAudioDroppedFrames() uint64 {
 	return s.outputAudioDroppedFrames.Load()
 }
 
+func (s *SessionState) BeginNegotiation(iceRestart bool) (bool, bool) {
+	for {
+		state := NegotiationState(s.negotiationState.Load())
+		switch state {
+		case NegotiationStateIdle:
+			if s.negotiationState.CompareAndSwap(int32(NegotiationStateIdle), int32(NegotiationStateOfferSent)) {
+				s.negotiationRetryICE.Store(false)
+				return true, false
+			}
+		case NegotiationStateOfferSent:
+			if s.negotiationState.CompareAndSwap(int32(NegotiationStateOfferSent), int32(NegotiationStateRetryPending)) {
+				if iceRestart {
+					s.negotiationRetryICE.Store(true)
+				}
+				return false, true
+			}
+		case NegotiationStateRetryPending:
+			if iceRestart {
+				s.negotiationRetryICE.Store(true)
+			}
+			return false, true
+		default:
+			s.ResetNegotiation()
+		}
+	}
+}
+
+func (s *SessionState) CompleteNegotiation() (bool, bool) {
+	state := NegotiationState(s.negotiationState.Swap(int32(NegotiationStateIdle)))
+	retryICE := s.negotiationRetryICE.Swap(false)
+	return state == NegotiationStateRetryPending, retryICE
+}
+
+func (s *SessionState) NegotiationState() NegotiationState {
+	return NegotiationState(s.negotiationState.Load())
+}
+
+func (s *SessionState) NegotiationRetryICE() bool {
+	return s.negotiationRetryICE.Load()
+}
+
+func (s *SessionState) ResetNegotiation() {
+	s.negotiationState.Store(int32(NegotiationStateIdle))
+	s.negotiationRetryICE.Store(false)
+}
+
+func (s *SessionState) SetICEGatheringActive(active bool) {
+	s.iceGatheringActive.Store(active)
+}
+
+func (s *SessionState) ICEGatheringActive() bool {
+	return s.iceGatheringActive.Load()
+}
+
+func (s *SessionState) DeferICERestart(restart WebRTCDeferredICERestart) {
+	if restart.MediaSessionID == 0 {
+		return
+	}
+	s.deferredICERestartMu.Lock()
+	defer s.deferredICERestartMu.Unlock()
+	s.deferredICERestart = restart
+}
+
+func (s *SessionState) DeferredICERestartPending(mediaSessionID uint64) bool {
+	if mediaSessionID == 0 {
+		return false
+	}
+	s.deferredICERestartMu.Lock()
+	defer s.deferredICERestartMu.Unlock()
+	return s.deferredICERestart.MediaSessionID == mediaSessionID
+}
+
+func (s *SessionState) TakeDeferredICERestart(mediaSessionID uint64) (WebRTCDeferredICERestart, bool) {
+	if mediaSessionID == 0 {
+		return WebRTCDeferredICERestart{}, false
+	}
+	s.deferredICERestartMu.Lock()
+	defer s.deferredICERestartMu.Unlock()
+	if s.deferredICERestart.MediaSessionID != mediaSessionID {
+		return WebRTCDeferredICERestart{}, false
+	}
+	deferredICERestart := s.deferredICERestart
+	s.deferredICERestart = WebRTCDeferredICERestart{}
+	return deferredICERestart, true
+}
+
+func (s *SessionState) ClearDeferredICERestart() {
+	s.deferredICERestartMu.Lock()
+	defer s.deferredICERestartMu.Unlock()
+	s.deferredICERestart = WebRTCDeferredICERestart{}
+}
+
+func (s *SessionState) ICERestartPending() bool {
+	return s.NegotiationState() == NegotiationStateRetryPending && s.NegotiationRetryICE()
+}
+
 func (s *SessionState) ResetMediaRestartAttempts() {
+	s.iceRestartAttempts.Store(0)
 	s.mediaRestartAttempts.Store(0)
+}
+
+func (s *SessionState) ResetICERestartAttempts() {
+	s.iceRestartAttempts.Store(0)
+}
+
+func (s *SessionState) TryBeginICERestart(limit uint64) (uint64, bool) {
+	for {
+		current := s.iceRestartAttempts.Load()
+		if current >= limit {
+			return current, false
+		}
+		next := current + 1
+		if s.iceRestartAttempts.CompareAndSwap(current, next) {
+			return next, true
+		}
+	}
 }
 
 func (s *SessionState) TryBeginMediaRestart(limit uint64) (uint64, bool) {
@@ -368,6 +668,22 @@ func (s *MediaHealthState) Reset() {
 
 func (s *MediaHealthState) StartICE(startedAt time.Time) {
 	*s = MediaHealthState{ICEStartedAt: startedAt}
+}
+
+func (s *MediaHealthState) StartICERestart(startedAt time.Time) {
+	s.ICEStartedAt = startedAt
+	s.OfferSentAt = time.Time{}
+	s.RemoteDescriptionSetAt = time.Time{}
+	s.ICEConnectionState = ""
+	s.ICEConnectionStateChangedAt = time.Time{}
+	s.ICECheckingStartedAt = time.Time{}
+	s.ICEConnectedAt = time.Time{}
+	s.ICECompletedAt = time.Time{}
+	s.ICEFailedAt = time.Time{}
+	s.PeerConnectedAt = time.Time{}
+	s.PeerDisconnectedAt = time.Time{}
+	s.PeerFailedAt = time.Time{}
+	s.PeerClosedAt = time.Time{}
 }
 
 func (s *MediaHealthState) RecordOfferSent(sentAt time.Time) {

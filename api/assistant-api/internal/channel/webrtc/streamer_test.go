@@ -18,7 +18,6 @@ import (
 
 	pionwebrtc "github.com/pion/webrtc/v4"
 	assistant_config "github.com/rapidaai/api/assistant-api/config"
-	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
 	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
 	channel_base "github.com/rapidaai/api/assistant-api/internal/channel/base"
@@ -48,16 +47,14 @@ func newTestStreamer(t *testing.T) *webrtcStreamer {
 	require.NoError(t, err)
 
 	return &webrtcStreamer{
-		BaseStreamer: channel_base.NewBaseStreamer(logger,
-			channel_base.WithInputChannelSize(16),
-			channel_base.WithOutputChannelSize(16),
-			channel_base.WithOutputAudioConfig(internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG),
-		),
-		peerConfig:  webrtc_internal.DefaultConfig(),
-		sessionID:   "test-session",
-		resampler:   resampler,
-		opusCodec:   opusCodec,
-		currentMode: protos.StreamMode_STREAM_MODE_TEXT,
+		BaseStreamer:     channel_base.NewBaseStreamerWithChannelCapacity(logger, 16, 16),
+		peerConfig:       webrtc_internal.DefaultConfig(),
+		sessionID:        "test-session",
+		resampler:        resampler,
+		opusCodec:        opusCodec,
+		currentMode:      protos.StreamMode_STREAM_MODE_TEXT,
+		audioBufferState: newWebRTCAudioBufferState(),
+		flushAudioCh:     make(chan struct{}, 1),
 	}
 }
 
@@ -115,6 +112,25 @@ func (f *fakeAmbientMixer) Mix(primary []byte) ([]byte, error) {
 func (f *fakeAmbientMixer) Reset() {}
 
 func (f *fakeAmbientMixer) CurrentConfig() internal_ambient.Config { return f.cfg }
+
+func requireLowConversationEvent(t *testing.T, s *webrtcStreamer, eventType string) *protos.ConversationEvent {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case msg := <-s.LowCh:
+			event, ok := msg.(*protos.ConversationEvent)
+			if !ok {
+				continue
+			}
+			if event.GetData()[webrtc_internal.DataType] == eventType {
+				return event
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for WebRTC event %q", eventType)
+		}
+	}
+}
 
 func TestBuildGRPCResponse_Disconnection(t *testing.T) {
 	t.Parallel()
@@ -219,6 +235,29 @@ func TestNewWebRTCStreamer_InvalidICETransportPolicyFallsBackToAll(t *testing.T)
 	assert.Equal(t, webrtc_internal.ICETransportPolicyAll, s.peerConfig.ICETransportPolicy)
 }
 
+func TestNewWebRTCStreamer_IgnoresEmptyICEServerEntries(t *testing.T) {
+	t.Setenv("WEBRTC_TURN_URL", "turn:turn.rapida.ai:3478?transport=tcp")
+	streamer, err := NewWebRTCStreamer(context.Background(), newTestLogger(t), &failingGRPCStream{sendErr: io.EOF}, &assistant_config.WebRTCConfig{
+		ICEServers: []assistant_config.WebRTCICEServer{
+			{URLs: []string{"", "   "}},
+			{URLs: nil},
+			{
+				URLs:       []string{" ${WEBRTC_TURN_URL} "},
+				Username:   "turn-user",
+				Credential: "turn-secret",
+			},
+		},
+	})
+	require.NoError(t, err)
+	s := streamer.(*webrtcStreamer)
+	t.Cleanup(func() { _ = s.Close() })
+
+	require.Len(t, s.peerConfig.ICEServers, 1)
+	assert.Equal(t, []string{"turn:turn.rapida.ai:3478?transport=tcp"}, s.peerConfig.ICEServers[0].URLs)
+	assert.Equal(t, "turn-user", s.peerConfig.ICEServers[0].Username)
+	assert.Equal(t, "turn-secret", s.peerConfig.ICEServers[0].Credential)
+}
+
 func TestDispatchOutput_SendFailureClosesStreamer(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
@@ -267,6 +306,37 @@ func TestServerSignaling_FallsBackToStreamerSessionID(t *testing.T) {
 		assert.Equal(t, s.sessionID, signaling.GetSessionId())
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for server signaling")
+	}
+}
+
+func TestServerSignaling_ConfigIncludesICEServersAndAudioDefaults(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.signalingSessionID = "media-signaling-session"
+	s.peerConfig.ICEServers = []webrtc_internal.ICEServer{
+		{
+			URLs:       []string{"turn:turn.rapida.ai:3478?transport=tcp"},
+			Username:   "turn-user",
+			Credential: "turn-secret",
+		},
+	}
+
+	s.signalConfig()
+
+	select {
+	case msg := <-s.OutputCh:
+		signaling, ok := msg.(*protos.ServerSignaling)
+		require.True(t, ok, "expected ServerSignaling, got %T", msg)
+		assert.Equal(t, "media-signaling-session", signaling.GetSessionId())
+		require.NotNil(t, signaling.GetConfig())
+		require.Len(t, signaling.GetConfig().GetIceServers(), 1)
+		assert.Equal(t, []string{"turn:turn.rapida.ai:3478?transport=tcp"}, signaling.GetConfig().GetIceServers()[0].GetUrls())
+		assert.Equal(t, "turn-user", signaling.GetConfig().GetIceServers()[0].GetUsername())
+		assert.Equal(t, "turn-secret", signaling.GetConfig().GetIceServers()[0].GetCredential())
+		assert.Equal(t, "opus", signaling.GetConfig().GetAudioCodec())
+		assert.Equal(t, int32(webrtc_internal.OpusSampleRate), signaling.GetConfig().GetSampleRate())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for WebRTC config")
 	}
 }
 
@@ -330,6 +400,47 @@ func TestServerTrickleICECandidate_CachesUntilOfferSignaled(t *testing.T) {
 	}
 }
 
+func TestQueueLocalICECandidate_EnqueuesWebRTCOperation(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.webrtcOperationCh = make(chan webrtc_internal.WebRTCOperation, 1)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	sdpMid := "audio"
+	sdpMLineIndex := uint16(0)
+
+	s.queueLocalICECandidate(pionwebrtc.ICECandidateInit{
+		Candidate:     "candidate:1 1 udp 2130706431 127.0.0.1 9 typ host",
+		SDPMid:        &sdpMid,
+		SDPMLineIndex: &sdpMLineIndex,
+	}, mediaSessionID)
+
+	select {
+	case operation := <-s.webrtcOperationCh:
+		assert.Equal(t, webrtc_internal.WebRTCOperationSendLocalICECandidate, operation.Kind)
+		assert.Equal(t, mediaSessionID, operation.MediaSessionID)
+		assert.Equal(t, "candidate:1 1 udp 2130706431 127.0.0.1 9 typ host", operation.LocalICECandidate.Candidate)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for local ICE WebRTC operation")
+	}
+}
+
+func TestQueueLocalICECandidate_IgnoresStaleMediaSession(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.webrtcOperationCh = make(chan webrtc_internal.WebRTCOperation, 1)
+	activeMediaSessionID := s.sessionState.StartMediaSession()
+
+	s.queueLocalICECandidate(pionwebrtc.ICECandidateInit{
+		Candidate: "candidate:1 1 udp 2130706431 127.0.0.1 9 typ host",
+	}, activeMediaSessionID+1)
+
+	select {
+	case operation := <-s.webrtcOperationCh:
+		t.Fatalf("stale local ICE candidate should not enqueue operation: %+v", operation)
+	default:
+	}
+}
+
 func TestInitiateWebRTCHandshake_SendsOfferBeforeTrickleCandidates(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
@@ -339,7 +450,11 @@ func TestInitiateWebRTCHandshake_SendsOfferBeforeTrickleCandidates(t *testing.T)
 	require.NoError(t, s.createPeer(mediaSessionID))
 	t.Cleanup(func() { s.stopMediaSession() })
 
-	require.NoError(t, s.sendOffer(mediaSessionID))
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:              webrtc_internal.WebRTCOperationSendOffer,
+		MediaSessionID:    mediaSessionID,
+		SignalMediaConfig: true,
+	})
 
 	select {
 	case msg := <-s.OutputCh:
@@ -374,17 +489,143 @@ func TestHandleConfigurationMessage_SameModeNoop(t *testing.T) {
 	assert.Nil(t, peerConnection, "peer connection should not be created for same mode")
 }
 
-func TestHandleConfigurationMessage_TextToAudioFails(t *testing.T) {
+func TestWebRTCRemoteAudioTrack_SelectedCodecUsesTrackCodecWhenAvailable(t *testing.T) {
+	t.Parallel()
+	trackCodec := pionwebrtc.RTPCodecParameters{
+		RTPCodecCapability: pionwebrtc.RTPCodecCapability{MimeType: pionwebrtc.MimeTypeOpus},
+		PayloadType:        webrtc_internal.OpusPayloadType,
+	}
+	receiverCodecs := []pionwebrtc.RTPCodecParameters{
+		{RTPCodecCapability: pionwebrtc.RTPCodecCapability{MimeType: "audio/PCMU"}},
+	}
+
+	selectedCodec, ok := webrtc_internal.WebRTCRemoteAudioTrack{
+		TrackCodec:     trackCodec,
+		ReceiverCodecs: receiverCodecs,
+	}.SelectedCodec()
+
+	require.True(t, ok)
+	assert.Equal(t, pionwebrtc.MimeTypeOpus, selectedCodec.MimeType)
+	assert.Equal(t, pionwebrtc.PayloadType(webrtc_internal.OpusPayloadType), selectedCodec.PayloadType)
+}
+
+func TestWebRTCRemoteAudioTrack_SelectedCodecFallsBackToNegotiatedReceiverCodec(t *testing.T) {
+	t.Parallel()
+	receiverCodecs := []pionwebrtc.RTPCodecParameters{
+		{RTPCodecCapability: pionwebrtc.RTPCodecCapability{MimeType: "audio/PCMU"}},
+		{
+			RTPCodecCapability: pionwebrtc.RTPCodecCapability{MimeType: pionwebrtc.MimeTypeOpus},
+			PayloadType:        webrtc_internal.OpusPayloadType,
+		},
+	}
+
+	selectedCodec, ok := webrtc_internal.WebRTCRemoteAudioTrack{
+		ReceiverCodecs: receiverCodecs,
+	}.SelectedCodec()
+
+	require.True(t, ok)
+	assert.Equal(t, pionwebrtc.MimeTypeOpus, selectedCodec.MimeType)
+	assert.Equal(t, pionwebrtc.PayloadType(webrtc_internal.OpusPayloadType), selectedCodec.PayloadType)
+}
+
+func TestWebRTCRemoteAudioTrack_SelectedCodecReturnsFalseWithoutNegotiatedCodec(t *testing.T) {
+	t.Parallel()
+
+	_, ok := webrtc_internal.WebRTCRemoteAudioTrack{}.SelectedCodec()
+
+	assert.False(t, ok)
+}
+
+func TestTryStartRemoteAudioReader_AllowsOneReaderPerMediaSession(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	peerConnection := &pionwebrtc.PeerConnection{}
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.peerConnection = peerConnection
+
+	started := s.tryStartRemoteAudioReader(peerConnection, mediaSessionID)
+	duplicateStarted := s.tryStartRemoteAudioReader(peerConnection, mediaSessionID)
+	s.mediaWorkers.Done()
+
+	assert.True(t, started)
+	assert.False(t, duplicateStarted)
+	assert.Equal(t, mediaSessionID, s.sessionState.RemoteAudioReaderMediaSessionID())
+}
+
+func TestTryStartRemoteAudioReader_RejectsStalePeerConnection(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	activePeerConnection := &pionwebrtc.PeerConnection{}
+	stalePeerConnection := &pionwebrtc.PeerConnection{}
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.peerConnection = activePeerConnection
+
+	started := s.tryStartRemoteAudioReader(stalePeerConnection, mediaSessionID)
+
+	assert.False(t, started)
+	assert.Zero(t, s.sessionState.RemoteAudioReaderMediaSessionID())
+}
+
+func TestHandleConfigurationMessage_AudioNegotiatingNoop(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.currentMode = protos.StreamMode_STREAM_MODE_TEXT
+	s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioNegotiating)
+	s.signalingSessionID = "active-signaling"
+
+	s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_AUDIO)
+
+	assert.Equal(t, mediaSessionID, s.sessionState.ActiveMediaSessionID())
+	s.Mu.Lock()
+	assert.Equal(t, webrtc_internal.MediaStateAudioNegotiating, s.sessionState.MediaState())
+	assert.Equal(t, "active-signaling", s.signalingSessionID)
+	assert.Nil(t, s.peerConnection)
+	s.Mu.Unlock()
+	select {
+	case msg := <-s.OutputCh:
+		t.Fatalf("duplicate audio mode should not signal or restart media: %T", msg)
+	default:
+	}
+}
+
+func TestHandleConfigurationMessage_TextToAudioStartsNegotiation(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
 	s.currentMode = protos.StreamMode_STREAM_MODE_TEXT
 
 	s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_AUDIO)
+	t.Cleanup(func() { s.stopMediaSession() })
 
 	s.Mu.Lock()
 	mode := s.currentMode
+	mediaState := s.sessionState.MediaState()
+	peerConnection := s.peerConnection
 	s.Mu.Unlock()
-	assert.Equal(t, protos.StreamMode_STREAM_MODE_TEXT, mode, "should fall back to text on audio setup failure")
+	assert.Equal(t, protos.StreamMode_STREAM_MODE_TEXT, mode, "current mode changes after peer connects")
+	assert.Equal(t, webrtc_internal.MediaStateAudioNegotiating, mediaState)
+	assert.NotNil(t, peerConnection)
+}
+
+func TestHandleConfigurationMessage_TextStopsAudioNegotiationBeforeAudioConnected(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.BaseStreamer = channel_base.NewBaseStreamerWithChannelCapacity(s.Logger, 64, 64)
+	s.currentMode = protos.StreamMode_STREAM_MODE_TEXT
+
+	s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_AUDIO)
+	s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_TEXT)
+
+	assert.Equal(t, webrtc_internal.MediaStateText, s.sessionState.MediaState())
+	assert.False(t, s.sessionState.PeerConnected())
+	assert.Zero(t, s.sessionState.RemoteAudioReaderMediaSessionID())
+	s.Mu.Lock()
+	assert.Equal(t, protos.StreamMode_STREAM_MODE_TEXT, s.currentMode)
+	assert.Empty(t, s.signalingSessionID)
+	assert.Nil(t, s.peerConnection)
+	assert.Nil(t, s.assistantAudioTrack)
+	assert.Nil(t, s.assistantRTPSender)
+	s.Mu.Unlock()
 }
 
 func TestClose_Idempotent(t *testing.T) {
@@ -463,6 +704,7 @@ func TestResetAudioSession_ClearsState(t *testing.T) {
 	assert.Nil(t, s.assistantAudioTrack, "assistant audio track should be nil after reset")
 	assert.Empty(t, s.signalingSessionID)
 	assert.Equal(t, protos.StreamMode_STREAM_MODE_TEXT, s.currentMode)
+	assert.Equal(t, webrtc_internal.MediaStateText, s.sessionState.MediaState())
 	assert.Equal(t, webrtc_internal.MediaHealthState{}, s.mediaHealthState)
 	s.Mu.Unlock()
 }
@@ -549,6 +791,7 @@ func TestStopMediaSession_InvalidatesCurrentMediaSession(t *testing.T) {
 	assert.Nil(t, s.peerConnection)
 	assert.Nil(t, s.assistantAudioTrack)
 	assert.Nil(t, s.assistantRTPSender)
+	assert.Zero(t, s.sessionState.RemoteAudioReaderMediaSessionID())
 	assert.Nil(t, s.mediaCtx)
 	assert.Nil(t, s.cancelMedia)
 	s.Mu.Unlock()
@@ -561,6 +804,7 @@ func TestHandlePeerState_ClosedStopsMediaSession(t *testing.T) {
 	s.sessionState.SetPeerConnected(true)
 	s.signalingSessionID = "active-signaling"
 	s.currentMode = protos.StreamMode_STREAM_MODE_AUDIO
+	s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioConnected)
 
 	s.handlePeerState(mediaSessionID, pionwebrtc.PeerConnectionStateClosed, time.Now())
 
@@ -568,25 +812,571 @@ func TestHandlePeerState_ClosedStopsMediaSession(t *testing.T) {
 	s.Mu.Lock()
 	assert.Empty(t, s.signalingSessionID)
 	assert.Equal(t, protos.StreamMode_STREAM_MODE_TEXT, s.currentMode)
+	assert.Equal(t, webrtc_internal.MediaStateText, s.sessionState.MediaState())
+	s.Mu.Unlock()
+}
+
+func TestHandlePeerState_ConnectedMarksAudioConnected(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioNegotiating)
+	connectedAt := time.Now()
+
+	s.handlePeerState(mediaSessionID, pionwebrtc.PeerConnectionStateConnected, connectedAt)
+
+	assert.True(t, s.sessionState.PeerConnected())
+	s.Mu.Lock()
+	assert.Equal(t, protos.StreamMode_STREAM_MODE_AUDIO, s.currentMode)
+	assert.Equal(t, webrtc_internal.MediaStateAudioConnected, s.sessionState.MediaState())
+	assert.Equal(t, connectedAt, s.mediaHealthState.PeerConnectedAt)
 	s.Mu.Unlock()
 }
 
 func TestQueueMediaSessionRestart_QueuesLifecycleEvent(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
-	s.mediaLifecycleCh = make(chan mediaLifecycleEvent, 1)
+	s.mediaLifecycleCh = make(chan webrtc_internal.MediaLifecycleEvent, 1)
 	requestedAt := time.Now()
 
 	s.queueMediaSessionRestart(42, webrtc_internal.ReasonPeerFailed, requestedAt)
 
 	select {
 	case event := <-s.mediaLifecycleCh:
-		assert.Equal(t, mediaLifecycleEventRestart, event.kind)
-		assert.Equal(t, uint64(42), event.mediaSessionID)
-		assert.Equal(t, webrtc_internal.ReasonPeerFailed, event.reason)
-		assert.Equal(t, requestedAt, event.requestedAt)
+		assert.Equal(t, webrtc_internal.MediaLifecycleEventRestart, event.Kind)
+		assert.Equal(t, uint64(42), event.MediaSessionID)
+		assert.Equal(t, webrtc_internal.ReasonPeerFailed, event.Reason)
+		assert.Equal(t, requestedAt, event.RequestedAt)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for media lifecycle event")
+	}
+}
+
+func TestQueueMediaSessionRecovery_QueuesLifecycleEvent(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.mediaLifecycleCh = make(chan webrtc_internal.MediaLifecycleEvent, 1)
+	requestedAt := time.Now()
+
+	s.queueMediaSessionRecovery(42, webrtc_internal.ReasonICEFailed, requestedAt)
+
+	select {
+	case event := <-s.mediaLifecycleCh:
+		assert.Equal(t, webrtc_internal.MediaLifecycleEventRecover, event.Kind)
+		assert.Equal(t, uint64(42), event.MediaSessionID)
+		assert.Equal(t, webrtc_internal.ReasonICEFailed, event.Reason)
+		assert.Equal(t, requestedAt, event.RequestedAt)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for media lifecycle event")
+	}
+}
+
+func TestWebRTCOperationKind_String(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "send_offer", webrtc_internal.WebRTCOperationSendOffer.String())
+	assert.Equal(t, "apply_remote_answer", webrtc_internal.WebRTCOperationApplyRemoteAnswer.String())
+	assert.Equal(t, "add_remote_ice_candidate", webrtc_internal.WebRTCOperationAddRemoteICECandidate.String())
+	assert.Equal(t, "send_local_ice_candidate", webrtc_internal.WebRTCOperationSendLocalICECandidate.String())
+	assert.Equal(t, "restart_ice", webrtc_internal.WebRTCOperationRestartICE.String())
+	assert.Equal(t, "ice_gathering_complete", webrtc_internal.WebRTCOperationICEGatheringComplete.String())
+	assert.Equal(t, "unknown", webrtc_internal.WebRTCOperationKind(999).String())
+}
+
+func TestWebRTCOperationLoop_SendsInitialOfferBeforeTrickleCandidates(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.webrtcOperationCh = make(chan webrtc_internal.WebRTCOperation, webrtc_internal.WebRTCOperationChannelSize)
+	go s.runWebRTCOperationLoop()
+	t.Cleanup(s.Cancel)
+
+	s.signalingSessionID = "media-signaling-session"
+	mediaSessionID := s.sessionState.StartMediaSession()
+	require.NoError(t, s.createPeer(mediaSessionID))
+	t.Cleanup(func() { s.stopMediaSession() })
+
+	sdpMid := "audio"
+	sdpMLineIndex := uint16(0)
+	usernameFragment := "ufrag"
+	s.queueLocalICECandidate(pionwebrtc.ICECandidateInit{
+		Candidate:        "candidate:1 1 udp 2130706431 127.0.0.1 9 typ host",
+		SDPMid:           &sdpMid,
+		SDPMLineIndex:    &sdpMLineIndex,
+		UsernameFragment: &usernameFragment,
+	}, mediaSessionID)
+
+	s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:              webrtc_internal.WebRTCOperationSendOffer,
+		MediaSessionID:    mediaSessionID,
+		SignalMediaConfig: true,
+	})
+
+	select {
+	case msg := <-s.OutputCh:
+		signaling, ok := msg.(*protos.ServerSignaling)
+		require.True(t, ok, "expected ServerSignaling, got %T", msg)
+		assert.NotNil(t, signaling.GetConfig())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for WebRTC config")
+	}
+	select {
+	case msg := <-s.OutputCh:
+		signaling, ok := msg.(*protos.ServerSignaling)
+		require.True(t, ok, "expected ServerSignaling, got %T", msg)
+		assert.NotNil(t, signaling.GetSdp())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for WebRTC offer")
+	}
+	select {
+	case msg := <-s.OutputCh:
+		signaling, ok := msg.(*protos.ServerSignaling)
+		require.True(t, ok, "expected ServerSignaling, got %T", msg)
+		assert.NotNil(t, signaling.GetIceCandidate())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for WebRTC ICE candidate")
+	}
+}
+
+func TestWebRTCOperationLoop_HandlesICEGatheringComplete(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.sessionState.SetICEGatheringActive(true)
+
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:           webrtc_internal.WebRTCOperationICEGatheringComplete,
+		MediaSessionID: mediaSessionID,
+	})
+
+	assert.False(t, s.sessionState.ICEGatheringActive())
+	assert.False(t, s.sessionState.DeferredICERestartPending(mediaSessionID))
+}
+
+func TestWebRTCOperation_DefersICERestartDuringGathering(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.sessionState.SetICEGatheringActive(true)
+
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:           webrtc_internal.WebRTCOperationRestartICE,
+		MediaSessionID: mediaSessionID,
+		Reason:         webrtc_internal.ReasonICEFailed,
+		RequestedAt:    time.Now(),
+		OfferOptions:   &pionwebrtc.OfferOptions{ICERestart: true},
+	})
+
+	assert.True(t, s.sessionState.ICEGatheringActive())
+	assert.True(t, s.sessionState.DeferredICERestartPending(mediaSessionID))
+	event := requireLowConversationEvent(t, s, webrtc_internal.EventICERestartDeferred)
+	assert.Equal(t, webrtc_internal.WebRTCOperationRestartICE.String(), event.GetData()[webrtc_internal.DataOperation])
+	assert.Equal(t, "true", event.GetData()[webrtc_internal.DataICERestart])
+
+	select {
+	case msg := <-s.OutputCh:
+		t.Fatalf("deferred ICE restart should not emit offer immediately: %T", msg)
+	default:
+	}
+}
+
+func TestWebRTCOperation_RunsDeferredICERestartAfterGatheringComplete(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	require.NoError(t, s.createPeer(mediaSessionID))
+	t.Cleanup(func() { s.stopMediaSession() })
+	_, _ = s.sessionState.BeginNegotiation(false)
+	s.sessionState.SetICEGatheringActive(true)
+	s.sessionState.DeferICERestart(webrtc_internal.WebRTCDeferredICERestart{
+		MediaSessionID: mediaSessionID,
+		Reason:         webrtc_internal.ReasonICEFailed,
+		RequestedAt:    time.Now(),
+	})
+
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:           webrtc_internal.WebRTCOperationICEGatheringComplete,
+		MediaSessionID: mediaSessionID,
+	})
+
+	assert.False(t, s.sessionState.DeferredICERestartPending(mediaSessionID))
+	assert.Equal(t, webrtc_internal.NegotiationStateRetryPending, s.sessionState.NegotiationState())
+	assert.True(t, s.sessionState.NegotiationRetryICE())
+	event := requireLowConversationEvent(t, s, webrtc_internal.EventNegotiationRetryQueued)
+	assert.Equal(t, webrtc_internal.WebRTCOperationRestartICE.String(), event.GetData()[webrtc_internal.DataOperation])
+	assert.Equal(t, "true", event.GetData()[webrtc_internal.DataICERestart])
+}
+
+func TestWebRTCOperation_ICEGatheringCompleteWithoutDeferredRestartClearsGatheringState(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.sessionState.SetICEGatheringActive(true)
+
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:           webrtc_internal.WebRTCOperationICEGatheringComplete,
+		MediaSessionID: mediaSessionID,
+	})
+
+	assert.False(t, s.sessionState.ICEGatheringActive())
+	assert.False(t, s.sessionState.DeferredICERestartPending(mediaSessionID))
+	select {
+	case msg := <-s.OutputCh:
+		t.Fatalf("ICE gathering completion without deferred restart should not signal: %T", msg)
+	default:
+	}
+}
+
+func TestWebRTCOperationLoop_CachesRemoteICEBeforeAnswer(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.webrtcOperationCh = make(chan webrtc_internal.WebRTCOperation, webrtc_internal.WebRTCOperationChannelSize)
+	go s.runWebRTCOperationLoop()
+	t.Cleanup(s.Cancel)
+
+	mediaSessionID := s.sessionState.StartMediaSession()
+	require.NoError(t, s.createPeer(mediaSessionID))
+	t.Cleanup(func() { s.stopMediaSession() })
+
+	sdpMid := "audio"
+	sdpMLineIndex := uint16(0)
+	usernameFragment := "remote"
+	s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:           webrtc_internal.WebRTCOperationAddRemoteICECandidate,
+		MediaSessionID: mediaSessionID,
+		RemoteICECandidate: pionwebrtc.ICECandidateInit{
+			Candidate:        "candidate:1 1 udp 2130706431 127.0.0.1 9 typ host",
+			SDPMid:           &sdpMid,
+			SDPMLineIndex:    &sdpMLineIndex,
+			UsernameFragment: &usernameFragment,
+		},
+	})
+
+	require.Eventually(t, func() bool {
+		s.Mu.Lock()
+		defer s.Mu.Unlock()
+		return len(s.signalPendingRemoteICECandidates) == 1
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestEnqueueWebRTCOperation_WaitsForCriticalOperationCapacity(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.webrtcOperationCh = make(chan webrtc_internal.WebRTCOperation, 1)
+	s.webrtcOperationCh <- webrtc_internal.WebRTCOperation{
+		Kind: webrtc_internal.WebRTCOperationAddRemoteICECandidate,
+	}
+
+	started := make(chan struct{})
+	operationQueued := make(chan struct{})
+	go func() {
+		close(started)
+		s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+			Kind: webrtc_internal.WebRTCOperationApplyRemoteAnswer,
+		})
+		close(operationQueued)
+	}()
+
+	<-started
+	select {
+	case <-operationQueued:
+		t.Fatal("critical WebRTC operation should wait when operation queue is full")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	<-s.webrtcOperationCh
+	select {
+	case <-operationQueued:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for critical WebRTC operation to queue")
+	}
+}
+
+func TestWebRTCOperation_AppliesAnswerThenDrainsRemoteICE(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.signalingSessionID = "media-signaling-session"
+	mediaSessionID := s.sessionState.StartMediaSession()
+	require.NoError(t, s.createPeer(mediaSessionID))
+	t.Cleanup(func() { s.stopMediaSession() })
+
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:              webrtc_internal.WebRTCOperationSendOffer,
+		MediaSessionID:    mediaSessionID,
+		SignalMediaConfig: true,
+	})
+
+	<-s.OutputCh
+	offerMessage, ok := (<-s.OutputCh).(*protos.ServerSignaling)
+	require.True(t, ok)
+	require.NotNil(t, offerMessage.GetSdp())
+
+	remoteMediaEngine := &pionwebrtc.MediaEngine{}
+	require.NoError(t, remoteMediaEngine.RegisterDefaultCodecs())
+	remoteAPI := pionwebrtc.NewAPI(pionwebrtc.WithMediaEngine(remoteMediaEngine))
+	remotePeerConnection, err := remoteAPI.NewPeerConnection(pionwebrtc.Configuration{})
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, remotePeerConnection.Close()) })
+
+	require.NoError(t, remotePeerConnection.SetRemoteDescription(pionwebrtc.SessionDescription{
+		Type: pionwebrtc.SDPTypeOffer,
+		SDP:  offerMessage.GetSdp().GetSdp(),
+	}))
+	answer, err := remotePeerConnection.CreateAnswer(nil)
+	require.NoError(t, err)
+	require.NoError(t, remotePeerConnection.SetLocalDescription(answer))
+
+	sdpMid := "audio"
+	sdpMLineIndex := uint16(0)
+	usernameFragment := "remote"
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:           webrtc_internal.WebRTCOperationAddRemoteICECandidate,
+		MediaSessionID: mediaSessionID,
+		RemoteICECandidate: pionwebrtc.ICECandidateInit{
+			Candidate:        "candidate:1 1 udp 2130706431 127.0.0.1 9 typ host",
+			SDPMid:           &sdpMid,
+			SDPMLineIndex:    &sdpMLineIndex,
+			UsernameFragment: &usernameFragment,
+		},
+	})
+
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:            webrtc_internal.WebRTCOperationApplyRemoteAnswer,
+		MediaSessionID:  mediaSessionID,
+		RemoteAnswerSDP: answer.SDP,
+	})
+
+	s.Mu.Lock()
+	assert.Empty(t, s.signalPendingRemoteICECandidates)
+	assert.False(t, s.mediaHealthState.RemoteDescriptionSetAt.IsZero())
+	s.Mu.Unlock()
+}
+
+func TestWebRTCOperation_EmitsNegotiationLifecycleEvents(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.signalingSessionID = "media-signaling-session"
+	mediaSessionID := s.sessionState.StartMediaSession()
+	require.NoError(t, s.createPeer(mediaSessionID))
+	t.Cleanup(func() { s.stopMediaSession() })
+
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:              webrtc_internal.WebRTCOperationSendOffer,
+		MediaSessionID:    mediaSessionID,
+		SignalMediaConfig: true,
+	})
+
+	<-s.OutputCh
+	offerMessage, ok := (<-s.OutputCh).(*protos.ServerSignaling)
+	require.True(t, ok)
+	require.NotNil(t, offerMessage.GetSdp())
+	offerSentEvent := requireLowConversationEvent(t, s, webrtc_internal.EventNegotiationOfferSent)
+	assert.Equal(t, webrtc_internal.WebRTCOperationSendOffer.String(), offerSentEvent.GetData()[webrtc_internal.DataOperation])
+	assert.Equal(t, "false", offerSentEvent.GetData()[webrtc_internal.DataICERestart])
+
+	remoteMediaEngine := &pionwebrtc.MediaEngine{}
+	require.NoError(t, remoteMediaEngine.RegisterDefaultCodecs())
+	remoteAPI := pionwebrtc.NewAPI(pionwebrtc.WithMediaEngine(remoteMediaEngine))
+	remotePeerConnection, err := remoteAPI.NewPeerConnection(pionwebrtc.Configuration{})
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, remotePeerConnection.Close()) })
+
+	require.NoError(t, remotePeerConnection.SetRemoteDescription(pionwebrtc.SessionDescription{
+		Type: pionwebrtc.SDPTypeOffer,
+		SDP:  offerMessage.GetSdp().GetSdp(),
+	}))
+	answer, err := remotePeerConnection.CreateAnswer(nil)
+	require.NoError(t, err)
+	require.NoError(t, remotePeerConnection.SetLocalDescription(answer))
+
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:            webrtc_internal.WebRTCOperationApplyRemoteAnswer,
+		MediaSessionID:  mediaSessionID,
+		RemoteAnswerSDP: answer.SDP,
+	})
+
+	answerEvent := requireLowConversationEvent(t, s, webrtc_internal.EventNegotiationAnswerReceived)
+	assert.Equal(t, webrtc_internal.WebRTCOperationApplyRemoteAnswer.String(), answerEvent.GetData()[webrtc_internal.DataOperation])
+	assert.Equal(t, "false", answerEvent.GetData()[webrtc_internal.DataRetryPending])
+}
+
+func TestWebRTCOperation_IgnoresStaleMediaSession(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	activeMediaSessionID := s.sessionState.StartMediaSession()
+
+	s.handleWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:              webrtc_internal.WebRTCOperationSendOffer,
+		MediaSessionID:    activeMediaSessionID + 1,
+		SignalMediaConfig: true,
+	})
+
+	select {
+	case msg := <-s.OutputCh:
+		t.Fatalf("stale WebRTC operation should not emit output: %T", msg)
+	default:
+	}
+}
+
+func TestWebRTCOperation_ICEFailedDuringPendingOfferQueuesRetry(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	require.NoError(t, s.createPeer(mediaSessionID))
+	t.Cleanup(func() { s.stopMediaSession() })
+	_, _ = s.sessionState.BeginNegotiation(false)
+
+	s.restartICEOrMediaSessionFallback(mediaSessionID, webrtc_internal.ReasonICEFailed, time.Now())
+
+	assert.Equal(t, webrtc_internal.NegotiationStateRetryPending, s.sessionState.NegotiationState())
+	assert.True(t, s.sessionState.NegotiationRetryICE())
+	event := requireLowConversationEvent(t, s, webrtc_internal.EventNegotiationRetryQueued)
+	assert.Equal(t, webrtc_internal.WebRTCOperationRestartICE.String(), event.GetData()[webrtc_internal.DataOperation])
+	assert.Equal(t, "true", event.GetData()[webrtc_internal.DataICERestart])
+}
+
+func TestWebRTCOperation_QueuesICERestartRetryWhenOfferPending(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.peerConnection = &pionwebrtc.PeerConnection{}
+	_, _ = s.sessionState.BeginNegotiation(false)
+
+	s.enqueueWebRTCOperation(webrtc_internal.WebRTCOperation{
+		Kind:           webrtc_internal.WebRTCOperationRestartICE,
+		MediaSessionID: mediaSessionID,
+		OfferOptions:   &pionwebrtc.OfferOptions{ICERestart: true},
+	})
+
+	s.Mu.Lock()
+	assert.Equal(t, webrtc_internal.NegotiationStateRetryPending, s.sessionState.NegotiationState())
+	assert.True(t, s.sessionState.NegotiationRetryICE())
+	s.Mu.Unlock()
+	select {
+	case msg := <-s.OutputCh:
+		t.Fatalf("queued ICE restart should not emit an offer immediately: %T", msg)
+	default:
+	}
+}
+
+func TestWebRTCRepeatedAudioModeToggles_NoDuplicateReadersNoDeadlock(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.BaseStreamer = channel_base.NewBaseStreamerWithChannelCapacity(s.Logger, 128, 128)
+	t.Cleanup(s.Cancel)
+
+	for i := 0; i < 5; i++ {
+		s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_AUDIO)
+		s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_TEXT)
+	}
+
+	assert.Equal(t, webrtc_internal.MediaStateText, s.sessionState.MediaState())
+	assert.False(t, s.sessionState.PeerConnected())
+	assert.Zero(t, s.sessionState.RemoteAudioReaderMediaSessionID())
+}
+
+func TestWebRTCSequentialTextAudioModeSwitchSoak_LeavesTextStable(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.BaseStreamer = channel_base.NewBaseStreamerWithChannelCapacity(s.Logger, 512, 512)
+	t.Cleanup(s.Cancel)
+
+	const switchCount = 25
+	for i := 0; i < switchCount; i++ {
+		s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_AUDIO)
+		assert.Equal(t, webrtc_internal.MediaStateAudioNegotiating, s.sessionState.MediaState())
+		assert.False(t, s.sessionState.PeerConnected())
+		s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_TEXT)
+		assert.Equal(t, webrtc_internal.MediaStateText, s.sessionState.MediaState())
+		assert.False(t, s.sessionState.PeerConnected())
+		assert.Zero(t, s.sessionState.RemoteAudioReaderMediaSessionID())
+	}
+
+	s.Mu.Lock()
+	assert.Equal(t, protos.StreamMode_STREAM_MODE_TEXT, s.currentMode)
+	assert.Empty(t, s.signalingSessionID)
+	assert.Nil(t, s.peerConnection)
+	assert.Nil(t, s.assistantAudioTrack)
+	assert.Nil(t, s.assistantRTPSender)
+	assert.Nil(t, s.mediaCtx)
+	assert.Nil(t, s.cancelMedia)
+	s.Mu.Unlock()
+}
+
+func TestWebRTCConcurrentTextAudioModeSwitchRace_LeavesValidState(t *testing.T) {
+	s := newTestStreamer(t)
+	s.BaseStreamer = channel_base.NewBaseStreamerWithChannelCapacity(s.Logger, 1024, 1024)
+	t.Cleanup(s.Cancel)
+
+	const workerCount = 2
+	const switchesPerWorker = 4
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for workerIndex := 0; workerIndex < workerCount; workerIndex++ {
+		workerIndex := workerIndex
+		go func() {
+			defer workers.Done()
+			for switchIndex := 0; switchIndex < switchesPerWorker; switchIndex++ {
+				if (workerIndex+switchIndex)%2 == 0 {
+					s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_AUDIO)
+					continue
+				}
+				s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_TEXT)
+			}
+		}()
+	}
+	workers.Wait()
+
+	s.handleConfigurationMessage(protos.StreamMode_STREAM_MODE_TEXT)
+
+	assert.Equal(t, webrtc_internal.MediaStateText, s.sessionState.MediaState())
+	assert.False(t, s.sessionState.PeerConnected())
+	assert.Zero(t, s.sessionState.RemoteAudioReaderMediaSessionID())
+	s.Mu.Lock()
+	assert.Equal(t, protos.StreamMode_STREAM_MODE_TEXT, s.currentMode)
+	assert.Empty(t, s.signalingSessionID)
+	assert.Nil(t, s.peerConnection)
+	assert.Nil(t, s.assistantAudioTrack)
+	assert.Nil(t, s.assistantRTPSender)
+	s.Mu.Unlock()
+}
+
+func TestWebRTCTrackBeforeRTP_StartsRemoteAudioReaderOnce(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	peerConnection := &pionwebrtc.PeerConnection{}
+	s.peerConnection = peerConnection
+
+	assert.True(t, s.tryStartRemoteAudioReader(peerConnection, mediaSessionID))
+	assert.False(t, s.tryStartRemoteAudioReader(peerConnection, mediaSessionID))
+	assert.Equal(t, mediaSessionID, s.sessionState.RemoteAudioReaderMediaSessionID())
+	s.mediaWorkers.Done()
+}
+
+func TestHandlePeerState_DisconnectedQueuesRecovery(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.mediaLifecycleCh = make(chan webrtc_internal.MediaLifecycleEvent, 1)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.sessionState.SetPeerConnected(true)
+	s.currentMode = protos.StreamMode_STREAM_MODE_AUDIO
+	s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioConnected)
+	disconnectedAt := time.Now()
+
+	s.handlePeerState(mediaSessionID, pionwebrtc.PeerConnectionStateDisconnected, disconnectedAt)
+
+	assert.False(t, s.sessionState.PeerConnected())
+	s.Mu.Lock()
+	assert.Equal(t, webrtc_internal.MediaStateAudioNegotiating, s.sessionState.MediaState())
+	s.Mu.Unlock()
+	select {
+	case event := <-s.mediaLifecycleCh:
+		assert.Equal(t, webrtc_internal.MediaLifecycleEventRecover, event.Kind)
+		assert.Equal(t, mediaSessionID, event.MediaSessionID)
+		assert.Equal(t, webrtc_internal.ReasonPeerDisconnected, event.Reason)
+		assert.Equal(t, disconnectedAt, event.RequestedAt)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for recovery event")
 	}
 }
 
@@ -615,6 +1405,61 @@ func TestHandlePeerICEConnectionState_RecordsSeparateICEState(t *testing.T) {
 	}
 }
 
+func TestHandlePeerICEConnectionState_FailedQueuesRecovery(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.mediaLifecycleCh = make(chan webrtc_internal.MediaLifecycleEvent, 1)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	s.sessionState.SetPeerConnected(true)
+	failedAt := time.Now()
+
+	s.handlePeerICEConnectionState(mediaSessionID, pionwebrtc.ICEConnectionStateFailed, failedAt)
+
+	assert.False(t, s.sessionState.PeerConnected())
+	s.Mu.Lock()
+	assert.Equal(t, webrtc_internal.ICEStateFailed, s.mediaHealthState.ICEConnectionState)
+	assert.Equal(t, failedAt, s.mediaHealthState.ICEFailedAt)
+	s.Mu.Unlock()
+
+	select {
+	case msg := <-s.LowCh:
+		event, ok := msg.(*protos.ConversationEvent)
+		require.True(t, ok, "expected ConversationEvent, got %T", msg)
+		assert.Equal(t, observe.EventICEFailed, event.GetData()[webrtc_internal.DataType])
+		assert.Equal(t, webrtc_internal.ICEStateFailed, event.GetData()[webrtc_internal.DataICEConnectionState])
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ICE failed event")
+	}
+
+	select {
+	case event := <-s.mediaLifecycleCh:
+		assert.Equal(t, webrtc_internal.MediaLifecycleEventRecover, event.Kind)
+		assert.Equal(t, mediaSessionID, event.MediaSessionID)
+		assert.Equal(t, webrtc_internal.ReasonICEFailed, event.Reason)
+		assert.Equal(t, failedAt, event.RequestedAt)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ICE recovery event")
+	}
+}
+
+func TestSessionState_TryBeginICERestartHonorsLimit(t *testing.T) {
+	t.Parallel()
+	var state webrtc_internal.SessionState
+
+	attempt, ok := state.TryBeginICERestart(webrtc_internal.ICERestartAttemptLimit)
+	require.True(t, ok)
+	assert.Equal(t, uint64(1), attempt)
+
+	attempt, ok = state.TryBeginICERestart(webrtc_internal.ICERestartAttemptLimit)
+	assert.False(t, ok)
+	assert.Equal(t, uint64(1), attempt)
+
+	state.ResetICERestartAttempts()
+	attempt, ok = state.TryBeginICERestart(webrtc_internal.ICERestartAttemptLimit)
+	require.True(t, ok)
+	assert.Equal(t, uint64(1), attempt)
+}
+
 func TestRestartMediaSession_LimitFallsBackToText(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
@@ -622,6 +1467,7 @@ func TestRestartMediaSession_LimitFallsBackToText(t *testing.T) {
 	s.sessionState.SetPeerConnected(true)
 	s.signalingSessionID = "active-signaling"
 	s.currentMode = protos.StreamMode_STREAM_MODE_AUDIO
+	s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioConnected)
 	_, ok := s.sessionState.TryBeginMediaRestart(webrtc_internal.MediaRestartAttemptLimit)
 	require.True(t, ok)
 
@@ -631,6 +1477,7 @@ func TestRestartMediaSession_LimitFallsBackToText(t *testing.T) {
 	s.Mu.Lock()
 	assert.Empty(t, s.signalingSessionID)
 	assert.Equal(t, protos.StreamMode_STREAM_MODE_TEXT, s.currentMode)
+	assert.Equal(t, webrtc_internal.MediaStateText, s.sessionState.MediaState())
 	s.Mu.Unlock()
 }
 
@@ -912,7 +1759,7 @@ func TestResetAudioSession_FlushesPendingOutput(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
 
-	s.WithOutputBuffer(func(buf *bytes.Buffer) {
+	s.withOutputAudioBuffer(func(buf *bytes.Buffer) {
 		buf.Write([]byte{0x01, 0x02, 0x03, 0x04})
 	})
 	s.Output(&protos.ConversationAssistantMessage{
@@ -921,15 +1768,52 @@ func TestResetAudioSession_FlushesPendingOutput(t *testing.T) {
 
 	s.stopMediaSessionAndFallbackToText()
 
-	s.WithOutputBuffer(func(buf *bytes.Buffer) {
-		assert.Equal(t, 0, buf.Len(), "output accumulation buffer should be cleared")
+	s.withOutputAudioBuffer(func(buf *bytes.Buffer) {
+		assert.Equal(t, 0, buf.Len(), "outputAudioBuffer accumulation buffer should be cleared")
 	})
 
 	select {
 	case <-s.OutputCh:
-		t.Fatal("output channel should be drained after reset")
+		t.Fatal("outputAudioBuffer channel should be drained after reset")
 	default:
 	}
+}
+
+func TestAudioBuffer_InputEmitsBridgeAudioAndFramedUserAudio(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	inputAudioReceivedAt := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
+	audio := bytes.Repeat([]byte{0x11}, webrtc_internal.InputBufferThreshold)
+
+	s.bufferAndSendInput(audio, inputAudioReceivedAt)
+
+	bridgeAudio, ok := (<-s.InputCh).(*protos.ConversationBridgeUserAudio)
+	require.True(t, ok)
+	assert.Equal(t, audio, bridgeAudio.GetAudio())
+	assert.Equal(t, inputAudioReceivedAt, bridgeAudio.GetTime().AsTime())
+
+	userAudio, ok := (<-s.InputCh).(*protos.ConversationUserMessage)
+	require.True(t, ok)
+	assert.Equal(t, audio, userAudio.GetAudio())
+	assert.Equal(t, inputAudioReceivedAt, userAudio.GetTime().AsTime())
+}
+
+func TestAudioBuffer_OutputFramesAssistantAudio(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	audio := bytes.Repeat([]byte{0x22}, webrtc_internal.WebRTCOutputPCM16kFrameBytes*2+1)
+
+	s.bufferAndSendOutput(audio)
+
+	for i := 0; i < 2; i++ {
+		msg, ok := (<-s.OutputCh).(*protos.ConversationAssistantMessage)
+		require.True(t, ok)
+		assert.Len(t, msg.GetAudio(), webrtc_internal.WebRTCOutputPCM16kFrameBytes)
+		assert.NotNil(t, msg.GetTime())
+	}
+	s.withOutputAudioBuffer(func(buf *bytes.Buffer) {
+		assert.Equal(t, 1, buf.Len())
+	})
 }
 
 func TestSend_TextMessage(t *testing.T) {
@@ -947,7 +1831,7 @@ func TestSend_AudioBuffersWebRTCOutputPCM16kFrame(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
 
-	audio := bytes.Repeat([]byte{0x22}, webRTCOutputPCM16kFrameBytes)
+	audio := bytes.Repeat([]byte{0x22}, webrtc_internal.WebRTCOutputPCM16kFrameBytes)
 	msg := &protos.ConversationAssistantMessage{
 		Message: &protos.ConversationAssistantMessage_Audio{Audio: audio},
 	}
@@ -960,7 +1844,7 @@ func TestSend_AudioBuffersWebRTCOutputPCM16kFrame(t *testing.T) {
 		assistant, ok := out.(*protos.ConversationAssistantMessage)
 		require.True(t, ok, "expected ConversationAssistantMessage, got %T", out)
 		got := assistant.GetAudio()
-		assert.Len(t, got, webRTCOutputPCM16kFrameBytes)
+		assert.Len(t, got, webrtc_internal.WebRTCOutputPCM16kFrameBytes)
 		assert.Equal(t, audio, got)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for assistant audio")
@@ -993,7 +1877,7 @@ func TestSend_Interruption(t *testing.T) {
 		assert.Equal(t, "2", eventMsg.GetData()[webrtc_internal.DataClearedFrames])
 		assert.Equal(t, fmt.Sprintf("%d", webrtc_internal.OutputAudioQueueEmptySize), eventMsg.GetData()[webrtc_internal.DataRemainingQueueFrames])
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for output queue cleared event")
+		t.Fatal("timed out waiting for outputAudioBuffer queue cleared event")
 	}
 }
 
@@ -1038,10 +1922,98 @@ func TestSend_TransferConversation_PushesFailedResult(t *testing.T) {
 	}
 }
 
+func TestHandleClientSignal_IgnoresStaleSignalingSession(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.webrtcOperationCh = make(chan webrtc_internal.WebRTCOperation, 2)
+	s.signalingSessionID = "active-signaling-session"
+	s.sessionState.StartMediaSession()
+
+	s.handleClientSignal(&protos.ClientSignaling{
+		SessionId: "stale-signaling-session",
+		Message: &protos.ClientSignaling_Sdp{
+			Sdp: &protos.WebRTCSDP{
+				Type: protos.WebRTCSDP_ANSWER,
+				Sdp:  "v=0\r\n",
+			},
+		},
+	})
+	s.handleClientSignal(&protos.ClientSignaling{
+		SessionId: "stale-signaling-session",
+		Message: &protos.ClientSignaling_IceCandidate{
+			IceCandidate: &protos.ICECandidate{
+				Candidate: "candidate:1 1 udp 2130706431 127.0.0.1 9 typ host",
+				SdpMid:    "audio",
+			},
+		},
+	})
+
+	select {
+	case operation := <-s.webrtcOperationCh:
+		t.Fatalf("stale client signaling should not enqueue WebRTC operation: %+v", operation)
+	default:
+	}
+}
+
+func TestHandleClientSignal_EnqueuesActiveAnswerAndICECandidate(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.webrtcOperationCh = make(chan webrtc_internal.WebRTCOperation, 2)
+	s.signalingSessionID = "active-signaling-session"
+	mediaSessionID := s.sessionState.StartMediaSession()
+
+	s.handleClientSignal(&protos.ClientSignaling{
+		SessionId: "active-signaling-session",
+		Message: &protos.ClientSignaling_Sdp{
+			Sdp: &protos.WebRTCSDP{
+				Type: protos.WebRTCSDP_ANSWER,
+				Sdp:  "v=0\r\n",
+			},
+		},
+	})
+	s.handleClientSignal(&protos.ClientSignaling{
+		SessionId: "active-signaling-session",
+		Message: &protos.ClientSignaling_IceCandidate{
+			IceCandidate: &protos.ICECandidate{
+				Candidate:        "candidate:1 1 udp 2130706431 127.0.0.1 9 typ host",
+				SdpMid:           "audio",
+				SdpMLineIndex:    0,
+				UsernameFragment: "remote-ufrag",
+			},
+		},
+	})
+
+	var answerOperation webrtc_internal.WebRTCOperation
+	select {
+	case answerOperation = <-s.webrtcOperationCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for remote answer operation")
+	}
+	assert.Equal(t, webrtc_internal.WebRTCOperationApplyRemoteAnswer, answerOperation.Kind)
+	assert.Equal(t, mediaSessionID, answerOperation.MediaSessionID)
+	assert.Equal(t, "v=0\r\n", answerOperation.RemoteAnswerSDP)
+
+	var iceOperation webrtc_internal.WebRTCOperation
+	select {
+	case iceOperation = <-s.webrtcOperationCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for remote ICE operation")
+	}
+	assert.Equal(t, webrtc_internal.WebRTCOperationAddRemoteICECandidate, iceOperation.Kind)
+	assert.Equal(t, mediaSessionID, iceOperation.MediaSessionID)
+	assert.Equal(t, "candidate:1 1 udp 2130706431 127.0.0.1 9 typ host", iceOperation.RemoteICECandidate.Candidate)
+	require.NotNil(t, iceOperation.RemoteICECandidate.SDPMid)
+	require.NotNil(t, iceOperation.RemoteICECandidate.SDPMLineIndex)
+	require.NotNil(t, iceOperation.RemoteICECandidate.UsernameFragment)
+	assert.Equal(t, "audio", *iceOperation.RemoteICECandidate.SDPMid)
+	assert.Equal(t, uint16(0), *iceOperation.RemoteICECandidate.SDPMLineIndex)
+	assert.Equal(t, "remote-ufrag", *iceOperation.RemoteICECandidate.UsernameFragment)
+}
+
 func TestQueueClientSignal_QueuesPeerEvent(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
-	s.peerEventCh = make(chan peerEvent, 1)
+	s.peerEventCh = make(chan webrtc_internal.PeerEvent, 1)
 	signaling := &protos.ClientSignaling{
 		SessionId: "signaling-session",
 		Message: &protos.ClientSignaling_Disconnect{
@@ -1053,8 +2025,8 @@ func TestQueueClientSignal_QueuesPeerEvent(t *testing.T) {
 
 	select {
 	case event := <-s.peerEventCh:
-		assert.Equal(t, signalEventClientMessage, event.kind)
-		assert.Same(t, signaling, event.signalClientMessage)
+		assert.Equal(t, webrtc_internal.SignalEventClientMessage, event.Kind)
+		assert.Same(t, signaling, event.SignalClientMessage)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for peer event")
 	}
@@ -1063,25 +2035,25 @@ func TestQueueClientSignal_QueuesPeerEvent(t *testing.T) {
 func TestEnqueuePeerEvent_PreservesPeerConnectionStateTransitions(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
-	s.peerEventCh = make(chan peerEvent, 2)
+	s.peerEventCh = make(chan webrtc_internal.PeerEvent, 2)
 
-	s.enqueuePeerEvent(peerEvent{
-		kind:               peerEventStateChanged,
-		mediaSessionID:     10,
-		peerState:          pionwebrtc.PeerConnectionStateDisconnected,
-		peerStateChangedAt: time.Now(),
+	s.enqueuePeerEvent(webrtc_internal.PeerEvent{
+		Kind:               webrtc_internal.PeerEventStateChanged,
+		MediaSessionID:     10,
+		PeerState:          pionwebrtc.PeerConnectionStateDisconnected,
+		PeerStateChangedAt: time.Now(),
 	})
-	s.enqueuePeerEvent(peerEvent{
-		kind:               peerEventStateChanged,
-		mediaSessionID:     10,
-		peerState:          pionwebrtc.PeerConnectionStateConnected,
-		peerStateChangedAt: time.Now().Add(time.Millisecond),
+	s.enqueuePeerEvent(webrtc_internal.PeerEvent{
+		Kind:               webrtc_internal.PeerEventStateChanged,
+		MediaSessionID:     10,
+		PeerState:          pionwebrtc.PeerConnectionStateConnected,
+		PeerStateChangedAt: time.Now().Add(time.Millisecond),
 	})
 
 	first := <-s.peerEventCh
 	second := <-s.peerEventCh
-	assert.Equal(t, pionwebrtc.PeerConnectionStateDisconnected, first.peerState)
-	assert.Equal(t, pionwebrtc.PeerConnectionStateConnected, second.peerState)
+	assert.Equal(t, pionwebrtc.PeerConnectionStateDisconnected, first.PeerState)
+	assert.Equal(t, pionwebrtc.PeerConnectionStateConnected, second.PeerState)
 }
 
 func TestApplyAmbientConfig_ReadsTypedConfig(t *testing.T) {
@@ -1114,7 +2086,7 @@ func TestApplyAmbientToFrame_AmbientOnlyOnSilenceTicks(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
 	fake := &fakeAmbientMixer{
-		ambientOut: make([]byte, webRTCOutputPCM16kFrameBytes),
+		ambientOut: make([]byte, webrtc_internal.WebRTCOutputPCM16kFrameBytes),
 	}
 	for i := range fake.ambientOut {
 		fake.ambientOut[i] = 0x11
@@ -1123,7 +2095,7 @@ func TestApplyAmbientToFrame_AmbientOnlyOnSilenceTicks(t *testing.T) {
 
 	out := s.applyAmbientToFrame(nil)
 	require.NotNil(t, out)
-	assert.Len(t, out, webRTCOutputPCM16kFrameBytes)
+	assert.Len(t, out, webrtc_internal.WebRTCOutputPCM16kFrameBytes)
 	assert.NotEqual(t, make([]byte, len(out)), out)
 }
 
@@ -1132,7 +2104,7 @@ func TestApplyAmbientToFrame_NoneLeavesPrimaryUntouched(t *testing.T) {
 	s := newTestStreamer(t)
 	s.ambientMixer = nil
 
-	pcm16k := make([]byte, webRTCOutputPCM16kFrameBytes)
+	pcm16k := make([]byte, webrtc_internal.WebRTCOutputPCM16kFrameBytes)
 	for i := range pcm16k {
 		pcm16k[i] = byte(i % 251)
 	}
@@ -1245,7 +2217,7 @@ func TestNextFrame_StampsActiveMediaSession(t *testing.T) {
 func TestConsumeFrame_TracksWriteFailureWithoutRecordingAssistantAudio(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
-	assistantPCM16k := bytes.Repeat([]byte{0x33}, webRTCOutputPCM16kFrameBytes)
+	assistantPCM16k := bytes.Repeat([]byte{0x33}, webrtc_internal.WebRTCOutputPCM16kFrameBytes)
 
 	err := s.ConsumeFrame(assistantPCM16k)
 	require.Error(t, err)
@@ -1269,7 +2241,7 @@ func TestConsumeFrame_DropsStalePacedMediaSession(t *testing.T) {
 	s.sessionState.StampPacedAssistantFrame(staleMediaSessionID)
 	s.sessionState.StartMediaSession()
 	s.sessionState.SetPeerConnected(true)
-	assistantPCM16k := bytes.Repeat([]byte{0x55}, webRTCOutputPCM16kFrameBytes)
+	assistantPCM16k := bytes.Repeat([]byte{0x55}, webrtc_internal.WebRTCOutputPCM16kFrameBytes)
 
 	err := s.ConsumeFrame(assistantPCM16k)
 
@@ -1299,7 +2271,7 @@ func TestConsumeFrame_TracksLastAssistantFrameSentAt(t *testing.T) {
 	require.NoError(t, err)
 	s.assistantAudioTrack = assistantAudioTrack
 
-	assistantPCM16k := bytes.Repeat([]byte{0x44}, webRTCOutputPCM16kFrameBytes)
+	assistantPCM16k := bytes.Repeat([]byte{0x44}, webrtc_internal.WebRTCOutputPCM16kFrameBytes)
 
 	err = s.ConsumeFrame(assistantPCM16k)
 	require.NoError(t, err)

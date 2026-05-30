@@ -1984,42 +1984,32 @@ func (h requestorDispatchHandler) callInputNormalizer(ctx context.Context, vl in
 }
 
 func (r *genericRequestor) notifyConfiguration(ctx context.Context, config *protos.ConversationInitialization, conversation *internal_conversation_entity.AssistantConversation) {
-	options := config.GetOptions()
-	mergedOptions := map[string]interface{}{}
-	if base, err := utils.AnyMapToInterfaceMap(config.GetOptions()); err == nil {
-		mergedOptions = base
-	}
-
-	if outputAudio, err := r.GetTextToSpeechTransformer(); err == nil && outputAudio != nil {
-		outputOpts := outputAudio.GetOptions()
-		if ambient, err := outputOpts.GetString("speaker.ambient"); err == nil && ambient != "" {
-			mergedOptions["speaker.ambient"] = ambient
-		}
-		if volume, err := outputOpts.GetString("speaker.ambient_volume"); err == nil && volume != "" {
-			mergedOptions["speaker.ambient_volume"] = volume
-		} else if volumeNum, err := outputOpts.GetUint64("speaker.ambient_volume"); err == nil {
-			mergedOptions["speaker.ambient_volume"] = volumeNum
-		}
-	}
-
-	if len(mergedOptions) > 0 {
-		if anyMap, err := utils.InterfaceMapToAnyMap(mergedOptions); err == nil {
-			options = anyMap
-		}
-	}
-	if err := r.Notify(ctx, &protos.ConversationInitialization{
+	conversationConfigurationObj := &protos.ConversationInitialization{
 		AssistantConversationId: conversation.Id,
 		Assistant: &protos.AssistantDefinition{
 			AssistantId: r.assistant.Id,
 			Version:     utils.GetVersionString(r.assistant.AssistantProviderId),
 		},
-		Args:         config.GetArgs(),
-		Metadata:     config.GetMetadata(),
-		Options:      options,
 		StreamMode:   config.GetStreamMode(),
 		UserIdentity: config.GetUserIdentity(),
 		Time:         timestamppb.Now(),
-	}); err != nil {
+	}
+	options := r.GetOptions()
+	if outputAudio, err := r.GetTextToSpeechTransformer(); err == nil && outputAudio != nil {
+		if ambient, _ := outputAudio.GetOptions().GetString("speaker.ambient"); ambient != "" {
+			options["speaker.ambient"] = ambient
+		}
+		if volume, _ := outputAudio.GetOptions().GetString("speaker.ambient_volume"); volume != "" {
+			options["speaker.ambient_volume"] = volume
+		}
+	}
+	if anyArgMap, err := utils.InterfaceMapToAnyMap(r.GetArgs()); err == nil {
+		conversationConfigurationObj.Args = anyArgMap
+	}
+	if anyMetaMap, err := utils.InterfaceMapToAnyMap(r.GetMetadata()); err == nil {
+		conversationConfigurationObj.Metadata = anyMetaMap
+	}
+	if err := r.Notify(ctx, conversationConfigurationObj); err != nil {
 		r.logger.Errorf("failed to send configuration notification: %v", err)
 	}
 }

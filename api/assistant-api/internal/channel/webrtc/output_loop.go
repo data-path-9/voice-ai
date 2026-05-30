@@ -23,7 +23,7 @@ func (s *webrtcStreamer) runOutputWriter() {
 		case <-s.Ctx.Done():
 			return
 
-		case <-s.FlushAudioCh:
+		case <-s.flushAudioCh:
 			clearedFrames := s.clearOutputAudio()
 			if clearedFrames > 0 {
 				s.Input(&protos.ConversationEvent{

@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
-	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_exotel "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/exotel/internal"
@@ -24,8 +23,6 @@ import (
 	"github.com/rapidaai/protos"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-var exotelLinear8kConfig = internal_audio.NewLinear8khzMonoAudioConfig()
 
 type exotelWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
@@ -45,7 +42,6 @@ func NewExotelWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 	exotel := &exotelWebsocketStreamer{
 		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
 			logger, cc, vaultCred,
-			internal_telephony_base.WithSourceAudioConfig(exotelLinear8kConfig),
 		),
 		streamID:   "",
 		connection: connection,

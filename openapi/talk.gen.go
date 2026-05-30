@@ -41,8 +41,8 @@ type ErrorResponse struct {
 	Success *bool  `json:"success,omitempty"`
 }
 
-// CreatePhoneCallJSONRequestBody defines body for CreatePhoneCall for application/json ContentType.
-type CreatePhoneCallJSONRequestBody = CreatePhoneCallRequest
-
 // CreateBulkPhoneCallJSONRequestBody defines body for CreateBulkPhoneCall for application/json ContentType.
 type CreateBulkPhoneCallJSONRequestBody = CreateBulkPhoneCallRequest
+
+// CreatePhoneCallJSONRequestBody defines body for CreatePhoneCall for application/json ContentType.
+type CreatePhoneCallJSONRequestBody = CreatePhoneCallRequest
