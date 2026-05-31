@@ -113,9 +113,10 @@ type StreamerOption struct {
 	AudioSocketWriter *bufio.Writer
 
 	// SIP transport
-	Ctx        context.Context
-	SIPSession *sip_infra.Session
-	SIPConfig  *sip_infra.Config
+	Ctx          context.Context
+	SIPSession   *sip_infra.Session
+	SIPConfig    *sip_infra.Config
+	SIPLifecycle sip_infra.LifecycleController
 }
 
 // NewStreamer is the unified streamer factory. It creates a transport-specific
@@ -142,7 +143,7 @@ func (at Telephony) NewStreamer(
 	case Telnyx:
 		return internal_telnyx_telephony.NewTelnyxWebsocketStreamer(logger, opt.WebSocketConn, cc, vaultCred)
 	case SIP:
-		return internal_sip_telephony.NewStreamer(opt.Ctx, logger, opt.SIPSession, cc, vaultCred)
+		return internal_sip_telephony.NewStreamer(opt.Ctx, logger, opt.SIPSession, opt.SIPLifecycle, cc, vaultCred)
 	default:
 		return nil, fmt.Errorf("streamer not supported for provider %q", at)
 	}

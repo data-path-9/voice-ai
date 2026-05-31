@@ -1,0 +1,75 @@
+<include>
+  <extension name="rapida_outbound_answer">
+    <condition field="destination_number" expression="^9197001$" break="on-false">
+      <action application="answer"/>
+      <action application="sleep" data="30000"/>
+      <action application="hangup"/>
+    </condition>
+  </extension>
+
+  <extension name="rapida_outbound_ring_only">
+    <condition field="destination_number" expression="^9197003$" break="on-false">
+      <action application="pre_answer"/>
+      <action application="sleep" data="30000"/>
+      <action application="hangup" data="NO_ANSWER"/>
+    </condition>
+  </extension>
+
+  <extension name="rapida_twilio_elastic_outbound">
+    <condition field="destination_number" expression="^9197010$" break="on-false"/>
+    <condition field="${sip_h_X-Twilio-AccountSid}" expression="^ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa$" break="on-false">
+      <anti-action application="respond" data="488 Missing Twilio account SID"/>
+    </condition>
+    <condition field="${sip_h_X-Twilio-Elastic-Trunk-SID}" expression="^TKaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa$" break="on-false">
+      <anti-action application="respond" data="488 Missing Twilio trunk SID"/>
+    </condition>
+    <condition field="${sip_h_X-Rapida-Twilio-Trunk-Profile}" expression="^elastic-sip-trunk$">
+      <action application="answer"/>
+      <action application="sleep" data="30000"/>
+      <action application="hangup"/>
+      <anti-action application="respond" data="488 Missing Twilio profile header"/>
+    </condition>
+  </extension>
+
+  <extension name="rapida_outbound_busy">
+    <condition field="destination_number" expression="^9197020$" break="on-false">
+      <action application="respond" data="486 Busy Here"/>
+    </condition>
+  </extension>
+
+  <extension name="rapida_outbound_rejected">
+    <condition field="destination_number" expression="^9197021$" break="on-false">
+      <action application="respond" data="603 Decline"/>
+    </condition>
+  </extension>
+
+  <extension name="rapida_outbound_no_answer">
+    <condition field="destination_number" expression="^9197022$" break="on-false">
+      <action application="pre_answer"/>
+      <action application="sleep" data="30000"/>
+      <action application="hangup" data="NO_ANSWER"/>
+    </condition>
+  </extension>
+
+  <extension name="rapida_outbound_unavailable">
+    <condition field="destination_number" expression="^9197023$" break="on-false">
+      <action application="respond" data="480 Temporarily Unavailable"/>
+    </condition>
+  </extension>
+
+  <extension name="rapida_outbound_media_rejected">
+    <condition field="destination_number" expression="^9197024$" break="on-false">
+      <action application="respond" data="488 Not Acceptable Here"/>
+    </condition>
+  </extension>
+
+  <extension name="rapida_outbound_header_assert">
+    <condition field="destination_number" expression="^9197002$" break="on-false"/>
+    <condition field="${sip_h_X-Rapida-Integration-Test}" expression="^headers-ok$">
+      <action application="answer"/>
+      <action application="sleep" data="30000"/>
+      <action application="hangup"/>
+      <anti-action application="respond" data="488 Missing required integration header"/>
+    </condition>
+  </extension>
+</include>

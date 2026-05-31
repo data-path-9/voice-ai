@@ -1,0 +1,12 @@
+<include>
+  <user id="rapida">
+    <params>
+      <param name="password" value="secret"/>
+    </params>
+    <variables>
+      <variable name="user_context" value="public"/>
+      <variable name="effective_caller_id_name" value="Rapida SIP Integration"/>
+      <variable name="effective_caller_id_number" value="rapida"/>
+    </variables>
+  </user>
+</include>

@@ -9,6 +9,7 @@ package sip_pipeline
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	observe "github.com/rapidaai/api/assistant-api/internal/observe"
@@ -38,6 +39,9 @@ type Dispatcher struct {
 	setupCh   chan callEnvelope
 	mediaCh   chan callEnvelope
 	controlCh chan callEnvelope
+
+	preparedMu       sync.Mutex
+	preparedSessions map[string]*preparedSession
 
 	server             TransferServer
 	registrationClient *sip_infra.RegistrationClient
@@ -86,9 +90,7 @@ type CallSetupResult struct {
 }
 
 type OnCallStartFunc func(ctx context.Context, session *sip_infra.Session, setup *CallSetupResult, vaultCred interface{}, sipConfig *sip_infra.Config, direction string) error
-
 type OnCallEndFunc func(callID string)
-
 type OnCreateObserverFunc func(ctx context.Context, setup *CallSetupResult, auth types.SimplePrinciple) *observe.ConversationObserver
 
 type DispatcherConfig struct {
@@ -108,7 +110,8 @@ type DispatcherConfig struct {
 // TransferServer is the minimal SIP infra surface required by transfer orchestration.
 // It enables deterministic tests by allowing fake implementations.
 type TransferServer interface {
-	MakeBridgeCall(ctx context.Context, cfg *sip_infra.Config, toURI, fromURI string) (*sip_infra.Session, error)
+	sip_infra.LifecycleController
+	MakeTransferBridgeCall(ctx context.Context, cfg *sip_infra.Config, toURI, fromURI string, opts sip_infra.TransferBridgeCallOptions) (*sip_infra.Session, error)
 	BridgeTransfer(ctx context.Context, inbound, outbound *sip_infra.Session, onOperatorAudio func([]byte)) (sip_infra.BridgeEndReason, error)
 }
 
@@ -132,6 +135,33 @@ func NewDispatcher(cfg *DispatcherConfig) *Dispatcher {
 		setupCh:              make(chan callEnvelope, setupChSize),
 		mediaCh:              make(chan callEnvelope, mediaChSize),
 		controlCh:            make(chan callEnvelope, controlChSize),
+		preparedSessions:     make(map[string]*preparedSession),
+	}
+}
+
+func (d *Dispatcher) transitionCall(session *sip_infra.Session, next sip_infra.CallState, reason sip_infra.LifecycleReason) bool {
+	if d.server == nil {
+		d.logger.Warnw("SIP lifecycle transition skipped: server unavailable",
+			"call_id", session.GetCallID(),
+			"to", next,
+			"reason", reason)
+		return false
+	}
+	return d.server.TransitionCall(session, next, reason)
+}
+
+func (d *Dispatcher) endCall(session *sip_infra.Session, reason sip_infra.LifecycleReason) {
+	if d.server == nil {
+		d.logger.Warnw("SIP lifecycle end skipped: server unavailable",
+			"call_id", session.GetCallID(),
+			"reason", reason)
+		return
+	}
+	if err := d.server.EndCallWithReason(session, reason); err != nil {
+		d.logger.Warnw("SIP lifecycle end failed",
+			"call_id", session.GetCallID(),
+			"reason", reason,
+			"error", err)
 	}
 }
 

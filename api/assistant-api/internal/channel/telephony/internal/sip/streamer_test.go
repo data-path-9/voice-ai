@@ -44,7 +44,6 @@ func TestSend_EndConversation_PushesToolResult(t *testing.T) {
 		t.Fatal("timed out waiting for ConversationToolCallResult")
 	}
 
-	// Context should remain open; disconnect is owned by handleToolResult in adapter layer.
 	select {
 	case <-s.Context().Done():
 		t.Fatal("streamer context should remain open; teardown is owned by Talk loop")

@@ -13,31 +13,35 @@ import (
 
 	"github.com/rapidaai/api/assistant-api/config"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
+	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
 )
 
 type OutboundDispatcher struct {
-	cfg                 *config.AssistantConfig
-	store               callcontext.Store
-	logger              commons.Logger
-	vaultClient         web_client.VaultClient
-	assistantService    internal_services.AssistantService
-	conversationService internal_services.AssistantConversationService
-	telephonyOpt        TelephonyOption
+	cfg                    *config.AssistantConfig
+	store                  callcontext.Store
+	logger                 commons.Logger
+	vaultClient            web_client.VaultClient
+	assistantService       internal_services.AssistantService
+	conversationService    internal_services.AssistantConversationService
+	telephonyOpt           TelephonyOption
+	outboundConnectTimeout time.Duration
 }
 
 func NewOutboundDispatcher(deps TelephonyDispatcherDeps) *OutboundDispatcher {
 	return &OutboundDispatcher{
-		cfg:                 deps.Cfg,
-		store:               deps.Store,
-		logger:              deps.Logger,
-		vaultClient:         deps.VaultClient,
-		assistantService:    deps.AssistantService,
-		conversationService: deps.ConversationService,
-		telephonyOpt:        deps.TelephonyOpt,
+		cfg:                    deps.Cfg,
+		store:                  deps.Store,
+		logger:                 deps.Logger,
+		vaultClient:            deps.VaultClient,
+		assistantService:       deps.AssistantService,
+		conversationService:    deps.ConversationService,
+		telephonyOpt:           deps.TelephonyOpt,
+		outboundConnectTimeout: defaultOutboundConnectTimeout,
 	}
 }
 
@@ -53,9 +57,7 @@ func (d *OutboundDispatcher) Dispatch(ctx context.Context, contextID string) err
 
 	if err := d.performOutbound(ctx, cc); err != nil {
 		d.logger.Errorf("outbound dispatcher[%s]: call failed for contextId=%s: %v", cc.Provider, contextID, err)
-		if updateErr := d.store.UpdateField(ctx, contextID, "status", callcontext.StatusClaimed); updateErr != nil {
-			d.logger.Errorf("outbound dispatcher[%s]: failed to update status for %s: %v", cc.Provider, contextID, updateErr)
-		}
+		d.persistOutboundSetupFailure(ctx, cc, err)
 		return err
 	}
 
@@ -68,15 +70,16 @@ func (d *OutboundDispatcher) Dispatch(ctx context.Context, contextID string) err
 	return nil
 }
 
-const callConnectTimeout = 2 * time.Minute
+const defaultOutboundConnectTimeout = 2 * time.Minute
 
 // monitorCallConnect checks if the call context was claimed (media connected) within timeout.
 // If still PENDING, the callee declined/didn't answer — mark as CLAIMED and persist FAILED metric.
 func (d *OutboundDispatcher) monitorCallConnect(ctx context.Context, contextID string, cc *callcontext.CallContext) {
+	connectTimeout := d.providerOutboundConnectTimeout(cc.Provider)
 	select {
 	case <-ctx.Done():
 		return
-	case <-time.After(callConnectTimeout):
+	case <-time.After(connectTimeout):
 	}
 
 	current, err := d.store.Get(ctx, contextID)
@@ -90,20 +93,27 @@ func (d *OutboundDispatcher) monitorCallConnect(ctx context.Context, contextID s
 	d.logger.Warnw("Outbound call not answered within timeout, marking as failed",
 		"contextId", contextID,
 		"provider", cc.Provider,
-		"timeout", callConnectTimeout)
+		"timeout", connectTimeout)
 
-	// Claim the context so it's not stuck as PENDING
-	if _, err := d.store.Claim(ctx, contextID); err != nil {
-		d.logger.Warnw("Failed to claim stale call context", "contextId", contextID, "error", err)
-	}
+	d.persistOutboundConnectTimeout(ctx, current)
 
-	// Persist FAILED metric
 	if d.conversationService != nil {
 		auth := cc.ToAuth()
 		d.conversationService.PersistMetrics(ctx, auth, cc.AssistantID, cc.ConversationID, []*types.Metric{
 			{Name: "status", Value: "FAILED", Description: "no_answer_timeout"},
 		})
 	}
+}
+
+func (d *OutboundDispatcher) providerOutboundConnectTimeout(provider string) time.Duration {
+	timeout := d.outboundConnectTimeout
+	if timeout <= 0 {
+		timeout = defaultOutboundConnectTimeout
+	}
+	if provider == SIP.String() && d.cfg != nil && d.cfg.SIPConfig != nil && d.cfg.SIPConfig.InviteTimeout > 0 {
+		return d.cfg.SIPConfig.InviteTimeout + 15*time.Second
+	}
+	return timeout
 }
 
 func (d *OutboundDispatcher) performOutbound(ctx context.Context, cc *callcontext.CallContext) error {
@@ -135,7 +145,8 @@ func (d *OutboundDispatcher) performOutbound(ctx context.Context, cc *callcontex
 	opts := assistant.AssistantPhoneDeployment.GetOptions()
 	opts["rapida.context_id"] = cc.ContextID
 
-	callInfo, callErr := telephony.OutboundCall(auth, cc.CallerNumber, cc.FromNumber, assistant, cc.ConversationID, vltC, opts)
+	statusReporter := d.newProviderCallStatusReporter(cc.ContextID)
+	callInfo, callErr := telephony.OutboundCall(ctx, auth, cc.CallerNumber, cc.FromNumber, assistant, cc.ConversationID, vltC, statusReporter, opts)
 	if callErr != nil {
 		d.logger.Errorf("outbound dispatcher[%s]: telephony call failed for contextId=%s: %v", cc.Provider, cc.ContextID, callErr)
 	}
@@ -150,4 +161,92 @@ func (d *OutboundDispatcher) performOutbound(ctx context.Context, cc *callcontex
 	}
 
 	return callErr
+}
+
+func (d *OutboundDispatcher) newProviderCallStatusReporter(contextID string) internal_type.ProviderCallStatusReporter {
+	return func(update internal_type.ProviderCallStatusUpdate) {
+		if update.ChannelUUID != "" {
+			if err := d.store.UpdateField(context.Background(), contextID, "channel_uuid", update.ChannelUUID); err != nil {
+				d.logger.Warnw("Failed to persist outbound channel UUID",
+					"contextId", contextID,
+					"channel_uuid", update.ChannelUUID,
+					"error", err)
+			}
+		}
+		if update.CallStatus == "" {
+			return
+		}
+		err := d.store.UpdateCallStatus(context.Background(), contextID, callcontext.CallStatusUpdate{
+			CallStatus:         update.CallStatus,
+			CallError:          update.ErrorMessage,
+			FailureClass:       update.FailureClass,
+			FailureReason:      update.FailureReason,
+			DisconnectReason:   update.DisconnectReason,
+			Retryable:          update.Retryable,
+			ProviderStatusCode: update.ProviderStatusCode,
+		})
+		if err != nil {
+			d.logger.Warnw("Failed to persist outbound status",
+				"contextId", contextID,
+				"call_status", update.CallStatus,
+				"failure_class", update.FailureClass,
+				"error", err)
+		}
+	}
+}
+
+func (d *OutboundDispatcher) persistOutboundSetupFailure(ctx context.Context, cc *callcontext.CallContext, setupErr error) {
+	if cc == nil || setupErr == nil {
+		return
+	}
+	d.updateOutboundFailureIfNotTerminal(ctx, cc.ContextID, callcontext.CallStatusUpdate{
+		CallStatus:       internal_telephony_base.OutboundCallStatusFailed,
+		CallError:        setupErr.Error(),
+		FailureClass:     internal_telephony_base.OutboundFailureClassSetup,
+		FailureReason:    "outbound setup failed",
+		DisconnectReason: internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+	})
+}
+
+func (d *OutboundDispatcher) persistOutboundConnectTimeout(ctx context.Context, cc *callcontext.CallContext) {
+	if cc == nil {
+		return
+	}
+	d.updateOutboundFailureIfNotTerminal(ctx, cc.ContextID, callcontext.CallStatusUpdate{
+		CallStatus:       internal_telephony_base.OutboundCallStatusFailed,
+		FailureClass:     internal_telephony_base.OutboundFailureClassNoAnswer,
+		FailureReason:    "outbound media was not claimed before timeout",
+		DisconnectReason: internal_telephony_base.OutboundDisconnectReasonConnectTimeout,
+		Retryable:        true,
+	})
+}
+
+func (d *OutboundDispatcher) updateOutboundFailureIfNotTerminal(ctx context.Context, contextID string, status callcontext.CallStatusUpdate) {
+	current, err := d.store.Get(ctx, contextID)
+	if err == nil && callContextHasTerminalOutboundStatus(current) {
+		return
+	}
+	if err := d.store.UpdateCallStatus(ctx, contextID, status); err != nil {
+		d.logger.Warnw("Failed to persist outbound failure status",
+			"contextId", contextID,
+			"call_status", status.CallStatus,
+			"failure_class", status.FailureClass,
+			"error", err)
+	}
+}
+
+func callContextHasTerminalOutboundStatus(cc *callcontext.CallContext) bool {
+	if cc == nil {
+		return false
+	}
+	switch cc.Status {
+	case callcontext.StatusFailed, callcontext.StatusCompleted:
+		return true
+	}
+	switch cc.CallStatus {
+	case internal_telephony_base.OutboundCallStatusFailed, internal_telephony_base.OutboundCallStatusCancelled:
+		return true
+	default:
+		return false
+	}
 }

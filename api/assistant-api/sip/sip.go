@@ -102,10 +102,11 @@ func (m *SIPEngine) listenConfig() *sip_infra.ListenConfig {
 		transportType = sip_infra.TransportTLS
 	}
 	lc := &sip_infra.ListenConfig{
-		Address:    m.cfg.SIPConfig.Server,
-		ExternalIP: m.cfg.SIPConfig.ExternalIP,
-		Port:       m.cfg.SIPConfig.Port,
-		Transport:  transportType,
+		Address:                 m.cfg.SIPConfig.Server,
+		ExternalIP:              m.cfg.SIPConfig.ExternalIP,
+		AllowLoopbackExternalIP: m.cfg.SIPConfig.AllowLoopbackExternalIP,
+		Port:                    m.cfg.SIPConfig.Port,
+		Transport:               transportType,
 	}
 	m.logger.Infow("SIP ListenConfig from app config",
 		"address", lc.Address,
@@ -140,6 +141,8 @@ func (m *SIPEngine) Connect(ctx context.Context) error {
 		},
 		m.vaultConfigResolver, // Fetch SIP config from vault
 	)
+	server.SetOnApplicationReady(m.onApplicationReady)
+	server.SetOnApplicationCleanup(m.onApplicationCleanup)
 	server.SetOnInvite(m.onInvite)
 	server.SetOnBye(m.onBye)
 	server.SetOnCancel(m.onCancel)
@@ -198,6 +201,11 @@ func (m *SIPEngine) applySIPOperationalDefaults(c *sip_infra.Config) {
 		sip_infra.Transport(m.cfg.SIPConfig.Transport),
 		m.cfg.SIPConfig.RTPPortRangeStart,
 		m.cfg.SIPConfig.RTPPortRangeEnd,
+	)
+	c.ApplyTimeoutDefaults(
+		m.cfg.SIPConfig.RegisterTimeout,
+		m.cfg.SIPConfig.InviteTimeout,
+		m.cfg.SIPConfig.SessionTimeout,
 	)
 }
 
@@ -282,33 +290,61 @@ func (m *SIPEngine) hasAccessToAssistant(auth types.SimplePrinciple, assistant *
 	return *auth.GetCurrentProjectId() == assistant.ProjectId
 }
 
-// onInvite routes incoming INVITE into the pipeline.
-// For inbound: middleware chain sets "auth" and "assistant" on the session.
-// For outbound: telephony.OutboundCall sets "auth" + "assistant_id" (uint64) but
-// not the full entity, so we resolve it here from the ID.
+func (m *SIPEngine) onApplicationReady(session *sip_infra.Session, fromURI, toURI string) error {
+	stage, err := m.sessionEstablishedStage(session, fromURI, toURI)
+	if err != nil {
+		return err
+	}
+	if m.dispatcher == nil {
+		return fmt.Errorf("SIP dispatcher not initialized")
+	}
+	return m.dispatcher.PrepareSession(m.ctx, stage)
+}
+
+func (m *SIPEngine) onApplicationCleanup(session *sip_infra.Session) {
+	if m.dispatcher == nil || session == nil {
+		return
+	}
+	m.dispatcher.DiscardPreparedSession(m.ctx, session.GetCallID())
+}
+
 func (m *SIPEngine) onInvite(session *sip_infra.Session, fromURI, toURI string) error {
+	stage, err := m.sessionEstablishedStage(session, fromURI, toURI)
+	if err != nil {
+		return err
+	}
+	if m.dispatcher == nil {
+		return fmt.Errorf("SIP dispatcher not initialized")
+	}
+	if stage.Direction == sip_infra.CallDirectionInbound {
+		return m.dispatcher.StartPreparedSession(m.ctx, stage)
+	}
+	m.dispatcher.OnPipeline(m.ctx, stage)
+	return nil
+}
+
+func (m *SIPEngine) sessionEstablishedStage(session *sip_infra.Session, fromURI, toURI string) (sip_infra.SessionEstablishedPipeline, error) {
+	if session == nil {
+		return sip_infra.SessionEstablishedPipeline{}, fmt.Errorf("session is nil")
+	}
 	info := session.GetInfo()
 	callID := info.CallID
 
 	if session.IsEnded() {
-		return fmt.Errorf("session already ended")
+		return sip_infra.SessionEstablishedPipeline{}, fmt.Errorf("session already ended")
 	}
 
 	auth := session.GetAuth()
 	if auth == nil {
-		return fmt.Errorf("missing auth on session %s", callID)
+		return sip_infra.SessionEstablishedPipeline{}, fmt.Errorf("missing auth on session %s", callID)
 	}
 
 	assistant := session.GetAssistant()
 	if assistant == nil {
-		return fmt.Errorf("missing assistant context on session %s", callID)
+		return sip_infra.SessionEstablishedPipeline{}, fmt.Errorf("missing assistant context on session %s", callID)
 	}
 
-	// For outbound, conversation_id is set on the session by MakeCall.
-	// For inbound, it's 0 here — created later by handleSessionEstablished.
-	conversationID := session.GetConversationID()
-
-	m.dispatcher.OnPipeline(m.ctx, sip_infra.SessionEstablishedPipeline{
+	return sip_infra.SessionEstablishedPipeline{
 		ID:              callID,
 		Session:         session,
 		Config:          session.GetConfig(),
@@ -318,18 +354,74 @@ func (m *SIPEngine) onInvite(session *sip_infra.Session, fromURI, toURI string) 
 		Auth:            auth,
 		FromURI:         fromURI,
 		ToURI:           toURI,
-		ConversationID:  conversationID,
-	})
-
-	return nil
+		ConversationID:  session.GetConversationID(),
+	}, nil
 }
 
 func (m *SIPEngine) onBye(session *sip_infra.Session) error {
+	disconnectMetadata := session.GetDisconnectMetadata()
+	m.persistRemoteByeCallStatus(session, disconnectMetadata)
 	m.dispatcher.OnPipeline(m.ctx, sip_infra.ByeReceivedPipeline{
 		ID:      session.GetInfo().CallID,
 		Session: session,
+		Reason:  disconnectMetadata.Reason,
 	})
 	return nil
+}
+
+func (m *SIPEngine) persistRemoteByeCallStatus(session *sip_infra.Session, metadata sip_infra.DisconnectMetadata) {
+	if m.callContextStore == nil || session == nil {
+		return
+	}
+	contextID := session.GetContextID()
+	if contextID == "" {
+		assistant := session.GetAssistant()
+		if assistant == nil {
+			m.logger.Debugw("SIP BYE status persistence skipped: assistant missing",
+				"call_id", session.GetCallID())
+			return
+		}
+		callContext, err := m.callContextStore.GetByChannelUUID(context.Background(), "sip", assistant.Id, session.GetCallID())
+		if err != nil {
+			m.logger.Debugw("SIP BYE status persistence skipped: call context missing",
+				"call_id", session.GetCallID(),
+				"assistant_id", assistant.Id,
+				"error", err)
+			return
+		}
+		contextID = callContext.ContextID
+	}
+	if contextID == "" {
+		return
+	}
+
+	current, err := m.callContextStore.Get(context.Background(), contextID)
+	if err == nil && callContextHasTerminalFailure(current) {
+		return
+	}
+	if metadata.Reason == "" {
+		metadata.Reason = sip_infra.DisconnectReasonRemoteHangup
+	}
+	if err := m.callContextStore.UpdateCallStatus(context.Background(), contextID, callcontext.CallStatusUpdate{
+		CallStatus:         callcontext.StatusCompleted,
+		DisconnectReason:   metadata.Reason,
+		ProviderStatusCode: metadata.ProviderStatusCode,
+	}); err != nil {
+		m.logger.Warnw("SIP BYE status persistence failed",
+			"call_id", session.GetCallID(),
+			"context_id", contextID,
+			"disconnect_reason", metadata.Reason,
+			"error", err)
+	}
+}
+
+func callContextHasTerminalFailure(callContext *callcontext.CallContext) bool {
+	if callContext == nil {
+		return false
+	}
+	return callContext.Status == callcontext.StatusFailed ||
+		callContext.CallStatus == callcontext.StatusFailed ||
+		callContext.CallStatus == "cancelled"
 }
 
 func (m *SIPEngine) onCancel(session *sip_infra.Session) error {
@@ -424,7 +516,7 @@ func (m *SIPEngine) fetchSIPConfigAndVaultCredential(auth types.SimplePrinciple,
 	}
 
 	// Set CallerID to the assistant's DID from the phone deployment.
-	// This is used as the From URI user in outbound INVITEs (prepareOutboundInvite).
+	// This is used as the From URI user in outbound INVITEs.
 	if did, err := opts.GetString("phone"); err == nil && did != "" {
 		sipConfig.CallerID = strings.TrimPrefix(did, "+")
 	}
@@ -435,6 +527,11 @@ func (m *SIPEngine) fetchSIPConfigAndVaultCredential(auth types.SimplePrinciple,
 			sip_infra.Transport(m.cfg.SIPConfig.Transport),
 			m.cfg.SIPConfig.RTPPortRangeStart,
 			m.cfg.SIPConfig.RTPPortRangeEnd,
+		)
+		sipConfig.ApplyTimeoutDefaults(
+			m.cfg.SIPConfig.RegisterTimeout,
+			m.cfg.SIPConfig.InviteTimeout,
+			m.cfg.SIPConfig.SessionTimeout,
 		)
 	}
 
@@ -679,8 +776,8 @@ func (m *SIPEngine) pipelineCallStart(ctx context.Context, session *sip_infra.Se
 	callID := session.GetCallID()
 	isOutbound := session.GetInfo().Direction == sip_infra.CallDirectionOutbound
 
-	// Outbound: ensure session.End() so handleOutboundDialog can proceed.
-	// Skip if a bridge transfer is active — the pipeline transfer handler owns the session.
+	// Outbound: ensure lifecycle teardown so outboundCall can proceed.
+	// Skip if a bridge transfer is active; the pipeline transfer handler owns the session.
 	if isOutbound {
 		defer func() {
 			if !session.IsEnded() {
@@ -688,7 +785,7 @@ func (m *SIPEngine) pipelineCallStart(ctx context.Context, session *sip_infra.Se
 				if state == sip_infra.CallStateTransferring || state == sip_infra.CallStateBridgeConnected {
 					return
 				}
-				session.End()
+				m.endSession(session, sip_infra.LifecycleReasonPipelineTalkCompleted)
 			}
 		}()
 	}
@@ -739,7 +836,7 @@ func (m *SIPEngine) pipelineCallStart(ctx context.Context, session *sip_infra.Se
 	callCtx, cancel := context.WithCancel(session.Context())
 	defer cancel()
 
-	// For outbound calls, session.End() is deferred until this function returns,
+	// For outbound calls, lifecycle teardown is deferred until this function returns,
 	// but BYE cancels the dialog context — not the session context. Bridge the gap
 	// by watching ByeReceived() and cancelling callCtx so talker.Talk() can exit.
 	go func() {
@@ -766,9 +863,10 @@ func (m *SIPEngine) pipelineCallStart(ctx context.Context, session *sip_infra.Se
 
 	streamer, err := internal_telephony.Telephony(internal_telephony.SIP).
 		NewStreamer(m.logger, cc, vc, internal_telephony.StreamerOption{
-			Ctx:        callCtx,
-			SIPSession: session,
-			SIPConfig:  sipConfig,
+			Ctx:          callCtx,
+			SIPSession:   session,
+			SIPConfig:    sipConfig,
+			SIPLifecycle: m.lifecycleController(),
 		})
 	if err != nil {
 		m.logger.Error("Failed to create SIP streamer", "error", err, "call_id", callID)
@@ -927,11 +1025,9 @@ func (m *SIPEngine) pipelineCallStart(ctx context.Context, session *sip_infra.Se
 		"assistant_id", cc.AssistantID,
 		"conversation_id", cc.ConversationID,
 		"direction", direction)
-
 	if err := talker.Talk(callCtx, auth); err != nil {
 		m.logger.Warnw("SIP talker exited", "error", err, "call_id", callID)
 	}
-
 	m.logger.Infow("SIP call ended", "call_id", callID)
 	return nil
 }
@@ -947,7 +1043,29 @@ func (m *SIPEngine) pipelineCallEnd(callID string) {
 	if !ok {
 		return
 	}
-	session.End()
+	m.endSession(session, sip_infra.LifecycleReasonPipelineCallEnd)
+}
+
+func (m *SIPEngine) lifecycleController() sip_infra.LifecycleController {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.server
+}
+
+func (m *SIPEngine) endSession(session *sip_infra.Session, reason sip_infra.LifecycleReason) {
+	server := m.lifecycleController()
+	if server == nil {
+		m.logger.Warnw("SIP lifecycle end skipped: server unavailable",
+			"call_id", session.GetCallID(),
+			"reason", reason)
+		return
+	}
+	if err := server.EndCallWithReason(session, reason); err != nil {
+		m.logger.Warnw("SIP lifecycle end failed",
+			"call_id", session.GetCallID(),
+			"reason", reason,
+			"error", err)
+	}
 }
 
 func (m *SIPEngine) createObserver(ctx context.Context, setup *sip_pipeline.CallSetupResult, auth types.SimplePrinciple) *observe.ConversationObserver {

@@ -65,7 +65,8 @@ func TestHandleSessionEstablished_SetupErrorEndsSession(t *testing.T) {
 	t.Parallel()
 
 	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
+		Logger:         newPipelineTestLogger(t),
+		TransferServer: &fakeTransferServer{},
 		OnCallSetup: func(ctx context.Context, session *sip_infra.Session, auth types.SimplePrinciple, assistantID uint64, conversationID uint64, cc *callcontext.CallContext) (*CallSetupResult, error) {
 			return nil, fmt.Errorf("setup failed")
 		},
@@ -125,6 +126,77 @@ func TestHandleSessionEstablished_PanicStillCallsOnCallEnd(t *testing.T) {
 	}
 
 	require.Equal(t, int32(1), onEndCount.Load())
+}
+
+func TestPrepareSessionDefersCallStartUntilExplicitStart(t *testing.T) {
+	t.Parallel()
+
+	var setupCount atomic.Int32
+	var startCount atomic.Int32
+	started := make(chan struct{}, 1)
+
+	d := NewDispatcher(&DispatcherConfig{
+		Logger: newPipelineTestLogger(t),
+		OnCallSetup: func(ctx context.Context, session *sip_infra.Session, auth types.SimplePrinciple, assistantID uint64, conversationID uint64, cc *callcontext.CallContext) (*CallSetupResult, error) {
+			setupCount.Add(1)
+			return &CallSetupResult{AssistantID: assistantID, ConversationID: conversationID}, nil
+		},
+		OnCallStart: func(ctx context.Context, session *sip_infra.Session, setup *CallSetupResult, vaultCred interface{}, sipConfig *sip_infra.Config, direction string) error {
+			startCount.Add(1)
+			started <- struct{}{}
+			return nil
+		},
+	})
+
+	stage := sip_infra.SessionEstablishedPipeline{
+		ID:             "call-prepared",
+		Session:        newPipelineTestSession(t),
+		Direction:      sip_infra.CallDirectionInbound,
+		AssistantID:    1,
+		ConversationID: 42,
+	}
+
+	require.NoError(t, d.PrepareSession(context.Background(), stage))
+	require.Equal(t, int32(1), setupCount.Load())
+	require.Equal(t, int32(0), startCount.Load())
+
+	require.NoError(t, d.StartPreparedSession(context.Background(), stage))
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prepared call start")
+	}
+	require.Equal(t, int32(1), startCount.Load())
+}
+
+func TestDiscardPreparedSessionPreventsLateStart(t *testing.T) {
+	t.Parallel()
+
+	var startCount atomic.Int32
+	d := NewDispatcher(&DispatcherConfig{
+		Logger: newPipelineTestLogger(t),
+		OnCallSetup: func(ctx context.Context, session *sip_infra.Session, auth types.SimplePrinciple, assistantID uint64, conversationID uint64, cc *callcontext.CallContext) (*CallSetupResult, error) {
+			return &CallSetupResult{AssistantID: assistantID, ConversationID: conversationID}, nil
+		},
+		OnCallStart: func(ctx context.Context, session *sip_infra.Session, setup *CallSetupResult, vaultCred interface{}, sipConfig *sip_infra.Config, direction string) error {
+			startCount.Add(1)
+			return nil
+		},
+	})
+	stage := sip_infra.SessionEstablishedPipeline{
+		ID:             "call-discarded",
+		Session:        newPipelineTestSession(t),
+		Direction:      sip_infra.CallDirectionInbound,
+		AssistantID:    1,
+		ConversationID: 42,
+	}
+
+	require.NoError(t, d.PrepareSession(context.Background(), stage))
+	d.DiscardPreparedSession(context.Background(), stage.ID)
+
+	require.Error(t, d.StartPreparedSession(context.Background(), stage))
+	require.Equal(t, int32(0), startCount.Load())
 }
 
 func TestDispatcherBackpressureAndTeardownStress(t *testing.T) {

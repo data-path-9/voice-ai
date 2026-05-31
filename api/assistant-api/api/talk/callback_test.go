@@ -63,6 +63,10 @@ func (s *callbackTestStore) UpdateField(ctx context.Context, contextID, field, v
 	return nil
 }
 
+func (s *callbackTestStore) UpdateCallStatus(ctx context.Context, contextID string, status callcontext.CallStatusUpdate) error {
+	return nil
+}
+
 type callbackTestPersister struct {
 	metrics  []*types.Metric
 	metadata []*types.Metadata

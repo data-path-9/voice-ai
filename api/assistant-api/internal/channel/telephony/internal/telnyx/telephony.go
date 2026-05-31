@@ -8,6 +8,7 @@ package internal_telnyx_telephony
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telnyx "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -144,21 +146,44 @@ func (tpc *telnyxTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo
 // OutboundCall places an outbound call using Telnyx Call Control API.
 // POST to /v2/calls with connection_id, to, from, and stream_url.
 func (tpc *telnyxTelephony) OutboundCall(
+	ctx context.Context,
 	auth types.SimplePrinciple,
 	toPhone string,
 	fromPhone string,
 	assistant *internal_assistant_entity.Assistant,
 	assistantConversationId uint64,
 	vaultCredential *protos.VaultCredential,
+	statusReporter internal_type.ProviderCallStatusReporter,
 	opts utils.Option,
 ) (*internal_type.CallInfo, error) {
 	info := &internal_type.CallInfo{Provider: telnyxProvider}
 
-	// Get credentials from vault
+	if err := ctx.Err(); err != nil {
+		info.Status = "FAILED"
+		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCancelled,
+			"request cancelled",
+			internal_telephony_base.OutboundDisconnectReasonRequestCancelled,
+			err,
+			0,
+		)
+		return info, err
+	}
+
 	apiKey, connectionID, err := tpc.getCredentials(vaultCredential)
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("authentication error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassAuthentication,
+			"authentication error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -182,14 +207,30 @@ func (tpc *telnyxTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to marshal request: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestPayload,
+			"failed to build provider request payload",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
 	// Create the HTTP request
-	req, err := http.NewRequest("POST", telnyxAPIBaseURL+"/calls", bytes.NewReader(requestBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", telnyxAPIBaseURL+"/calls", bytes.NewReader(requestBody))
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to create request: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCreation,
+			"failed to create provider request",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -202,6 +243,14 @@ func (tpc *telnyxTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("API error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			"provider API error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 	defer resp.Body.Close()
@@ -210,6 +259,14 @@ func (tpc *telnyxTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to read response: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			"failed to read provider response",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
 		return info, err
 	}
 
@@ -218,6 +275,14 @@ func (tpc *telnyxTelephony) OutboundCall(
 	if err := json.Unmarshal(respBody, &callResponse); err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to parse response: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			"failed to decode provider response",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
 		return info, err
 	}
 
@@ -233,7 +298,16 @@ func (tpc *telnyxTelephony) OutboundCall(
 		}
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("API error: %s", errMsg)
-		return info, fmt.Errorf("API error: %s", errMsg)
+		err := fmt.Errorf("API error: %s", errMsg)
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			errMsg,
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
+		return info, err
 	}
 
 	// Extract call information from response
@@ -273,6 +347,7 @@ func (tpc *telnyxTelephony) OutboundCall(
 	}
 
 	info.StatusInfo = internal_type.StatusInfo{Event: eventName, Payload: callResponse}
+	internal_telephony_base.ReportOutboundInitiated(statusReporter, info.ChannelUUID)
 
 	return info, nil
 }

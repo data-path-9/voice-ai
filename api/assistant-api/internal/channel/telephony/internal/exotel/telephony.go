@@ -6,6 +6,7 @@
 package internal_exotel_telephony
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,10 +17,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_exotel "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/exotel/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
-
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
@@ -178,18 +179,42 @@ func (exo *exotelTelephony) AppUrl(vaultCredential *protos.VaultCredential, opts
 }
 
 func (exo *exotelTelephony) OutboundCall(
+	ctx context.Context,
 	auth types.SimplePrinciple,
 	toPhone string,
 	fromPhone string,
 	assistant *internal_assistant_entity.Assistant, assistantConversationId uint64,
 	vaultCredential *protos.VaultCredential,
+	statusReporter internal_type.ProviderCallStatusReporter,
 	opts utils.Option) (*internal_type.CallInfo, error) {
 	info := &internal_type.CallInfo{Provider: exotelProvider}
+
+	if err := ctx.Err(); err != nil {
+		info.Status = "FAILED"
+		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCancelled,
+			"request cancelled",
+			internal_telephony_base.OutboundDisconnectReasonRequestCancelled,
+			err,
+			0,
+		)
+		return info, err
+	}
 
 	clientUrl, err := exo.ClientUrl(vaultCredential, opts)
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("Failed to build url, check credentials: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassConfiguration,
+			"failed to build provider URL",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -197,6 +222,14 @@ func (exo *exotelTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("Failed to build app url: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassConfiguration,
+			"failed to build application URL",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -211,10 +244,18 @@ func (exo *exotelTelephony) OutboundCall(
 	formData.Set("CustomField", internal_type.GetContextAnswerPath(exotelProvider, contextID))
 
 	client := &http.Client{Timeout: 60 * time.Second}
-	req, err := http.NewRequest("POST", *clientUrl, strings.NewReader(formData.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", *clientUrl, strings.NewReader(formData.Encode()))
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("request creation error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCreation,
+			"failed to create provider request",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -223,6 +264,14 @@ func (exo *exotelTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("API error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			"provider API error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 	defer resp.Body.Close()
@@ -230,6 +279,14 @@ func (exo *exotelTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to read response: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			"failed to read provider response",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
 		return info, err
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -237,7 +294,16 @@ func (exo *exotelTelephony) OutboundCall(
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(bodyBytes))
 		info.StatusInfo = internal_type.StatusInfo{Event: "Failed", Payload: string(bodyBytes)}
-		return info, fmt.Errorf("status code %d: %s", resp.StatusCode, string(bodyBytes))
+		err := fmt.Errorf("status code %d: %s", resp.StatusCode, string(bodyBytes))
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			fmt.Sprintf("provider returned HTTP %d", resp.StatusCode),
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
+		return info, err
 	}
 
 	var jsonResponse internal_exotel.MakeCallResponse
@@ -245,12 +311,21 @@ func (exo *exotelTelephony) OutboundCall(
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to decode response: %s", err.Error())
 		info.StatusInfo = internal_type.StatusInfo{Event: jsonResponse.Call.Status, Payload: "Failed to decode response"}
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			"failed to decode provider response",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
 		return info, err
 	}
 
 	info.ChannelUUID = jsonResponse.Call.Sid
 	info.Status = "SUCCESS"
 	info.StatusInfo = internal_type.StatusInfo{Event: jsonResponse.Call.Status, Payload: jsonResponse}
+	internal_telephony_base.ReportOutboundInitiated(statusReporter, info.ChannelUUID)
 	return info, nil
 }
 

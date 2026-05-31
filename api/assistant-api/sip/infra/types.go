@@ -10,32 +10,33 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"strconv"
-	"strings"
 	"time"
 
+	internal_core "github.com/rapidaai/api/assistant-api/sip/internal/core"
 	"github.com/rapidaai/protos"
 )
 
-// SIP-specific errors
 var (
-	ErrInvalidConfig     = errors.New("invalid SIP configuration")
-	ErrSessionNotFound   = errors.New("SIP session not found")
-	ErrSessionClosed     = errors.New("SIP session is closed")
-	ErrRTPNotInitialized = errors.New("RTP handler not initialized")
-	ErrSDPParseFailed    = errors.New("failed to parse SDP")
-	ErrCodecNotSupported = errors.New("codec not supported")
-	ErrConnectionFailed  = errors.New("SIP connection failed")
+	ErrInvalidConfig            = internal_core.ErrInvalidConfig
+	ErrSessionNotFound          = internal_core.ErrSessionNotFound
+	ErrSessionClosed            = internal_core.ErrSessionClosed
+	ErrRTPNotInitialized        = internal_core.ErrRTPNotInitialized
+	ErrSDPParseFailed           = internal_core.ErrSDPParseFailed
+	ErrCodecNotSupported        = internal_core.ErrCodecNotSupported
+	ErrConnectionFailed         = internal_core.ErrConnectionFailed
+	ErrAuthRequired             = internal_core.ErrAuthRequired
+	ErrOutboundFromUserRequired = internal_core.ErrOutboundFromUserRequired
+	ErrInboundACKTimeout        = internal_core.ErrInboundACKTimeout
+	ErrInboundInviteCancelled   = internal_core.ErrInboundInviteCancelled
+	ErrBridgeLifecycleRejected  = internal_core.ErrBridgeLifecycleRejected
 )
 
-// SIPError wraps SIP-specific errors with context
 type SIPError struct {
-	Op      string // Operation that failed
-	CallID  string // SIP Call-ID if available
-	Code    int    // SIP response code if applicable
-	Message string // Human-readable message
-	Err     error  // Underlying error
+	Op      string
+	CallID  string
+	Code    int
+	Message string
+	Err     error
 }
 
 func (e *SIPError) Error() string {
@@ -49,12 +50,10 @@ func (e *SIPError) Unwrap() error {
 	return e.Err
 }
 
-// NewSIPError creates a new SIP error
 func NewSIPError(op, callID, message string, err error) *SIPError {
 	return &SIPError{Op: op, CallID: callID, Message: message, Err: err}
 }
 
-// Transport represents the transport protocol for SIP
 type Transport string
 
 const (
@@ -63,12 +62,10 @@ const (
 	TransportTLS Transport = "tls"
 )
 
-// String returns the string representation of the transport
 func (t Transport) String() string {
 	return string(t)
 }
 
-// IsValid checks if the transport is valid
 func (t Transport) IsValid() bool {
 	switch t {
 	case TransportUDP, TransportTCP, TransportTLS:
@@ -78,118 +75,118 @@ func (t Transport) IsValid() bool {
 	}
 }
 
-// Config holds the full SIP configuration, combining:
-//   - Provider credentials (from vault/Twilio): Server, Username, Password, Realm, Domain
-//   - Platform operational settings (from app config): Port, Transport, RTP range, timeouts
 type Config struct {
-	// Provider credentials — from vault (Twilio, SIP trunk provider, etc.)
 	Server   string `json:"sip_server" mapstructure:"sip_server"`
 	Username string `json:"sip_username" mapstructure:"sip_username"`
 	Password string `json:"sip_password" mapstructure:"sip_password"`
 	Realm    string `json:"sip_realm" mapstructure:"sip_realm"`
 	Domain   string `json:"sip_domain,omitempty" mapstructure:"sip_domain"`
 
-	// CallerID overrides the From header user in outbound calls.
-	// For cloud providers (Twilio, Vonage, Telnyx), this should be the E.164 DID number.
-	// For self-hosted PBX (Asterisk, FreeSWITCH), leave empty — defaults to Username
-	// so the From URI matches the auth endpoint (required for PJSIP endpoint resolution).
-	CallerID string `json:"sip_caller_id,omitempty" mapstructure:"sip_caller_id"`
-
-	// CustomHeaders are user-defined SIP headers added to outbound INVITE requests.
-	// Stored in vault as comma-separated key=value pairs (e.g. "X-Custom=foo,X-Other=bar").
+	CallerID      string            `json:"sip_caller_id,omitempty" mapstructure:"sip_caller_id"`
 	CustomHeaders map[string]string `json:"sip_headers,omitempty" mapstructure:"sip_headers"`
 
-	// Platform operational settings — from app config (not from vault)
 	Port              int       `json:"sip_port" mapstructure:"sip_port"`
 	Transport         Transport `json:"sip_transport" mapstructure:"sip_transport"`
 	RTPPortRangeStart int       `json:"rtp_port_range_start" mapstructure:"rtp_port_range_start"`
 	RTPPortRangeEnd   int       `json:"rtp_port_range_end" mapstructure:"rtp_port_range_end"`
 	SRTPEnabled       bool      `json:"srtp_enabled" mapstructure:"srtp_enabled"`
 
-	// Timeout settings — from app config
 	RegisterTimeout  time.Duration `json:"register_timeout,omitempty" mapstructure:"register_timeout"`
 	InviteTimeout    time.Duration `json:"invite_timeout,omitempty" mapstructure:"invite_timeout"`
 	SessionTimeout   time.Duration `json:"session_timeout,omitempty" mapstructure:"session_timeout"`
 	KeepAliveEnabled bool          `json:"keepalive_enabled,omitempty" mapstructure:"keepalive_enabled"`
 }
 
-// Validate validates the full SIP configuration (for outbound calls / registration)
 func (c *Config) Validate() error {
-	if err := c.ValidateRTP(); err != nil {
-		return err
-	}
-	if c.Username == "" {
-		return fmt.Errorf("%w: sip_username is required", ErrInvalidConfig)
-	}
-	if c.Password == "" {
-		return fmt.Errorf("%w: sip_password is required", ErrInvalidConfig)
-	}
-	return nil
+	return c.toCore().Validate()
 }
 
-// ApplyOperationalDefaults fills in unset operational fields (port, transport, RTP range)
-// from the platform's app-level SIP config. These are infrastructure settings, not provider credentials.
 func (c *Config) ApplyOperationalDefaults(port int, transport Transport, rtpStart, rtpEnd int) {
-	if c.Port <= 0 && port > 0 {
-		c.Port = port
+	if c == nil {
+		return
 	}
-	if c.Transport == "" && transport != "" {
-		c.Transport = transport
-	}
-	if c.RTPPortRangeStart <= 0 && rtpStart > 0 {
-		c.RTPPortRangeStart = rtpStart
-	}
-	if c.RTPPortRangeEnd <= 0 && rtpEnd > 0 {
-		c.RTPPortRangeEnd = rtpEnd
-	}
+	coreConfig := c.toCore()
+	coreConfig.ApplyOperationalDefaults(port, internal_core.Transport(transport), rtpStart, rtpEnd)
+	*c = configFromCore(coreConfig)
 }
 
-// ValidateRTP validates the minimum config needed for inbound calls (server + RTP ports)
+func (c *Config) ApplyTimeoutDefaults(registerTimeout, inviteTimeout, sessionTimeout time.Duration) {
+	if c == nil {
+		return
+	}
+	coreConfig := c.toCore()
+	coreConfig.ApplyTimeoutDefaults(registerTimeout, inviteTimeout, sessionTimeout)
+	*c = configFromCore(coreConfig)
+}
+
+func (c *Config) EffectiveRegisterTimeout() time.Duration {
+	return c.toCore().EffectiveRegisterTimeout()
+}
+
 func (c *Config) ValidateRTP() error {
-	if c.Server == "" {
-		return fmt.Errorf("%w: sip_server is required", ErrInvalidConfig)
-	}
-	if c.Port <= 0 || c.Port > 65535 {
-		return fmt.Errorf("%w: sip_port must be between 1 and 65535", ErrInvalidConfig)
-	}
-	if c.RTPPortRangeStart <= 0 || c.RTPPortRangeEnd <= 0 {
-		return fmt.Errorf("%w: rtp_port_range must be specified", ErrInvalidConfig)
-	}
-	if c.RTPPortRangeStart >= c.RTPPortRangeEnd {
-		return fmt.Errorf("%w: rtp_port_range_start must be less than rtp_port_range_end", ErrInvalidConfig)
-	}
-	if c.RTPPortRangeStart < 1024 {
-		return fmt.Errorf("%w: rtp_port_range_start must be >= 1024 (non-privileged port)", ErrInvalidConfig)
-	}
-	if !c.Transport.IsValid() && c.Transport != "" {
-		return fmt.Errorf("%w: invalid transport: %s", ErrInvalidConfig, c.Transport)
-	}
-	return nil
+	return c.toCore().ValidateRTP()
 }
 
-// GetTransport returns the transport, defaulting to UDP if not set
 func (c *Config) GetTransport() Transport {
-	if c.Transport == "" {
-		return TransportUDP
-	}
-	return c.Transport
+	return Transport(c.toCore().GetTransport())
 }
 
-// GetSIPURI returns the full SIP URI for the server
 func (c *Config) GetSIPURI() string {
-	domain := c.Domain
-	if domain == "" {
-		domain = c.Server
-	}
-	return fmt.Sprintf("sip:%s@%s:%d", c.Username, domain, c.Port)
+	return c.toCore().GetSIPURI()
 }
 
-// GetListenAddr returns the listen address string
 func (c *Config) GetListenAddr() string {
-	return fmt.Sprintf("%s:%d", c.Server, c.Port)
+	return c.toCore().GetListenAddr()
 }
 
-// CallState represents the state of a SIP call
+func (c *Config) toCore() *internal_core.Config {
+	if c == nil {
+		return nil
+	}
+	return &internal_core.Config{
+		Server:            c.Server,
+		Username:          c.Username,
+		Password:          c.Password,
+		Realm:             c.Realm,
+		Domain:            c.Domain,
+		CallerID:          c.CallerID,
+		CustomHeaders:     c.CustomHeaders,
+		Port:              c.Port,
+		Transport:         internal_core.Transport(c.Transport),
+		RTPPortRangeStart: c.RTPPortRangeStart,
+		RTPPortRangeEnd:   c.RTPPortRangeEnd,
+		SRTPEnabled:       c.SRTPEnabled,
+		RegisterTimeout:   c.RegisterTimeout,
+		InviteTimeout:     c.InviteTimeout,
+		SessionTimeout:    c.SessionTimeout,
+		KeepAliveEnabled:  c.KeepAliveEnabled,
+	}
+}
+
+func configFromCore(c *internal_core.Config) Config {
+	if c == nil {
+		return Config{}
+	}
+	return Config{
+		Server:            c.Server,
+		Username:          c.Username,
+		Password:          c.Password,
+		Realm:             c.Realm,
+		Domain:            c.Domain,
+		CallerID:          c.CallerID,
+		CustomHeaders:     c.CustomHeaders,
+		Port:              c.Port,
+		Transport:         Transport(c.Transport),
+		RTPPortRangeStart: c.RTPPortRangeStart,
+		RTPPortRangeEnd:   c.RTPPortRangeEnd,
+		SRTPEnabled:       c.SRTPEnabled,
+		RegisterTimeout:   c.RegisterTimeout,
+		InviteTimeout:     c.InviteTimeout,
+		SessionTimeout:    c.SessionTimeout,
+		KeepAliveEnabled:  c.KeepAliveEnabled,
+	}
+}
+
 type CallState string
 
 const (
@@ -202,24 +199,29 @@ const (
 	CallStateEnding          CallState = "ending"
 	CallStateEnded           CallState = "ended"
 	CallStateFailed          CallState = "failed"
+	CallStateCancelled       CallState = "cancelled"
 )
 
-// String returns the string representation of the call state
 func (s CallState) String() string {
 	return string(s)
 }
 
-// IsTerminal returns true if the call state is terminal (ended or failed)
 func (s CallState) IsTerminal() bool {
-	return s == CallStateEnded || s == CallStateFailed
+	return s == CallStateEnded || s == CallStateFailed || s == CallStateCancelled
 }
 
-// IsActive returns true if the call is in an active state
 func (s CallState) IsActive() bool {
 	return s == CallStateConnected || s == CallStateRinging || s == CallStateOnHold || s == CallStateTransferring || s == CallStateBridgeConnected
 }
 
-// CallDirection represents the direction of the call
+func callStateFromCore(state internal_core.CallState) CallState {
+	return CallState(state)
+}
+
+func (s CallState) toCore() internal_core.CallState {
+	return internal_core.CallState(s)
+}
+
 type CallDirection string
 
 const (
@@ -227,7 +229,23 @@ const (
 	CallDirectionOutbound CallDirection = "outbound"
 )
 
-// SessionInfo contains information about an active SIP session
+func (d CallDirection) toCore() internal_core.CallDirection {
+	return internal_core.CallDirection(d)
+}
+
+type InboundSetupPhase string
+
+const (
+	InboundSetupPhaseInviteReceived   InboundSetupPhase = "invite_received"
+	InboundSetupPhaseAuthenticated    InboundSetupPhase = "authenticated"
+	InboundSetupPhaseRouted           InboundSetupPhase = "routed"
+	InboundSetupPhaseMediaAllocated   InboundSetupPhase = "media_allocated"
+	InboundSetupPhaseApplicationReady InboundSetupPhase = "application_ready"
+	InboundSetupPhaseAnswered         InboundSetupPhase = "answered"
+	InboundSetupPhaseACKConfirmed     InboundSetupPhase = "ack_confirmed"
+	InboundSetupPhaseMediaFlowing     InboundSetupPhase = "media_flowing"
+)
+
 type SessionInfo struct {
 	CallID           string        `json:"call_id"`
 	LocalTag         string        `json:"local_tag"`
@@ -246,7 +264,6 @@ type SessionInfo struct {
 	Duration         time.Duration `json:"duration,omitempty"`
 }
 
-// GetDuration calculates the call duration
 func (s *SessionInfo) GetDuration() time.Duration {
 	if s.EndTime != nil && s.ConnectedTime != nil {
 		return s.EndTime.Sub(*s.ConnectedTime)
@@ -257,7 +274,26 @@ func (s *SessionInfo) GetDuration() time.Duration {
 	return 0
 }
 
-// EventType represents the type of SIP event
+func sessionInfoFromCore(info internal_core.SessionInfo) SessionInfo {
+	return SessionInfo{
+		CallID:           info.CallID,
+		LocalTag:         info.LocalTag,
+		RemoteTag:        info.RemoteTag,
+		LocalURI:         info.LocalURI,
+		RemoteURI:        info.RemoteURI,
+		State:            CallState(info.State),
+		Direction:        CallDirection(info.Direction),
+		StartTime:        info.StartTime,
+		ConnectedTime:    info.ConnectedTime,
+		EndTime:          info.EndTime,
+		LocalRTPAddress:  info.LocalRTPAddress,
+		RemoteRTPAddress: info.RemoteRTPAddress,
+		Codec:            info.Codec,
+		SampleRate:       info.SampleRate,
+		Duration:         info.Duration,
+	}
+}
+
 type EventType string
 
 const (
@@ -272,45 +308,20 @@ const (
 	EventTypeRTPStopped EventType = "rtp_stopped"
 )
 
-// =============================================================================
-// Bridge Transfer Constants
-// =============================================================================
-
 const (
-	// BridgeCallTimeout is the maximum time to wait for the transfer target to answer.
-	BridgeCallTimeout = 30 * time.Second
-
-	// BridgeSafetyTimeout tears down the bridge if neither side hangs up.
-	BridgeSafetyTimeout = 5 * time.Minute
-
-	// MetadataBridgeTransferTarget is the session metadata key set by the streamer
-	// when a TRANSFER_CONVERSATION directive is received. The engine reads this
-	// after Talk() returns to orchestrate the bridge.
-	MetadataBridgeTransferTarget = "bridge_transfer_target"
-
-	// MetadataBridgeTransferStatus is set by executeBridgeTransfer to indicate
-	// the outcome. Values: "completed" or "failed". Read by media.go to emit
-	// the correct transfer event.
-	MetadataBridgeTransferStatus = "bridge_transfer_status"
-
-	// MetadataBridgeTransferDuration holds the bridge duration as a string
-	// (time.Duration.String()). Set after BridgeTransfer returns.
-	MetadataBridgeTransferDuration = "bridge_transfer_duration"
-
-	// MetadataBridgeTransferOutboundCallID holds the SIP Call-ID of the
-	// outbound (B-leg) call created for the transfer.
+	BridgeCallTimeout                    = 30 * time.Second
+	BridgeSafetyTimeout                  = 5 * time.Minute
+	MetadataBridgeTransferTarget         = "bridge_transfer_target"
+	MetadataBridgeTransferStatus         = "bridge_transfer_status"
+	MetadataBridgeTransferDuration       = "bridge_transfer_duration"
 	MetadataBridgeTransferOutboundCallID = "bridge_transfer_outbound_call_id"
-
-	// PostTransferActionEndCall ends the inbound caller's session when the
-	// operator (transfer target) hangs up.
-	PostTransferActionEndCall = "end_call"
-
-	// PostTransferActionResumeAI hands the caller back to the AI when the
-	// operator (transfer target) hangs up.
-	PostTransferActionResumeAI = "resume_ai"
+	MetadataDisconnectReason             = "disconnect_reason"
+	MetadataDisconnectText               = "disconnect_text"
+	MetadataDisconnectRawReason          = "disconnect_raw_reason"
+	PostTransferActionEndCall            = "end_call"
+	PostTransferActionResumeAI           = "resume_ai"
 )
 
-// Event represents events from SIP stack
 type Event struct {
 	Type      EventType              `json:"type"`
 	CallID    string                 `json:"call_id"`
@@ -318,7 +329,42 @@ type Event struct {
 	Data      map[string]interface{} `json:"data,omitempty"`
 }
 
-// NewEvent creates a new SIP event
+const (
+	DisconnectReasonRemoteHangup   = "remote_hangup"
+	DisconnectReasonNormalClearing = "normal_clearing"
+	DisconnectReasonBusy           = "busy"
+	DisconnectReasonNoAnswer       = "no_answer"
+	DisconnectReasonRejected       = "rejected"
+	DisconnectReasonCancelled      = "cancelled"
+	DisconnectReasonNetworkFailure = "network_failure"
+	DisconnectReasonRemoteError    = "remote_error"
+)
+
+type DisconnectMetadata struct {
+	Reason             string
+	Text               string
+	Raw                string
+	ProviderStatusCode int
+}
+
+func (m DisconnectMetadata) toCore() internal_core.DisconnectMetadata {
+	return internal_core.DisconnectMetadata{
+		Reason:             m.Reason,
+		Text:               m.Text,
+		Raw:                m.Raw,
+		ProviderStatusCode: m.ProviderStatusCode,
+	}
+}
+
+func disconnectMetadataFromCore(m internal_core.DisconnectMetadata) DisconnectMetadata {
+	return DisconnectMetadata{
+		Reason:             m.Reason,
+		Text:               m.Text,
+		Raw:                m.Raw,
+		ProviderStatusCode: m.ProviderStatusCode,
+	}
+}
+
 func NewEvent(eventType EventType, callID string, data map[string]interface{}) Event {
 	return Event{
 		Type:      eventType,
@@ -328,13 +374,11 @@ func NewEvent(eventType EventType, callID string, data map[string]interface{}) E
 	}
 }
 
-// DTMFEvent represents DTMF input
 type DTMFEvent struct {
 	Digit    string `json:"digit"`
 	Duration int    `json:"duration_ms"`
 }
 
-// RTPStats contains RTP statistics
 type RTPStats struct {
 	PacketsSent     uint64        `json:"packets_sent"`
 	PacketsReceived uint64        `json:"packets_received"`
@@ -344,98 +388,68 @@ type RTPStats struct {
 	Jitter          time.Duration `json:"jitter"`
 }
 
-// ParseConfigFromVault extracts SIP provider credentials from a vault credential.
-// Handles: sip_uri, sip_server, sip_port, sip_username, sip_password, sip_realm,
-// sip_domain, sip_caller_id, sip_headers (JSON string).
-// Does NOT set operational fields (transport, RTP range) — call ApplyOperationalDefaults after.
+func rtpStatsFromCore(stats internal_core.RTPStats) RTPStats {
+	return RTPStats{
+		PacketsSent:     stats.PacketsSent,
+		PacketsReceived: stats.PacketsReceived,
+		BytesSent:       stats.BytesSent,
+		BytesReceived:   stats.BytesReceived,
+		PacketsLost:     stats.PacketsLost,
+		Jitter:          stats.Jitter,
+	}
+}
+
 func ParseConfigFromVault(vaultCredential *protos.VaultCredential) (*Config, error) {
-	if vaultCredential == nil || vaultCredential.GetValue() == nil {
-		return nil, fmt.Errorf("vault credential is required")
+	coreConfig, err := internal_core.ParseConfigFromVault(vaultCredential)
+	if err != nil {
+		return nil, err
 	}
-
-	credMap := vaultCredential.GetValue().AsMap()
-	cfg := &Config{}
-
-	// Parse sip_uri → server + port (e.g. "sip:192.168.1.5:5060")
-	if sipURI, ok := credMap["sip_uri"].(string); ok && sipURI != "" {
-		raw := strings.TrimPrefix(strings.TrimPrefix(sipURI, "sips:"), "sip:")
-		host, portStr, err := net.SplitHostPort(raw)
-		if err != nil {
-			cfg.Server = raw
-		} else {
-			cfg.Server = host
-			if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
-				cfg.Port = p
-			}
-		}
-	}
-
-	if server, ok := credMap["sip_server"].(string); ok && server != "" {
-		cfg.Server = server
-	}
-	if cfg.Port <= 0 {
-		cfg.Port = parsePortValue(credMap["sip_port"])
-	}
-	if username, ok := credMap["sip_username"].(string); ok {
-		cfg.Username = username
-	}
-	if password, ok := credMap["sip_password"].(string); ok {
-		cfg.Password = password
-	}
-	if realm, ok := credMap["sip_realm"].(string); ok {
-		cfg.Realm = realm
-	}
-	if domain, ok := credMap["sip_domain"].(string); ok {
-		cfg.Domain = domain
-	}
-	if callerID, ok := credMap["sip_caller_id"].(string); ok {
-		cfg.CallerID = callerID
-	}
-	if headersRaw, ok := credMap["sip_headers"].(string); ok && headersRaw != "" {
-		parsed := make(map[string]string)
-		if err := json.Unmarshal([]byte(headersRaw), &parsed); err == nil {
-			cfg.CustomHeaders = parsed
-		}
-	}
-
-	return cfg, nil
+	config := configFromCore(coreConfig)
+	return &config, nil
 }
 
-func parsePortValue(v any) int {
-	switch p := v.(type) {
-	case float64:
-		if int(p) > 0 && int(p) <= 65535 {
-			return int(p)
-		}
-	case string:
-		if port, err := strconv.Atoi(p); err == nil && port > 0 && port <= 65535 {
-			return port
-		}
-	}
-	return 0
-}
-
-// ExtractDIDFromURI extracts the user part from a SIP URI as a phone number (DID).
-// Strips URI parameters (e.g. ;user=phone) that some providers append.
 func ExtractDIDFromURI(uri string) string {
-	raw := strings.TrimPrefix(strings.TrimPrefix(uri, "sip:"), "sips:")
-	parts := strings.SplitN(raw, "@", 2)
-	if len(parts) == 0 || parts[0] == "" {
-		return ""
-	}
-	user := parts[0]
-	// Strip URI parameters (e.g. "+15551234567;user=phone" → "+15551234567")
-	if idx := strings.IndexByte(user, ';'); idx >= 0 {
-		user = user[:idx]
-	}
-	// Skip credential pairs (assistantID:apiKey)
-	if strings.Contains(user, ":") {
-		return ""
-	}
-	// Normalize to E.164: add "+" prefix for phone numbers
-	if len(user) > 5 && user[0] != '+' {
-		user = "+" + user
-	}
+	return internal_core.ExtractDIDFromURI(uri)
+}
 
-	return user
+func cloneMap(values map[string]interface{}) map[string]interface{} {
+	if len(values) == 0 {
+		return nil
+	}
+	copied := make(map[string]interface{}, len(values))
+	for key, value := range values {
+		copied[key] = value
+	}
+	return copied
+}
+
+func copyJSONCompatibleMap(raw map[string]string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	copied := make(map[string]string, len(raw))
+	for key, value := range raw {
+		copied[key] = value
+	}
+	return copied
+}
+
+func marshalJSONMap(value interface{}) map[string]interface{} {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func isCoreSIPError(err error) (*internal_core.SIPError, bool) {
+	var sipErr *internal_core.SIPError
+	if errors.As(err, &sipErr) {
+		return sipErr, true
+	}
+	return nil, false
 }

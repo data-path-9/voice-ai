@@ -20,17 +20,26 @@ import (
 
 // Store provides operations to save and retrieve call contexts from Postgres.
 //
-// Call contexts bridge the HTTP call-setup request (inbound webhook or outbound
-// gRPC) and the media connection. Status lifecycle: PENDING → CLAIMED. Save
-// creates PENDING; Claim atomically marks the context consumed by the media
-// path; Get reads regardless of status. Claim is idempotent at the call level
-// — only the first caller wins, subsequent callers get an error.
+// Call contexts bridge the HTTP call-setup request and the media connection.
+// Save creates PENDING; Claim atomically marks the context consumed by the media
+// path; call status updates can mark unclaimed setup attempts FAILED.
 type Store interface {
 	Save(ctx context.Context, cc *CallContext) (string, error)
 	Get(ctx context.Context, contextID string) (*CallContext, error)
 	GetByChannelUUID(ctx context.Context, provider string, assistantID uint64, channelUUID string) (*CallContext, error)
 	Claim(ctx context.Context, contextID string) (*CallContext, error)
 	UpdateField(ctx context.Context, contextID, field, value string) error
+	UpdateCallStatus(ctx context.Context, contextID string, status CallStatusUpdate) error
+}
+
+type CallStatusUpdate struct {
+	CallStatus         string
+	CallError          string
+	FailureClass       string
+	FailureReason      string
+	DisconnectReason   string
+	Retryable          bool
+	ProviderStatusCode int
 }
 
 type postgresStore struct {
@@ -131,14 +140,47 @@ func (s *postgresStore) UpdateField(ctx context.Context, contextID, field, value
 		return fmt.Errorf("field %q is not updatable on call context", field)
 	}
 
-	result := db.Model(&CallContext{}).
-		Where("context_id = ?", contextID).
-		Update(field, value)
+	query := db.Model(&CallContext{}).Where("context_id = ?", contextID)
+	if field == "status" && value == StatusClaimed {
+		query = query.Where("status NOT IN ?", []string{StatusFailed, StatusCompleted, StatusCancelled})
+	}
+	result := query.Update(field, value)
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to update field %s on call context %s: %w", field, contextID, result.Error)
 	}
 
 	s.logger.Debugf("updated call context field: contextId=%s, %s=%s", contextID, field, value)
+	return nil
+}
+
+func (s *postgresStore) UpdateCallStatus(ctx context.Context, contextID string, status CallStatusUpdate) error {
+	db := s.postgres.DB(ctx)
+	updates := map[string]interface{}{
+		"call_status":          status.CallStatus,
+		"call_error":           status.CallError,
+		"failure_class":        status.FailureClass,
+		"failure_reason":       status.FailureReason,
+		"disconnect_reason":    status.DisconnectReason,
+		"retryable":            status.Retryable,
+		"provider_status_code": status.ProviderStatusCode,
+		"updated_date":         time.Now(),
+	}
+	if status.CallStatus == StatusFailed || status.CallStatus == StatusCancelled {
+		updates["status"] = StatusFailed
+	}
+	if status.CallStatus == StatusCompleted {
+		updates["status"] = StatusCompleted
+	}
+
+	result := db.Model(&CallContext{}).
+		Where("context_id = ?", contextID).
+		Updates(updates)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to update call status on call context %s: %w", contextID, result.Error)
+	}
+
+	s.logger.Debugf("updated call status: contextId=%s, call_status=%s, failure_class=%s", contextID, status.CallStatus, status.FailureClass)
 	return nil
 }

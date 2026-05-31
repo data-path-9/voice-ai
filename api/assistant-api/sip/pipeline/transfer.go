@@ -63,11 +63,19 @@ func (d *Dispatcher) executeTransfer(ctx context.Context, v sip_infra.TransferIn
 			v.OnAttempt(target, attempt, len(targets))
 		}
 
-		// Each target gets its own BridgeCallTimeout. The overall budget is
-		// bounded by the inbound session context — if the caller hangs up
-		// mid-failover, we stop trying.
+		// Each target gets its own bridge timeout. Transfer policy remains here;
+		// SIP infra owns only the outbound B-leg lifecycle.
 		perTargetCtx, perTargetCancel := context.WithTimeout(v.Session.Context(), sip_infra.BridgeCallTimeout)
-		session, err := d.server.MakeBridgeCall(perTargetCtx, cfg, target, cfg.CallerID)
+		session, err := d.server.MakeTransferBridgeCall(perTargetCtx, cfg, target, cfg.CallerID, sip_infra.TransferBridgeCallOptions{
+			ParentCallID:    v.Session.GetCallID(),
+			Attempt:         attempt,
+			TotalAttempts:   len(targets),
+			Auth:            v.Session.GetAuth(),
+			Assistant:       v.Session.GetAssistant(),
+			ConversationID:  v.Session.GetConversationID(),
+			ContextID:       v.Session.GetContextID(),
+			VaultCredential: v.Session.GetVaultCredential(),
+		})
 		perTargetCancel()
 		if err == nil {
 			outboundSession = session
@@ -125,8 +133,6 @@ func (d *Dispatcher) executeTransfer(ctx context.Context, v sip_infra.TransferIn
 		v.OnConnected(outboundSession.GetRTPHandler())
 	}
 
-	v.Session.SetState(sip_infra.CallStateBridgeConnected)
-
 	d.OnPipeline(ctx, sip_infra.TransferConnectedPipeline{
 		ID:              v.ID,
 		InboundSession:  v.Session,
@@ -167,14 +173,14 @@ func (d *Dispatcher) executeTransfer(ctx context.Context, v sip_infra.TransferIn
 	// Teardown order matters:
 	//   1. OnTeardown — calls streamer.ClearBridgeTarget which blocks until any
 	//      in-flight ForwardUserAudio write to the outbound RTP has finished.
-	//   2. outboundSession.End() — only now safe to close the outbound RTP
+	//   2. lifecycle ends outbound session, closing outbound RTP only after
 	//      channels; no streamer goroutine still holds a reference.
 	//   3. OnResumeAI — bridge state is fully torn down; AI resumes.
 	if v.OnTeardown != nil {
 		v.OnTeardown()
 	}
 	if !outboundSession.IsEnded() {
-		outboundSession.End()
+		d.endCall(outboundSession, sip_infra.LifecycleReasonTransferOutboundEnded)
 	}
 	if v.OnResumeAI != nil {
 		v.OnResumeAI()

@@ -7,6 +7,7 @@
 package internal_telnyx_telephony
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telnyx "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	configs "github.com/rapidaai/config"
@@ -504,13 +506,22 @@ func TestOutboundCall_MissingCredentials(t *testing.T) {
 	}
 	logger := newTelnyxTestLogger(t)
 	telephony, _ := NewTelnyxTelephony(cfg, logger)
+	var statusUpdate internal_type.ProviderCallStatusUpdate
 
-	info, err := telephony.OutboundCall(nil, "+15551234567", "+15559876543", nil, 1, nil, utils.Option{})
+	info, err := telephony.OutboundCall(context.Background(), nil, "+15551234567", "+15559876543", nil, 1, nil, func(update internal_type.ProviderCallStatusUpdate) {
+		statusUpdate = update
+	}, utils.Option{})
 	if err == nil {
 		t.Error("expected error for nil vault credential")
 	}
 	if info.Status != "FAILED" {
 		t.Errorf("expected FAILED status, got %s", info.Status)
+	}
+	if statusUpdate.CallStatus != internal_telephony_base.OutboundCallStatusFailed {
+		t.Errorf("expected outbound status failed, got %s", statusUpdate.CallStatus)
+	}
+	if statusUpdate.FailureClass != internal_telephony_base.OutboundFailureClassAuthentication {
+		t.Errorf("expected authentication failure class, got %s", statusUpdate.FailureClass)
 	}
 }
 

@@ -6,12 +6,14 @@
 package internal_twilio_telephony
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_twilio "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -153,8 +155,22 @@ func (tpc *twilioTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 	return callback.StatusInfo(), nil
 }
 
-func (tpc *twilioTelephony) OutboundCall(auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, opts utils.Option) (*internal_type.CallInfo, error) {
+func (tpc *twilioTelephony) OutboundCall(ctx context.Context, auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, statusReporter internal_type.ProviderCallStatusReporter, opts utils.Option) (*internal_type.CallInfo, error) {
 	info := &internal_type.CallInfo{Provider: twilioProvider}
+
+	if err := ctx.Err(); err != nil {
+		info.Status = "FAILED"
+		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCancelled,
+			"request cancelled",
+			internal_telephony_base.OutboundDisconnectReasonRequestCancelled,
+			err,
+			0,
+		)
+		return info, err
+	}
 
 	contextID, _ := opts.GetString("rapida.context_id")
 
@@ -162,6 +178,14 @@ func (tpc *twilioTelephony) OutboundCall(auth types.SimplePrinciple, toPhone str
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("authentication error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassAuthentication,
+			"authentication error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 	callParams := &openapi.CreateCallParams{}
@@ -184,15 +208,38 @@ func (tpc *twilioTelephony) OutboundCall(auth types.SimplePrinciple, toPhone str
 			toPhone),
 	)
 	resp, err := client.Api.CreateCall(callParams)
-	if err != nil || resp.Status == nil || resp.Sid == nil {
+	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("API error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			"provider API error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
+		return info, err
+	}
+	if resp.Status == nil || resp.Sid == nil {
+		err := fmt.Errorf("twilio response missing status or sid")
+		info.Status = "FAILED"
+		info.ErrorMessage = err.Error()
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			"provider response missing status or sid",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
 	info.ChannelUUID = *resp.Sid
 	info.Status = "SUCCESS"
 	info.StatusInfo = internal_type.StatusInfo{Event: *resp.Status, Payload: resp}
+	internal_telephony_base.ReportOutboundInitiated(statusReporter, info.ChannelUUID)
 	return info, nil
 }
 

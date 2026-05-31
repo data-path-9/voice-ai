@@ -6,12 +6,14 @@
 package internal_vonage_telephony
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_vonage "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -123,19 +125,43 @@ func (vng *vonageTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 }
 
 func (vng *vonageTelephony) OutboundCall(
+	ctx context.Context,
 	auth types.SimplePrinciple,
 	toPhone string,
 	fromPhone string,
 	assistant *internal_assistant_entity.Assistant, assistantConversationId uint64,
 	vaultCredential *protos.VaultCredential,
+	statusReporter internal_type.ProviderCallStatusReporter,
 	opts utils.Option,
 ) (*internal_type.CallInfo, error) {
 	info := &internal_type.CallInfo{Provider: vonageProvider}
+
+	if err := ctx.Err(); err != nil {
+		info.Status = "FAILED"
+		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCancelled,
+			"request cancelled",
+			internal_telephony_base.OutboundDisconnectReasonRequestCancelled,
+			err,
+			0,
+		)
+		return info, err
+	}
 
 	cAuth, err := vonageAuth(vaultCredential)
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("authentication error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassAuthentication,
+			"authentication error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 	ct := vonage.NewVoiceClient(cAuth)
@@ -166,13 +192,30 @@ func (vng *vonageTelephony) OutboundCall(
 	if apiError != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("API error: %s", apiError.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			"provider API error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			apiError,
+			0,
+		)
 		return info, apiError
 	}
 
 	if vErr.Error != nil {
+		err := fmt.Errorf("failed to create call")
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("Calling error: %v", vErr.Error)
-		return info, fmt.Errorf("failed to create call")
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			fmt.Sprintf("%v", vErr.Error),
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
+		return info, err
 	}
 
 	info.ChannelUUID = result.Uuid
@@ -181,6 +224,7 @@ func (vng *vonageTelephony) OutboundCall(
 	info.Extra = map[string]string{
 		"conversation_uuid": result.ConversationUuid,
 	}
+	internal_telephony_base.ReportOutboundInitiated(statusReporter, info.ChannelUUID)
 	return info, nil
 }
 

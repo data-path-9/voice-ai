@@ -13,22 +13,10 @@ import (
 	"github.com/rapidaai/protos"
 )
 
-// Pipeline is the base interface for all SIP call lifecycle stages.
-// Each concrete type represents a distinct stage in the pipeline.
-// Handlers receive a typed Pipeline, apply logic, and emit the next stage(s)
-// via OnPipeline — forming chains without explicit wiring.
 type Pipeline interface {
 	CallID() string
 }
 
-// =============================================================================
-// Media pipeline — RTP, codec, session establishment
-// =============================================================================
-
-// SessionEstablishedPipeline is emitted after RTP allocation, session creation,
-// and 200 OK is sent. Converges inbound and outbound flows. FromURI/ToURI
-// carry the INVITE addresses so downstream stages can build a CallContext
-// without re-parsing SIP headers.
 type SessionEstablishedPipeline struct {
 	ID              string
 	Session         *Session
@@ -39,14 +27,10 @@ type SessionEstablishedPipeline struct {
 	Auth            types.SimplePrinciple
 	FromURI         string
 	ToURI           string
-	ConversationID  uint64 // Non-zero for outbound (already created by channel pipeline)
+	ConversationID  uint64
 }
 
 func (p SessionEstablishedPipeline) CallID() string { return p.ID }
-
-// =============================================================================
-// Signal pipeline — BYE, CANCEL, transfer (preempts everything)
-// =============================================================================
 
 type ByeReceivedPipeline struct {
 	ID      string
@@ -113,11 +97,6 @@ type CallFailedPipeline struct {
 
 func (p CallFailedPipeline) CallID() string { return p.ID }
 
-// =============================================================================
-// Control pipeline — metrics, events, recording, DTMF, registration
-// =============================================================================
-
-// EventEmittedPipeline is a generic event for logging and observability.
 type EventEmittedPipeline struct {
 	ID    string
 	Event string
@@ -126,7 +105,6 @@ type EventEmittedPipeline struct {
 
 func (p EventEmittedPipeline) CallID() string { return p.ID }
 
-// MetricEmittedPipeline carries metrics for a call.
 type MetricEmittedPipeline struct {
 	ID      string
 	Metrics []*protos.Metric
@@ -134,11 +112,10 @@ type MetricEmittedPipeline struct {
 
 func (p MetricEmittedPipeline) CallID() string { return p.ID }
 
-// DTMFReceivedPipeline is emitted when a DTMF digit is detected via RTP (RFC 4733).
 type DTMFReceivedPipeline struct {
 	ID       string
 	Digit    string
-	Duration int // milliseconds
+	Duration int
 }
 
 func (p DTMFReceivedPipeline) CallID() string { return p.ID }

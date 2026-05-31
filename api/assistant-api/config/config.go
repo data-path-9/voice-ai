@@ -8,6 +8,7 @@ package config
 import (
 	"log"
 	"os"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/rapidaai/config"
@@ -17,13 +18,18 @@ import (
 
 // SIPConfig holds the SIP server configuration
 type SIPConfig struct {
-	Server            string `mapstructure:"server"`
-	InstanceID        string `mapstructure:"instance_id"` // Unique identifier for this SIP server instance (defaults to external_ip)
-	ExternalIP        string `mapstructure:"external_ip"` // Public/reachable IP for SDP and SIP Contact headers (defaults to Server if empty)
-	Port              int    `mapstructure:"port"`
-	Transport         string `mapstructure:"transport"`
-	RTPPortRangeStart int    `mapstructure:"rtp_port_range_start"`
-	RTPPortRangeEnd   int    `mapstructure:"rtp_port_range_end"`
+	Server                  string        `mapstructure:"server"`
+	InstanceID              string        `mapstructure:"instance_id"` // Unique identifier for this SIP server instance (defaults to external_ip)
+	ExternalIP              string        `mapstructure:"external_ip"` // Public/reachable IP for outbound SDP and SIP Contact headers
+	AllowLoopbackExternalIP bool          `mapstructure:"allow_loopback_external_ip"`
+	Port                    int           `mapstructure:"port"`
+	Transport               string        `mapstructure:"transport"`
+	RTPPortRangeStart       int           `mapstructure:"rtp_port_range_start"`
+	RTPPortRangeEnd         int           `mapstructure:"rtp_port_range_end"`
+	RegisterTimeout         time.Duration `mapstructure:"register_timeout"`
+	InviteTimeout           time.Duration `mapstructure:"invite_timeout"`
+	SessionTimeout          time.Duration `mapstructure:"session_timeout"`
+	OutboundHealthGate      *bool         `mapstructure:"outbound_health_gate"`
 }
 
 // WebRTCConfig holds WebRTC ICE configuration for production cloud deployments.

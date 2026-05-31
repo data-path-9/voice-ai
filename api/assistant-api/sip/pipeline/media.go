@@ -8,6 +8,7 @@ package sip_pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,7 +17,76 @@ import (
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 )
 
+type preparedSession struct {
+	stage    sip_infra.SessionEstablishedPipeline
+	setup    *CallSetupResult
+	observer *obs.ConversationObserver
+}
+
+type sessionPreparationError struct {
+	reason sip_infra.LifecycleReason
+	err    error
+}
+
+func (e *sessionPreparationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *sessionPreparationError) Unwrap() error {
+	return e.err
+}
+
+func newSessionPreparationError(reason sip_infra.LifecycleReason, err error) *sessionPreparationError {
+	return &sessionPreparationError{reason: reason, err: err}
+}
+
 func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.SessionEstablishedPipeline) {
+	prepared, err := d.prepareSession(ctx, v)
+	if err != nil {
+		d.logger.Error("Pipeline: session preparation failed", "call_id", v.ID, "error", err)
+		d.endCall(v.Session, sessionPreparationReason(err))
+		return
+	}
+	d.startPreparedSession(ctx, prepared)
+}
+
+func (d *Dispatcher) PrepareSession(ctx context.Context, v sip_infra.SessionEstablishedPipeline) error {
+	prepared, err := d.prepareSession(ctx, v)
+	if err != nil {
+		return err
+	}
+	d.preparedMu.Lock()
+	d.preparedSessions[v.ID] = prepared
+	d.preparedMu.Unlock()
+	return nil
+}
+
+func (d *Dispatcher) StartPreparedSession(ctx context.Context, v sip_infra.SessionEstablishedPipeline) error {
+	prepared := d.popPreparedSession(v.ID)
+	if prepared == nil {
+		return fmt.Errorf("prepared SIP session not found for call %s", v.ID)
+	}
+	d.startPreparedSession(ctx, prepared)
+	return nil
+}
+
+func (d *Dispatcher) DiscardPreparedSession(ctx context.Context, callID string) {
+	prepared := d.popPreparedSession(callID)
+	if prepared == nil || prepared.observer == nil {
+		return
+	}
+	prepared.observer.Shutdown(ctx)
+}
+
+func (d *Dispatcher) popPreparedSession(callID string) *preparedSession {
+	d.preparedMu.Lock()
+	defer d.preparedMu.Unlock()
+	prepared := d.preparedSessions[callID]
+	delete(d.preparedSessions, callID)
+	return prepared
+}
+
+func (d *Dispatcher) prepareSession(ctx context.Context, v sip_infra.SessionEstablishedPipeline) (*preparedSession, error) {
 	d.logger.Infow("Pipeline: SessionEstablished",
 		"call_id", v.ID,
 		"direction", v.Direction,
@@ -25,26 +95,26 @@ func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.S
 
 	if d.onCallSetup == nil || d.onCallStart == nil {
 		d.logger.Error("Pipeline: callbacks not configured", "call_id", v.ID)
-		v.Session.End()
-		return
+		return nil, newSessionPreparationError(
+			sip_infra.LifecycleReasonPipelineCallbacksMissing,
+			fmt.Errorf("pipeline callbacks not configured"),
+		)
 	}
 
-	// Resolve conversation ID:
-	// - Outbound: already created by channel pipeline, passed in ConversationID
-	// - Inbound: create now via onCreateConversation
 	conversationID := v.ConversationID
 	if conversationID == 0 {
 		if d.onCreateConversation == nil {
 			d.logger.Error("Pipeline: onCreateConversation not configured", "call_id", v.ID)
-			v.Session.End()
-			return
+			return nil, newSessionPreparationError(
+				sip_infra.LifecycleReasonPipelineConversationMissing,
+				fmt.Errorf("pipeline conversation callback not configured"),
+			)
 		}
 		var err error
 		conversationID, err = d.onCreateConversation(ctx, v.Auth, v.AssistantID, v.FromURI, string(v.Direction))
 		if err != nil {
 			d.logger.Error("Pipeline: create conversation failed", "call_id", v.ID, "error", err)
-			v.Session.End()
-			return
+			return nil, newSessionPreparationError(sip_infra.LifecycleReasonPipelineConversationFailed, err)
 		}
 		v.Session.SetConversationID(conversationID)
 	}
@@ -61,8 +131,7 @@ func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.S
 	setup, err := d.onCallSetup(ctx, v.Session, v.Auth, v.AssistantID, conversationID, cc)
 	if err != nil {
 		d.logger.Error("Pipeline: call setup failed", "call_id", v.ID, "error", err)
-		v.Session.End()
-		return
+		return nil, newSessionPreparationError(sip_infra.LifecycleReasonPipelineSetupFailed, err)
 	}
 
 	var observer *obs.ConversationObserver
@@ -85,17 +154,25 @@ func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.S
 			v.ID, "",
 			codec, sampleRate,
 		))
-		observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
-			obs.DataType:      obs.EventCallStarted,
-			obs.DataProvider:  "sip",
-			obs.DataDirection: string(v.Direction),
-		})
 	}
+	return &preparedSession{stage: v, setup: setup, observer: observer}, nil
+}
 
+func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *preparedSession) {
+	v := prepared.stage
+	setup := prepared.setup
+	observer := prepared.observer
 	go func() {
 		startTime := time.Now()
 		reason := "talk_completed"
 		status := "COMPLETED"
+		if observer != nil {
+			observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
+				obs.DataType:      obs.EventCallStarted,
+				obs.DataProvider:  "sip",
+				obs.DataDirection: string(v.Direction),
+			})
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				reason = fmt.Sprintf("panic: %v", r)
@@ -152,4 +229,12 @@ func (d *Dispatcher) handleSessionEstablished(ctx context.Context, v sip_infra.S
 			}
 		}
 	}()
+}
+
+func sessionPreparationReason(err error) sip_infra.LifecycleReason {
+	var preparationErr *sessionPreparationError
+	if errors.As(err, &preparationErr) {
+		return preparationErr.reason
+	}
+	return sip_infra.LifecycleReasonPipelineSetupFailed
 }

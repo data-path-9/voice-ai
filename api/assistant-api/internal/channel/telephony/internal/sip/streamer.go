@@ -12,11 +12,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
+	internal_sip "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/sip/internal"
 	"github.com/rapidaai/api/assistant-api/internal/observe"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
@@ -32,8 +34,9 @@ type Streamer struct {
 	closed atomic.Bool
 
 	session    *sip_infra.Session
+	lifecycle  sip_infra.LifecycleController
 	rtpHandler *sip_infra.RTPHandler
-	audio      *AudioProcessor
+	audio      *internal_sip.AudioProcessor
 	media      *internal_telephony_media.MediaSession
 
 	transferring        atomic.Bool
@@ -44,11 +47,15 @@ type Streamer struct {
 func NewStreamer(ctx context.Context,
 	logger commons.Logger,
 	sipSession *sip_infra.Session,
+	lifecycle sip_infra.LifecycleController,
 	cc *callcontext.CallContext,
 	vaultCred *protos.VaultCredential,
 ) (internal_type.Streamer, error) {
 	if sipSession == nil {
-		return nil, fmt.Errorf("SIP session is required — standalone server mode is not supported")
+		return nil, fmt.Errorf("SIP session is required; standalone server mode is not supported")
+	}
+	if lifecycle == nil {
+		return nil, fmt.Errorf("SIP lifecycle controller is required")
 	}
 
 	s := &Streamer{
@@ -57,12 +64,7 @@ func NewStreamer(ctx context.Context,
 		),
 	}
 
-	// Client disconnect detection (SIP BYE from peer): push disc to Input,
-	// let the talker drive Close via Notify → Send.
-	//
-	// Bridge teardown safety is owned by AudioProcessor.bridgeMu — Forward
-	// vs Clear is serialized there. We don't need to defensively clear the
-	// bridge here.
+	// Peer BYE is reported to Talk; AudioProcessor owns bridge teardown safety.
 	go func() {
 		select {
 		case <-sipSession.ByeReceived():
@@ -75,8 +77,7 @@ func NewStreamer(ctx context.Context,
 		}
 	}()
 
-	// Server watches client context: safety net that forces Close if the
-	// talker cannot drive it (mirrors watchCallerContext in the webrtc streamer).
+	// Context cancellation is a safety net when Talk cannot drive teardown.
 	go func() {
 		select {
 		case <-sipSession.Context().Done():
@@ -98,22 +99,32 @@ func NewStreamer(ctx context.Context,
 	}
 
 	s.session = sipSession
+	s.lifecycle = lifecycle
 	s.rtpHandler = rtpHandler
-	s.audio = NewAudioProcessor(AudioProcessorConfig{
+	s.audio = internal_sip.NewAudioProcessor(internal_sip.AudioProcessorConfig{
 		RTPHandler: rtpHandler,
 		Resampler:  s.Resampler(),
 		PushInput:  s.Input,
-		Ringtone:   "ringtone_us",
+		Ringtone:   internal_sip.DefaultRingtone,
 		Ambient:    resolveAmbientConfig(sipSession),
 	})
-	s.media = internal_telephony_media.NewMediaSession(s.Ctx, logger, s.audio, nil)
-	s.media.SetInputSink(func(audio []byte) {
-		s.Input(&protos.ConversationUserMessage{
-			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
-		})
-	})
-	s.media.SetEventSink(func(event *protos.ConversationEvent) {
-		s.Input(event)
+	s.media = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     s.Ctx,
+		Logger:      logger,
+		MediaEngine: s.audio,
+		StreamSink:  s.Input,
+		OutputSink: func(frame internal_telephony_media.AssistantOutputFrame) error {
+			return s.audio.ConsumeFrame(frame.ProviderAudio)
+		},
+		EventSink: func(event *protos.ConversationEvent) {
+			if event != nil {
+				if event.Data == nil {
+					event.Data = map[string]string{}
+				}
+				event.Data["provider"] = internal_sip.Provider
+			}
+			s.Input(event)
+		},
 	})
 
 	go s.forwardIncomingAudio()
@@ -177,7 +188,10 @@ func (s *Streamer) forwardIncomingAudio() {
 				continue
 			}
 			if s.media != nil {
-				if err := s.media.HandleProviderAudio(audioData); err != nil {
+				if err := s.media.HandleProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+					Audio:      audioData,
+					ReceivedAt: time.Now(),
+				}); err != nil {
 					s.Logger.Debugw("SIP provider audio processing failed", "error", err.Error())
 				}
 			}
@@ -215,7 +229,7 @@ func (s *Streamer) Send(response internal_type.Stream) error {
 	case *protos.ConversationDisconnection:
 		_ = s.Disconnect(data.GetType())
 		s.emitChannelEvent("disconnected", map[string]string{"reason": data.GetType().String()})
-		s.endSession() // notify SIP peer via BYE (equivalent of Output(data) in webrtc)
+		s.endSession()
 		s.Close()
 	case *protos.ConversationToolCall:
 		switch data.GetAction() {
@@ -245,15 +259,9 @@ func (s *Streamer) Send(response internal_type.Stream) error {
 			s.EnterTransferMode(targets, postTransferAction, ringtone)
 			return nil
 		}
-	default:
-		// s.Logger.Warnw("SIP Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
 	}
 	return nil
 }
-
-// =============================================================================
-// Transfer
-// =============================================================================
 
 func (s *Streamer) EnterTransferMode(targets []string, postTransferAction, ringtoneEnum string) {
 	if !s.transferring.CompareAndSwap(false, true) {
@@ -266,7 +274,7 @@ func (s *Streamer) EnterTransferMode(targets []string, postTransferAction, ringt
 	s.mu.RUnlock()
 
 	if session != nil {
-		session.SetState(sip_infra.CallStateTransferring)
+		s.transitionCall(session, sip_infra.CallStateTransferring, sip_infra.LifecycleReasonTransferModeStarted)
 	}
 
 	ringbackCtx, ringbackCancel := context.WithCancel(s.Ctx)
@@ -302,7 +310,7 @@ func (s *Streamer) ExitTransferMode() {
 		cancelFn()
 	}
 	if session != nil {
-		session.SetState(sip_infra.CallStateConnected)
+		s.transitionCall(session, sip_infra.CallStateConnected, sip_infra.LifecycleReasonTransferModeEnded)
 	}
 
 	s.audio.SetTransferActive(false)
@@ -361,13 +369,9 @@ func (s *Streamer) endSession() {
 	session := s.session
 	s.mu.RUnlock()
 	if session != nil {
-		session.End()
+		s.endCall(session, sip_infra.LifecycleReasonStreamerEndSession)
 	}
 }
-
-// =============================================================================
-// Lifecycle
-// =============================================================================
 
 func (s *Streamer) Close() error {
 	if !s.closed.CompareAndSwap(false, true) {
@@ -385,17 +389,43 @@ func (s *Streamer) Close() error {
 	s.mu.RUnlock()
 
 	if session != nil {
-		session.End()
+		s.endCall(session, sip_infra.LifecycleReasonStreamerClosed)
 	}
 
 	s.Logger.Infow("SIP streamer closed")
 	return nil
 }
 
+func (s *Streamer) transitionCall(session *sip_infra.Session, next sip_infra.CallState, reason sip_infra.LifecycleReason) {
+	if s.lifecycle == nil {
+		s.Logger.Warnw("SIP lifecycle transition skipped: controller unavailable",
+			"call_id", session.GetCallID(),
+			"to", next,
+			"reason", reason)
+		return
+	}
+	s.lifecycle.TransitionCall(session, next, reason)
+}
+
+func (s *Streamer) endCall(session *sip_infra.Session, reason sip_infra.LifecycleReason) {
+	if s.lifecycle == nil {
+		s.Logger.Warnw("SIP lifecycle end skipped: controller unavailable",
+			"call_id", session.GetCallID(),
+			"reason", reason)
+		return
+	}
+	if err := s.lifecycle.EndCallWithReason(session, reason); err != nil {
+		s.Logger.Warnw("SIP lifecycle end failed",
+			"call_id", session.GetCallID(),
+			"reason", reason,
+			"error", err)
+	}
+}
+
 func (s *Streamer) emitChannelEvent(eventType string, extra map[string]string) {
 	data := map[string]string{
 		"type":     eventType,
-		"provider": "sip",
+		"provider": internal_sip.Provider,
 	}
 	for k, v := range extra {
 		data[k] = v
