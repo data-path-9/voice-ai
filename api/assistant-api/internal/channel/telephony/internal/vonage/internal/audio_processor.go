@@ -45,7 +45,7 @@ type AudioProcessor struct {
 func NewAudioProcessor(logger commons.Logger) (*AudioProcessor, error) {
 	resampler, err := internal_audio_resampler.GetResampler(logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create resampler: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrResamplerCreateFailed, err)
 	}
 
 	audioProcessor := &AudioProcessor{

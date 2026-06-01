@@ -6,6 +6,7 @@
 package internal_exotel_telephony
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_exotel "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/exotel/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	configs "github.com/rapidaai/config"
 	"github.com/rapidaai/pkg/commons"
@@ -56,6 +58,7 @@ func TestClientUrl_NilVaultValue(t *testing.T) {
 	result, err := exo.ClientUrl(cred, utils.Option{})
 	assert.Error(t, err)
 	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, internal_exotel.ErrVaultCredentialValueMissing))
 	assert.Contains(t, err.Error(), "vault credential value is nil")
 }
 
@@ -69,6 +72,7 @@ func TestClientUrl_MissingAccountSid(t *testing.T) {
 	result, err := exo.ClientUrl(cred, utils.Option{})
 	assert.Error(t, err)
 	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, internal_exotel.ErrVaultAccountSIDMissing))
 	assert.Contains(t, err.Error(), "accountSid")
 }
 
@@ -80,6 +84,7 @@ func TestAppUrl_NilVaultValue(t *testing.T) {
 	result, err := exo.AppUrl(cred, opts)
 	assert.Error(t, err)
 	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, internal_exotel.ErrVaultCredentialValueMissing))
 	assert.Contains(t, err.Error(), "vault credential value is nil")
 }
 
@@ -106,6 +111,7 @@ func TestAppUrl_MissingAppId(t *testing.T) {
 	result, err := exo.AppUrl(cred, utils.Option{})
 	assert.Error(t, err)
 	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, internal_exotel.ErrAppIDMissing))
 	assert.Contains(t, err.Error(), "app_id")
 }
 
@@ -132,13 +138,13 @@ func TestReceiveCall(t *testing.T) {
 			expectedPhone: "+919876543210",
 			checkCallInfo: func(t *testing.T, info *internal_type.CallInfo) {
 				require.NotNil(t, info)
-				assert.Equal(t, "exotel", info.Provider)
+				assert.Equal(t, internal_exotel.Provider, info.Provider)
 				assert.Equal(t, "SUCCESS", info.Status)
 				assert.Equal(t, "+919876543210", info.CallerNumber)
 				assert.Equal(t, "exotel-call-sid-12345", info.ChannelUUID)
 
 				// Check StatusInfo
-				assert.Equal(t, "webhook", info.StatusInfo.Event)
+				assert.Equal(t, internal_exotel.WebhookEvent, info.StatusInfo.Event)
 				assert.NotNil(t, info.StatusInfo.Payload)
 				payload, ok := info.StatusInfo.Payload.(map[string]string)
 				require.True(t, ok, "Payload should be map[string]string")
@@ -156,10 +162,10 @@ func TestReceiveCall(t *testing.T) {
 			expectedPhone: "+919876543210",
 			checkCallInfo: func(t *testing.T, info *internal_type.CallInfo) {
 				require.NotNil(t, info)
-				assert.Equal(t, "exotel", info.Provider)
+				assert.Equal(t, internal_exotel.Provider, info.Provider)
 				assert.Equal(t, "SUCCESS", info.Status)
 				assert.Empty(t, info.ChannelUUID, "ChannelUUID should be empty without CallSid")
-				assert.Equal(t, "webhook", info.StatusInfo.Event)
+				assert.Equal(t, internal_exotel.WebhookEvent, info.StatusInfo.Event)
 				assert.NotNil(t, info.StatusInfo.Payload)
 			},
 		},
@@ -228,6 +234,7 @@ func TestReceiveCall(t *testing.T) {
 			if tt.expectedError {
 				assert.Error(t, err)
 				assert.Nil(t, callInfo)
+				assert.True(t, errors.Is(err, internal_exotel.ErrInboundFromMissing))
 			} else {
 				assert.NoError(t, err)
 				if callInfo != nil {
@@ -359,6 +366,7 @@ func TestCatchAllStatusCallback(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, statusInfo)
+		assert.True(t, errors.Is(err, internal_exotel.ErrCatchAllCallSIDMissing))
 	})
 }
 
@@ -393,7 +401,7 @@ func TestReceiveCall_QueryParameterExtraction(t *testing.T) {
 	require.NotNil(t, callInfo)
 
 	// Verify StatusInfo contains webhook event with all query parameters as payload
-	assert.Equal(t, "webhook", callInfo.StatusInfo.Event)
+	assert.Equal(t, internal_exotel.WebhookEvent, callInfo.StatusInfo.Event)
 	require.NotNil(t, callInfo.StatusInfo.Payload, "StatusInfo payload should not be nil")
 
 	payloadMap, ok := callInfo.StatusInfo.Payload.(map[string]string)
@@ -449,13 +457,13 @@ func TestReceiveCall_CallInfoStructure(t *testing.T) {
 	require.NotNil(t, callInfo)
 
 	// Verify CallInfo fields
-	assert.Equal(t, "exotel", callInfo.Provider)
+	assert.Equal(t, internal_exotel.Provider, callInfo.Provider)
 	assert.Equal(t, "SUCCESS", callInfo.Status)
 	assert.Equal(t, "+919876543210", callInfo.CallerNumber)
 	assert.Equal(t, "exotel-call-sid-12345", callInfo.ChannelUUID)
 	assert.Empty(t, callInfo.ErrorMessage)
 
 	// Verify StatusInfo
-	assert.Equal(t, "webhook", callInfo.StatusInfo.Event)
+	assert.Equal(t, internal_exotel.WebhookEvent, callInfo.StatusInfo.Event)
 	assert.NotNil(t, callInfo.StatusInfo.Payload)
 }

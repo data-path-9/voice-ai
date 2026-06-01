@@ -9,6 +9,7 @@ package internal_telnyx_telephony
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -318,8 +319,8 @@ func TestReceiveCall(t *testing.T) {
 				t.Errorf("expected caller number %s, got %s", tt.expectNumber, callInfo.CallerNumber)
 			}
 
-			if callInfo.Provider != telnyxProvider {
-				t.Errorf("expected provider %s, got %s", telnyxProvider, callInfo.Provider)
+			if callInfo.Provider != internal_telnyx.Provider {
+				t.Errorf("expected provider %s, got %s", internal_telnyx.Provider, callInfo.Provider)
 			}
 		})
 	}
@@ -353,8 +354,8 @@ func TestInboundCall(t *testing.T) {
 		t.Errorf("failed to parse response: %v", err)
 	}
 
-	if result, ok := response["result"].(string); !ok || result != "streaming.start" {
-		t.Errorf("expected result streaming.start, got %v", response["result"])
+	if result, ok := response["result"].(string); !ok || result != internal_telnyx.InboundStreamingStart {
+		t.Errorf("expected result %s, got %v", internal_telnyx.InboundStreamingStart, response["result"])
 	}
 }
 
@@ -368,7 +369,7 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 			name:    "start event",
 			jsonStr: `{"event":"start","stream_id":"stream-123","start":{"call_control_id":"call-456","media_format":{"encoding":"PCMU","sample_rate":8000,"channels":1}}}`,
 			expected: internal_telnyx.TelnyxWebSocketEvent{
-				Event:    "start",
+				Event:    internal_telnyx.EventTypeStart,
 				StreamID: "stream-123",
 				Start: &internal_telnyx.TelnyxStartEvent{
 					CallControlID: "call-456",
@@ -384,7 +385,7 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 			name:    "media event",
 			jsonStr: `{"event":"media","stream_id":"stream-123","media":{"track":"inbound","payload":"dGVzdA=="}}`,
 			expected: internal_telnyx.TelnyxWebSocketEvent{
-				Event:    "media",
+				Event:    internal_telnyx.EventTypeMedia,
 				StreamID: "stream-123",
 				Media: &internal_telnyx.TelnyxMediaEvent{
 					Track:   "inbound",
@@ -396,7 +397,7 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 			name:    "stop event",
 			jsonStr: `{"event":"stop","stream_id":"stream-123","stop":{"call_control_id":"call-456"}}`,
 			expected: internal_telnyx.TelnyxWebSocketEvent{
-				Event:    "stop",
+				Event:    internal_telnyx.EventTypeStop,
 				StreamID: "stream-123",
 				Stop: &internal_telnyx.TelnyxStopEvent{
 					CallControlID: "call-456",
@@ -472,6 +473,16 @@ func TestGetCredentials(t *testing.T) {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
+				switch tt.name {
+				case "missing api_key":
+					if !errors.Is(err, internal_telnyx.ErrVaultAPIKeyMissing) {
+						t.Errorf("expected ErrVaultAPIKeyMissing, got %v", err)
+					}
+				case "missing connection_id":
+					if !errors.Is(err, internal_telnyx.ErrVaultConnectionIDMissing) {
+						t.Errorf("expected ErrVaultConnectionIDMissing, got %v", err)
+					}
+				}
 				return
 			}
 
@@ -497,6 +508,9 @@ func TestGetCredentials_NilVault(t *testing.T) {
 	_, _, err := telephony.getCredentials(nil)
 	if err == nil {
 		t.Error("expected error for nil vault credential, got nil")
+	}
+	if !errors.Is(err, internal_telnyx.ErrVaultCredentialMissing) {
+		t.Errorf("expected ErrVaultCredentialMissing, got %v", err)
 	}
 }
 

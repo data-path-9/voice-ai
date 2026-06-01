@@ -6,7 +6,6 @@
 package internal_vonage
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -31,7 +30,7 @@ func NewStatusCallback(payload map[string]interface{}) (*StatusCallback, error) 
 	options := utils.Option(payload)
 	status, _ := options.GetString("status")
 	if !validator.NotBlank(status) {
-		return nil, fmt.Errorf("status not found in payload")
+		return nil, ErrStatusCallbackStatusMissing
 	}
 
 	channelUUID, _ := options.GetString("uuid")

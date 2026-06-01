@@ -6,7 +6,6 @@
 package internal_exotel
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -29,7 +28,7 @@ type StatusCallback struct {
 func NewStatusCallback(eventDetails utils.Option) (*StatusCallback, error) {
 	event, _ := eventDetails.GetString("Status")
 	if !validator.NotBlank(event) {
-		return nil, fmt.Errorf("status not found in payload")
+		return nil, ErrStatusCallbackStatusMissing
 	}
 
 	channelUUID, _ := eventDetails.GetString("CallSid")

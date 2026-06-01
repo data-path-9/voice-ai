@@ -7,7 +7,6 @@
 package internal_telnyx
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -30,13 +29,13 @@ type StatusCallback struct {
 func NewStatusCallback(payload map[string]interface{}) (*StatusCallback, error) {
 	rawData, ok := payload["data"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("data field not found in payload")
+		return nil, ErrStatusCallbackDataMissing
 	}
 	data := utils.Option(rawData)
 
 	eventType, _ := data.GetString("event_type")
 	if !validator.NotBlank(eventType) {
-		return nil, fmt.Errorf("event_type not found in payload")
+		return nil, ErrStatusCallbackEventTypeMissing
 	}
 
 	payloadData := utils.Option{}

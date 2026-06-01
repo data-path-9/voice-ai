@@ -28,8 +28,6 @@ import (
 	"github.com/rapidaai/protos"
 )
 
-const exotelProvider = "exotel"
-
 type exotelTelephony struct {
 	logger commons.Logger
 	appCfg *config.AssistantConfig
@@ -65,7 +63,7 @@ func (exo *exotelTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 			form, err := ctx.MultipartForm()
 			if err != nil {
 				exo.logger.Errorf("failed to parse callback form-data with error %+v", err)
-				return nil, fmt.Errorf("failed to parse callback form-data")
+				return nil, fmt.Errorf("%w: %w", internal_exotel.ErrCallbackFormParseFailed, err)
 			}
 			for key, values := range form.Value {
 				if len(values) > 0 {
@@ -84,7 +82,7 @@ func (exo *exotelTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 	}
 	if !validator.NotBlank(callback.ChannelUUID) {
 		exo.logger.Errorf("call sid not found or invalid in catch-all payload")
-		return nil, fmt.Errorf("call sid not found in callback")
+		return nil, internal_exotel.ErrCatchAllCallSIDMissing
 	}
 	return callback.StatusInfo(), nil
 }
@@ -112,7 +110,7 @@ func (exo *exotelTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 			form, err := c.MultipartForm()
 			if err != nil {
 				exo.logger.Errorf("failed to parse callback form-data with error %+v", err)
-				return nil, fmt.Errorf("failed to parse callback form-data")
+				return nil, fmt.Errorf("%w: %w", internal_exotel.ErrCallbackFormParseFailed, err)
 			}
 			for key, values := range form.Value {
 				if len(values) > 0 {
@@ -133,26 +131,26 @@ func (exo *exotelTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 
 func (exo *exotelTelephony) ClientUrl(vaultCredential *protos.VaultCredential, opts utils.Option) (*string, error) {
 	if vaultCredential.GetValue() == nil {
-		return nil, fmt.Errorf("vault credential value is nil")
+		return nil, internal_exotel.ErrVaultCredentialValueMissing
 	}
 	vaultMap := vaultCredential.GetValue().AsMap()
 	accountSid, ok := vaultMap["account_sid"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config accountSid is not found")
+		return nil, internal_exotel.ErrVaultAccountSIDMissing
 	}
 	clientId, ok := vaultMap["client_id"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config client_id not found")
+		return nil, internal_exotel.ErrVaultClientIDMissing
 	}
 	authToken, ok := vaultMap["client_secret"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config client_secret not found")
+		return nil, internal_exotel.ErrVaultClientSecretMissing
 	}
 	sid, _ := accountSid.(string)
 	cid, _ := clientId.(string)
 	token, _ := authToken.(string)
 	if sid == "" || cid == "" || token == "" {
-		return nil, fmt.Errorf("illegal vault config: credentials must be non-empty strings")
+		return nil, internal_exotel.ErrVaultCredentialInvalid
 	}
 	return utils.Ptr(fmt.Sprintf("https://%s:%s@api.exotel.com/v1/Accounts/%s/Calls/connect.json",
 		cid, token, sid)), nil
@@ -160,20 +158,20 @@ func (exo *exotelTelephony) ClientUrl(vaultCredential *protos.VaultCredential, o
 
 func (exo *exotelTelephony) AppUrl(vaultCredential *protos.VaultCredential, opts utils.Option) (*string, error) {
 	if vaultCredential.GetValue() == nil {
-		return nil, fmt.Errorf("vault credential value is nil")
+		return nil, internal_exotel.ErrVaultCredentialValueMissing
 	}
 	vaultMap := vaultCredential.GetValue().AsMap()
 	accountSid, ok := vaultMap["account_sid"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config accountSid is not found")
+		return nil, internal_exotel.ErrVaultAccountSIDMissing
 	}
 	app_id, err := opts.GetString("app_id")
 	if err != nil {
-		return nil, fmt.Errorf("illegal app_id option is not found")
+		return nil, internal_exotel.ErrAppIDMissing
 	}
 	sid, _ := accountSid.(string)
 	if sid == "" {
-		return nil, fmt.Errorf("illegal vault config account_sid must be a non-empty string")
+		return nil, internal_exotel.ErrVaultAccountSIDInvalid
 	}
 	return utils.Ptr(fmt.Sprintf("http://my.exotel.com/%s/exoml/start_voice/%s", sid, app_id)), nil
 }
@@ -187,7 +185,7 @@ func (exo *exotelTelephony) OutboundCall(
 	vaultCredential *protos.VaultCredential,
 	statusReporter internal_type.ProviderCallStatusReporter,
 	opts utils.Option) (*internal_type.CallInfo, error) {
-	info := &internal_type.CallInfo{Provider: exotelProvider}
+	info := &internal_type.CallInfo{Provider: internal_exotel.Provider}
 
 	if err := ctx.Err(); err != nil {
 		info.Status = "FAILED"
@@ -240,8 +238,8 @@ func (exo *exotelTelephony) OutboundCall(
 	formData.Set("CallerId", fromPhone)
 	formData.Set("To", fromPhone)
 	formData.Set("Url", *appUrl)
-	formData.Set("StatusCallback", fmt.Sprintf("https://%s/%s", exo.appCfg.Assistant.Public, internal_type.GetContextEventPath(exotelProvider, contextID)))
-	formData.Set("CustomField", internal_type.GetContextAnswerPath(exotelProvider, contextID))
+	formData.Set("StatusCallback", fmt.Sprintf("https://%s/%s", exo.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_exotel.Provider, contextID)))
+	formData.Set("CustomField", internal_type.GetContextAnswerPath(internal_exotel.Provider, contextID))
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "POST", *clientUrl, strings.NewReader(formData.Encode()))
@@ -336,7 +334,7 @@ func (exo *exotelTelephony) InboundCall(c *gin.Context, auth types.SimplePrincip
 	response := map[string]string{
 		"url": fmt.Sprintf("wss://%s/%s",
 			exo.appCfg.Assistant.Public,
-			internal_type.GetContextAnswerPath("exotel", ctxID)),
+			internal_type.GetContextAnswerPath(internal_exotel.Provider, ctxID)),
 	}
 	c.JSON(http.StatusOK, response)
 	return nil
@@ -364,14 +362,14 @@ func (exo *exotelTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo
 	clientNumber, ok := queryParams["CallFrom"]
 	if !ok || clientNumber == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid caller"})
-		return nil, fmt.Errorf("missing or empty 'from' query parameter")
+		return nil, internal_exotel.ErrInboundFromMissing
 	}
 
 	info := &internal_type.CallInfo{
 		CallerNumber: clientNumber,
-		Provider:     exotelProvider,
+		Provider:     internal_exotel.Provider,
 		Status:       "SUCCESS",
-		StatusInfo:   internal_type.StatusInfo{Event: "webhook", Payload: queryParams},
+		StatusInfo:   internal_type.StatusInfo{Event: internal_exotel.WebhookEvent, Payload: queryParams},
 	}
 	if v, ok := queryParams["CallTo"]; ok && v != "" {
 		info.FromNumber = v

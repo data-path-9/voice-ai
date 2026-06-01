@@ -146,6 +146,9 @@ func TestAudioProcessor_ProcessProviderAudioFrame_PropagatesConversionError(t *t
 	if err == nil {
 		t.Fatal("expected conversion error")
 	}
+	if !errors.Is(err, ErrProviderAudioConversionFailed) {
+		t.Fatalf("expected ErrProviderAudioConversionFailed, got %v", err)
+	}
 }
 
 func TestAudioProcessor_ProcessAssistantAudio_ProducesProviderAndBridgeOutputFrames(t *testing.T) {
@@ -176,6 +179,9 @@ func TestAudioProcessor_ProcessAssistantAudio_PropagatesConversionError(t *testi
 	err := audioProcessor.ProcessAssistantAudio([]byte{1}, false)
 	if err == nil {
 		t.Fatal("expected conversion error")
+	}
+	if !errors.Is(err, ErrAssistantAudioConversionFailed) {
+		t.Fatalf("expected ErrAssistantAudioConversionFailed, got %v", err)
 	}
 }
 

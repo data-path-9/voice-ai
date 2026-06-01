@@ -27,12 +27,10 @@ import (
 
 type vonageWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
-
 	mediaSession *internal_telephony_media.MediaSession
-
-	connection *websocket.Conn
-	writeMu    sync.Mutex
-	closed     atomic.Bool
+	connection   *websocket.Conn
+	writeMu      sync.Mutex
+	closed       atomic.Bool
 }
 
 // NewVonageWebsocketStreamer creates a Vonage WebSocket streamer.
@@ -41,7 +39,7 @@ type vonageWebsocketStreamer struct {
 func NewVonageWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential) (internal_type.Streamer, error) {
 	audioProcessor, err := internal_vonage.NewAudioProcessor(logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Vonage audio processor: %w", err)
+		return nil, fmt.Errorf("%w: %w", internal_vonage.ErrAudioProcessorInitFailed, err)
 	}
 	vng := &vonageWebsocketStreamer{
 		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
@@ -61,7 +59,7 @@ func NewVonageWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 				if event.Data == nil {
 					event.Data = map[string]string{}
 				}
-				event.Data["provider"] = "vonage"
+				event.Data["provider"] = internal_vonage.Provider
 			}
 			vng.Input(event)
 		},
@@ -93,17 +91,17 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 				continue
 			}
 			switch textEvent.Event {
-			case "websocket:connected":
+			case internal_vonage.EventTypeWebSocketConnected:
 				if vng.mediaSession != nil {
 					vng.mediaSession.Start()
 				}
 				vng.Input(vng.CreateConnectionRequest())
 				vng.Input(&protos.ConversationEvent{
 					Name: "channel",
-					Data: map[string]string{"type": "connected", "provider": "vonage"},
+					Data: map[string]string{"type": internal_vonage.ChannelEventConnected, "provider": internal_vonage.Provider},
 					Time: timestamppb.Now(),
 				})
-			case "stop":
+			case internal_vonage.EventTypeStop:
 				if msg := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 					vng.Input(msg)
 				}
@@ -264,7 +262,7 @@ func (vng *vonageWebsocketStreamer) sendOutputFrame(frame internal_telephony_med
 }
 
 func (vng *vonageWebsocketStreamer) sendProviderClear() error {
-	message, err := json.Marshal(internal_vonage.VonageClearMessage{Action: "clear"})
+	message, err := json.Marshal(internal_vonage.VonageClearMessage{Action: internal_vonage.ClearAction})
 	if err != nil {
 		return err
 	}
