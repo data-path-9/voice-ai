@@ -14,23 +14,6 @@ import (
 	"github.com/rapidaai/pkg/commons"
 )
 
-var (
-	ErrMissingDID          = internal_core.ErrMissingDID
-	ErrMissingServer       = internal_core.ErrMissingServer
-	ErrRegistrationFailed  = internal_core.ErrRegistrationFailed
-	ErrRegistrationExpired = internal_core.ErrRegistrationExpired
-	ErrDIDNotRegistered    = internal_core.ErrDIDNotRegistered
-	ErrAuthFailed          = internal_core.ErrAuthFailed
-	ErrPermanentFailure    = internal_core.ErrPermanentFailure
-)
-
-type Registration struct {
-	DID         string
-	Config      *Config
-	AssistantID uint64
-	ExpiresIn   int
-}
-
 func (r *Registration) Validate() error {
 	return r.toCore().Validate()
 }
@@ -45,10 +28,6 @@ func (r *Registration) toCore() *internal_core.Registration {
 		AssistantID: r.AssistantID,
 		ExpiresIn:   r.ExpiresIn,
 	}
-}
-
-type RegistrationClient struct {
-	inner *internal_core.RegistrationClient
 }
 
 func NewRegistrationClient(client *sipgo.Client, listenConfig *ListenConfig, logger commons.Logger) *RegistrationClient {

@@ -6,26 +6,9 @@
 
 package sip_infra
 
-import (
-	"context"
-
-	internal_core "github.com/rapidaai/api/assistant-api/sip/internal/core"
-)
-
-type BridgeEndReason int
-
-const (
-	BridgeEndInboundBye BridgeEndReason = iota
-	BridgeEndOutboundBye
-	BridgeEndContext
-	BridgeEndTimeout
-)
+import "context"
 
 func (s *Server) BridgeTransfer(ctx context.Context, inbound, outbound *Session, onOperatorAudio func([]byte)) (BridgeEndReason, error) {
 	reason, err := s.inner.BridgeTransfer(ctx, inbound.unwrap(), outbound.unwrap(), onOperatorAudio)
 	return BridgeEndReason(reason), err
-}
-
-func bridgeEndReasonToCore(reason BridgeEndReason) internal_core.BridgeEndReason {
-	return internal_core.BridgeEndReason(reason)
 }

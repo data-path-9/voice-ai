@@ -131,7 +131,7 @@ func classifyOutboundSIPStatus(statusCode int, reason string) OutboundFailure {
 		failure.Class = OutboundFailureNoAnswer
 		failure.Retryable = true
 		failure.LifecycleReason = LifecycleReasonOutboundNoAnswer
-	case sip.StatusTemporarilyUnavailable, sip.StatusServiceUnavailable:
+	case sip.StatusTemporarilyUnavailable:
 		failure.Class = OutboundFailureUnavailable
 		failure.Retryable = true
 		failure.LifecycleReason = LifecycleReasonOutboundUnavailable
@@ -142,7 +142,7 @@ func classifyOutboundSIPStatus(statusCode int, reason string) OutboundFailure {
 		failure.LifecycleReason = LifecycleReasonOutboundMediaRejected
 	case sip.StatusGlobalDecline:
 		failure.Class = OutboundFailureRejected
-	case sip.StatusInternalServerError, sip.StatusBadGateway, sip.StatusGatewayTimeout:
+	case sip.StatusInternalServerError, sip.StatusBadGateway, sip.StatusServiceUnavailable, sip.StatusGatewayTimeout:
 		failure.Class = OutboundFailureUpstreamFailure
 		failure.Retryable = true
 		failure.LifecycleReason = LifecycleReasonOutboundUpstreamFailure
