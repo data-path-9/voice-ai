@@ -5,10 +5,25 @@
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
 package internal_twilio
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+const TwilioProvider = "twilio"
+
+type EventType string
+
+const (
+	EventTypeConnected EventType = "connected"
+	EventTypeStart     EventType = "start"
+	EventTypeMedia     EventType = "media"
+	EventTypeStop      EventType = "stop"
+	EventTypeClear     EventType = "clear"
+)
 
 type TwilioMediaEvent struct {
-	Event     string       `json:"event"`
+	Event     EventType    `json:"event"`
 	Media     *TwilioMedia `json:"media,omitempty"`
 	StreamSid string       `json:"streamSid"`
 }
@@ -21,7 +36,7 @@ type TwilioMedia struct {
 }
 
 type TwilioOutboundMessage struct {
-	Event    string               `json:"event"`
+	Event    EventType            `json:"event"`
 	StreamID string               `json:"streamSid"`
 	Media    *TwilioOutboundMedia `json:"media,omitempty"`
 }
@@ -38,4 +53,22 @@ const (
 	BridgeOutputFrameSize = Linear16BytesPerMs * 20
 	InputBufferThreshold  = Linear16BytesPerMs * 60
 	MulawSilence          = 0xFF
+)
+
+var (
+	ErrVaultCredentialValueMissing      = errors.New("vault credential value is nil")
+	ErrVaultAccountSIDMissing           = errors.New("illegal vault config accountSid is not found")
+	ErrVaultAccountTokenMissing         = errors.New("illegal vault config account_token not found")
+	ErrVaultAccountSIDInvalid           = errors.New("illegal vault config account_sid is not a string")
+	ErrVaultAccountTokenInvalid         = errors.New("illegal vault config account_token is not a string")
+	ErrRequestBodyReadFailed            = errors.New("failed to read request body")
+	ErrRequestBodyParseFailed           = errors.New("failed to parse request body")
+	ErrStatusCallbackCallSIDMissing     = errors.New("call sid not found in callback")
+	ErrStatusCallbackStatusMissing      = errors.New("status not found in payload")
+	ErrOutboundResponseMissingStatusSID = errors.New("twilio response missing status or sid")
+	ErrInboundFromMissing               = errors.New("missing or empty 'from' query parameter")
+	ErrAudioProcessorInitFailed         = errors.New("failed to initialize Twilio audio processor")
+	ErrResamplerCreateFailed            = errors.New("failed to create resampler")
+	ErrProviderAudioConversionFailed    = errors.New("audio conversion to 16kHz linear16 failed")
+	ErrAssistantAudioConversionFailed   = errors.New("audio conversion to mulaw 8kHz failed")
 )

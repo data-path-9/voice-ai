@@ -26,6 +26,7 @@ import (
 const (
 	chunkDuration         = 20 * time.Millisecond
 	defaultFrameSize      = 160
+	maxOptimalFrameSize   = 320
 	linear16BytesPerMs    = 32
 	bridgeOutputFrameSize = linear16BytesPerMs * 20
 	inputBufferThreshold  = linear16BytesPerMs * 60
@@ -126,7 +127,8 @@ func (audioProcessor *AudioProcessor) ConfigureAmbient(ambientConfig internal_am
 }
 
 func (audioProcessor *AudioProcessor) SetOptimalFrameSize(size int) {
-	if size <= 0 {
+	size = normalizeOptimalFrameSize(size)
+	if size == 0 {
 		return
 	}
 	audioProcessor.stateMu.Lock()
@@ -193,14 +195,26 @@ func (audioProcessor *AudioProcessor) ClearOutputBuffer() {
 }
 
 func (audioProcessor *AudioProcessor) createSilenceFrame(frameSize int, silenceByte byte) []byte {
-	if frameSize <= 0 {
-		frameSize = defaultFrameSize
-	}
+	frameSize = normalizeFrameAllocationSize(frameSize)
 	frame := make([]byte, frameSize)
 	for i := range frame {
 		frame[i] = silenceByte
 	}
 	return frame
+}
+
+func normalizeFrameAllocationSize(frameSize int) int {
+	if frameSize <= 0 || frameSize > maxOptimalFrameSize {
+		frameSize = defaultFrameSize
+	}
+	return frameSize
+}
+
+func normalizeOptimalFrameSize(frameSize int) int {
+	if frameSize <= 0 || frameSize > maxOptimalFrameSize {
+		return 0
+	}
+	return frameSize
 }
 
 func (audioProcessor *AudioProcessor) OutputFrameDuration() time.Duration {

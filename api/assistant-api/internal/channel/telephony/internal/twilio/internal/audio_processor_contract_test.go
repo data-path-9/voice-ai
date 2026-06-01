@@ -134,6 +134,9 @@ func TestAudioProcessor_ProcessProviderAudioFrame_PropagatesConversionError(t *t
 	if err == nil {
 		t.Fatal("expected conversion error")
 	}
+	if !errors.Is(err, ErrProviderAudioConversionFailed) {
+		t.Fatalf("expected provider audio conversion error, got %v", err)
+	}
 }
 
 func TestAudioProcessor_ProcessAssistantAudio_ProducesProviderAndBridgeOutputFrames(t *testing.T) {
@@ -155,6 +158,18 @@ func TestAudioProcessor_ProcessAssistantAudio_ProducesProviderAndBridgeOutputFra
 	}
 	if len(outputFrame.BridgeAudio) != BridgeOutputFrameSize || outputFrame.BridgeAudio[0] != 4 {
 		t.Fatalf("unexpected bridge audio length=%d", len(outputFrame.BridgeAudio))
+	}
+}
+
+func TestAudioProcessor_ProcessAssistantAudio_PropagatesConversionError(t *testing.T) {
+	processor := newTestAudioProcessor(nil, errors.New("resample failed"))
+
+	err := processor.ProcessAssistantAudio([]byte{1}, false)
+	if err == nil {
+		t.Fatal("expected conversion error")
+	}
+	if !errors.Is(err, ErrAssistantAudioConversionFailed) {
+		t.Fatalf("expected assistant audio conversion error, got %v", err)
 	}
 }
 

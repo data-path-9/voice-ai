@@ -6,6 +6,7 @@
 package internal_twilio_telephony
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_twilio "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -51,6 +53,7 @@ func TestTwilioClientParams_NilVaultValue(t *testing.T) {
 	params, err := twilioClientParams(cred)
 	assert.Error(t, err)
 	assert.Nil(t, params)
+	assert.True(t, errors.Is(err, internal_twilio.ErrVaultCredentialValueMissing))
 	assert.Contains(t, err.Error(), "vault credential value is nil")
 }
 
@@ -62,6 +65,7 @@ func TestTwilioClientParams_MissingAccountSid(t *testing.T) {
 	params, err := twilioClientParams(cred)
 	assert.Error(t, err)
 	assert.Nil(t, params)
+	assert.True(t, errors.Is(err, internal_twilio.ErrVaultAccountSIDMissing))
 	assert.Contains(t, err.Error(), "accountSid")
 }
 
@@ -73,6 +77,7 @@ func TestTwilioClientParams_MissingAccountToken(t *testing.T) {
 	params, err := twilioClientParams(cred)
 	assert.Error(t, err)
 	assert.Nil(t, params)
+	assert.True(t, errors.Is(err, internal_twilio.ErrVaultAccountTokenMissing))
 	assert.Contains(t, err.Error(), "account_token")
 }
 
@@ -93,6 +98,7 @@ func TestTwilioClient_NilVaultValue(t *testing.T) {
 	client, err := twilioClient(cred)
 	assert.Error(t, err)
 	assert.Nil(t, client)
+	assert.True(t, errors.Is(err, internal_twilio.ErrVaultCredentialValueMissing))
 }
 
 // TestReceiveCall tests the ReceiveCall method with Twilio webhook parameters
@@ -254,6 +260,7 @@ func TestReceiveCall(t *testing.T) {
 			if tt.expectedError {
 				assert.Error(t, err)
 				assert.Nil(t, callInfo)
+				assert.True(t, errors.Is(err, internal_twilio.ErrInboundFromMissing))
 			} else {
 				assert.NoError(t, err)
 				require.NotNil(t, callInfo)
@@ -386,6 +393,7 @@ func TestCatchAllStatusCallback(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, statusInfo)
+		assert.True(t, errors.Is(err, internal_twilio.ErrStatusCallbackCallSIDMissing))
 	})
 }
 

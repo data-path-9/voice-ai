@@ -26,8 +26,6 @@ import (
 	openapi "github.com/twilio/twilio-go/rest/api/v2010"
 )
 
-const twilioProvider = "twilio"
-
 type twilioTelephony struct {
 	appCfg *config.AssistantConfig
 	logger commons.Logger
@@ -50,24 +48,24 @@ func twilioClient(vaultCredential *protos.VaultCredential) (*twilio.RestClient, 
 
 func twilioClientParams(vaultCredential *protos.VaultCredential) (*twilio.ClientParams, error) {
 	if vaultCredential.GetValue() == nil {
-		return nil, fmt.Errorf("vault credential value is nil")
+		return nil, internal_twilio.ErrVaultCredentialValueMissing
 	}
 	vaultMap := vaultCredential.GetValue().AsMap()
 	accountSid, ok := vaultMap["account_sid"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config accountSid is not found")
+		return nil, internal_twilio.ErrVaultAccountSIDMissing
 	}
 	authToken, ok := vaultMap["account_token"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config account_token not found")
+		return nil, internal_twilio.ErrVaultAccountTokenMissing
 	}
 	sid, ok := accountSid.(string)
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config account_sid is not a string")
+		return nil, internal_twilio.ErrVaultAccountSIDInvalid
 	}
 	token, ok := authToken.(string)
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config account_token is not a string")
+		return nil, internal_twilio.ErrVaultAccountTokenInvalid
 	}
 	return &twilio.ClientParams{
 		Username: sid,
@@ -89,12 +87,12 @@ func (tpc *twilioTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 		body, err := ctx.GetRawData()
 		if err != nil {
 			tpc.logger.Errorf("failed to read event body with error %+v", err)
-			return nil, fmt.Errorf("failed to read request body")
+			return nil, fmt.Errorf("%w: %w", internal_twilio.ErrRequestBodyReadFailed, err)
 		}
 		values, err := url.ParseQuery(string(body))
 		if err != nil {
 			tpc.logger.Errorf("failed to parse body with error %+v", err)
-			return nil, fmt.Errorf("failed to parse request body")
+			return nil, fmt.Errorf("%w: %w", internal_twilio.ErrRequestBodyParseFailed, err)
 		}
 		for key, value := range values {
 			if len(value) > 0 {
@@ -112,7 +110,7 @@ func (tpc *twilioTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 	}
 	if !validator.NotBlank(callback.ChannelUUID) {
 		tpc.logger.Errorf("call sid not found or invalid in catch-all payload")
-		return nil, fmt.Errorf("call sid not found in callback")
+		return nil, internal_twilio.ErrStatusCallbackCallSIDMissing
 	}
 	return callback.StatusInfo(), nil
 }
@@ -131,12 +129,12 @@ func (tpc *twilioTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 		body, err := c.GetRawData()
 		if err != nil {
 			tpc.logger.Errorf("failed to read event body with error %+v", err)
-			return nil, fmt.Errorf("failed to read request body")
+			return nil, fmt.Errorf("%w: %w", internal_twilio.ErrRequestBodyReadFailed, err)
 		}
 		values, err := url.ParseQuery(string(body))
 		if err != nil {
 			tpc.logger.Errorf("failed to parse body with error %+v", err)
-			return nil, fmt.Errorf("failed to parse request body")
+			return nil, fmt.Errorf("%w: %w", internal_twilio.ErrRequestBodyParseFailed, err)
 		}
 		for key, value := range values {
 			if len(value) > 0 {
@@ -156,7 +154,7 @@ func (tpc *twilioTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 }
 
 func (tpc *twilioTelephony) OutboundCall(ctx context.Context, auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, statusReporter internal_type.ProviderCallStatusReporter, opts utils.Option) (*internal_type.CallInfo, error) {
-	info := &internal_type.CallInfo{Provider: twilioProvider}
+	info := &internal_type.CallInfo{Provider: internal_twilio.TwilioProvider}
 
 	if err := ctx.Err(); err != nil {
 		info.Status = "FAILED"
@@ -192,7 +190,7 @@ func (tpc *twilioTelephony) OutboundCall(ctx context.Context, auth types.SimpleP
 	callParams.SetTo(toPhone)
 	callParams.SetFrom(fromPhone)
 	callParams.SetStatusCallback(
-		fmt.Sprintf("https://%s/%s", tpc.appCfg.Assistant.Public, internal_type.GetContextEventPath(twilioProvider, contextID)),
+		fmt.Sprintf("https://%s/%s", tpc.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_twilio.TwilioProvider, contextID)),
 	)
 	callParams.SetStatusCallbackEvent([]string{
 		"initiated", "ringing", "answered", "completed",
@@ -202,8 +200,8 @@ func (tpc *twilioTelephony) OutboundCall(ctx context.Context, auth types.SimpleP
 		tpc.CreateTwinML(
 			tpc.appCfg.Assistant.Public,
 			fmt.Sprintf("%d__%d", assistant.Id, assistantConversationId),
-			internal_type.GetContextAnswerPath(twilioProvider, contextID),
-			fmt.Sprintf("https://%s/%s", tpc.appCfg.Assistant.Public, internal_type.GetContextEventPath(twilioProvider, contextID)),
+			internal_type.GetContextAnswerPath(internal_twilio.TwilioProvider, contextID),
+			fmt.Sprintf("https://%s/%s", tpc.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_twilio.TwilioProvider, contextID)),
 			assistant.Id,
 			toPhone),
 	)
@@ -222,7 +220,7 @@ func (tpc *twilioTelephony) OutboundCall(ctx context.Context, auth types.SimpleP
 		return info, err
 	}
 	if resp.Status == nil || resp.Sid == nil {
-		err := fmt.Errorf("twilio response missing status or sid")
+		err := internal_twilio.ErrOutboundResponseMissingStatusSID
 		info.Status = "FAILED"
 		info.ErrorMessage = err.Error()
 		internal_telephony_base.ReportOutboundFailure(
@@ -289,12 +287,12 @@ func (tpc *twilioTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo
 	clientNumber, ok := queryParams["From"]
 	if !ok || clientNumber == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assistant ID"})
-		return nil, fmt.Errorf("missing or empty 'from' query parameter")
+		return nil, internal_twilio.ErrInboundFromMissing
 	}
 
 	info := &internal_type.CallInfo{
 		CallerNumber: clientNumber,
-		Provider:     twilioProvider,
+		Provider:     internal_twilio.TwilioProvider,
 		Status:       "SUCCESS",
 		StatusInfo:   internal_type.StatusInfo{Event: "webhook", Payload: queryParams},
 	}

@@ -15,6 +15,7 @@ import (
 func ParseAsteriskEvent(data string) (*AsteriskMediaEvent, error) {
 	event := &AsteriskMediaEvent{}
 	if err := json.Unmarshal([]byte(data), event); err == nil && (event.Event != "" || event.Command != "") {
+		event.OptimalFrameSize = normalizeOptimalFrameSize(event.OptimalFrameSize)
 		return event, nil
 	}
 	event.RawMessage = data
@@ -25,7 +26,7 @@ func ParseAsteriskEvent(data string) (*AsteriskMediaEvent, error) {
 	}
 	if rawFrameSize, ok := params["optimal_frame_size"]; ok {
 		if frameSize, err := strconv.Atoi(rawFrameSize); err == nil {
-			event.OptimalFrameSize = frameSize
+			event.OptimalFrameSize = normalizeOptimalFrameSize(frameSize)
 		}
 	}
 	return event, nil

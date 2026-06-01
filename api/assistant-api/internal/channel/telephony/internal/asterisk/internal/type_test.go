@@ -97,6 +97,28 @@ func TestParseAsteriskEvent_InvalidOptimalFrameSize(t *testing.T) {
 	}
 }
 
+func TestParseAsteriskEvent_OversizedJSONOptimalFrameSize(t *testing.T) {
+	data := `{"event":"MEDIA_START","channel":"SIP/test-001","optimal_frame_size":999999999}`
+	event, err := ParseAsteriskEvent(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if event.OptimalFrameSize != 0 {
+		t.Fatalf("expected oversized frame size to be ignored, got %d", event.OptimalFrameSize)
+	}
+}
+
+func TestParseAsteriskEvent_OversizedPlainTextOptimalFrameSize(t *testing.T) {
+	data := "MEDIA_START channel:SIP/test-002 optimal_frame_size:999999999"
+	event, err := ParseAsteriskEvent(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if event.OptimalFrameSize != 0 {
+		t.Fatalf("expected oversized frame size to be ignored, got %d", event.OptimalFrameSize)
+	}
+}
+
 func TestParseAsteriskEvent_EmptyJSON(t *testing.T) {
 	data := `{}`
 	event, err := ParseAsteriskEvent(data)

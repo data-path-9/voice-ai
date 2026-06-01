@@ -84,6 +84,29 @@ func TestSetOptimalFrameSize(t *testing.T) {
 	}
 }
 
+func TestSetOptimalFrameSize_IgnoresOversizedValue(t *testing.T) {
+	audioProcessor := newTestProcessor(t, 0xFF, 160)
+
+	audioProcessor.SetOptimalFrameSize(maxOptimalFrameSize + 1)
+
+	if audioProcessor.GetOptimalFrameSize() != 160 {
+		t.Fatalf("expected oversized frame size to be ignored, got %d", audioProcessor.GetOptimalFrameSize())
+	}
+	if len(audioProcessor.silenceFrame) != 160 {
+		t.Fatalf("silence frame size=%d want=160", len(audioProcessor.silenceFrame))
+	}
+}
+
+func TestCreateSilenceFrame_BoundsOversizedAllocation(t *testing.T) {
+	audioProcessor := newTestProcessor(t, 0xFF, 160)
+
+	frame := audioProcessor.createSilenceFrame(maxOptimalFrameSize+1, 0xFF)
+
+	if len(frame) != defaultFrameSize {
+		t.Fatalf("silence frame size=%d want=%d", len(frame), defaultFrameSize)
+	}
+}
+
 func TestProcessProviderAudioFrame_EmptyInput(t *testing.T) {
 	audioProcessor := newTestProcessor(t, 0x00, 320)
 	receivedAt := time.Now()

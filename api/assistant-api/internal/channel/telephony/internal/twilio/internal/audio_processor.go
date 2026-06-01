@@ -24,22 +24,18 @@ import (
 
 // AudioProcessor handles audio conversion for Twilio mulaw 8kHz streams.
 type AudioProcessor struct {
-	logger commons.Logger
-
-	resampler internal_type.AudioResampler
-
+	logger           commons.Logger
 	twilioConfig     *protos.AudioConfig
 	downstreamConfig *protos.AudioConfig
 
-	inputBuffer internal_channel_input.InputBuffer
+	resampler internal_type.AudioResampler
 
+	inputBuffer        internal_channel_input.InputBuffer
 	outputBuffer       internal_telephony_output.FrameBuffer
 	bridgeOutputBuffer internal_telephony_output.FrameBuffer
 
 	silenceFrame []byte
-
 	ambientMixer internal_ambient.Mixer
-
 	outputHealth *internal_telephony_output.HealthStats
 }
 
@@ -47,7 +43,7 @@ type AudioProcessor struct {
 func NewAudioProcessor(logger commons.Logger) (*AudioProcessor, error) {
 	resampler, err := internal_audio_resampler.GetResampler(logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create resampler: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrResamplerCreateFailed, err)
 	}
 
 	audioProcessor := &AudioProcessor{
@@ -90,7 +86,7 @@ func (audioProcessor *AudioProcessor) ProcessProviderAudioFrame(frame internal_t
 
 	converted, err := audioProcessor.resampler.Resample(frame.Audio, audioProcessor.twilioConfig, audioProcessor.downstreamConfig)
 	if err != nil {
-		return inputFrame, fmt.Errorf("audio conversion to 16kHz linear16 failed: %w", err)
+		return inputFrame, fmt.Errorf("%w: %w", ErrProviderAudioConversionFailed, err)
 	}
 
 	inputFrame.BridgeAudio = converted
@@ -105,7 +101,7 @@ func (audioProcessor *AudioProcessor) ProcessAssistantAudio(audio []byte, comple
 	if len(audio) > 0 {
 		converted, err := audioProcessor.convertOutputAudio(audio)
 		if err != nil {
-			return fmt.Errorf("audio conversion to mulaw 8kHz failed: %w", err)
+			return fmt.Errorf("%w: %w", ErrAssistantAudioConversionFailed, err)
 		}
 		audioProcessor.outputBuffer.Write(converted)
 		audioProcessor.bridgeOutputBuffer.Write(audio)

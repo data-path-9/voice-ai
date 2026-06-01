@@ -37,7 +37,7 @@ type twilioWebsocketStreamer struct {
 func NewTwilioWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential) (internal_type.Streamer, error) {
 	audioProcessor, err := internal_twilio.NewAudioProcessor(logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Twilio audio processor: %w", err)
+		return nil, fmt.Errorf("%w: %w", internal_twilio.ErrAudioProcessorInitFailed, err)
 	}
 	tws := &twilioWebsocketStreamer{
 		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
@@ -51,7 +51,7 @@ func NewTwilioWebsocketStreamer(logger commons.Logger, connection *websocket.Con
 		Logger:      logger,
 		MediaEngine: audioProcessor,
 		SendProviderClear: func() error {
-			return tws.sendTwilioMessage("clear", nil)
+			return tws.sendTwilioMessage(internal_twilio.EventTypeClear, nil)
 		},
 		StreamSink: tws.Input,
 		OutputSink: tws.sendOutputFrame,
@@ -89,13 +89,13 @@ func (tws *twilioWebsocketStreamer) runWebSocketReader() {
 			continue
 		}
 		switch mediaEvent.Event {
-		case "connected":
+		case internal_twilio.EventTypeConnected:
 			tws.Input(&protos.ConversationEvent{
 				Name: "channel",
-				Data: map[string]string{"type": "connected", "provider": "twilio"},
+				Data: map[string]string{"type": string(internal_twilio.EventTypeConnected), "provider": internal_twilio.TwilioProvider},
 				Time: timestamppb.Now(),
 			})
-		case "start":
+		case internal_twilio.EventTypeStart:
 			tws.handleStartEvent(mediaEvent)
 			if tws.mediaSession != nil {
 				tws.mediaSession.Start()
@@ -106,7 +106,7 @@ func (tws *twilioWebsocketStreamer) runWebSocketReader() {
 				Data: map[string]string{"type": "stream_started", "provider": "twilio", "stream_id": tws.streamID},
 				Time: timestamppb.Now(),
 			})
-		case "media":
+		case internal_twilio.EventTypeMedia:
 			if err := tws.handleMediaEvent(mediaEvent); err != nil {
 				tws.Logger.Errorw("Failed to process Twilio media frame",
 					"error", err,
@@ -114,7 +114,7 @@ func (tws *twilioWebsocketStreamer) runWebSocketReader() {
 					"conversation_uuid", tws.GetConversationUuid(),
 				)
 			}
-		case "stop":
+		case internal_twilio.EventTypeStop:
 			tws.Logger.Info("Twilio stream stopped")
 			if msg := tws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				tws.Input(msg)
@@ -292,7 +292,7 @@ func (tws *twilioWebsocketStreamer) sendOutputFrame(frame internal_telephony_med
 	if len(frame.ProviderAudio) == 0 {
 		return nil
 	}
-	return tws.sendTwilioMessage("media", &internal_twilio.TwilioOutboundMedia{
+	return tws.sendTwilioMessage(internal_twilio.EventTypeMedia, &internal_twilio.TwilioOutboundMedia{
 		Payload: tws.Encoder().EncodeToString(frame.ProviderAudio),
 	})
 }
@@ -327,7 +327,7 @@ func (tws *twilioWebsocketStreamer) handleMediaEvent(mediaEvent internal_twilio.
 }
 
 func (tws *twilioWebsocketStreamer) sendTwilioMessage(
-	eventType string,
+	eventType internal_twilio.EventType,
 	mediaData *internal_twilio.TwilioOutboundMedia,
 ) error {
 	if tws.streamID == "" {

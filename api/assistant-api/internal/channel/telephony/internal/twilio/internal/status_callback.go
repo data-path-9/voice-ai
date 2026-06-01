@@ -6,7 +6,6 @@
 package internal_twilio
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -33,7 +32,7 @@ func NewStatusCallback(eventDetails utils.Option) (*StatusCallback, error) {
 		event = streamEvent
 	}
 	if !validator.NotBlank(event) {
-		return nil, fmt.Errorf("status not found in payload")
+		return nil, ErrStatusCallbackStatusMissing
 	}
 
 	channelUUID, _ := eventDetails.GetString("CallSid")
