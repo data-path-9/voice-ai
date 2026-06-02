@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -151,6 +152,55 @@ func TestGetApplicationConfig(t *testing.T) {
 	}
 	if appConfig.Assistant.Public != "integral-presently-cub.ngrok-free.app" {
 		t.Errorf("Expected Assistant.Public to be 'integral-presently-cub.ngrok-free.app', but got %v", appConfig.Assistant.Public)
+	}
+}
+
+func TestGetApplicationConfig_ParsesNestedSIPInboundConfig(t *testing.T) {
+	v := viper.New()
+	v.SetConfigType("yaml")
+
+	inboundYAML := strings.Replace(baseAssistantYAML, `    answer_mode: "answer_when_assistant_ready"
+    min_ring_duration: 0s
+    max_ring_duration: 30s
+    ack_timeout: 5s
+    assistant_audio_ready_timeout: 2s
+    require_assistant_audio_ready: true`, `    answer_mode: "answer_after_min_ring_ms"
+    min_ring_duration: 750ms
+    max_ring_duration: 45s
+    ack_timeout: 7s
+    assistant_audio_ready_timeout: 3s
+    require_assistant_audio_ready: false`, 1)
+
+	if err := v.ReadConfig(strings.NewReader(inboundYAML)); err != nil {
+		t.Fatalf("ReadConfig returned an error: %v", err)
+	}
+
+	appConfig, err := GetApplicationConfig(v)
+	if err != nil {
+		t.Fatalf("GetApplicationConfig returned an error: %v", err)
+	}
+	if appConfig.SIPConfig == nil {
+		t.Fatal("Expected SIPConfig to be parsed")
+	}
+
+	inboundConfig := appConfig.SIPConfig.Inbound
+	if inboundConfig.AnswerMode != "answer_after_min_ring_ms" {
+		t.Fatalf("Inbound.AnswerMode = %q, want %q", inboundConfig.AnswerMode, "answer_after_min_ring_ms")
+	}
+	if inboundConfig.MinRingDuration != 750*time.Millisecond {
+		t.Fatalf("Inbound.MinRingDuration = %s, want 750ms", inboundConfig.MinRingDuration)
+	}
+	if inboundConfig.MaxRingDuration != 45*time.Second {
+		t.Fatalf("Inbound.MaxRingDuration = %s, want 45s", inboundConfig.MaxRingDuration)
+	}
+	if inboundConfig.ACKTimeout != 7*time.Second {
+		t.Fatalf("Inbound.ACKTimeout = %s, want 7s", inboundConfig.ACKTimeout)
+	}
+	if inboundConfig.AssistantAudioReadyTimeout != 3*time.Second {
+		t.Fatalf("Inbound.AssistantAudioReadyTimeout = %s, want 3s", inboundConfig.AssistantAudioReadyTimeout)
+	}
+	if inboundConfig.RequireAssistantAudioReady {
+		t.Fatal("Inbound.RequireAssistantAudioReady = true, want false")
 	}
 }
 

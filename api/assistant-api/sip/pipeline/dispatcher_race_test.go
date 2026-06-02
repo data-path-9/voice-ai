@@ -85,9 +85,10 @@ func (f *fakePreparedCallRuntime) Close(_ context.Context) {
 func TestHandleSessionEstablished_SetupErrorEndsSession(t *testing.T) {
 	t.Parallel()
 
+	transferServer := &fakeTransferServer{}
 	d := NewDispatcher(&DispatcherConfig{
 		Logger:         newPipelineTestLogger(t),
-		TransferServer: &fakeTransferServer{},
+		TransferServer: transferServer,
 		OnCallSetup: func(ctx context.Context, session *sip_infra.Session, auth types.SimplePrinciple, assistantID uint64, conversationID uint64, cc *callcontext.CallContext) (*CallSetupResult, error) {
 			return nil, fmt.Errorf("setup failed")
 		},
@@ -106,6 +107,29 @@ func TestHandleSessionEstablished_SetupErrorEndsSession(t *testing.T) {
 	})
 
 	require.Eventually(t, s.IsEnded, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, []sip_infra.LifecycleReason{sip_infra.LifecycleReasonPipelineSetupFailed}, transferServer.lifecycleEndReasons())
+}
+
+func TestHandleSessionEstablished_MissingCallbacksEndsWithCallbackReason(t *testing.T) {
+	t.Parallel()
+
+	transferServer := &fakeTransferServer{}
+	d := NewDispatcher(&DispatcherConfig{
+		Logger:         newPipelineTestLogger(t),
+		TransferServer: transferServer,
+	})
+
+	s := newPipelineTestSession(t)
+	d.handleSessionEstablished(context.Background(), sip_infra.SessionEstablishedPipeline{
+		ID:             "call-callbacks-missing",
+		Session:        s,
+		Direction:      sip_infra.CallDirectionInbound,
+		AssistantID:    1,
+		ConversationID: 42,
+	})
+
+	require.Eventually(t, s.IsEnded, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, []sip_infra.LifecycleReason{sip_infra.LifecycleReasonPipelineCallbacksMissing}, transferServer.lifecycleEndReasons())
 }
 
 func TestHandleSessionEstablished_PanicStillCallsOnCallEnd(t *testing.T) {

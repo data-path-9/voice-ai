@@ -69,6 +69,26 @@ func (t *ackableTestServerTx) PushACK(req *sip.Request) {
 	t.acks <- req
 }
 
+type failingStatusServerTx struct {
+	*activeTestServerTx
+	statusCode int
+}
+
+func newFailingStatusServerTx(statusCode int) *failingStatusServerTx {
+	return &failingStatusServerTx{
+		activeTestServerTx: newActiveTestServerTx(),
+		statusCode:         statusCode,
+	}
+}
+
+func (t *failingStatusServerTx) Respond(response *sip.Response) error {
+	t.responses = append(t.responses, response)
+	if response.StatusCode == t.statusCode {
+		return assert.AnError
+	}
+	return nil
+}
+
 func (t *testServerTx) lastStatus() int {
 	if len(t.responses) == 0 {
 		return 0
@@ -332,6 +352,10 @@ func TestSIPCommand_InitialAnswerAcceptsACKHandledOutsideTransaction(t *testing.
 func TestSIPCommand_BYE_InboundSession_NotifiesAndEnds(t *testing.T) {
 	s := newServerForCommandTests(t)
 	session := registerConnectedInboundDialogSession(t, s, "call-bye-1")
+	disconnectCalled := false
+	session.SetOnDisconnect(func(*Session) {
+		disconnectCalled = true
+	})
 	req := newInboundDialogRequest(t, session, sip.BYE)
 	req.AppendHeader(sip.NewHeader("Reason", `Q.850;cause=16;text="Normal call clearing"`))
 	tx := newTestServerTx()
@@ -350,6 +374,17 @@ func TestSIPCommand_BYE_InboundSession_NotifiesAndEnds(t *testing.T) {
 	assert.Equal(t, DisconnectReasonNormalClearing, metadata.Reason)
 	assert.Equal(t, 16, metadata.ProviderStatusCode)
 	assert.Equal(t, "Normal call clearing", metadata.Text)
+	assert.False(t, disconnectCalled, "remote BYE must not trigger local BYE")
+
+	metadataValue, ok := session.GetMetadata(MetadataDisconnectReason)
+	require.True(t, ok)
+	assert.Equal(t, DisconnectReasonNormalClearing, metadataValue)
+	metadataValue, ok = session.GetMetadata(MetadataDisconnectText)
+	require.True(t, ok)
+	assert.Equal(t, "Normal call clearing", metadataValue)
+	metadataValue, ok = session.GetMetadata(MetadataDisconnectRawReason)
+	require.True(t, ok)
+	assert.Equal(t, `Q.850;cause=16;text="Normal call clearing"`, metadataValue)
 }
 
 func TestSIPCommand_BYE_InboundSessionWithoutDialogReturns481(t *testing.T) {
@@ -688,6 +723,99 @@ func TestCallLifecycle_ConnectedEndDisconnects(t *testing.T) {
 	assert.True(t, session.IsEnded())
 	assert.Equal(t, CallStateEnded, session.GetState())
 	assert.True(t, disconnectCalled)
+}
+
+func TestInboundLifecycle_PreAnswerCancelDoesNotDisconnect(t *testing.T) {
+	s := newServerForCommandTests(t)
+	session := newTestSession(t, "call-inbound-cancelled", CallDirectionInbound)
+	s.registerSession(session, "call-inbound-cancelled")
+
+	disconnectCalled := false
+	session.SetOnDisconnect(func(*Session) {
+		disconnectCalled = true
+	})
+
+	require.True(t, s.TransitionCall(session, CallStateRinging, LifecycleReasonInboundInviteRinging))
+	require.NoError(t, s.CancelInboundCall(session, LifecycleReasonCancelReceived))
+
+	assert.True(t, session.IsEnded())
+	assert.Equal(t, CallStateCancelled, session.GetState())
+	assert.False(t, disconnectCalled, "pre-answer inbound CANCEL must not send BYE")
+}
+
+func TestInboundLifecycle_PreAnswerFailureDoesNotDisconnect(t *testing.T) {
+	s := newServerForCommandTests(t)
+	session := newTestSession(t, "call-inbound-failed-pre-answer", CallDirectionInbound)
+	s.registerSession(session, "call-inbound-failed-pre-answer")
+
+	disconnectCalled := false
+	session.SetOnDisconnect(func(*Session) {
+		disconnectCalled = true
+	})
+
+	require.True(t, s.TransitionCall(session, CallStateRinging, LifecycleReasonInboundInviteRinging))
+	require.NoError(t, s.FailInboundCall(session, LifecycleReasonInboundInviteFailed, assert.AnError))
+
+	assert.True(t, session.IsEnded())
+	assert.Equal(t, CallStateFailed, session.GetState())
+	assert.False(t, disconnectCalled, "pre-answer inbound failure must not send BYE")
+}
+
+func TestInboundLifecycle_ConnectedEndDisconnects(t *testing.T) {
+	s := newServerForCommandTests(t)
+	session := newTestSession(t, "call-inbound-ended", CallDirectionInbound)
+	s.registerSession(session, "call-inbound-ended")
+
+	disconnectCalled := false
+	session.SetOnDisconnect(func(*Session) {
+		disconnectCalled = true
+	})
+
+	require.True(t, s.TransitionCall(session, CallStateRinging, LifecycleReasonInboundInviteRinging))
+	require.True(t, s.TransitionCall(session, CallStateConnected, LifecycleReasonInboundInviteACKReceived))
+	require.NoError(t, s.EndInboundCall(session, LifecycleReasonEndCall))
+
+	assert.True(t, session.IsEnded())
+	assert.Equal(t, CallStateEnded, session.GetState())
+	assert.True(t, disconnectCalled, "local inbound end must send BYE after answer")
+}
+
+func TestInboundLifecycle_ConnectedFailureDisconnects(t *testing.T) {
+	s := newServerForCommandTests(t)
+	session := newTestSession(t, "call-inbound-failed-after-answer", CallDirectionInbound)
+	s.registerSession(session, "call-inbound-failed-after-answer")
+
+	disconnectCalled := false
+	session.SetOnDisconnect(func(*Session) {
+		disconnectCalled = true
+	})
+
+	require.True(t, s.TransitionCall(session, CallStateRinging, LifecycleReasonInboundInviteRinging))
+	require.True(t, s.TransitionCall(session, CallStateConnected, LifecycleReasonInboundInviteACKReceived))
+	require.NoError(t, s.FailInboundCall(session, LifecycleReasonPipelineSetupFailed, assert.AnError))
+
+	assert.True(t, session.IsEnded())
+	assert.Equal(t, CallStateFailed, session.GetState())
+	assert.True(t, disconnectCalled, "post-answer inbound failure must send BYE")
+}
+
+func TestInboundLifecycle_ServerStopDisconnectsAnsweredCall(t *testing.T) {
+	s := newServerForCommandTests(t)
+	session := newTestSession(t, "call-inbound-server-stop", CallDirectionInbound)
+	s.registerSession(session, "call-inbound-server-stop")
+
+	disconnectCalled := false
+	session.SetOnDisconnect(func(*Session) {
+		disconnectCalled = true
+	})
+
+	require.True(t, s.TransitionCall(session, CallStateRinging, LifecycleReasonInboundInviteRinging))
+	require.True(t, s.TransitionCall(session, CallStateConnected, LifecycleReasonInboundInviteACKReceived))
+	require.NoError(t, s.EndInboundCall(session, LifecycleReasonServerStop))
+
+	assert.True(t, session.IsEnded())
+	assert.Equal(t, CallStateEnded, session.GetState())
+	assert.True(t, disconnectCalled, "server stop must send BYE for answered inbound calls")
 }
 
 func TestCallLifecycle_TransferSequence(t *testing.T) {

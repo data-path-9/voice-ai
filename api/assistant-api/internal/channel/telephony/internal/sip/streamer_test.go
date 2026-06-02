@@ -40,6 +40,33 @@ func newTestInboundSIPSession(t *testing.T, callID string) *sip_infra.Session {
 	return session
 }
 
+type fakeSIPLifecycleController struct {
+	endReasons []sip_infra.LifecycleReason
+}
+
+func (f *fakeSIPLifecycleController) TransitionCall(session *sip_infra.Session, next sip_infra.CallState, _ sip_infra.LifecycleReason) bool {
+	session.SetState(next)
+	return true
+}
+
+func (f *fakeSIPLifecycleController) EndCallWithReason(session *sip_infra.Session, reason sip_infra.LifecycleReason) error {
+	f.endReasons = append(f.endReasons, reason)
+	session.SetState(sip_infra.CallStateEnded)
+	session.ClearOnDisconnect()
+	session.End()
+	return nil
+}
+
+func (f *fakeSIPLifecycleController) FailCall(session *sip_infra.Session, reason sip_infra.LifecycleReason, _ error) error {
+	session.SetState(sip_infra.CallStateFailed)
+	return f.EndCallWithReason(session, reason)
+}
+
+func (f *fakeSIPLifecycleController) CancelCall(session *sip_infra.Session, reason sip_infra.LifecycleReason) error {
+	session.SetState(sip_infra.CallStateCancelled)
+	return f.EndCallWithReason(session, reason)
+}
+
 func TestSend_EndConversation_PushesToolResult(t *testing.T) {
 	s := newTestSIPStreamer(t)
 
@@ -136,6 +163,10 @@ func drainLowChForEvent(t *testing.T, s *Streamer, wantType string, timeout time
 
 func TestSend_ConversationDisconnection_EmitsEventAndClosesStreamer(t *testing.T) {
 	s := newTestSIPStreamer(t)
+	session := newTestInboundSIPSession(t, "sip-streamer-disconnect")
+	lifecycle := &fakeSIPLifecycleController{}
+	s.session = session
+	s.lifecycle = lifecycle
 
 	err := s.Send(&protos.ConversationDisconnection{
 		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT,
@@ -162,6 +193,8 @@ func TestSend_ConversationDisconnection_EmitsEventAndClosesStreamer(t *testing.T
 	case <-time.After(time.Second):
 		t.Fatal("expected streamer context to be cancelled after disconnect")
 	}
+
+	require.Equal(t, []sip_infra.LifecycleReason{sip_infra.LifecycleReasonStreamerEndSession}, lifecycle.endReasons)
 }
 
 func TestSend_ConversationDisconnection_PreservesExplicitReason(t *testing.T) {

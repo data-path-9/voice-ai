@@ -32,6 +32,37 @@ func TestInboundCall_InvalidSDPRejectsWithoutSession(t *testing.T) {
 	assert.False(t, exists)
 }
 
+func TestInboundCall_InvalidIdentityRejectsWithoutSession(t *testing.T) {
+	cases := []struct {
+		name         string
+		callID       string
+		removeHeader string
+	}{
+		{name: "missing call id", callID: "inbound-missing-call-id", removeHeader: "Call-ID"},
+		{name: "missing from", callID: "inbound-missing-from", removeHeader: "From"},
+		{name: "missing to", callID: "inbound-missing-to", removeHeader: "To"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newServerForCommandTests(t)
+			request := newInboundInviteRequest(tc.callID)
+			for request.RemoveHeader(tc.removeHeader) {
+			}
+			transaction := newTestServerTx()
+
+			server.handleInvite(request, transaction)
+
+			require.NotEmpty(t, transaction.responses)
+			assert.Equal(t, 400, transaction.lastStatus())
+			if tc.removeHeader != "Call-ID" {
+				_, exists := server.GetSession(tc.callID)
+				assert.False(t, exists)
+			}
+		})
+	}
+}
+
 func TestInboundCall_ConfigRejectDoesNotCreateSession(t *testing.T) {
 	server := newServerForCommandTests(t)
 	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
@@ -45,6 +76,41 @@ func TestInboundCall_ConfigRejectDoesNotCreateSession(t *testing.T) {
 	require.NotEmpty(t, transaction.responses)
 	assert.Equal(t, 403, transaction.lastStatus())
 	_, exists := server.GetSession("inbound-config-reject")
+	assert.False(t, exists)
+}
+
+func TestInboundCall_ConfigResolverErrorRejectsWithoutSession(t *testing.T) {
+	server := newServerForCommandTests(t)
+	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
+		return nil, errors.New("resolver unavailable")
+	})
+	request := newInboundInviteRequest("inbound-config-error")
+	transaction := newTestServerTx()
+
+	server.handleInvite(request, transaction)
+
+	require.NotEmpty(t, transaction.responses)
+	assert.Equal(t, 500, transaction.lastStatus())
+	_, exists := server.GetSession("inbound-config-error")
+	assert.False(t, exists)
+}
+
+func TestInboundCall_InvalidSessionConfigRejectsWithoutSession(t *testing.T) {
+	server := newServerForCommandTests(t)
+	invalidConfig := bridgeTestConfig()
+	invalidConfig.RTPPortRangeStart = 20000
+	invalidConfig.RTPPortRangeEnd = 10000
+	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
+		return Allow(invalidConfig), nil
+	})
+	request := newInboundInviteRequest("inbound-session-config-invalid")
+	transaction := newTestServerTx()
+
+	server.handleInvite(request, transaction)
+
+	require.NotEmpty(t, transaction.responses)
+	assert.Equal(t, 500, transaction.lastStatus())
+	_, exists := server.GetSession("inbound-session-config-invalid")
 	assert.False(t, exists)
 }
 
@@ -202,6 +268,26 @@ func TestInboundCall_RTPAllocationFailureEndsLifecycle(t *testing.T) {
 	assert.False(t, exists)
 }
 
+func TestInboundCall_RTPHandlerCreationFailureEndsLifecycle(t *testing.T) {
+	server := newServerForCommandTests(t)
+	server.rtpAllocator = &testRTPAllocator{nextPort: 19000}
+	server.newRTPHandler = func(context.Context, *RTPConfig) (*RTPHandler, error) {
+		return nil, errors.New("rtp bind failed")
+	}
+	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
+		return Allow(bridgeTestConfig()), nil
+	})
+	request := newInboundInviteRequest("inbound-rtp-handler-failed")
+	transaction := newActiveTestServerTx()
+
+	server.handleInvite(request, transaction)
+
+	require.NotEmpty(t, transaction.responses)
+	assert.Equal(t, 503, transaction.lastStatus())
+	_, exists := server.GetSession("inbound-rtp-handler-failed")
+	assert.False(t, exists)
+}
+
 func TestInboundCall_DialogSetupFailureDoesNotSendManualFinalResponse(t *testing.T) {
 	server := newServerForCommandTests(t)
 	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
@@ -214,6 +300,41 @@ func TestInboundCall_DialogSetupFailureDoesNotSendManualFinalResponse(t *testing
 
 	assert.Empty(t, transaction.responses)
 	_, exists := server.GetSession("inbound-dialog-create-failed")
+	assert.False(t, exists)
+}
+
+func TestInboundCall_TryingResponseFailureEndsLifecycle(t *testing.T) {
+	server := newServerForCommandTests(t)
+	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
+		return Allow(bridgeTestConfig()), nil
+	})
+	request := newInboundInviteRequest("inbound-trying-failed")
+	transaction := newFailingStatusServerTx(100)
+
+	server.handleInvite(request, transaction)
+
+	require.NotEmpty(t, transaction.responses)
+	assert.Equal(t, 500, transaction.lastStatus())
+	assertSIPStatus(t, transaction.responses, 100)
+	_, exists := server.GetSession("inbound-trying-failed")
+	assert.False(t, exists)
+}
+
+func TestInboundCall_RingingResponseFailureEndsLifecycle(t *testing.T) {
+	server := newServerForCommandTests(t)
+	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
+		return Allow(bridgeTestConfig()), nil
+	})
+	request := newInboundInviteRequest("inbound-ringing-failed")
+	transaction := newFailingStatusServerTx(180)
+
+	server.handleInvite(request, transaction)
+
+	require.NotEmpty(t, transaction.responses)
+	assert.Equal(t, 500, transaction.lastStatus())
+	assertSIPStatus(t, transaction.responses, 100)
+	assertSIPStatus(t, transaction.responses, 180)
+	_, exists := server.GetSession("inbound-ringing-failed")
 	assert.False(t, exists)
 }
 
@@ -713,6 +834,16 @@ func assertNoSIPStatus(t *testing.T, responses []*sip.Response, statusCode int) 
 	for _, response := range responses {
 		assert.NotEqual(t, statusCode, response.StatusCode)
 	}
+}
+
+func assertSIPStatus(t *testing.T, responses []*sip.Response, statusCode int) {
+	t.Helper()
+	for _, response := range responses {
+		if response.StatusCode == statusCode {
+			return
+		}
+	}
+	t.Fatalf("expected SIP status %d in responses", statusCode)
 }
 
 func inboundNoopRTPHandler(server *Server) RTPHandlerFactory {

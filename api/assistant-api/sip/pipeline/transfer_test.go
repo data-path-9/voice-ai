@@ -22,6 +22,9 @@ import (
 type fakeTransferServer struct {
 	mu                       sync.Mutex
 	transitions              []fakeTransferLifecycleTransition
+	endReasons               []sip_infra.LifecycleReason
+	failReasons              []sip_infra.LifecycleReason
+	cancelReasons            []sip_infra.LifecycleReason
 	makeTransferBridgeCallFn func(ctx context.Context, cfg *sip_infra.Config, toURI, fromURI string, opts sip_infra.TransferBridgeCallOptions) (*sip_infra.Session, error)
 	bridgeTransferFn         func(ctx context.Context, inbound, outbound *sip_infra.Session, onOperatorAudio func([]byte)) (sip_infra.BridgeEndReason, error)
 }
@@ -54,17 +57,26 @@ func (f *fakeTransferServer) TransitionCall(session *sip_infra.Session, next sip
 }
 
 func (f *fakeTransferServer) EndCallWithReason(session *sip_infra.Session, reason sip_infra.LifecycleReason) error {
+	f.mu.Lock()
+	f.endReasons = append(f.endReasons, reason)
+	f.mu.Unlock()
 	session.End()
 	return nil
 }
 
 func (f *fakeTransferServer) FailCall(session *sip_infra.Session, reason sip_infra.LifecycleReason, err error) error {
+	f.mu.Lock()
+	f.failReasons = append(f.failReasons, reason)
+	f.mu.Unlock()
 	session.SetState(sip_infra.CallStateFailed)
 	session.End()
 	return nil
 }
 
 func (f *fakeTransferServer) CancelCall(session *sip_infra.Session, reason sip_infra.LifecycleReason) error {
+	f.mu.Lock()
+	f.cancelReasons = append(f.cancelReasons, reason)
+	f.mu.Unlock()
 	session.SetState(sip_infra.CallStateCancelled)
 	session.ClearOnDisconnect()
 	session.End()
@@ -75,6 +87,24 @@ func (f *fakeTransferServer) lifecycleTransitions() []fakeTransferLifecycleTrans
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]fakeTransferLifecycleTransition(nil), f.transitions...)
+}
+
+func (f *fakeTransferServer) lifecycleEndReasons() []sip_infra.LifecycleReason {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]sip_infra.LifecycleReason(nil), f.endReasons...)
+}
+
+func (f *fakeTransferServer) lifecycleFailReasons() []sip_infra.LifecycleReason {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]sip_infra.LifecycleReason(nil), f.failReasons...)
+}
+
+func (f *fakeTransferServer) lifecycleCancelReasons() []sip_infra.LifecycleReason {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]sip_infra.LifecycleReason(nil), f.cancelReasons...)
 }
 
 func newTransferTestConfig() *sip_infra.Config {
