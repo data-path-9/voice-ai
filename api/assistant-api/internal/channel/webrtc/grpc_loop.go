@@ -55,7 +55,6 @@ func (s *webrtcStreamer) buildGRPCResponse(msg internal_type.Stream) *protos.Web
 
 // dispatchOutput writes a WebTalk response to the client stream.
 func (s *webrtcStreamer) dispatchOutput(resp *protos.WebTalkResponse) bool {
-	s.Logger.Infow("WebRTC gRPC sending response", "session", s.sessionID, webrtc_internal.DataType, fmt.Sprintf("%T", resp.GetData()))
 	if err := s.grpcStream.Send(resp); err != nil {
 		if s.Ctx.Err() != nil || errors.Is(err, io.EOF) || status.Code(err) == codes.Canceled || status.Code(err) == codes.Unavailable {
 			s.Logger.Infow("WebRTC gRPC stream closed during send", "session", s.sessionID, "code", status.Code(err), "error", err)

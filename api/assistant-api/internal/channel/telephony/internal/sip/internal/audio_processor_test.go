@@ -124,6 +124,14 @@ func testRTPHandler(t *testing.T, codec *sip_infra.Codec) *sip_infra.RTPHandler 
 	return h
 }
 
+func rtpAudioOutLen(t *testing.T, handler *sip_infra.RTPHandler) int {
+	t.Helper()
+	rv := reflect.ValueOf(handler).Elem()
+	field := rv.FieldByName("audioOutChan")
+	require.True(t, field.IsValid(), "audioOutChan field not found")
+	return field.Len()
+}
+
 func setUnexportedField(t *testing.T, obj interface{}, field string, val interface{}) {
 	t.Helper()
 	rv := reflect.ValueOf(obj)
@@ -779,32 +787,10 @@ func TestConnectTransferMedia_PCMA_to_PCMU_Transcode(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: PlayRingback
+// Tests: Ringback
 // ---------------------------------------------------------------------------
 
-func TestPlayRingback_ExitsOnContextCancel(t *testing.T) {
-	rec := &pushRecorder{}
-	proc := newTestAudioProcessor(t, &sip_infra.CodecPCMU, &mockResampler{}, rec)
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan struct{})
-	go func() {
-		proc.PlayRingback(ctx)
-		close(done)
-	}()
-
-	cancel()
-
-	select {
-	case <-done:
-		// OK
-	case <-time.After(2 * time.Second):
-		t.Fatal("PlayRingback did not exit after context cancellation")
-	}
-}
-
-func TestPlayRingback_ProducesFrames(t *testing.T) {
+func TestRingback_UsesRTPFallbackSourceWithoutQueueProducer(t *testing.T) {
 	rec := &pushRecorder{}
 	rtp := testRTPHandler(t, &sip_infra.CodecPCMU)
 	proc := NewAudioProcessor(AudioProcessorConfig{
@@ -813,25 +799,11 @@ func TestPlayRingback_ProducesFrames(t *testing.T) {
 		PushInput:  rec.push,
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan struct{})
-	go func() {
-		proc.PlayRingback(ctx)
-		close(done)
-	}()
-
-	// Let PlayRingback run for a few ticks (~60ms) to produce frames,
-	// then cancel and verify it exits cleanly.
+	proc.StartRingback()
 	time.Sleep(60 * time.Millisecond)
-	cancel()
+	assert.Equal(t, 0, rtpAudioOutLen(t, rtp))
 
-	select {
-	case <-done:
-		// Exited cleanly after producing frames into the buffered AudioOut channel.
-	case <-time.After(2 * time.Second):
-		t.Fatal("PlayRingback did not exit after context cancellation")
-	}
+	proc.StopRingback()
 }
 
 // ---------------------------------------------------------------------------

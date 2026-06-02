@@ -6,7 +6,7 @@
 
 package internal_transformer_custom_tts_websocket_v1
 
-import internal_transformer_custom_websocketdsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/websocketdsl"
+import internal_transformer_custom_dsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/dsl"
 
 type queryScope struct {
 	Text       string
@@ -23,7 +23,7 @@ type outboundRequest struct {
 	Body  any
 }
 
-type responseFrame = internal_transformer_custom_websocketdsl.Frame
+type responseFrame = internal_transformer_custom_dsl.Frame
 
 type responseOutcome struct {
 	Matched   bool
@@ -35,13 +35,13 @@ type responseOutcome struct {
 
 type dslEngine struct {
 	config *Config
-	core   *internal_transformer_custom_websocketdsl.Core
+	core   *internal_transformer_custom_dsl.Core
 }
 
 func (config *Config) newEngine() *dslEngine {
 	return &dslEngine{
 		config: config,
-		core:   internal_transformer_custom_websocketdsl.NewCore("custom-tts websocket_v1"),
+		core:   internal_transformer_custom_dsl.NewCore("custom-tts websocket_v1"),
 	}
 }
 
@@ -167,7 +167,7 @@ func (engine *dslEngine) ParseFrame(messageType int, payload []byte) (responseFr
 func (engine *dslEngine) EvaluateResponse(frame responseFrame, defaultMessageID string) (responseOutcome, error) {
 	for _, rule := range engine.config.ResponseRules {
 		matched, err := engine.core.MatchWhen(
-			internal_transformer_custom_websocketdsl.When{
+			internal_transformer_custom_dsl.When{
 				Frame:  rule.When.Frame,
 				Path:   rule.When.Path,
 				Equals: rule.When.Equals,

@@ -91,7 +91,7 @@ func (google *googleSpeechToText) Transform(c context.Context, in internal_type.
 		google.contextId = pkt.ContextID
 		google.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextInterruptPacket:
+	case internal_type.SpeechToTextEndPacket:
 		google.mu.Lock()
 		if google.startedAt.IsZero() {
 			google.startedAt = time.Now()

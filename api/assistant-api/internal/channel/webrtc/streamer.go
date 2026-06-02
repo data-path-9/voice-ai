@@ -901,12 +901,11 @@ func (s *webrtcStreamer) handleConfigurationMessage(mode protos.StreamMode) {
 			return
 		}
 		s.sessionState.SetMediaState(webrtc_internal.MediaStateAudioNegotiating)
-
 		s.clearBufferedOutputAudio()
 		s.signalClear()
 		s.sessionState.ResetMediaRestartAttempts()
 		if err := s.startMediaSession(); err != nil {
-			s.Logger.Errorw("Failed to setup audio", "error", err)
+			s.Logger.Errorf("error while starting media session %s", err)
 			s.stopMediaSessionAndFallbackToText()
 		}
 	case protos.StreamMode_STREAM_MODE_TEXT:

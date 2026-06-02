@@ -108,3 +108,19 @@ func TestRTPHandler_EnqueueAudioReportsBackpressureAndStopped(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrRTPHandlerStopped))
 }
+
+func TestRTPHandler_NextOutputChunkUsesFallbackOnlyWhenQueueIsEmpty(t *testing.T) {
+	handler := newTestRTPHandler()
+	handler.SetFallbackAudioSource(func(frameSize int) []byte {
+		return []byte{0x11, 0x22}
+	})
+	silence := []byte{0xff, 0xff}
+
+	pendingAudio := []byte{0x33, 0x44}
+	assert.Equal(t, []byte{0x33, 0x44}, handler.nextOutputChunk(&pendingAudio, 2, silence))
+
+	assert.Equal(t, []byte{0x11, 0x22}, handler.nextOutputChunk(&pendingAudio, 2, silence))
+
+	handler.ClearFallbackAudioSource()
+	assert.Equal(t, silence, handler.nextOutputChunk(&pendingAudio, 2, silence))
+}

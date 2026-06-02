@@ -71,34 +71,26 @@ func NewTextToSpeech(
 	if err != nil {
 		return nil, err
 	}
-
-	sourceConfig := &protos.AudioConfig{
-		SampleRate:  uint32(config.SampleRate),
-		AudioFormat: parseAudioEncoding(config.Encoding),
-		Channels:    1,
-	}
-	targetConfig := internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG
-
-	var resampler internal_type.AudioResampler
-	if !isSameAudioConfig(sourceConfig, targetConfig) {
-		resampler, err = internal_audio_resampler.GetResampler(logger)
-		if err != nil {
-			return nil, fmt.Errorf("custom-tts websocket_v1: failed to initialize audio resampler: %w", err)
-		}
+	resampler, err := internal_audio_resampler.GetResampler(logger)
+	if err != nil {
+		return nil, fmt.Errorf("custom-tts websocket_v1: failed to initialize audio resampler: %w", err)
 	}
 	ctx2, cancel := context.WithCancel(ctx)
-
 	return &textToSpeech{
-		config:            config,
-		engine:            config.newEngine(),
-		ctx:               ctx2,
-		cancel:            cancel,
-		dialWS:            websocket.DefaultDialer.DialContext,
-		logger:            logger,
-		onPacket:          onPacket,
-		resampler:         resampler,
-		sourceAudioConfig: sourceConfig,
-		targetAudioConfig: targetConfig,
+		config:    config,
+		engine:    config.newEngine(),
+		ctx:       ctx2,
+		cancel:    cancel,
+		dialWS:    websocket.DefaultDialer.DialContext,
+		logger:    logger,
+		onPacket:  onPacket,
+		resampler: resampler,
+		sourceAudioConfig: &protos.AudioConfig{
+			SampleRate:  uint32(config.SampleRate),
+			AudioFormat: parseAudioEncoding(config.Encoding),
+			Channels:    1,
+		},
+		targetAudioConfig: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
 	}, nil
 }
 

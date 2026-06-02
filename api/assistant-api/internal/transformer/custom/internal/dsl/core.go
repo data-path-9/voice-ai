@@ -4,7 +4,7 @@
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
 
-package internal_transformer_custom_websocketdsl
+package internal_transformer_custom_dsl
 
 import (
 	"encoding/base64"
@@ -130,6 +130,27 @@ func (core *Core) RenderObject(template map[string]any, resolve VariableResolver
 func (core *Core) ValidateRequestObject(template map[string]any, contract Contract, field string) error {
 	allowedVariables := toStringSet(contract.SupportedVariables)
 	return core.validateRequestNode(template, allowedVariables, field)
+}
+
+func (core *Core) ValidateScopedObject(template any, contract Contract, validationScope any, field string) error {
+	allowedRoots := toStringSet(contract.SupportedPathRoots)
+	if err := core.validateScopedNode(template, allowedRoots, field); err != nil {
+		return err
+	}
+	if validationScope == nil {
+		return nil
+	}
+	rendered, err := core.evalScopedNode(template, validationScope)
+	if err != nil {
+		return err
+	}
+	if !isJSONValue(rendered) {
+		return core.Errorf("%s must resolve to JSON value", field)
+	}
+	if _, ok := rendered.(map[string]any); !ok {
+		return core.Errorf("%s must resolve to JSON object", field)
+	}
+	return nil
 }
 
 func (core *Core) ValidateQueryParams(template map[string]any, contract Contract, field string) error {

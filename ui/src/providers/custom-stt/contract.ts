@@ -15,9 +15,9 @@ import {
   validateWebsocketDslResponseRules,
 } from '../websocket-dsl/core';
 
-export const CUSTOM_STT_QUERY_PARAMS_KEY = 'listen.ws.query_params';
-export const CUSTOM_STT_REQUEST_RULES_KEY = 'listen.ws.request_rules';
-export const CUSTOM_STT_RESPONSE_RULES_KEY = 'listen.ws.response_rules';
+export const CUSTOM_STT_QUERY_PARAMS_KEY = 'listen.query_params';
+export const CUSTOM_STT_REQUEST_RULES_KEY = 'listen.request_rules';
+export const CUSTOM_STT_RESPONSE_RULES_KEY = 'listen.response_rules';
 
 export const CUSTOM_STT_DSL_VARIABLES = [
   'model',
@@ -70,6 +70,8 @@ export interface CustomSttRequestRuleContext {
     audio?: {
       bytes: string;
       base64: string;
+      pcm_base64?: string;
+      wav_base64?: string;
     };
   };
 }
@@ -165,6 +167,8 @@ const REQUEST_RULE_VALIDATION_CONTEXTS: Record<
       audio: {
         bytes: 'AAEC',
         base64: 'AAEC',
+        pcm_base64: 'AAEC',
+        wav_base64: 'UklGRg==',
       },
     },
   },

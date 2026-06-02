@@ -18,6 +18,7 @@ const (
 	defaultInboundACKTimeout                = 5 * time.Second
 	defaultInboundFinalResponseRetryInitial = 500 * time.Millisecond
 	defaultInboundFinalResponseRetryMax     = 4 * time.Second
+	defaultInboundRingingInterval           = time.Second
 )
 
 func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
@@ -798,6 +799,13 @@ func (s *Server) effectiveInboundFinalResponseRetryMax() time.Duration {
 	return defaultInboundFinalResponseRetryMax
 }
 
+func (s *Server) effectiveInboundRingingInterval() time.Duration {
+	if s.inboundRingingInterval > 0 {
+		return s.inboundRingingInterval
+	}
+	return defaultInboundRingingInterval
+}
+
 func (s *Server) acceptInboundACK(req *sip.Request, tx sip.ServerTransaction, session *Session) {
 	if !session.HasInitialACKReceived() {
 		s.acceptInboundACKWithReason(req, tx, session, LifecycleReasonInboundInviteACKReceived)
@@ -807,7 +815,7 @@ func (s *Server) acceptInboundACK(req *sip.Request, tx sip.ServerTransaction, se
 		s.acceptInboundACKWithReason(req, tx, session, LifecycleReasonInboundReinviteACKReceived)
 		return
 	}
-	s.logger.Infow("Late or duplicate inbound ACK ignored",
+	s.logger.Debugw("Late or duplicate inbound ACK ignored",
 		"call_id", session.GetCallID(),
 		"reason", LifecycleReasonInboundLateACK)
 }

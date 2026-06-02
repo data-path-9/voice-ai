@@ -242,7 +242,7 @@ func (aai *assemblyaiSTT) Transform(ctx context.Context, in internal_type.Packet
 		aai.contextId = pkt.ContextID
 		aai.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextInterruptPacket:
+	case internal_type.SpeechToTextEndPacket:
 		aai.mu.Lock()
 		if aai.startedAt.IsZero() {
 			aai.startedAt = time.Now()

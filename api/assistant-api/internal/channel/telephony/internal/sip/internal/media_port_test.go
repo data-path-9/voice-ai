@@ -160,6 +160,33 @@ func TestMediaPort_AssistantAudioReachesRTPOutput(t *testing.T) {
 	assert.False(t, mediaPort.session.GetInboundSetupTimings().FirstAssistantAudioSentAt.IsZero())
 }
 
+func TestMediaPort_StartInputDoesNotStartAssistantOutput(t *testing.T) {
+	streams := make(chan internal_type.Stream, 4)
+	mediaPort, _, audioOut := newMediaPortForTest(t, func(stream internal_type.Stream) {
+		streams <- stream
+	})
+
+	mediaPort.StartInput()
+	defer func() { require.NoError(t, mediaPort.Close()) }()
+	require.NoError(t, mediaPort.HandleAssistantAudio(make([]byte, BridgeOutputFrameSize), false))
+
+	select {
+	case frame := <-audioOut:
+		t.Fatalf("pre-answer assistant audio was sent to RTP: %v", frame)
+	case stream := <-streams:
+		t.Fatalf("pre-answer assistant audio was recorded as delivered: %T", stream)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	mediaPort.StartOutput()
+	select {
+	case frame := <-audioOut:
+		assert.Len(t, frame, MulawFrameSize)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for RTP output after output start")
+	}
+}
+
 func TestMediaPort_DroppedAssistantAudioIsNotRecorded(t *testing.T) {
 	streams := make(chan internal_type.Stream, 4)
 	mediaPort, _, audioOut := newMediaPortForTest(t, func(stream internal_type.Stream) {

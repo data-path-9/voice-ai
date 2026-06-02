@@ -156,7 +156,7 @@ func TestSpeechToText_WebsocketFlow_JSONRequestRules(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transformer.Initialize())
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-1"}))
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-1"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-1"}))
 
 	audio := []byte{0x01, 0x02, 0x03, 0x04}
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
@@ -291,7 +291,7 @@ func TestSpeechToText_BinaryAudioResampledWithBinaryRequestRule(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transformer.Initialize())
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-2"}))
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-2"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-2"}))
 
 	audio := transformer_testutil.SineTonePCM(440, 1.0)
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
@@ -362,7 +362,7 @@ func TestSpeechToText_WebsocketFlow_TextTranscriptFrames(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transformer.Initialize())
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-text"}))
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-text"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-text"}))
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
 		ContextID: "ctx-text",
 		Audio:     []byte{0x01, 0x02, 0x03, 0x04},
@@ -518,11 +518,11 @@ func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transformer.Initialize())
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-first-interrupt"}))
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-first-interrupt"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-first-interrupt"}))
 
 	time.Sleep(120 * time.Millisecond)
 
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-first-interrupt"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-first-interrupt"}))
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
 		ContextID: "ctx-first-interrupt",
 		Audio:     []byte{0x01, 0x02, 0x03, 0x04},

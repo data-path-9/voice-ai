@@ -197,7 +197,7 @@ func (cst *cartesiaSpeechToText) Transform(ctx context.Context, in internal_type
 		cst.contextId = pkt.ContextID
 		cst.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextInterruptPacket:
+	case internal_type.SpeechToTextEndPacket:
 		cst.mu.Lock()
 		if cst.startedAt.IsZero() {
 			cst.startedAt = time.Now()

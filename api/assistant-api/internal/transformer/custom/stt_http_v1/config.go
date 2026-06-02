@@ -4,7 +4,7 @@
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
 
-package internal_transformer_custom_stt_websocket_v1
+package internal_transformer_custom_stt_http_v1
 
 import (
 	"bytes"
@@ -103,8 +103,10 @@ var requestRuleContract = internal_transformer_custom_dsl.Contract{
 				"kind":       requestPacketAudio,
 				"context_id": "ctx_123",
 				"audio": map[string]any{
-					"bytes":  []byte{0x00, 0x01},
-					"base64": "AAE=",
+					"bytes":      []byte{0x00, 0x01},
+					"base64":     "AAE=",
+					"pcm_base64": "AAE=",
+					"wav_base64": "UklGRg==",
 				},
 			},
 		},
@@ -190,7 +192,7 @@ func NewConfig(credential *protos.VaultCredential, opts utils.Option) (*Config, 
 
 func (parser *configParser) loadCredential(config *Config) error {
 	if parser.credential == nil || parser.credential.GetValue() == nil {
-		return fmt.Errorf("custom-stt websocket_v1: base url must be specified in credentials")
+		return fmt.Errorf("custom-stt http_v1: base url must be specified in credentials")
 	}
 
 	raw := parser.credential.GetValue().AsMap()
@@ -199,23 +201,23 @@ func (parser *configParser) loadCredential(config *Config) error {
 		baseURLRaw, found = raw[credentialKeyBaseURLCamel]
 	}
 	if !found {
-		return fmt.Errorf("custom-stt websocket_v1: base url must be specified in credentials")
+		return fmt.Errorf("custom-stt http_v1: base url must be specified in credentials")
 	}
 
 	baseURL, ok := baseURLRaw.(string)
 	if !ok {
-		return fmt.Errorf("custom-stt websocket_v1: base url must be a string")
+		return fmt.Errorf("custom-stt http_v1: base url must be a string")
 	}
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
-		return fmt.Errorf("custom-stt websocket_v1: base url must not be empty")
+		return fmt.Errorf("custom-stt http_v1: base url must not be empty")
 	}
 	config.BaseURL = baseURL
 
 	if rawHeaders, found := raw[credentialKeyHeaders]; found && rawHeaders != nil {
 		headers, err := utils.Option{credentialKeyHeaders: rawHeaders}.GetStringMap(credentialKeyHeaders)
 		if err != nil {
-			return fmt.Errorf("custom-stt websocket_v1: invalid headers: %w", err)
+			return fmt.Errorf("custom-stt http_v1: invalid headers: %w", err)
 		}
 		if headers != nil {
 			config.Headers = headers
@@ -238,7 +240,7 @@ func (parser *configParser) loadOptions(config *Config) error {
 	if rawSampleRate, found := parser.opts[optionKeySampleRate]; found && rawSampleRate != nil {
 		sampleRate, err := parser.opts.GetUint32(optionKeySampleRate)
 		if err != nil {
-			return fmt.Errorf("custom-stt websocket_v1: invalid %s: %w", optionKeySampleRate, err)
+			return fmt.Errorf("custom-stt http_v1: invalid %s: %w", optionKeySampleRate, err)
 		}
 		config.SampleRate = int(sampleRate)
 	}
@@ -248,7 +250,6 @@ func (parser *configParser) loadOptions(config *Config) error {
 	} else if found && config.QueryParams == nil {
 		config.QueryParams = map[string]any{}
 	}
-
 	if _, err := parser.decodeJSONArray(optionKeyRequestRules, true, &config.RequestRules); err != nil {
 		return err
 	}
@@ -264,7 +265,7 @@ func (parser *configParser) decodeJSONObject(key string, required bool, destinat
 	raw, found := parser.opts[key]
 	if !found || raw == nil {
 		if required {
-			return false, fmt.Errorf("custom-stt websocket_v1: %s is required", key)
+			return false, fmt.Errorf("custom-stt http_v1: %s is required", key)
 		}
 		return false, nil
 	}
@@ -283,7 +284,7 @@ func (parser *configParser) decodeJSONArray(key string, required bool, destinati
 	raw, found := parser.opts[key]
 	if !found || raw == nil {
 		if required {
-			return false, fmt.Errorf("custom-stt websocket_v1: %s is required", key)
+			return false, fmt.Errorf("custom-stt http_v1: %s is required", key)
 		}
 		return false, nil
 	}
@@ -303,19 +304,19 @@ func (parser *configParser) toJSONBytes(raw any, key string) ([]byte, error) {
 	case string:
 		trimmed := strings.TrimSpace(typed)
 		if trimmed == "" {
-			return nil, fmt.Errorf("custom-stt websocket_v1: invalid %s: value must not be empty", key)
+			return nil, fmt.Errorf("custom-stt http_v1: invalid %s: value must not be empty", key)
 		}
 		return []byte(trimmed), nil
 	case []byte:
 		trimmed := bytes.TrimSpace(typed)
 		if len(trimmed) == 0 {
-			return nil, fmt.Errorf("custom-stt websocket_v1: invalid %s: value must not be empty", key)
+			return nil, fmt.Errorf("custom-stt http_v1: invalid %s: value must not be empty", key)
 		}
 		return trimmed, nil
 	default:
 		payload, err := json.Marshal(raw)
 		if err != nil {
-			return nil, fmt.Errorf("custom-stt websocket_v1: invalid %s: %w", key, err)
+			return nil, fmt.Errorf("custom-stt http_v1: invalid %s: %w", key, err)
 		}
 		return payload, nil
 	}
@@ -325,34 +326,34 @@ func (parser *configParser) decodeJSON(payload []byte, destination any, key stri
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
 	if err := decoder.Decode(destination); err != nil {
-		return fmt.Errorf("custom-stt websocket_v1: invalid %s: %w", key, err)
+		return fmt.Errorf("custom-stt http_v1: invalid %s: %w", key, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("custom-stt websocket_v1: invalid %s: trailing content after JSON value", key)
+			return fmt.Errorf("custom-stt http_v1: invalid %s: trailing content after JSON value", key)
 		}
-		return fmt.Errorf("custom-stt websocket_v1: invalid %s: trailing content after JSON value: %w", key, err)
+		return fmt.Errorf("custom-stt http_v1: invalid %s: trailing content after JSON value: %w", key, err)
 	}
 	return nil
 }
 
 func (config *Config) validate() error {
-	core := internal_transformer_custom_dsl.NewCore("custom-stt websocket_v1")
+	core := internal_transformer_custom_dsl.NewCore("custom-stt http_v1")
 	if strings.TrimSpace(config.BaseURL) == "" {
-		return fmt.Errorf("custom-stt websocket_v1: base url must be specified in credentials")
+		return fmt.Errorf("custom-stt http_v1: base url must be specified in credentials")
 	}
 	if strings.TrimSpace(config.Encoding) == "" {
-		return fmt.Errorf("custom-stt websocket_v1: %s must not be empty", optionKeyEncoding)
+		return fmt.Errorf("custom-stt http_v1: %s must not be empty", optionKeyEncoding)
 	}
 	if config.SampleRate <= 0 {
-		return fmt.Errorf("custom-stt websocket_v1: %s must be positive", optionKeySampleRate)
+		return fmt.Errorf("custom-stt http_v1: %s must be positive", optionKeySampleRate)
 	}
 	if len(config.RequestRules) == 0 {
-		return fmt.Errorf("custom-stt websocket_v1: %s must contain at least one rule", optionKeyRequestRules)
+		return fmt.Errorf("custom-stt http_v1: %s must contain at least one rule", optionKeyRequestRules)
 	}
 	if len(config.ResponseRules) == 0 {
-		return fmt.Errorf("custom-stt websocket_v1: %s must contain at least one rule", optionKeyResponseRules)
+		return fmt.Errorf("custom-stt http_v1: %s must contain at least one rule", optionKeyResponseRules)
 	}
 
 	if len(config.QueryParams) > 0 {
@@ -372,7 +373,7 @@ func (config *Config) validate() error {
 	}
 	if !hasAudioRule {
 		return fmt.Errorf(
-			"custom-stt websocket_v1: %s must contain at least one rule with when.packet %q",
+			"custom-stt http_v1: %s must contain at least one rule with when.packet %q",
 			optionKeyRequestRules,
 			requestPacketAudio,
 		)

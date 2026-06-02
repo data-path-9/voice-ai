@@ -29,7 +29,7 @@ func Classify(p internal_type.Packet) Route {
 	case internal_type.InterruptionDetectedPacket,
 		internal_type.TextToSpeechInterruptPacket,
 		internal_type.LLMInterruptPacket,
-		internal_type.SpeechToTextInterruptPacket,
+		internal_type.SpeechToTextEndPacket,
 		internal_type.EndOfSpeechInterruptionPacket,
 		internal_type.TurnChangePacket:
 		return RouteControl

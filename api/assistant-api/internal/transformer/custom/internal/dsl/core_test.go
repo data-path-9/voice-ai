@@ -4,7 +4,7 @@
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
 
-package internal_transformer_custom_websocketdsl
+package internal_transformer_custom_dsl
 
 import (
 	"testing"
@@ -71,7 +71,7 @@ func TestCoreValidateResponseRules_TextContracts(t *testing.T) {
 				"interim": true,
 			},
 		},
-	}, contract, "listen.ws.response_rules")
+	}, contract, "listen.response_rules")
 	require.NoError(t, err)
 
 	err = core.ValidateResponseRules([]ResponseRule{
@@ -81,7 +81,7 @@ func TestCoreValidateResponseRules_TextContracts(t *testing.T) {
 				"script": map[string]any{"$frame": FrameText},
 			},
 		},
-	}, contract, "listen.ws.response_rules")
+	}, contract, "listen.response_rules")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "when.path cannot be used")
 }
@@ -157,7 +157,7 @@ func TestCoreValidateRequestRules_SupportsPacketScopedPaths(t *testing.T) {
 				},
 			},
 		},
-	}, contract, "listen.ws.request_rules")
+	}, contract, "listen.request_rules")
 	require.NoError(t, err)
 }
 
@@ -177,7 +177,7 @@ func TestCoreValidateRequestRules_RejectsUnknownPathRoot(t *testing.T) {
 				Body:  map[string]any{"$path": "state.audio.bytes"},
 			},
 		},
-	}, contract, "listen.ws.request_rules")
+	}, contract, "listen.request_rules")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `$path root must be "config" or "packet"`)
 }

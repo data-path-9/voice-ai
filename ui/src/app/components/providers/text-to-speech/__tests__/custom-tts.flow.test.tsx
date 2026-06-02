@@ -201,7 +201,9 @@ describe('custom-tts text-to-speech flow', () => {
       target: { value: 'custom-tts' },
     });
 
-    expect(screen.getByText('Model')).toBeInTheDocument();
+    expect(screen.queryByText('Model')).not.toBeInTheDocument();
+    expect(screen.queryByText('Language')).not.toBeInTheDocument();
+    expect(screen.queryByText('Voice ID')).not.toBeInTheDocument();
     expect(
       (screen.getByLabelText('Audio Encoding') as HTMLSelectElement).value,
     ).toBe('LINEAR16');
@@ -215,9 +217,6 @@ describe('custom-tts text-to-speech flow', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Pick custom-tts credential' }),
     );
-    fireEvent.change(screen.getByLabelText('Voice ID'), {
-      target: { value: 'narrator-1' },
-    });
 
     fireEvent.change(screen.getByPlaceholderText('Type { for DSL snippets'), {
       target: {

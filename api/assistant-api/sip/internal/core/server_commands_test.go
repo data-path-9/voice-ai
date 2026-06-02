@@ -8,6 +8,7 @@ package core
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 )
 
 type testServerTx struct {
+	mu        sync.Mutex
 	done      chan struct{}
 	err       error
 	responses []*sip.Response
@@ -41,6 +43,8 @@ func (t *testServerTx) OnTerminate(f sip.FnTxTerminate) bool {
 func (t *testServerTx) Done() <-chan struct{} { return t.done }
 func (t *testServerTx) Err() error            { return t.err }
 func (t *testServerTx) Respond(res *sip.Response) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.responses = append(t.responses, res)
 	return nil
 }
@@ -82,6 +86,8 @@ func newFailingStatusServerTx(statusCode int) *failingStatusServerTx {
 }
 
 func (t *failingStatusServerTx) Respond(response *sip.Response) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.responses = append(t.responses, response)
 	if response.StatusCode == t.statusCode {
 		return assert.AnError
@@ -90,10 +96,24 @@ func (t *failingStatusServerTx) Respond(response *sip.Response) error {
 }
 
 func (t *testServerTx) lastStatus() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if len(t.responses) == 0 {
 		return 0
 	}
 	return t.responses[len(t.responses)-1].StatusCode
+}
+
+func (t *testServerTx) statusCount(statusCode int) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	count := 0
+	for _, response := range t.responses {
+		if response.StatusCode == statusCode {
+			count++
+		}
+	}
+	return count
 }
 
 func newServerForCommandTests(t *testing.T) *Server {

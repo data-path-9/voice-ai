@@ -138,9 +138,9 @@ describe('Speech-to-text provider runtime standard', () => {
       expect.arrayContaining([
         'listen.audio.encoding',
         'listen.audio.sample_rate',
-        'listen.ws.query_params',
-        'listen.ws.request_rules',
-        'listen.ws.response_rules',
+        'listen.query_params',
+        'listen.request_rules',
+        'listen.response_rules',
       ]),
     );
     expect(sttConfig?.parameters[0].data).toBeUndefined();

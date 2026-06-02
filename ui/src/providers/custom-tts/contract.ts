@@ -212,10 +212,10 @@ export const CUSTOM_TTS_DEFAULT_REQUEST_RULES_EXAMPLE = `[
       "frame": "json",
       "body": {
         "text": { "$path": "packet.text" },
-        "voice_id": { "$path": "config.voice.id" },
+        "voice_id": "narrator-1",
         "message_id": { "$path": "packet.message_id" },
-        "model": { "$path": "config.model" },
-        "language": { "$path": "config.language" },
+        "model": "sonic-2",
+        "language": "en-US",
         "audio": {
           "encoding": { "$path": "config.audio.encoding" },
           "sample_rate": {

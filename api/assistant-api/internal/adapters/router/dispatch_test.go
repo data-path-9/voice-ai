@@ -33,7 +33,9 @@ func (s *dispatchHandlerStub) HandleInterruptionDetected(context.Context, intern
 func (s *dispatchHandlerStub) HandleTextToSpeechInterrupt(context.Context, internal_type.TextToSpeechInterruptPacket) {
 }
 func (s *dispatchHandlerStub) HandleLLMInterrupt(context.Context, internal_type.LLMInterruptPacket) {}
-func (s *dispatchHandlerStub) HandleSpeechToTextInterrupt(context.Context, internal_type.SpeechToTextInterruptPacket) {
+func (s *dispatchHandlerStub) HandleSpeechToTextEnd(context.Context, internal_type.SpeechToTextEndPacket) {
+}
+func (s *dispatchHandlerStub) HandleSpeechToTextStart(context.Context, internal_type.SpeechToTextStartPacket) {
 }
 func (s *dispatchHandlerStub) HandleTurnChange(context.Context, internal_type.TurnChangePacket) {}
 func (s *dispatchHandlerStub) HandleLLMResponseDelta(context.Context, internal_type.LLMResponseDeltaPacket) {

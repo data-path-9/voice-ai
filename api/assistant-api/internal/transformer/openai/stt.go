@@ -65,7 +65,7 @@ func (o *openaiSpeechToText) Transform(ctx context.Context, byt internal_type.Pa
 			o.contextId = pkt.ContextID
 		}
 		return nil
-	case internal_type.SpeechToTextInterruptPacket:
+	case internal_type.SpeechToTextEndPacket:
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
 		return nil

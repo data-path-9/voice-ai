@@ -70,22 +70,10 @@ func NewSpeechToText(
 	if err != nil {
 		return nil, err
 	}
-
-	sourceConfig := cloneAudioConfig(internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG)
-	targetConfig := &protos.AudioConfig{
-		SampleRate:  uint32(config.SampleRate),
-		AudioFormat: parseAudioEncoding(config.Encoding),
-		Channels:    1,
+	resampler, err := internal_audio_resampler.GetResampler(logger)
+	if err != nil {
+		return nil, fmt.Errorf("custom-stt websocket_v1: failed to initialize audio resampler: %w", err)
 	}
-
-	var resampler internal_type.AudioResampler
-	if !isSameAudioConfig(sourceConfig, targetConfig) {
-		resampler, err = internal_audio_resampler.GetResampler(logger)
-		if err != nil {
-			return nil, fmt.Errorf("custom-stt websocket_v1: failed to initialize audio resampler: %w", err)
-		}
-	}
-
 	transformerContext, cancel := context.WithCancel(ctx)
 	return &speechToText{
 		config:            config,
@@ -96,8 +84,12 @@ func NewSpeechToText(
 		logger:            logger,
 		onPacket:          onPacket,
 		resampler:         resampler,
-		sourceAudioConfig: sourceConfig,
-		targetAudioConfig: targetConfig,
+		sourceAudioConfig: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
+		targetAudioConfig: &protos.AudioConfig{
+			SampleRate:  uint32(config.SampleRate),
+			AudioFormat: parseAudioEncoding(config.Encoding),
+			Channels:    1,
+		},
 	}, nil
 }
 
@@ -138,7 +130,7 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 			})
 		}
 		return nil
-	case internal_type.SpeechToTextInterruptPacket:
+	case internal_type.SpeechToTextEndPacket:
 		transformer.mu.Lock()
 		if transformer.interruptionStartedAt.IsZero() {
 			transformer.interruptionStartedAt = time.Now()
@@ -564,17 +556,6 @@ func parseAudioEncoding(encoding string) protos.AudioConfig_AudioFormat {
 		return protos.AudioConfig_MuLaw8
 	default:
 		return protos.AudioConfig_LINEAR16
-	}
-}
-
-func cloneAudioConfig(config *protos.AudioConfig) *protos.AudioConfig {
-	if config == nil {
-		return &protos.AudioConfig{SampleRate: 16000, AudioFormat: protos.AudioConfig_LINEAR16, Channels: 1}
-	}
-	return &protos.AudioConfig{
-		SampleRate:  config.GetSampleRate(),
-		AudioFormat: config.GetAudioFormat(),
-		Channels:    config.GetChannels(),
 	}
 }
 

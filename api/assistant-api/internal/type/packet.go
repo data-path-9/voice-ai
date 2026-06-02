@@ -132,9 +132,11 @@ func (f VadAudioPacket) ContextId() string { return f.ContextID }
 // VadSpeechActivityPacket is a lightweight heartbeat emitted by the VAD on every
 // audio chunk where the user is actively speaking. The EOS detector uses it to
 // keep extending the silence timer during sustained speech.
-type VadSpeechActivityPacket struct{}
+type VadSpeechActivityPacket struct {
+	ContextID string
+}
 
-func (f VadSpeechActivityPacket) ContextId() string { return "" }
+func (f VadSpeechActivityPacket) ContextId() string { return f.ContextID }
 
 // SpeechToTextPacket carries a transcript result from the STT provider.
 type SpeechToTextPacket struct {
@@ -263,13 +265,21 @@ func (f SpeechToTextErrorPacket) IsRecoverable() bool {
 func (f SpeechToTextErrorPacket) Err() error         { return f.Error }
 func (f SpeechToTextErrorPacket) ErrMessage() string { return fmt.Sprintf("stt: %s", f.Error.Error()) }
 
-type SpeechToTextInterruptPacket struct {
+type SpeechToTextEndPacket struct {
 	ContextID string
 	StartAt   float64
 	EndAt     float64
 }
 
-func (f SpeechToTextInterruptPacket) ContextId() string { return f.ContextID }
+func (f SpeechToTextEndPacket) ContextId() string { return f.ContextID }
+
+type SpeechToTextStartPacket struct {
+	ContextID string
+	StartAt   float64
+	EndAt     float64
+}
+
+func (f SpeechToTextStartPacket) ContextId() string { return f.ContextID }
 
 // InterruptLLMPacket signals the LLM executor to cancel current generation.
 type LLMInterruptPacket struct {

@@ -175,6 +175,7 @@ type Server struct {
 	inboundACKTimeout                time.Duration
 	inboundFinalResponseRetryInitial time.Duration
 	inboundFinalResponseRetryMax     time.Duration
+	inboundRingingInterval           time.Duration
 
 	// Multi-tenant config resolver - called for each incoming INVITE
 	configResolver ConfigResolver
@@ -374,6 +375,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		inboundACKTimeout:                defaultInboundACKTimeout,
 		inboundFinalResponseRetryInitial: defaultInboundFinalResponseRetryInitial,
 		inboundFinalResponseRetryMax:     defaultInboundFinalResponseRetryMax,
+		inboundRingingInterval:           defaultInboundRingingInterval,
 		ctx:                              serverCtx,
 		cancel:                           cancel,
 	}

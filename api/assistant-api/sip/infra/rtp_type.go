@@ -28,13 +28,16 @@ type RTPPacket struct {
 
 type RTPHandlerFactory func(context.Context, *RTPConfig) (*RTPHandler, error)
 
+type RTPFallbackAudioSource func(frameSize int) []byte
+
 type RTPHandler struct {
 	inner *internal_core.RTPHandler
 
-	codec        *Codec
-	audioInChan  chan []byte
-	audioOutChan chan []byte
-	flushAudioCh chan struct{}
+	codec          *Codec
+	audioInChan    chan []byte
+	audioOutChan   chan []byte
+	flushAudioCh   chan struct{}
+	fallbackSource RTPFallbackAudioSource
 }
 
 type RTPConfig struct {

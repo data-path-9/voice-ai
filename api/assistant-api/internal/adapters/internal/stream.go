@@ -78,26 +78,26 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 				Time: eventTime,
 			})
 		case *protos.ConversationDisconnection:
-			if t.Conversation() == nil {
-				return nil
+			if t.Conversation() != nil {
+				ctx := context.Background()
+				t.OnPacket(ctx,
+					internal_type.ConversationEventPacket{
+						ContextID: t.GetID(),
+						Name:      observe.ComponentSession,
+						Data: map[string]string{
+							observe.DataType:   observe.EventDisconnectRequested,
+							observe.DataReason: payload.GetType().String()},
+						Time: time.Now(),
+					},
+					internal_type.ConversationMetadataPacket{
+						ContextID: t.Conversation().Id,
+						Metadata: []*protos.Metadata{{
+							Key:   "disconnect_reason",
+							Value: payload.GetType().String(),
+						}},
+					})
 			}
-			ctx := context.Background()
-			t.OnPacket(ctx,
-				internal_type.ConversationEventPacket{
-					ContextID: t.GetID(),
-					Name:      observe.ComponentSession,
-					Data: map[string]string{
-						observe.DataType:   observe.EventDisconnectRequested,
-						observe.DataReason: payload.GetType().String()},
-					Time: time.Now(),
-				},
-				internal_type.ConversationMetadataPacket{
-					ContextID: t.Conversation().Id,
-					Metadata: []*protos.Metadata{{
-						Key:   "disconnect_reason",
-						Value: payload.GetType().String(),
-					}},
-				})
+
 		}
 
 	}

@@ -96,7 +96,8 @@ func NewStreamer(ctx context.Context,
 
 	s.session = sipSession
 	s.lifecycle = lifecycle
-	if sipSession.GetInfo().Direction != sip_infra.CallDirectionInbound {
+	isInbound := sipSession.GetInfo().Direction == sip_infra.CallDirectionInbound
+	if !isInbound {
 		s.assistantOutputActive.Store(true)
 	}
 	mediaPort, err := internal_sip.NewMediaPort(internal_sip.MediaPortConfig{
@@ -110,10 +111,14 @@ func NewStreamer(ctx context.Context,
 		return nil, err
 	}
 	s.mediaPort = mediaPort
-	s.mediaPort.Start()
+	if isInbound {
+		s.mediaPort.StartInput()
+	} else {
+		s.mediaPort.Start()
+		s.emitChannelEvent("media_started", nil)
+	}
 	s.Input(s.CreateConnectionRequest())
 	s.emitChannelEvent("connected", nil)
-	s.emitChannelEvent("media_started", nil)
 
 	localIP, localPort := mediaPort.LocalAddr()
 	logger.Infow("SIP streamer created",
@@ -197,6 +202,11 @@ func (s *Streamer) Send(response internal_type.Stream) error {
 func (s *Streamer) StartAssistantOutput() {
 	if !s.assistantOutputActive.CompareAndSwap(false, true) {
 		return
+	}
+	if s.mediaPort != nil {
+		s.mediaPort.StartOutput()
+		s.mediaPort.StartBridgeRecorder()
+		s.emitChannelEvent("media_started", nil)
 	}
 	s.outputMu.Lock()
 	frames := s.pendingAssistantAudioFrames

@@ -59,6 +59,10 @@ type AudioProcessor struct {
 	ringtoneMu sync.RWMutex
 	ringtone   []byte
 
+	ringbackMu         sync.Mutex
+	ringbackOffset     int
+	ringbackFileOffset int
+
 	ambientMixer internal_ambient.Mixer
 
 	outputHealth        *internal_telephony_output.HealthStats
@@ -422,51 +426,50 @@ func (p *AudioProcessor) resampleBridgeRecordingFrame(frame bridgeRecordingFrame
 	return p.resampler.Resample(linearPCM8k, Linear8kConfig, Rapida16kConfig)
 }
 
-// PlayRingback writes ringback frames directly to RTP.
-func (p *AudioProcessor) PlayRingback(ctx context.Context) {
-	codec := p.currentCodec()
-	ticker := time.NewTicker(ChunkDuration)
-	defer ticker.Stop()
+func (p *AudioProcessor) StartRingback() {
+	if p == nil || p.rtpHandler == nil {
+		return
+	}
+	p.ringbackMu.Lock()
+	p.ringbackOffset = 0
+	p.ringbackFileOffset = 0
+	p.ringbackMu.Unlock()
+	p.rtpHandler.SetFallbackAudioSource(p.nextRingbackFrame)
+}
 
+func (p *AudioProcessor) StopRingback() {
+	if p == nil || p.rtpHandler == nil {
+		return
+	}
+	p.rtpHandler.ClearFallbackAudioSource()
+}
+
+func (p *AudioProcessor) nextRingbackFrame(frameSize int) []byte {
+	if frameSize <= 0 {
+		return nil
+	}
+	codec := p.currentCodec()
 	ringtone := p.ringtoneBytes()
-	useFile := len(ringtone) >= MulawFrameSize
-	fileOffset := 0
-	offset := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			var frame []byte
-			if useFile {
-				if len(ringtone) >= MulawFrameSize {
-					end := fileOffset + MulawFrameSize
-					if end > len(ringtone) {
-						fileOffset = 0
-						end = MulawFrameSize
-					}
-					if end <= len(ringtone) {
-						frame = ringtone[fileOffset:end]
-						fileOffset = end
-					}
-				}
-				if len(frame) == 0 {
-					frame, offset = internal_audio.GenerateRingbackMulawFrame(offset)
-				}
-			} else {
-				frame, offset = internal_audio.GenerateRingbackMulawFrame(offset)
-			}
-			if codec.Name == sip_infra.CodecPCMA.Name {
-				frame = internal_audio.UlawToAlaw(frame)
-			}
-			if err := p.rtpHandler.EnqueueAudio(frame); errors.Is(err, sip_infra.ErrRTPHandlerStopped) {
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
+	useFile := len(ringtone) >= frameSize
+	p.ringbackMu.Lock()
+	defer p.ringbackMu.Unlock()
+	var frame []byte
+	if useFile {
+		end := p.ringbackFileOffset + frameSize
+		if end > len(ringtone) {
+			p.ringbackFileOffset = 0
+			end = frameSize
+		}
+		if end <= len(ringtone) {
+			frame = ringtone[p.ringbackFileOffset:end]
+			p.ringbackFileOffset = end
 		}
 	}
+	if len(frame) == 0 {
+		frame, p.ringbackOffset = internal_audio.GenerateRingbackMulawFrame(p.ringbackOffset)
+	}
+	if codec.Name == sip_infra.CodecPCMA.Name {
+		frame = internal_audio.UlawToAlaw(frame)
+	}
+	return frame
 }

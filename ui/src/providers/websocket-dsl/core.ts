@@ -320,6 +320,14 @@ interface ScopedExpressionValidationOptions {
   supportedPathRoots: readonly string[];
 }
 
+interface ScopedDefinitionValidationOptions {
+  providerLabel: string;
+  definitionLabel: string;
+  jsonErrorLabel: string;
+  supportedPathRoots: readonly string[];
+  validationContext: WebsocketDslScopedContext;
+}
+
 function evaluateScopedExpression(
   value: unknown,
   context: WebsocketDslScopedContext,
@@ -723,6 +731,44 @@ export function renderWebsocketDslScopedValue(
 ): unknown {
   const parsed = JSON.parse(definition);
   return evaluateScopedExpression(parsed, context);
+}
+
+export function validateWebsocketDslScopedJsonObjectDefinition(
+  value: string,
+  options: ScopedDefinitionValidationOptions,
+): string | undefined {
+  const definitionLabel = resolveDefinitionLabel(options.definitionLabel);
+  const parsed = parseJsonWithMessage(
+    value,
+    `Please provide valid JSON ${definitionLabel} for ${options.jsonErrorLabel}.`,
+  );
+  if (typeof parsed === 'string') return parsed;
+  if (!isPlainObject(parsed)) {
+    return `${options.providerLabel} ${definitionLabel} must be a JSON object.`;
+  }
+
+  const error = validateScopedExpression(parsed, {
+    providerLabel: options.providerLabel,
+    definitionLabel,
+    supportedPathRoots: options.supportedPathRoots,
+  });
+  if (error) return error;
+
+  try {
+    const rendered = renderWebsocketDslScopedValue(
+      value,
+      options.validationContext,
+    );
+    if (!isPlainObject(rendered)) {
+      return `${options.providerLabel} ${definitionLabel} must resolve to a JSON object.`;
+    }
+    if (!isJsonValue(rendered)) {
+      return `${options.providerLabel} ${definitionLabel} must resolve to a JSON value.`;
+    }
+    return undefined;
+  } catch {
+    return `Please provide valid JSON ${definitionLabel} for ${options.jsonErrorLabel}.`;
+  }
 }
 
 export function validateWebsocketDslRequestRules<

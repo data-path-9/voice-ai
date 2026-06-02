@@ -113,7 +113,7 @@ func (inboundCall *inboundCall) run() {
 		return
 	}
 	server.TransitionCall(inboundCall.session, CallStateRinging, LifecycleReasonInboundInviteRinging)
-	if err := inboundCall.answerController.SendRinging(); err != nil {
+	if err := inboundCall.answerController.StartRinging(server.ctx); err != nil {
 		inboundCall.failSetup(500, internal_inbound.FailureDialog, LifecycleReasonInboundInviteFailed, err)
 		return
 	}
@@ -139,10 +139,6 @@ func (inboundCall *inboundCall) run() {
 	if inboundCall.cancelIfRequested(LifecycleReasonInviteCancelledBeforeAnswer) {
 		return
 	}
-	if err := inboundCall.startRTP(); err != nil {
-		inboundCall.failSetup(503, internal_inbound.FailureRTP, LifecycleReasonInboundInviteFailed, err)
-		return
-	}
 	if err := inboundCall.answer(); err != nil {
 		if errors.Is(err, ErrInboundInviteCancelled) {
 			return
@@ -154,8 +150,9 @@ func (inboundCall *inboundCall) run() {
 		inboundCall.failSetup(500, internal_inbound.FailureDialog, LifecycleReasonInboundInviteFailed, err)
 		return
 	}
-	if inboundCall.rtpStarted {
-		inboundCall.recordPhase(InboundSetupPhaseMediaFlowing, LifecycleReasonInboundMediaFlowing)
+	if err := inboundCall.startRTP(); err != nil {
+		inboundCall.failSetup(503, internal_inbound.FailureRTP, LifecycleReasonInboundInviteFailed, err)
+		return
 	}
 
 	inboundCall.dispatchInvite()

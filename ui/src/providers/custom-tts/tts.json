@@ -2,33 +2,6 @@
   "preservePrefix": "speaker.",
   "parameters": [
     {
-      "key": "speak.model",
-      "label": "Model",
-      "type": "input",
-      "required": false,
-      "placeholder": "e.g. sonic-2",
-      "helpText": "Optional provider-defined model identifier that can be referenced from websocket query params and request packets.",
-      "errorMessage": "Please provide a valid model for custom TTS."
-    },
-    {
-      "key": "speak.language",
-      "label": "Language",
-      "type": "input",
-      "required": false,
-      "placeholder": "e.g. en-US",
-      "helpText": "Optional provider-defined language code that can be referenced from websocket query params and request packets.",
-      "errorMessage": "Please provide a valid language for custom TTS."
-    },
-    {
-      "key": "speak.voice.id",
-      "label": "Voice ID",
-      "type": "input",
-      "required": true,
-      "placeholder": "e.g. narrator-1",
-      "helpText": "Plain voice identifier that can be bound into websocket query params and request packets.",
-      "errorMessage": "Please provide a valid voice ID for custom TTS."
-    },
-    {
       "key": "speak.audio.encoding",
       "label": "Audio Encoding",
       "type": "select",
@@ -103,7 +76,7 @@
       "label": "Request Rules",
       "type": "json",
       "required": true,
-      "default": "[\n  {\n    \"when\": { \"packet\": \"text\" },\n    \"send\": {\n      \"frame\": \"json\",\n      \"body\": {\n        \"text\": { \"$path\": \"packet.text\" },\n        \"voice_id\": { \"$path\": \"config.voice.id\" },\n        \"message_id\": { \"$path\": \"packet.message_id\" },\n        \"model\": { \"$path\": \"config.model\" },\n        \"language\": { \"$path\": \"config.language\" },\n        \"audio\": {\n          \"encoding\": { \"$path\": \"config.audio.encoding\" },\n          \"sample_rate\": {\n            \"$cast\": \"number\",\n            \"value\": { \"$path\": \"config.audio.sample_rate\" }\n          }\n        }\n      }\n    }\n  }\n]",
+      "default": "[\n  {\n    \"when\": { \"packet\": \"text\" },\n    \"send\": {\n      \"frame\": \"json\",\n      \"body\": {\n        \"text\": { \"$path\": \"packet.text\" },\n        \"voice_id\": \"narrator-1\",\n        \"message_id\": { \"$path\": \"packet.message_id\" },\n        \"model\": \"sonic-2\",\n        \"language\": \"en-US\",\n        \"audio\": {\n          \"encoding\": { \"$path\": \"config.audio.encoding\" },\n          \"sample_rate\": {\n            \"$cast\": \"number\",\n            \"value\": { \"$path\": \"config.audio.sample_rate\" }\n          }\n        }\n      }\n    }\n  }\n]",
       "colSpan": 2,
       "editor": "websocket_dsl_json",
       "editorMode": "request_rules",

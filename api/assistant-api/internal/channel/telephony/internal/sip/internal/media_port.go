@@ -9,7 +9,6 @@ package internal_sip
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -43,12 +42,11 @@ type MediaPort struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	started        atomic.Bool
-	closed         atomic.Bool
-	transferActive atomic.Bool
-
-	mu             sync.RWMutex
-	ringbackCancel context.CancelFunc
+	inputStarted          atomic.Bool
+	outputStarted         atomic.Bool
+	bridgeRecorderStarted atomic.Bool
+	closed                atomic.Bool
+	transferActive        atomic.Bool
 }
 
 func NewMediaPort(config MediaPortConfig) (*MediaPort, error) {
@@ -126,15 +124,46 @@ func resolveAmbientConfig(sipSession *sip_infra.Session) *internal_ambient.Confi
 	return &config
 }
 
+// Start activates the full media path for calls that are already answered.
 func (port *MediaPort) Start() {
 	if port == nil || port.closed.Load() {
 		return
 	}
-	if !port.started.CompareAndSwap(false, true) {
+	port.StartInput()
+	port.StartOutput()
+	port.StartBridgeRecorder()
+}
+
+// StartInput begins RTP input forwarding without enabling assistant RTP output.
+func (port *MediaPort) StartInput() {
+	if port == nil || port.closed.Load() {
+		return
+	}
+	if !port.inputStarted.CompareAndSwap(false, true) {
 		return
 	}
 	go port.forwardIncomingAudio()
+}
+
+// StartOutput enables paced assistant audio delivery to RTP.
+func (port *MediaPort) StartOutput() {
+	if port == nil || port.closed.Load() {
+		return
+	}
+	if !port.outputStarted.CompareAndSwap(false, true) {
+		return
+	}
 	port.mediaSession.Start()
+}
+
+// StartBridgeRecorder enables transfer bridge recording delivery.
+func (port *MediaPort) StartBridgeRecorder() {
+	if port == nil || port.closed.Load() {
+		return
+	}
+	if !port.bridgeRecorderStarted.CompareAndSwap(false, true) {
+		return
+	}
 	go port.audioProcessor.RunBridgeRecorder(port.ctx)
 }
 
@@ -145,7 +174,7 @@ func (port *MediaPort) Close() error {
 	if !port.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	port.cancelRingback(false)
+	port.stopRingback(false)
 	if port.mediaSession != nil {
 		port.mediaSession.Shutdown()
 	}
@@ -186,15 +215,11 @@ func (port *MediaPort) EnterTransferMode(ringtone string) bool {
 	if !port.transferActive.CompareAndSwap(false, true) {
 		return false
 	}
-	ringbackContext, ringbackCancel := context.WithCancel(port.ctx)
-	port.mu.Lock()
-	port.ringbackCancel = ringbackCancel
-	port.mu.Unlock()
 	port.audioProcessor.SetTransferActive(true)
 	port.audioProcessor.ClearInputBuffer()
 	port.audioProcessor.ClearOutputBuffer()
 	port.audioProcessor.SetRingtone(ringtone)
-	go port.audioProcessor.PlayRingback(ringbackContext)
+	port.audioProcessor.StartRingback()
 	return true
 }
 
@@ -205,7 +230,7 @@ func (port *MediaPort) ResumeAssistant() bool {
 	if !port.transferActive.CompareAndSwap(true, false) {
 		return false
 	}
-	port.cancelRingback(false)
+	port.stopRingback(false)
 	port.audioProcessor.SetTransferActive(false)
 	port.audioProcessor.DisconnectTransferMedia()
 	return true
@@ -215,7 +240,7 @@ func (port *MediaPort) StopTransferRingback() {
 	if port == nil {
 		return
 	}
-	port.cancelRingback(true)
+	port.stopRingback(true)
 }
 
 func (port *MediaPort) ConnectTransferMedia(target internal_type.SIPRTPBridgeTarget, outputCodecName string) {
@@ -355,14 +380,11 @@ func (port *MediaPort) recordDeliveredAssistantAudio(assistantPCM16k []byte) {
 	}
 }
 
-func (port *MediaPort) cancelRingback(clearOutput bool) {
-	port.mu.Lock()
-	cancelFn := port.ringbackCancel
-	port.ringbackCancel = nil
-	port.mu.Unlock()
-	if cancelFn != nil {
-		cancelFn()
+func (port *MediaPort) stopRingback(clearOutput bool) {
+	if port == nil || port.audioProcessor == nil {
+		return
 	}
+	port.audioProcessor.StopRingback()
 	if clearOutput && port.audioProcessor != nil {
 		port.audioProcessor.ClearOutputBuffer()
 	}

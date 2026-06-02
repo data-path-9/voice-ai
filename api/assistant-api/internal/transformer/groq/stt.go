@@ -88,7 +88,7 @@ func (st *groqSTT) Transform(ctx context.Context, in internal_type.Packet) error
 		st.contextId = pkt.ContextID
 		st.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextInterruptPacket:
+	case internal_type.SpeechToTextEndPacket:
 		st.mu.Lock()
 		if st.startedAt.IsZero() {
 			st.startedAt = time.Now()

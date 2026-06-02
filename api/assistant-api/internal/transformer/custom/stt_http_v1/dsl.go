@@ -4,7 +4,7 @@
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
 
-package internal_transformer_custom_stt_websocket_v1
+package internal_transformer_custom_stt_http_v1
 
 import (
 	"encoding/base64"
@@ -44,7 +44,7 @@ type dslEngine struct {
 func (config *Config) newEngine() *dslEngine {
 	return &dslEngine{
 		config: config,
-		core:   internal_transformer_custom_dsl.NewCore("custom-stt websocket_v1"),
+		core:   internal_transformer_custom_dsl.NewCore("custom-stt http_v1"),
 	}
 }
 
@@ -57,8 +57,8 @@ func (config *Config) newQueryScope() queryScope {
 	}
 }
 
-func (config *Config) newRequestScope(packet string, contextID string, audio []byte) map[string]any {
-	scope := map[string]any{
+func (config *Config) newRequestScope(contextID string, pcmAudio []byte, wavAudio []byte) map[string]any {
+	return map[string]any{
 		"config": map[string]any{
 			"model":    config.Model,
 			"language": config.Language,
@@ -68,22 +68,19 @@ func (config *Config) newRequestScope(packet string, contextID string, audio []b
 			},
 		},
 		"packet": map[string]any{
-			"kind":       packet,
+			"kind":       "audio",
 			"context_id": contextID,
+			"audio": map[string]any{
+				"bytes":      append([]byte(nil), pcmAudio...),
+				"base64":     base64.StdEncoding.EncodeToString(pcmAudio),
+				"pcm_base64": base64.StdEncoding.EncodeToString(pcmAudio),
+				"wav_base64": base64.StdEncoding.EncodeToString(wavAudio),
+			},
 		},
 	}
-
-	if len(audio) > 0 {
-		scope["packet"].(map[string]any)["audio"] = map[string]any{
-			"bytes":  append([]byte(nil), audio...),
-			"base64": base64.StdEncoding.EncodeToString(audio),
-		}
-	}
-
-	return scope
 }
 
-func (engine *dslEngine) BuildConnectionURL(scope queryScope) (string, error) {
+func (engine *dslEngine) BuildRequestURL(scope queryScope) (string, error) {
 	return engine.core.BuildConnectionURL(engine.config.BaseURL, engine.config.QueryParams, func(name string) (any, error) {
 		return engine.resolveQueryVariable(name, scope)
 	})
@@ -133,15 +130,6 @@ func (engine *dslEngine) EvaluateRequestRules(packet string, scope map[string]an
 	return requests, nil
 }
 
-func (engine *dslEngine) HasRequestRules(packet string) bool {
-	for _, rule := range engine.config.RequestRules {
-		if engine.core.MatchRequestWhen(rule.When, packet) {
-			return true
-		}
-	}
-	return false
-}
-
 func (engine *dslEngine) resolveQueryVariable(name string, scope queryScope) (any, error) {
 	switch name {
 	case "model":
@@ -157,32 +145,23 @@ func (engine *dslEngine) resolveQueryVariable(name string, scope queryScope) (an
 	}
 }
 
-func (engine *dslEngine) ParseFrame(messageType int, payload []byte) (responseFrame, error) {
-	frame, err := engine.core.ParseFrame(messageType, payload, func(currentType int) bool {
-		return currentType == 2
-	})
+func (engine *dslEngine) ParseHTTPResponse(payload []byte) (responseFrame, error) {
+	frame, err := engine.core.ParseFrame(1, payload, nil)
 	if err != nil {
 		return responseFrame{}, err
 	}
-
-	// STT response rules use JSON-path extraction for structured payloads and
-	// text-frame extraction for raw transcript chunks. Upstreams that send quoted
-	// text chunks (JSON string primitives) should map to text-frame behavior.
 	if frame.Kind != frameTypeJSON {
 		return frame, nil
 	}
-
 	if _, isJSONObject := frame.JSON.(map[string]any); isJSONObject {
 		return frame, nil
 	}
-
 	if textValue, isJSONString := frame.JSON.(string); isJSONString {
 		frame.Kind = frameTypeText
 		frame.JSON = nil
 		frame.Text = textValue
 		return frame, nil
 	}
-
 	frame.Kind = frameTypeText
 	frame.JSON = nil
 	return frame, nil

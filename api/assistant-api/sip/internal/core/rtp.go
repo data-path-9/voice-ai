@@ -78,6 +78,7 @@ type RTPHandler struct {
 	audioInChan  chan []byte
 	audioOutChan chan []byte
 	inputJitter  *rtpInputJitterBuffer
+	outputSource RTPFallbackAudioSource
 
 	// flushAudioCh signals the sendLoop to discard all pending audio
 	// (used on user interruption to silence stale frames immediately).
@@ -100,6 +101,8 @@ type RTPHandler struct {
 	firstPacketSeen atomic.Bool
 	onFirstPacket   func()
 }
+
+type RTPFallbackAudioSource func(frameSize int) []byte
 
 // RTPConfig holds configuration for RTP handler
 type RTPConfig struct {
@@ -512,6 +515,19 @@ func (h *RTPHandler) FlushAudioOut() {
 	}
 }
 
+func (h *RTPHandler) SetFallbackAudioSource(source RTPFallbackAudioSource) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.outputSource = source
+	h.mu.Unlock()
+}
+
+func (h *RTPHandler) ClearFallbackAudioSource() {
+	h.SetFallbackAudioSource(nil)
+}
+
 // GetCodec returns the codec used by this handler
 func (h *RTPHandler) GetCodec() *Codec {
 	h.mu.RLock()
@@ -832,8 +848,8 @@ func (h *RTPHandler) sendLoop() {
 			continue
 		}
 
-		// Get exactly ONE chunk: audio if available, otherwise silence
-		chunk := h.getAudioChunk(&pendingAudio, samplesPerPacket, silenceChunk)
+		// Get exactly ONE chunk: queued audio, fallback media, or silence.
+		chunk := h.nextOutputChunk(&pendingAudio, samplesPerPacket, silenceChunk)
 
 		packet := h.createRTPPacket(chunk)
 		data := h.serializeRTPPacket(packet)
@@ -891,6 +907,34 @@ func (h *RTPHandler) getAudioChunk(pendingAudio *[]byte, size int, silenceChunk 
 
 	// No audio - return silence
 	return silenceChunk
+}
+
+func (h *RTPHandler) nextOutputChunk(pendingAudio *[]byte, size int, silenceChunk []byte) []byte {
+	if len(*pendingAudio) > 0 {
+		return h.getAudioChunk(pendingAudio, size, silenceChunk)
+	}
+	h.mu.RLock()
+	outputSource := h.outputSource
+	h.mu.RUnlock()
+	if outputSource != nil {
+		if chunk := outputSource(size); len(chunk) > 0 {
+			return h.fitAudioChunk(chunk, size, silenceChunk)
+		}
+	}
+	return silenceChunk
+}
+
+func (h *RTPHandler) fitAudioChunk(chunk []byte, size int, silenceChunk []byte) []byte {
+	if len(chunk) == size {
+		return chunk
+	}
+	if len(chunk) > size {
+		return chunk[:size]
+	}
+	fitted := make([]byte, size)
+	copy(fitted, chunk)
+	copy(fitted[len(chunk):], silenceChunk[len(chunk):])
+	return fitted
 }
 
 func (h *RTPHandler) parseRTPPacket(data []byte) (*RTPPacket, error) {

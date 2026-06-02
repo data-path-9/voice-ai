@@ -413,7 +413,7 @@ func TestInboundCall_ProvisionalResponsesBeforeAnswer(t *testing.T) {
 	assert.Equal(t, 200, transaction.responses[2].StatusCode)
 }
 
-func TestInboundCall_StartsRTPBeforeWaitingForACK(t *testing.T) {
+func TestInboundCall_StartsRTPAfterACK(t *testing.T) {
 	server := newServerForCommandTests(t)
 	server.rtpAllocator = &testRTPAllocator{nextPort: 19000}
 	server.newRTPHandler = inboundNoopRTPHandler(server)
@@ -435,7 +435,7 @@ func TestInboundCall_StartsRTPBeforeWaitingForACK(t *testing.T) {
 	session, exists := server.GetSession("inbound-rtp-before-ack")
 	require.True(t, exists)
 	require.NotNil(t, session.GetRTPHandler())
-	assert.True(t, session.GetRTPHandler().IsRunning())
+	assert.Equal(t, InboundSetupPhaseAnswered, session.GetInboundSetupPhase())
 
 	transaction.PushACK(newACKRequest("inbound-rtp-before-ack"))
 	select {
@@ -443,6 +443,47 @@ func TestInboundCall_StartsRTPBeforeWaitingForACK(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for inbound INVITE handler")
 	}
+	assert.Equal(t, InboundSetupPhaseMediaFlowing, session.GetInboundSetupPhase())
+}
+
+func TestInboundCall_RetransmitsRingingUntilAnswer(t *testing.T) {
+	server := newServerForCommandTests(t)
+	server.inboundRingingInterval = 5 * time.Millisecond
+	server.rtpAllocator = &testRTPAllocator{nextPort: 19000}
+	server.newRTPHandler = inboundNoopRTPHandler(server)
+	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
+		return Allow(bridgeTestConfig()), nil
+	})
+	applicationReady := make(chan struct{})
+	server.SetOnApplicationReady(func(_ *Session, _, _ string) error {
+		<-applicationReady
+		return nil
+	})
+	transaction := newActiveAckableTestServerTx()
+	request := newInboundInviteRequest("inbound-ringing-retransmit")
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		server.handleInvite(request, transaction)
+	}()
+
+	require.Eventually(t, func() bool {
+		return transaction.statusCount(180) >= 2
+	}, time.Second, time.Millisecond)
+	assert.Equal(t, 0, transaction.statusCount(200))
+
+	close(applicationReady)
+	transaction.PushACK(newACKRequest("inbound-ringing-retransmit"))
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for inbound INVITE handler")
+	}
+	ringingCount := transaction.statusCount(180)
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, ringingCount, transaction.statusCount(180))
+	assert.Equal(t, 200, transaction.lastStatus())
 }
 
 func TestInboundCall_WaitsForApplicationReadyBeforeAnswer(t *testing.T) {

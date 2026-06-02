@@ -2,24 +2,6 @@
   "preservePrefix": "microphone.",
   "parameters": [
     {
-      "key": "listen.model",
-      "label": "Model",
-      "type": "input",
-      "required": false,
-      "placeholder": "e.g. nova-3",
-      "helpText": "Optional provider-defined model identifier that can be referenced from websocket query params and request packets.",
-      "errorMessage": "Please provide a valid model for custom STT."
-    },
-    {
-      "key": "listen.language",
-      "label": "Language",
-      "type": "input",
-      "required": false,
-      "placeholder": "e.g. en-US",
-      "helpText": "Optional provider-defined language code that can be referenced from websocket query params and request packets.",
-      "errorMessage": "Please provide a valid language for custom STT."
-    },
-    {
       "key": "listen.audio.encoding",
       "label": "Audio Encoding",
       "type": "select",
@@ -78,7 +60,7 @@
       "errorMessage": "Please select a valid sample rate for custom STT."
     },
     {
-      "key": "listen.ws.query_params",
+      "key": "listen.query_params",
       "label": "Query Parameters",
       "type": "json",
       "required": false,
@@ -86,11 +68,11 @@
       "editor": "websocket_dsl_json",
       "editorMode": "query_params",
       "placeholder": "Type { for DSL snippets",
-      "helpText": "Optional flat JSON object for dynamic websocket query params. Use {\"$var\":\"...\"} and optional {\"$cast\":\"number\",\"value\":...} bindings.",
+      "helpText": "Optional flat JSON object for dynamic STT query params. Use {\"$var\":\"...\"} and optional {\"$cast\":\"number\",\"value\":...} bindings.",
       "errorMessage": "Please provide valid query parameters for custom STT."
     },
     {
-      "key": "listen.ws.request_rules",
+      "key": "listen.request_rules",
       "label": "Request Rules",
       "type": "json",
       "required": true,
@@ -99,11 +81,11 @@
       "editor": "websocket_dsl_json",
       "editorMode": "request_rules",
       "placeholder": "Type [ for rule snippets",
-      "helpText": "Ordered websocket outbound rules aligned to normalized STT packets. Each rule defines when.packet plus send.frame/send.body using \"$path\" and optional \"$cast\" expressions over config.* and packet.*.",
+      "helpText": "Ordered STT request rules aligned to normalized packets. Each rule defines when.packet plus send.frame/send.body using \"$path\" and optional \"$cast\" expressions over config.* and packet.*.",
       "errorMessage": "Please provide valid request rules for custom STT."
     },
     {
-      "key": "listen.ws.response_rules",
+      "key": "listen.response_rules",
       "label": "Response Rules",
       "type": "json",
       "required": true,
@@ -111,7 +93,7 @@
       "editor": "websocket_dsl_json",
       "editorMode": "response_rules",
       "placeholder": "Type [ for rule snippets",
-      "helpText": "Required JSON rule list for websocket responses. Each rule defines a text or JSON frame match and emit expressions for script, confidence, language, interim, and error.",
+      "helpText": "Required JSON rule list for STT responses. Each rule defines a text or JSON frame match and emit expressions for script, confidence, language, interim, and error.",
       "errorMessage": "Please provide valid response rules for custom STT."
     }
   ]

@@ -25,7 +25,6 @@ func testCredential(t *testing.T, values map[string]any) *protos.VaultCredential
 
 func baseOptions() utils.Option {
 	return utils.Option{
-		optionKeyVoiceID:       "voice-1",
 		optionKeyRequestRules:  `[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"},"request_id":{"$path":"packet.message_id"}}}}]`,
 		optionKeyResponseRules: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
 	}
@@ -40,7 +39,7 @@ func TestNewConfig_DefaultsAndOptionals(t *testing.T) {
 
 	assert.Equal(t, "wss://example.com/ws", config.BaseURL)
 	assert.Equal(t, "Bearer token", config.Headers["Authorization"])
-	assert.Equal(t, "voice-1", config.VoiceID)
+	assert.Empty(t, config.VoiceID)
 	assert.Equal(t, defaultEncoding, config.Encoding)
 	assert.Equal(t, defaultSampleRate, config.SampleRate)
 	assert.Empty(t, config.Model)
@@ -51,6 +50,7 @@ func TestNewConfig_DefaultsAndOptionals(t *testing.T) {
 
 func TestNewConfig_WithOverrides(t *testing.T) {
 	opts := baseOptions()
+	opts[optionKeyVoiceID] = "voice-1"
 	opts[optionKeyEncoding] = "MuLaw8"
 	opts[optionKeySampleRate] = "48000"
 	opts[optionKeyModel] = "my-model"
@@ -68,6 +68,7 @@ func TestNewConfig_WithOverrides(t *testing.T) {
 
 	assert.Equal(t, "MuLaw8", config.Encoding)
 	assert.Equal(t, 48000, config.SampleRate)
+	assert.Equal(t, "voice-1", config.VoiceID)
 	assert.Equal(t, "my-model", config.Model)
 	assert.Equal(t, "hi-IN", config.Language)
 	assert.NotNil(t, config.QueryParams)
@@ -82,14 +83,6 @@ func TestNewConfig_ValidateRequired(t *testing.T) {
 	assert.Contains(t, err.Error(), "base url")
 
 	opts := baseOptions()
-	delete(opts, optionKeyVoiceID)
-	_, err = NewConfig(testCredential(t, map[string]any{
-		credentialKeyBaseURLCamel: "wss://example.com/ws",
-	}), opts)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), optionKeyVoiceID)
-
-	opts = baseOptions()
 	delete(opts, optionKeyRequestRules)
 	_, err = NewConfig(testCredential(t, map[string]any{
 		credentialKeyBaseURLCamel: "wss://example.com/ws",
@@ -130,6 +123,38 @@ func TestNewConfig_InvalidJSON(t *testing.T) {
 	}), opts)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "trailing content")
+}
+
+func TestNewConfig_OptionalQueryParamsValidateOnlyNonBlankStrings(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  any
+	}{
+		{name: "empty string", raw: ""},
+		{name: "blank string", raw: "   "},
+		{name: "non string", raw: map[string]any{"language": map[string]any{"$var": "language"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := baseOptions()
+			opts[optionKeyQueryParams] = tt.raw
+
+			config, err := NewConfig(testCredential(t, map[string]any{
+				credentialKeyBaseURLCamel: "wss://example.com/ws",
+			}), opts)
+			require.NoError(t, err)
+			assert.Empty(t, config.QueryParams)
+		})
+	}
+
+	opts := baseOptions()
+	opts[optionKeyQueryParams] = `{"language":{"$var":"language"`
+	_, err := NewConfig(testCredential(t, map[string]any{
+		credentialKeyBaseURLCamel: "wss://example.com/ws",
+	}), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), optionKeyQueryParams)
 }
 
 func TestNewConfig_QueryParamsMustResolveToPrimitive(t *testing.T) {

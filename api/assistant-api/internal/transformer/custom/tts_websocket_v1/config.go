@@ -13,8 +13,9 @@ import (
 	"io"
 	"strings"
 
-	internal_transformer_custom_websocketdsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/websocketdsl"
+	internal_transformer_custom_dsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/dsl"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
 
@@ -52,7 +53,7 @@ const (
 	requestPacketInterrupt = "interrupt"
 )
 
-var queryContract = internal_transformer_custom_websocketdsl.Contract{
+var queryContract = internal_transformer_custom_dsl.Contract{
 	SupportedVariables: []string{
 		"message_id",
 		"voice_id",
@@ -63,7 +64,7 @@ var queryContract = internal_transformer_custom_websocketdsl.Contract{
 	},
 }
 
-var requestRuleContract = internal_transformer_custom_websocketdsl.Contract{
+var requestRuleContract = internal_transformer_custom_dsl.Contract{
 	SupportedRequestPackets: []string{
 		requestPacketText,
 		requestPacketDone,
@@ -136,7 +137,7 @@ var requestRuleContract = internal_transformer_custom_websocketdsl.Contract{
 	},
 }
 
-var responseContract = internal_transformer_custom_websocketdsl.Contract{
+var responseContract = internal_transformer_custom_dsl.Contract{
 	SupportedResponseFrames: []string{
 		frameTypeBinary,
 		frameTypeJSON,
@@ -168,11 +169,11 @@ type Config struct {
 	ResponseRules []ResponseRule
 }
 
-type RequestRule = internal_transformer_custom_websocketdsl.RequestRule
-type RequestWhen = internal_transformer_custom_websocketdsl.RequestWhen
-type RequestSend = internal_transformer_custom_websocketdsl.Send
-type ResponseRule = internal_transformer_custom_websocketdsl.ResponseRule
-type ResponseWhen = internal_transformer_custom_websocketdsl.When
+type RequestRule = internal_transformer_custom_dsl.RequestRule
+type RequestWhen = internal_transformer_custom_dsl.RequestWhen
+type RequestSend = internal_transformer_custom_dsl.Send
+type ResponseRule = internal_transformer_custom_dsl.ResponseRule
+type ResponseWhen = internal_transformer_custom_dsl.When
 
 type configParser struct {
 	credential *protos.VaultCredential
@@ -239,12 +240,9 @@ func (parser *configParser) loadCredential(config *Config) error {
 }
 
 func (parser *configParser) loadOptions(config *Config) error {
-	voiceID, err := parser.opts.GetString(optionKeyVoiceID)
-	if err != nil || strings.TrimSpace(voiceID) == "" {
-		return fmt.Errorf("custom-tts websocket_v1: %s is required", optionKeyVoiceID)
+	if voiceID, err := parser.opts.GetString(optionKeyVoiceID); err == nil {
+		config.VoiceID = strings.TrimSpace(voiceID)
 	}
-	config.VoiceID = strings.TrimSpace(voiceID)
-
 	if model, err := parser.opts.GetString(optionKeyModel); err == nil {
 		config.Model = strings.TrimSpace(model)
 	}
@@ -284,6 +282,12 @@ func (parser *configParser) decodeJSONObject(key string, required bool, destinat
 			return false, fmt.Errorf("custom-tts websocket_v1: %s is required", key)
 		}
 		return false, nil
+	}
+	if !required {
+		rawString, ok := raw.(string)
+		if !ok || !validator.NotBlank(rawString) {
+			return false, nil
+		}
 	}
 
 	payload, err := parser.toJSONBytes(raw, key)
@@ -355,12 +359,9 @@ func (parser *configParser) decodeJSON(payload []byte, destination any, key stri
 }
 
 func (config *Config) validate() error {
-	core := internal_transformer_custom_websocketdsl.NewCore("custom-tts websocket_v1")
+	core := internal_transformer_custom_dsl.NewCore("custom-tts websocket_v1")
 	if strings.TrimSpace(config.BaseURL) == "" {
 		return fmt.Errorf("custom-tts websocket_v1: base url must be specified in credentials")
-	}
-	if strings.TrimSpace(config.VoiceID) == "" {
-		return fmt.Errorf("custom-tts websocket_v1: %s is required", optionKeyVoiceID)
 	}
 	if strings.TrimSpace(config.Encoding) == "" {
 		return fmt.Errorf("custom-tts websocket_v1: %s must not be empty", optionKeyEncoding)

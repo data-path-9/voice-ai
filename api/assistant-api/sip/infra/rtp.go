@@ -146,6 +146,21 @@ func (h *RTPHandler) FlushAudioOut() {
 	}
 }
 
+func (h *RTPHandler) SetFallbackAudioSource(source RTPFallbackAudioSource) {
+	if h == nil {
+		return
+	}
+	if h.inner != nil {
+		h.inner.SetFallbackAudioSource(internal_core.RTPFallbackAudioSource(source))
+		return
+	}
+	h.fallbackSource = source
+}
+
+func (h *RTPHandler) ClearFallbackAudioSource() {
+	h.SetFallbackAudioSource(nil)
+}
+
 func (h *RTPHandler) GetCodec() *Codec {
 	if h == nil {
 		return nil

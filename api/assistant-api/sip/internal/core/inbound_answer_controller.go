@@ -9,6 +9,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/emiago/sipgo"
@@ -25,7 +26,10 @@ type inboundAnswerController struct {
 	policy      InboundAnswerPolicy
 	callID      string
 
+	mu                   sync.Mutex
 	finalResponseStarted bool
+	ringingCancel        context.CancelFunc
+	ringingStopped       chan struct{}
 }
 
 func newInboundAnswerController(
@@ -59,15 +63,84 @@ func (controller *inboundAnswerController) SendTrying() error {
 	return nil
 }
 
-func (controller *inboundAnswerController) SendRinging() error {
+func (controller *inboundAnswerController) StartRinging(ctx context.Context) error {
+	if controller.dialog == nil {
+		return fmt.Errorf("inbound dialog session is required before ringing")
+	}
+	controller.mu.Lock()
+	if controller.ringingCancel != nil {
+		controller.mu.Unlock()
+		return nil
+	}
+	controller.mu.Unlock()
+	if err := controller.sendRingingResponse(true); err != nil {
+		return err
+	}
+
+	ringingContext, ringingCancel := context.WithCancel(ctx)
+	ringingStopped := make(chan struct{})
+	controller.mu.Lock()
+	controller.ringingCancel = ringingCancel
+	controller.ringingStopped = ringingStopped
+	controller.mu.Unlock()
+	go controller.runRingingLoop(ringingContext, ringingStopped)
+	return nil
+}
+
+func (controller *inboundAnswerController) StopRinging() {
+	controller.mu.Lock()
+	cancel := controller.ringingCancel
+	stopped := controller.ringingStopped
+	controller.ringingCancel = nil
+	controller.ringingStopped = nil
+	controller.mu.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	<-stopped
+}
+
+func (controller *inboundAnswerController) sendRingingResponse(recordPhase bool) error {
 	if controller.dialog == nil {
 		return fmt.Errorf("inbound dialog session is required before ringing")
 	}
 	if err := controller.dialog.Respond(180, "Ringing", nil); err != nil {
 		return fmt.Errorf("failed to send 180 Ringing: %w", err)
 	}
-	controller.recordPhase(InboundSetupPhaseRingingSent, LifecycleReasonInboundInviteRinging)
+	if recordPhase {
+		controller.recordPhase(InboundSetupPhaseRingingSent, LifecycleReasonInboundInviteRinging)
+	}
 	return nil
+}
+
+func (controller *inboundAnswerController) runRingingLoop(ctx context.Context, stopped chan<- struct{}) {
+	defer close(stopped)
+	ticker := time.NewTicker(controller.server.effectiveInboundRingingInterval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-controller.server.ctx.Done():
+			return
+		case <-controller.session.Context().Done():
+			return
+		case <-ticker.C:
+		}
+		controller.mu.Lock()
+		finalResponseStarted := controller.finalResponseStarted
+		controller.mu.Unlock()
+		if finalResponseStarted {
+			return
+		}
+		if err := controller.sendRingingResponse(false); err != nil {
+			controller.server.logger.Warnw("Inbound SIP ringing retransmit failed",
+				"error", err,
+				"call_id", controller.callID)
+			return
+		}
+	}
 }
 
 func (controller *inboundAnswerController) WaitUntilAnswerReady(ctx context.Context) error {
@@ -106,7 +179,10 @@ func (controller *inboundAnswerController) AnswerAndWaitACK(ctx context.Context,
 	default:
 	}
 
+	controller.StopRinging()
+	controller.mu.Lock()
 	controller.finalResponseStarted = true
+	controller.mu.Unlock()
 	if !controller.server.beginPendingInviteFinalResponse(controller.callID) {
 		return ErrInboundInviteCancelled
 	}
@@ -131,9 +207,12 @@ func (controller *inboundAnswerController) CancelBeforeAnswer(reason LifecycleRe
 	if controller == nil {
 		return false
 	}
+	controller.StopRinging()
 	terminated := controller.server.terminatePendingInvite(controller.callID, 487)
 	if terminated {
+		controller.mu.Lock()
 		controller.finalResponseStarted = true
+		controller.mu.Unlock()
 	}
 	return terminated
 }
@@ -142,19 +221,30 @@ func (controller *inboundAnswerController) FailBeforeAnswer(statusCode int, fail
 	if controller == nil {
 		return
 	}
+	controller.mu.Lock()
 	if controller.finalResponseStarted {
+		controller.mu.Unlock()
 		return
 	}
+	controller.mu.Unlock()
+	controller.StopRinging()
 	if controller.session == nil {
 		controller.server.RejectInboundInvite(controller.request, controller.transaction, controller.callID, statusCode, failureClass, reason, err)
+		controller.mu.Lock()
 		controller.finalResponseStarted = true
+		controller.mu.Unlock()
 		return
 	}
 	controller.sendSessionFinalResponse(statusCode)
 }
 
 func (controller *inboundAnswerController) FinalResponseStarted() bool {
-	return controller != nil && controller.finalResponseStarted
+	if controller == nil {
+		return false
+	}
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	return controller.finalResponseStarted
 }
 
 func (controller *inboundAnswerController) waitForMinimumRing(ctx context.Context, minRingDuration time.Duration) error {
@@ -222,14 +312,20 @@ func (controller *inboundAnswerController) waitForAssistantAudioReady(ctx contex
 }
 
 func (controller *inboundAnswerController) sendSessionFinalResponse(statusCode int) {
+	controller.mu.Lock()
 	if controller.finalResponseStarted {
+		controller.mu.Unlock()
 		return
 	}
+	controller.mu.Unlock()
+	controller.StopRinging()
 	if controller.dialog == nil || controller.dialog.InviteRequest == nil {
 		controller.server.logger.Errorw("Inbound session final response skipped without dialog ownership",
 			"call_id", controller.callID,
 			"status_code", statusCode)
+		controller.mu.Lock()
 		controller.finalResponseStarted = true
+		controller.mu.Unlock()
 		return
 	}
 
@@ -245,7 +341,9 @@ func (controller *inboundAnswerController) sendSessionFinalResponse(statusCode i
 			"call_id", controller.callID,
 			"status_code", statusCode)
 	}
+	controller.mu.Lock()
 	controller.finalResponseStarted = true
+	controller.mu.Unlock()
 }
 
 func (controller *inboundAnswerController) recordPhase(phase InboundSetupPhase, reason LifecycleReason) {

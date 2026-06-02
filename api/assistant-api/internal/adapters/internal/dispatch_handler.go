@@ -81,8 +81,11 @@ func (h requestorDispatchHandler) HandleUserAudio(ctx context.Context, vl intern
 		)
 		return
 	}
+	if h.r.vadExecutor != nil {
+		h.r.OnPacket(ctx,
+			internal_type.VadAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio})
+	}
 	h.r.OnPacket(ctx,
-		internal_type.VadAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 		internal_type.SpeechToTextAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 		internal_type.EndOfSpeechAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 	)
@@ -109,20 +112,21 @@ func (h requestorDispatchHandler) HandleDenoise(ctx context.Context, vl internal
 		h.r.logger.Warnf("denoiser returned unexpected error: %+v", err)
 	}
 }
+
 func (h requestorDispatchHandler) HandleDenoisedAudio(ctx context.Context, vl internal_type.DenoisedAudioPacket) {
+	if h.r.vadExecutor != nil {
+		h.r.OnPacket(ctx,
+			internal_type.VadAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio})
+	}
 	h.r.OnPacket(ctx,
-		internal_type.VadAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 		internal_type.SpeechToTextAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 		internal_type.EndOfSpeechAudioPacket{ContextID: vl.ContextID, Audio: vl.Audio},
 	)
 }
 
 func (h requestorDispatchHandler) HandleVadAudio(ctx context.Context, vl internal_type.VadAudioPacket) {
-	vad := h.r.vadExecutor
-	if vad != nil {
-		if err := vad.Execute(ctx, internal_type.UserAudioReceivedPacket{ContextID: vl.ContextID, Audio: vl.Audio}); err != nil {
-			h.r.logger.Warnf("error while processing with vad %s", err.Error())
-		}
+	if err := h.r.vadExecutor.Execute(ctx, internal_type.UserAudioReceivedPacket{ContextID: vl.ContextID, Audio: vl.Audio}); err != nil {
+		h.r.logger.Warnf("error while processing with vad %s", err.Error())
 	}
 }
 func (h requestorDispatchHandler) HandleVadSpeechActivity(ctx context.Context, vl internal_type.VadSpeechActivityPacket) {
@@ -236,13 +240,17 @@ func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context
 	default:
 		switch p.Event {
 		case internal_type.InterruptionEventStart:
-			if p.StartAt < 5 {
-				return
-			}
-			if err := h.r.Transition(Interrupt); err != nil {
-				return
-			}
-			h.r.OnPacket(ctx, internal_type.EndOfSpeechInterruptionPacket{ContextID: p.ContextID, Source: internal_type.InterruptionSourceVad})
+			// if p.StartAt < 5 {
+			// 	return
+			// }
+			h.r.logger.Debugf("interuption %+v", p)
+			h.r.Transition(Interrupt)
+			h.r.OnPacket(
+				ctx,
+				internal_type.EndOfSpeechInterruptionPacket{ContextID: p.ContextID, Source: internal_type.InterruptionSourceVad},
+				internal_type.SpeechToTextStartPacket{ContextID: p.ContextID},
+			)
+			//
 			utils.Go(ctx, func() {
 				h.r.Notify(ctx, &protos.ConversationInterruption{
 					Type: protos.ConversationInterruption_INTERRUPTION_TYPE_VAD,
@@ -250,7 +258,7 @@ func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context
 				})
 			})
 		case internal_type.InterruptionEventEnd:
-			h.r.OnPacket(ctx, internal_type.SpeechToTextInterruptPacket{ContextID: p.ContextID})
+			h.r.OnPacket(ctx, internal_type.SpeechToTextEndPacket{ContextID: p.ContextID})
 		}
 	}
 }
@@ -277,10 +285,19 @@ func (h requestorDispatchHandler) HandleLLMInterrupt(ctx context.Context, p inte
 		}
 	}
 }
-func (h requestorDispatchHandler) HandleSpeechToTextInterrupt(ctx context.Context, p internal_type.SpeechToTextInterruptPacket) {
+
+func (h requestorDispatchHandler) HandleSpeechToTextStart(ctx context.Context, p internal_type.SpeechToTextStartPacket) {
 	if h.r.speechToTextTransformer != nil {
 		if err := h.r.speechToTextTransformer.Transform(ctx, p); err != nil {
-			h.r.logger.Errorf("stt interrupt: %v", err)
+			h.r.logger.Errorf("stt end: %v", err)
+		}
+	}
+}
+
+func (h requestorDispatchHandler) HandleSpeechToTextEnd(ctx context.Context, p internal_type.SpeechToTextEndPacket) {
+	if h.r.speechToTextTransformer != nil {
+		if err := h.r.speechToTextTransformer.Transform(ctx, p); err != nil {
+			h.r.logger.Errorf("stt start: %v", err)
 		}
 	}
 }
