@@ -8,6 +8,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -99,7 +100,7 @@ func (s *Server) BridgeTransfer(ctx context.Context, inbound, outbound *Session,
 	audioCtx, audioCancel := context.WithCancel(ctx)
 	defer audioCancel()
 
-	go s.forwardBridgeAudio(audioCtx, outRTP.AudioIn(), inRTP.AudioOut(), needsTranscode, outCodec, inCodec, onOperatorAudio)
+	go s.forwardBridgeAudio(audioCtx, outRTP.AudioIn(), inRTP, needsTranscode, outCodec, inCodec, onOperatorAudio)
 
 	var reason BridgeEndReason
 	select {
@@ -167,8 +168,8 @@ func (s *Server) beginBridgeLegLifecycle(session *Session, legRole string) error
 	return nil
 }
 
-// forwardBridgeAudio reads audio from src and writes to dst, transcoding if needed.
-func (s *Server) forwardBridgeAudio(ctx context.Context, src <-chan []byte, dst chan<- []byte, needsTranscode bool, srcCodec, dstCodec *Codec, onAudio func([]byte)) {
+// forwardBridgeAudio reads audio from src and enqueues it to dst, transcoding if needed.
+func (s *Server) forwardBridgeAudio(ctx context.Context, src <-chan []byte, dst internal_type.SIPRTPBridgeTarget, needsTranscode bool, srcCodec, dstCodec *Codec, onAudio func([]byte)) {
 	var droppedFrames uint64
 	for {
 		select {
@@ -182,20 +183,18 @@ func (s *Server) forwardBridgeAudio(ctx context.Context, src <-chan []byte, dst 
 			if needsTranscode {
 				data = s.transcodeG711(data, srcCodec, dstCodec)
 			}
-			bridgeFrameDelivered := false
-			select {
-			case dst <- data:
-				bridgeFrameDelivered = true
-			case <-ctx.Done():
-				return
-			default:
+			if err := dst.EnqueueAudio(data); err != nil {
 				droppedFrames++
-				if s.logger != nil && (droppedFrames == 1 || droppedFrames%100 == 0) {
+				if errors.Is(err, ErrRTPHandlerStopped) {
+					return
+				}
+				if s.logger != nil && errors.Is(err, ErrRTPOutputQueueFull) && (droppedFrames == 1 || droppedFrames%100 == 0) {
 					s.logger.Warnw("Bridge RTP output queue full; dropping frame",
 						"dropped_frames_total", droppedFrames)
 				}
+				continue
 			}
-			if bridgeFrameDelivered && onAudio != nil {
+			if onAudio != nil {
 				onAudio(rawData)
 			}
 		}

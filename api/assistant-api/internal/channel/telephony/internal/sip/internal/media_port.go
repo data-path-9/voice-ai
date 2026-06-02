@@ -8,6 +8,7 @@ package internal_sip
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -316,6 +317,9 @@ func (port *MediaPort) sendPipelineUserAudio(userPCM16k []byte, receivedAt time.
 }
 
 func (port *MediaPort) deliverAssistantFrame(outputFrame internal_telephony_media.AssistantOutputFrame) error {
+	if port == nil || port.closed.Load() {
+		return sip_infra.ErrSessionClosed
+	}
 	providerAudio, err := port.audioProcessor.encodeAssistantOutputFrame(outputFrame.ProviderAudio)
 	if err != nil {
 		return err
@@ -323,10 +327,11 @@ func (port *MediaPort) deliverAssistantFrame(outputFrame internal_telephony_medi
 	if len(providerAudio) == 0 {
 		return nil
 	}
-	select {
-	case port.rtpHandler.AudioOut() <- providerAudio:
-	default:
-		return port.audioProcessor.rtpOutputQueueFullError()
+	if err := port.rtpHandler.EnqueueAudio(providerAudio); err != nil {
+		if errors.Is(err, sip_infra.ErrRTPOutputQueueFull) {
+			return port.audioProcessor.rtpOutputQueueFullError()
+		}
+		return err
 	}
 	if outputFrame.Idle || len(outputFrame.ProviderAudio) == 0 {
 		return nil

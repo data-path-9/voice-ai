@@ -21,6 +21,8 @@ var (
 	ErrSessionNotFound            = internal_core.ErrSessionNotFound
 	ErrSessionClosed              = internal_core.ErrSessionClosed
 	ErrRTPNotInitialized          = internal_core.ErrRTPNotInitialized
+	ErrRTPHandlerStopped          = internal_core.ErrRTPHandlerStopped
+	ErrRTPOutputQueueFull         = internal_core.ErrRTPOutputQueueFull
 	ErrSDPParseFailed             = internal_core.ErrSDPParseFailed
 	ErrCodecNotSupported          = internal_core.ErrCodecNotSupported
 	ErrConnectionFailed           = internal_core.ErrConnectionFailed

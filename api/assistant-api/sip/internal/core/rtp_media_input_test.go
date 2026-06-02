@@ -7,6 +7,7 @@
 package core
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -85,12 +86,25 @@ func TestRTPHandler_StopOwnsLoopShutdownBeforeClosingChannels(t *testing.T) {
 		}
 	}, time.Second, 10*time.Millisecond)
 
-	require.Eventually(t, func() bool {
-		select {
-		case _, ok := <-handler.audioOutChan:
-			return !ok
-		default:
-			return false
-		}
-	}, time.Second, 10*time.Millisecond)
+	select {
+	case _, ok := <-handler.audioOutChan:
+		require.True(t, ok, "RTP output queue must not be closed by Stop")
+	default:
+	}
+}
+
+func TestRTPHandler_EnqueueAudioReportsBackpressureAndStopped(t *testing.T) {
+	handler := newTestRTPHandler()
+	for i := 0; i < cap(handler.audioOutChan); i++ {
+		require.NoError(t, handler.EnqueueAudio([]byte{byte(i)}))
+	}
+
+	err := handler.EnqueueAudio([]byte{0xff})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRTPOutputQueueFull))
+
+	require.NoError(t, handler.Stop())
+	err = handler.EnqueueAudio([]byte{0x01})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRTPHandlerStopped))
 }

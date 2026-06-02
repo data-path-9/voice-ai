@@ -321,7 +321,7 @@ func (h *RTPHandler) Stop() error {
 	}
 
 	h.loops.Wait()
-	h.closeChannels()
+	h.closeInboundChannel()
 
 	if h.logger != nil {
 		sent, received := h.GetStats()
@@ -333,13 +333,9 @@ func (h *RTPHandler) Stop() error {
 	return err
 }
 
-// closeChannels safely closes audio channels
-func (h *RTPHandler) closeChannels() {
+func (h *RTPHandler) closeInboundChannel() {
 	if h.audioInChan != nil {
 		close(h.audioInChan)
-	}
-	if h.audioOutChan != nil {
-		close(h.audioOutChan)
 	}
 }
 
@@ -467,9 +463,44 @@ func (h *RTPHandler) AudioIn() <-chan []byte {
 	return h.audioInChan
 }
 
-// AudioOut returns the channel for sending audio
-func (h *RTPHandler) AudioOut() chan<- []byte {
-	return h.audioOutChan
+// EnqueueAudio queues outbound audio without exposing RTP channel lifecycle.
+// Producers never own channel close; stopped or full queues are returned as errors.
+func (h *RTPHandler) EnqueueAudio(audio []byte) error {
+	if h == nil {
+		return ErrRTPNotInitialized
+	}
+	if len(audio) == 0 {
+		return nil
+	}
+	if !h.running.Load() {
+		return ErrRTPHandlerStopped
+	}
+	if h.audioOutChan == nil {
+		return ErrRTPNotInitialized
+	}
+	if h.ctx != nil {
+		select {
+		case <-h.ctx.Done():
+			return ErrRTPHandlerStopped
+		default:
+		}
+	}
+	if h.ctx != nil {
+		select {
+		case h.audioOutChan <- audio:
+			return nil
+		case <-h.ctx.Done():
+			return ErrRTPHandlerStopped
+		default:
+			return ErrRTPOutputQueueFull
+		}
+	}
+	select {
+	case h.audioOutChan <- audio:
+		return nil
+	default:
+		return ErrRTPOutputQueueFull
+	}
 }
 
 // FlushAudioOut signals the sendLoop to discard all pending audio.

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	"github.com/rapidaai/protos"
@@ -275,4 +276,17 @@ func TestMediaPort_CloseIsIdempotent(t *testing.T) {
 
 	require.NoError(t, mediaPort.Close())
 	require.NoError(t, mediaPort.Close())
+}
+
+func TestMediaPort_DeliverAssistantFrameAfterCloseReturnsSessionClosed(t *testing.T) {
+	mediaPort, _, _ := newMediaPortForTest(t, nil)
+	mediaPort.Start()
+	require.NoError(t, mediaPort.Close())
+
+	require.NotPanics(t, func() {
+		err := mediaPort.deliverAssistantFrame(internal_telephony_media.AssistantOutputFrame{
+			ProviderAudio: make([]byte, BridgeOutputFrameSize),
+		})
+		assert.ErrorIs(t, err, sip_infra.ErrSessionClosed)
+	})
 }

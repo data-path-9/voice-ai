@@ -8,6 +8,7 @@ package internal_sip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -354,15 +355,9 @@ func (p *AudioProcessor) ForwardUserAudio(audioData []byte) bool {
 	if state.forwardingTranscode != nil {
 		audioData = state.forwardingTranscode(audioData)
 	}
-	bridgeFrameDelivered := false
-	select {
-	case state.outputTarget.AudioOut() <- audioData:
-		bridgeFrameDelivered = true
-	default:
-	}
-	if !bridgeFrameDelivered {
+	if err := state.outputTarget.EnqueueAudio(audioData); err != nil {
 		dropped := p.droppedBridgeFrames.Add(1)
-		if p.pushInput != nil && (dropped == 1 || dropped%100 == 0) {
+		if p.pushInput != nil && errors.Is(err, sip_infra.ErrRTPOutputQueueFull) && (dropped == 1 || dropped%100 == 0) {
 			p.pushInput(&protos.ConversationEvent{
 				Name: observe.ComponentTelephony,
 				Data: map[string]string{
@@ -464,8 +459,10 @@ func (p *AudioProcessor) PlayRingback(ctx context.Context) {
 			if codec.Name == sip_infra.CodecPCMA.Name {
 				frame = internal_audio.UlawToAlaw(frame)
 			}
+			if err := p.rtpHandler.EnqueueAudio(frame); errors.Is(err, sip_infra.ErrRTPHandlerStopped) {
+				return
+			}
 			select {
-			case p.rtpHandler.AudioOut() <- frame:
 			case <-ctx.Done():
 				return
 			default:

@@ -38,7 +38,7 @@ var (
 
 	ErrProviderAudioConversionFailed  = errors.New("audio conversion to 16kHz linear16 failed")
 	ErrAssistantAudioConversionFailed = errors.New("audio conversion to mulaw 8kHz failed")
-	ErrRTPOutputQueueFull             = errors.New("sip rtp output queue full")
+	ErrRTPOutputQueueFull             = sip_infra.ErrRTPOutputQueueFull
 )
 
 type AudioProcessorConfig struct {

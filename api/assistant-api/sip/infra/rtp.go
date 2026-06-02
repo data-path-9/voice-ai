@@ -108,17 +108,25 @@ func (h *RTPHandler) AudioIn() <-chan []byte {
 	return h.audioInChan
 }
 
-func (h *RTPHandler) AudioOut() chan<- []byte {
+func (h *RTPHandler) EnqueueAudio(audio []byte) error {
 	if h == nil {
+		return ErrRTPNotInitialized
+	}
+	if len(audio) == 0 {
 		return nil
 	}
 	if h.inner != nil {
-		return h.inner.AudioOut()
+		return h.inner.EnqueueAudio(audio)
 	}
 	if h.audioOutChan == nil {
 		h.audioOutChan = make(chan []byte, 100)
 	}
-	return h.audioOutChan
+	select {
+	case h.audioOutChan <- audio:
+		return nil
+	default:
+		return ErrRTPOutputQueueFull
+	}
 }
 
 func (h *RTPHandler) FlushAudioOut() {

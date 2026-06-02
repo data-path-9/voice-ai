@@ -357,8 +357,11 @@ func TestRTPTypeManualHandlerFallback(t *testing.T) {
 	if codec := handler.GetCodec(); codec == nil || *codec != CodecPCMA {
 		t.Fatalf("expected manual RTP codec PCMA, got %#v", codec)
 	}
-	if handler.AudioIn() == nil || handler.AudioOut() == nil {
-		t.Fatal("expected manual RTP audio channels")
+	if handler.AudioIn() == nil {
+		t.Fatal("expected manual RTP input channel")
+	}
+	if err := handler.EnqueueAudio([]byte{0x01}); err != nil {
+		t.Fatalf("expected manual RTP output enqueue, got %v", err)
 	}
 
 	handler.FlushAudioOut()

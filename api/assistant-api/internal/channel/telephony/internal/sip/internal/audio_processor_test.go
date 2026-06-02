@@ -484,9 +484,7 @@ func TestForwardUserAudio_BridgeActive_SuccessPath(t *testing.T) {
 	proc.ConnectTransferMedia(bridgeRTP, &sip_infra.CodecPCMU, sip_infra.CodecPCMU.Name)
 
 	audio := []byte{0xAA, 0xBB, 0xCC}
-	// ForwardUserAudio sends to outRTP.AudioOut() (non-blocking) and queues to bridgeUserCh.
-	// We verify the return value and bridgeUserCh; outRTP.AudioOut() is send-only so we
-	// can't read from it, but the non-blocking send into its buffered channel won't fail.
+	// ForwardUserAudio enqueues bridge RTP and records only after enqueue succeeds.
 	result := proc.ForwardUserAudio(audio)
 	assert.True(t, result)
 
@@ -520,8 +518,7 @@ func TestForwardUserAudio_WithTranscode_PCMU_to_PCMA(t *testing.T) {
 	assert.True(t, result, "should return true when bridge is active")
 
 	// Raw (untranscoded) audio should still go to bridgeUserCh.
-	// The transcode only applies to what's sent to outRTP.AudioOut() (which is
-	// send-only and can't be read in tests). We verify the contract by confirming
+	// The transcode only applies to the bridge RTP enqueue. We verify the contract by confirming
 	// that bridgeUserCh gets the original raw audio, proving the transcode path
 	// is separate.
 	select {
@@ -574,9 +571,8 @@ func TestForwardUserAudio_DoesNotRecordWhenBridgeRTPQueueFull(t *testing.T) {
 		PushInput:  rec.push,
 	})
 	bridgeRTP := testRTPHandler(t, &sip_infra.CodecPCMU)
-	bridgeAudioOut := bridgeRTP.AudioOut()
-	for i := 0; i < cap(bridgeAudioOut); i++ {
-		bridgeAudioOut <- []byte{byte(i)}
+	for i := 0; i < 100; i++ {
+		require.NoError(t, bridgeRTP.EnqueueAudio([]byte{byte(i)}))
 	}
 	proc.ConnectTransferMedia(bridgeRTP, &sip_infra.CodecPCMU, sip_infra.CodecPCMU.Name)
 
@@ -772,8 +768,7 @@ func TestConnectTransferMedia_PCMA_to_PCMU_Transcode(t *testing.T) {
 	result := proc.ForwardUserAudio(audio)
 	assert.True(t, result)
 
-	// bridgeUserCh always gets the raw (untranscoded) audio.
-	// Transcode is applied only to the send to outRTP.AudioOut() which is send-only.
+	// bridgeUserCh always gets the raw audio; transcode is limited to bridge RTP enqueue.
 	select {
 	case queued := <-proc.bridgeUserCh:
 		assert.Equal(t, audio, queued.audio, "bridgeUserCh should get raw untranscoded audio")

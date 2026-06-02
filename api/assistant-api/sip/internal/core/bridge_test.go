@@ -23,6 +23,23 @@ func bridgeTestLogger() commons.Logger {
 	return l
 }
 
+type bridgeAudioSink struct {
+	frames chan []byte
+}
+
+func newBridgeAudioSink(size int) *bridgeAudioSink {
+	return &bridgeAudioSink{frames: make(chan []byte, size)}
+}
+
+func (s *bridgeAudioSink) EnqueueAudio(audio []byte) error {
+	select {
+	case s.frames <- audio:
+		return nil
+	default:
+		return ErrRTPOutputQueueFull
+	}
+}
+
 // newTestRTPHandler creates an RTPHandler with pre-made channels and no real UDP socket.
 func newTestRTPHandler() *RTPHandler {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -142,7 +159,7 @@ func TestForwardBridgeAudio_PassthroughSameCodec(t *testing.T) {
 	srv := bridgeTestServer()
 
 	src := make(chan []byte, 10)
-	dst := make(chan []byte, 10)
+	dst := newBridgeAudioSink(10)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go srv.forwardBridgeAudio(ctx, src, dst, false, &CodecPCMU, &CodecPCMU, nil)
@@ -152,7 +169,7 @@ func TestForwardBridgeAudio_PassthroughSameCodec(t *testing.T) {
 	}
 	for i := 0; i < 5; i++ {
 		select {
-		case frame := <-dst:
+		case frame := <-dst.frames:
 			assert.Equal(t, []byte{byte(i), byte(i + 1)}, frame)
 		case <-time.After(100 * time.Millisecond):
 			t.Fatalf("timeout waiting for frame %d", i)
@@ -166,7 +183,7 @@ func TestForwardBridgeAudio_TranscodesWhenNeeded(t *testing.T) {
 	srv := bridgeTestServer()
 
 	src := make(chan []byte, 10)
-	dst := make(chan []byte, 10)
+	dst := newBridgeAudioSink(10)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -176,7 +193,7 @@ func TestForwardBridgeAudio_TranscodesWhenNeeded(t *testing.T) {
 	src <- alaw
 
 	select {
-	case frame := <-dst:
+	case frame := <-dst.frames:
 		assert.NotEqual(t, alaw, frame, "should be transcoded")
 		assert.Len(t, frame, len(alaw))
 	case <-time.After(100 * time.Millisecond):
@@ -189,7 +206,7 @@ func TestForwardBridgeAudio_ExitsOnContextCancel(t *testing.T) {
 	srv := bridgeTestServer()
 
 	src := make(chan []byte, 10)
-	dst := make(chan []byte, 10)
+	dst := newBridgeAudioSink(10)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan struct{})
@@ -212,7 +229,7 @@ func TestForwardBridgeAudio_ExitsOnSrcClose(t *testing.T) {
 	srv := bridgeTestServer()
 
 	src := make(chan []byte, 10)
-	dst := make(chan []byte, 10)
+	dst := newBridgeAudioSink(10)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -236,7 +253,7 @@ func TestForwardBridgeAudio_DropsFrameWhenDstFull(t *testing.T) {
 	srv := bridgeTestServer()
 
 	src := make(chan []byte, 10)
-	dst := make(chan []byte, 1)
+	dst := newBridgeAudioSink(1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -252,7 +269,7 @@ func TestForwardBridgeAudio_DropsFrameWhenDstFull(t *testing.T) {
 	}
 
 	select {
-	case frame := <-dst:
+	case frame := <-dst.frames:
 		assert.Equal(t, []byte{0x01}, frame)
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("forwardBridgeAudio is blocked")
@@ -264,12 +281,12 @@ func TestForwardBridgeAudio_DoesNotRecordDroppedFrame(t *testing.T) {
 	srv := bridgeTestServer()
 
 	src := make(chan []byte, 1)
-	dst := make(chan []byte, 1)
+	dst := newBridgeAudioSink(1)
 	recorded := make(chan []byte, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dst <- []byte{0xff}
+	dst.frames <- []byte{0xff}
 	go srv.forwardBridgeAudio(ctx, src, dst, false, &CodecPCMU, &CodecPCMU, func(audio []byte) {
 		recorded <- audio
 	})
@@ -621,7 +638,7 @@ func TestForwardBridgeAudio_Passthrough_10Frames(t *testing.T) {
 	srv := bridgeTestServer()
 
 	src := make(chan []byte, 20)
-	dst := make(chan []byte, 20)
+	dst := newBridgeAudioSink(20)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -634,7 +651,7 @@ func TestForwardBridgeAudio_Passthrough_10Frames(t *testing.T) {
 
 	for i := 0; i < frameCount; i++ {
 		select {
-		case frame := <-dst:
+		case frame := <-dst.frames:
 			assert.Equal(t, []byte{byte(i), byte(i * 2)}, frame, "frame %d mismatch", i)
 		case <-time.After(200 * time.Millisecond):
 			t.Fatalf("timeout waiting for frame %d of %d", i, frameCount)
@@ -647,7 +664,7 @@ func TestForwardBridgeAudio_ContextCancel_NoHang(t *testing.T) {
 	srv := bridgeTestServer()
 
 	src := make(chan []byte) // unbuffered — blocks if forwardBridgeAudio tries to read
-	dst := make(chan []byte, 10)
+	dst := newBridgeAudioSink(10)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan struct{})
@@ -668,7 +685,7 @@ func TestForwardBridgeAudio_ContextCancel_NoHang(t *testing.T) {
 
 	// dst should be empty — no frames were sent
 	select {
-	case <-dst:
+	case <-dst.frames:
 		t.Fatal("unexpected frame on dst after cancel")
 	default:
 		// expected

@@ -23,6 +23,8 @@ var (
 	ErrSessionNotFound            = errors.New("SIP session not found")
 	ErrSessionClosed              = errors.New("SIP session is closed")
 	ErrRTPNotInitialized          = errors.New("RTP handler not initialized")
+	ErrRTPHandlerStopped          = errors.New("RTP handler is stopped")
+	ErrRTPOutputQueueFull         = errors.New("RTP output queue is full")
 	ErrSDPParseFailed             = errors.New("failed to parse SDP")
 	ErrCodecNotSupported          = errors.New("codec not supported")
 	ErrConnectionFailed           = errors.New("SIP connection failed")
