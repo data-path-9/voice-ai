@@ -25,6 +25,12 @@ func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipe
 	if err != nil {
 		rec.Outcome = OutcomeClaimError
 		m.logger.Warnw("Ownership claim failed", "did", rec.DID, "error", err)
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, RegistrationStatusUpdate{
+			Error:         err.Error(),
+			FailureClass:  RegistrationFailureClassOwnership,
+			FailureReason: RegistrationFailureReasonOwnershipClaimFailed,
+			OwnerInstance: m.instanceID,
+		})
 		return nil
 	}
 	if claimed {
@@ -48,6 +54,12 @@ func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipe
 	if err != nil {
 		rec.Outcome = OutcomeClaimError
 		m.logger.Warnw("Ownership claim failed", "did", rec.DID, "error", err)
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, RegistrationStatusUpdate{
+			Error:         err.Error(),
+			FailureClass:  RegistrationFailureClassOwnership,
+			FailureReason: RegistrationFailureReasonOwnershipClaimFailed,
+			OwnerInstance: m.instanceID,
+		})
 		return nil
 	}
 	if cur == m.instanceID {
@@ -67,6 +79,9 @@ func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipe
 // Used by the reconcile cleanup branch and by ReleaseAll on graceful
 // shutdown so a peer can claim immediately rather than waiting for the TTL.
 func (m *Manager) releaseOwner(ctx context.Context, did string) {
+	if m.redis == nil {
+		return
+	}
 	key := OwnerKeyPrefix + did
 	cur, err := m.redis.Get(ctx, key).Result()
 	if err != nil {

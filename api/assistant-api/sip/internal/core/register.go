@@ -10,6 +10,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,40 +20,32 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/rapidaai/pkg/commons"
-)
-
-// Registration errors
-var (
-	ErrRegistrationFailed  = errors.New("SIP registration failed")
-	ErrRegistrationExpired = errors.New("SIP registration expired")
-	ErrDIDNotRegistered    = errors.New("DID is not registered")
-	ErrMissingDID          = errors.New("DID is required for registration")
-	ErrMissingServer       = errors.New("SIP server is required for registration")
-	ErrAuthFailed          = errors.New("SIP authentication failed")
-	ErrPermanentFailure    = errors.New("SIP registration permanently rejected")
+	"github.com/rapidaai/pkg/validator"
 )
 
 const (
-	defaultRegisterExpiry  = 3600 // seconds
-	renewalFraction        = 0.8  // re-register at 80% of expiry
-	defaultRegisterTimeout = 10 * time.Second
-	renewRetryInterval     = 30 * time.Second
+	defaultRegisterExpiry      = 3600 // seconds
+	renewalFraction            = 0.8  // re-register at 80% of expiry
+	defaultRegisterTimeout     = 10 * time.Second
+	renewRetryInterval         = 30 * time.Second
+	maxRegistrationExpiryGrace = 60 * time.Second
 )
 
 // Registration describes a SIP registration to be maintained with an external registrar.
 type Registration struct {
-	DID         string  // Phone number / DID being registered (e.g., "+15551234567")
-	Config      *Config // SIP provider credentials (server, username, password, realm, domain)
-	AssistantID uint64  // Assistant that owns this DID
-	ExpiresIn   int     // Desired registration duration in seconds (0 = use default)
+	DID          string  // Phone number / DID being registered (e.g., "+15551234567")
+	Config       *Config // SIP provider credentials (server, username, password, realm, domain)
+	DeploymentID uint64  // Deployment that owns this registration.
+	AssistantID  uint64  // Assistant that owns this DID
+	ExpiresIn    int     // Desired registration duration in seconds (0 = use default)
 }
 
 // Validate checks that the registration has the minimum required fields.
 func (r *Registration) Validate() error {
-	if r.DID == "" {
+	if !validator.NonNil(r) || !validator.NotBlank(r.DID) {
 		return ErrMissingDID
 	}
-	if r.Config == nil || r.Config.Server == "" {
+	if !validator.NonNil(r.Config) || !validator.NotBlank(r.Config.Server) {
 		return ErrMissingServer
 	}
 	return nil
@@ -59,11 +53,23 @@ func (r *Registration) Validate() error {
 
 // activeRegistration tracks a live registration and its renewal timer.
 type activeRegistration struct {
-	reg       *Registration
-	cancel    context.CancelFunc
-	expiresAt time.Time
-	callID    string
-	cseq      uint32
+	reg                  *Registration
+	cancel               context.CancelFunc
+	expiresAt            time.Time
+	grantedExpirySeconds int
+	callID               string
+	cseq                 uint32
+
+	renewalRetryCount int
+	lastRenewalError  error
+	failureClass      RegistrationFailureClass
+	failureReason     RegistrationFailureReason
+	statusCode        int
+	statusText        string
+}
+
+func (active *activeRegistration) expired(now time.Time) bool {
+	return now.After(active.expiresAt.Add(registrationExpiryGrace(active.grantedExpirySeconds)))
 }
 
 // RegistrationClient manages outbound SIP REGISTER transactions.
@@ -73,6 +79,7 @@ type RegistrationClient struct {
 	client       *sipgo.Client
 	listenConfig *ListenConfig
 	logger       commons.Logger
+	observer     RegistrationObserver
 
 	mu            sync.RWMutex
 	registrations map[string]*activeRegistration // keyed by DID
@@ -88,12 +95,18 @@ func NewRegistrationClient(client *sipgo.Client, listenConfig *ListenConfig, log
 	}
 }
 
+func (rc *RegistrationClient) SetObserver(observer RegistrationObserver) {
+	rc.mu.Lock()
+	rc.observer = observer
+	rc.mu.Unlock()
+}
+
 // Register sends a REGISTER request and maintains the registration with periodic renewal.
 // Handles 401/407 digest auth challenges automatically via sipgo's DoDigestAuth.
 // Idempotent: calling Register for an already-registered DID replaces the existing registration.
 func (rc *RegistrationClient) Register(ctx context.Context, reg *Registration) error {
 	if err := reg.Validate(); err != nil {
-		return err
+		return newRegistrationValidationError(err)
 	}
 
 	expiresIn := reg.ExpiresIn
@@ -117,11 +130,12 @@ func (rc *RegistrationClient) Register(ctx context.Context, reg *Registration) e
 		existing.cancel()
 	}
 	rc.registrations[reg.DID] = &activeRegistration{
-		reg:       reg,
-		cancel:    cancelReg,
-		expiresAt: time.Now().Add(time.Duration(grantedExpiry) * time.Second),
-		callID:    bindingCallID,
-		cseq:      cseq + 1,
+		reg:                  reg,
+		cancel:               cancelReg,
+		expiresAt:            time.Now().Add(time.Duration(grantedExpiry) * time.Second),
+		grantedExpirySeconds: grantedExpiry,
+		callID:               bindingCallID,
+		cseq:                 cseq + 1,
 	}
 	rc.mu.Unlock()
 
@@ -139,13 +153,9 @@ func (rc *RegistrationClient) Register(ctx context.Context, reg *Registration) e
 // Unregister sends a REGISTER with Expires: 0 to remove the registration.
 // Idempotent: returns nil if the DID is not registered.
 func (rc *RegistrationClient) Unregister(ctx context.Context, did string) error {
-	rc.mu.Lock()
+	rc.mu.RLock()
 	active, ok := rc.registrations[did]
-	if ok {
-		active.cancel()
-		delete(rc.registrations, did)
-	}
-	rc.mu.Unlock()
+	rc.mu.RUnlock()
 
 	if !ok {
 		return nil
@@ -158,8 +168,16 @@ func (rc *RegistrationClient) Unregister(ctx context.Context, did string) error 
 		rc.logger.Warnw("Failed to send REGISTER Expires:0",
 			"did", did,
 			"error", err)
+		rc.notifyUnregisterFailed(ctx, active, err)
 		return err
 	}
+
+	rc.mu.Lock()
+	if current, ok := rc.registrations[did]; ok && current == active {
+		active.cancel()
+		delete(rc.registrations, did)
+	}
+	rc.mu.Unlock()
 
 	rc.logger.Infow("SIP registration removed", "did", did)
 	return nil
@@ -185,10 +203,27 @@ func (rc *RegistrationClient) UnregisterAll(ctx context.Context) {
 
 // IsRegistered returns true if the given DID has an active registration.
 func (rc *RegistrationClient) IsRegistered(did string) bool {
+	return rc.Snapshot(did).Active
+}
+
+func (rc *RegistrationClient) Snapshot(did string) RegistrationSnapshot {
 	rc.mu.RLock()
 	defer rc.mu.RUnlock()
-	_, ok := rc.registrations[did]
-	return ok
+	active, ok := rc.registrations[did]
+	if !ok {
+		return RegistrationSnapshot{DID: did}
+	}
+	expired := active.expired(time.Now())
+	return RegistrationSnapshot{
+		DID:               did,
+		Active:            !expired,
+		Healthy:           !expired && active.lastRenewalError == nil,
+		ExpiresAt:         active.expiresAt,
+		RenewalRetryCount: active.renewalRetryCount,
+		LastRenewalError:  active.lastRenewalError,
+		FailureClass:      active.failureClass,
+		FailureReason:     active.failureReason,
+	}
 }
 
 // ActiveCount returns the number of active registrations.
@@ -212,10 +247,21 @@ func (rc *RegistrationClient) GetRegisteredDIDs() []string {
 // sendRegister constructs and sends a REGISTER request, handling digest auth if challenged.
 // Returns the granted expiry from the 200 OK response.
 func (rc *RegistrationClient) sendRegister(ctx context.Context, reg *Registration, expiresIn int, bindingCallID string, cseq uint32) (int, error) {
+	return rc.sendRegisterWithMinExpires(ctx, reg, expiresIn, bindingCallID, cseq, true)
+}
+
+func (rc *RegistrationClient) sendRegisterWithMinExpires(
+	ctx context.Context,
+	reg *Registration,
+	expiresIn int,
+	bindingCallID string,
+	cseq uint32,
+	allowMinExpiresRetry bool,
+) (int, error) {
 	cfg := reg.Config
 
 	domain := cfg.Domain
-	if domain == "" {
+	if !validator.NotBlank(domain) {
 		domain = cfg.Server
 	}
 
@@ -253,6 +299,9 @@ func (rc *RegistrationClient) sendRegister(ctx context.Context, reg *Registratio
 
 	// Contact: where the registrar should route INVITEs for this DID
 	externalIP := rc.listenConfig.GetExternalIP()
+	if err := validateRegistrationContactAddress(rc.listenConfig, externalIP); err != nil {
+		return 0, err
+	}
 	contactHdr := &sip.ContactHeader{
 		Address: sip.Uri{
 			Scheme: scheme,
@@ -288,7 +337,7 @@ func (rc *RegistrationClient) sendRegister(ctx context.Context, reg *Registratio
 
 	resp, err := rc.client.Do(reqCtx, req)
 	if err != nil {
-		return 0, fmt.Errorf("transport error: %w", err)
+		return 0, newRegistrationTransportError(reqCtx, err)
 	}
 
 	// Handle digest auth challenges (401 WWW-Authenticate / 407 Proxy-Authenticate)
@@ -302,20 +351,22 @@ func (rc *RegistrationClient) sendRegister(ctx context.Context, reg *Registratio
 			Password: cfg.Password,
 		})
 		if err != nil {
-			return 0, fmt.Errorf("%w: %v", ErrAuthFailed, err)
+			return 0, newRegistrationAuthError(0, "", err)
 		}
 	}
 
 	// Second 401/407 after digest auth means credentials are wrong
 	if resp.StatusCode == 401 || resp.StatusCode == 407 {
-		return 0, fmt.Errorf("%w: %d %s", ErrAuthFailed, resp.StatusCode, resp.Reason)
+		return 0, newRegistrationAuthError(resp.StatusCode, resp.Reason, ErrAuthFailed)
 	}
 
 	if resp.StatusCode != 200 {
-		if isPermanentSIPResponse(resp.StatusCode) {
-			return 0, fmt.Errorf("%w: %d %s", ErrPermanentFailure, resp.StatusCode, resp.Reason)
+		if resp.StatusCode == 423 && allowMinExpiresRetry {
+			if minExpires := parseMinExpires(resp); minExpires > expiresIn {
+				return rc.sendRegisterWithMinExpires(ctx, reg, minExpires, bindingCallID, cseq+1, false)
+			}
 		}
-		return 0, fmt.Errorf("rejected with %d %s", resp.StatusCode, resp.Reason)
+		return 0, newRegistrationResponseError(resp.StatusCode, resp.Reason)
 	}
 
 	// Parse granted expiry. Per RFC 3261 §10.2.4, the registrar may return the
@@ -363,21 +414,42 @@ func (rc *RegistrationClient) renewLoop(ctx context.Context, reg *Registration, 
 			cancel()
 
 			if err != nil {
+				nextRetryAt := time.Now().Add(renewRetryInterval)
+				expired, current := rc.markRenewalFailed(ctx, active, err, nextRetryAt)
 				rc.logger.Warnw("Re-registration failed",
 					"did", reg.DID,
 					"error", err,
 					"retry_in", renewRetryInterval)
+				if expired || !current {
+					return
+				}
 				timer.Reset(renewRetryInterval)
 				continue
 			}
 
+			var event RegistrationEvent
+			renewed := false
 			rc.mu.Lock()
-			if active, ok := rc.registrations[reg.DID]; ok {
+			if current, ok := rc.registrations[reg.DID]; ok && current == active {
 				active.expiresAt = time.Now().Add(time.Duration(grantedExpiry) * time.Second)
+				active.grantedExpirySeconds = grantedExpiry
 				active.cseq++
+				active.renewalRetryCount = 0
+				active.lastRenewalError = nil
+				active.failureClass = ""
+				active.failureReason = ""
+				active.statusCode = 0
+				active.statusText = ""
+				event = rc.registrationEvent(active)
+				renewed = true
 			}
 			rc.mu.Unlock()
+			if !renewed {
+				return
+			}
+			rc.notifyRenewed(ctx, event)
 
+			expiresIn = grantedExpiry
 			renewInterval = time.Duration(float64(grantedExpiry)*renewalFraction) * time.Second
 			timer.Reset(renewInterval)
 
@@ -406,6 +478,221 @@ func contextWithTimeout(parent context.Context, timeout time.Duration) (context.
 // Some registrars reject "+" in the userinfo field.
 func normalizeUser(did string) string {
 	return strings.TrimPrefix(did, "+")
+}
+
+func (rc *RegistrationClient) markRenewalFailed(
+	ctx context.Context,
+	active *activeRegistration,
+	err error,
+	nextRetryAt time.Time,
+) (bool, bool) {
+	registrationError := registrationErrorFrom(err)
+	retryCount := 0
+	expired := false
+	registrationCurrent := false
+	var event RegistrationEvent
+
+	rc.mu.Lock()
+	if currentActive, ok := rc.registrations[active.reg.DID]; ok && currentActive == active {
+		registrationCurrent = true
+		active.renewalRetryCount++
+		active.lastRenewalError = err
+		active.failureClass = RegistrationFailureClassRenewal
+		active.failureReason = RegistrationFailureReasonRenewalFailed
+		active.statusCode = registrationError.StatusCode
+		active.statusText = registrationError.StatusText
+		retryCount = active.renewalRetryCount
+		expired = active.expired(time.Now())
+		event = rc.registrationEvent(active)
+		if expired {
+			active.cancel()
+			delete(rc.registrations, active.reg.DID)
+		}
+	}
+	rc.mu.Unlock()
+	if !registrationCurrent {
+		return false, false
+	}
+
+	event.RetryCount = retryCount
+	event.NextRetryAt = nextRetryAt
+	event.Error = err
+	event.FailureClass = RegistrationFailureClassRenewal
+	event.FailureReason = RegistrationFailureReasonRenewalFailed
+	event.StatusCode = registrationError.StatusCode
+	event.StatusText = registrationError.StatusText
+
+	if expired {
+		rc.notifyExpired(ctx, event)
+		return true, true
+	}
+	rc.notifyRenewalFailed(ctx, event)
+	return false, true
+}
+
+func (rc *RegistrationClient) notifyRenewed(ctx context.Context, event RegistrationEvent) {
+	observer := rc.registrationObserver()
+	if observer != nil {
+		observer.RegistrationRenewed(ctx, event)
+	}
+}
+
+func (rc *RegistrationClient) notifyRenewalFailed(ctx context.Context, event RegistrationEvent) {
+	observer := rc.registrationObserver()
+	if observer != nil {
+		observer.RegistrationRenewalFailed(ctx, event)
+	}
+}
+
+func (rc *RegistrationClient) notifyExpired(ctx context.Context, event RegistrationEvent) {
+	observer := rc.registrationObserver()
+	if observer != nil {
+		observer.RegistrationExpired(ctx, event)
+	}
+}
+
+func (rc *RegistrationClient) notifyUnregisterFailed(ctx context.Context, active *activeRegistration, err error) {
+	registrationError := registrationErrorFrom(err)
+	event := rc.registrationEvent(active)
+	event.Error = err
+	event.FailureClass = RegistrationFailureClassUnregister
+	event.FailureReason = RegistrationFailureReasonUnregisterFailed
+	event.StatusCode = registrationError.StatusCode
+	event.StatusText = registrationError.StatusText
+
+	observer := rc.registrationObserver()
+	if observer != nil {
+		observer.RegistrationUnregisterFailed(ctx, event)
+	}
+}
+
+func (rc *RegistrationClient) registrationObserver() RegistrationObserver {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+	return rc.observer
+}
+
+func (rc *RegistrationClient) registrationEvent(active *activeRegistration) RegistrationEvent {
+	return RegistrationEvent{
+		DID:           active.reg.DID,
+		DeploymentID:  active.reg.DeploymentID,
+		AssistantID:   active.reg.AssistantID,
+		Server:        active.reg.Config.Server,
+		ExpiresAt:     active.expiresAt,
+		GrantedExpiry: active.grantedExpirySeconds,
+	}
+}
+
+func registrationErrorFrom(err error) *RegistrationError {
+	var registrationError *RegistrationError
+	if errors.As(err, &registrationError) {
+		return registrationError
+	}
+	return &RegistrationError{
+		Class:     RegistrationFailureClassTransient,
+		Reason:    RegistrationFailureReasonRegistrarUnreachable,
+		Retryable: true,
+		Cause:     err,
+	}
+}
+
+func registrationExpiryGrace(expiresIn int) time.Duration {
+	if expiresIn <= 0 {
+		return maxRegistrationExpiryGrace
+	}
+	grace := time.Duration(math.Ceil(float64(expiresIn)*0.2)) * time.Second
+	if grace <= 0 || grace > maxRegistrationExpiryGrace {
+		return maxRegistrationExpiryGrace
+	}
+	return grace
+}
+
+func validateRegistrationContactAddress(listenConfig *ListenConfig, address string) error {
+	if !validator.NonNil(listenConfig) || !validator.NotBlank(address) {
+		return newRegistrationContactAddressError(address)
+	}
+	ip := net.ParseIP(strings.TrimSpace(address))
+	if ip == nil || ip.IsUnspecified() {
+		return newRegistrationContactAddressError(address)
+	}
+	if ip.IsLoopback() && !listenConfig.AllowLoopbackExternalIP {
+		return newRegistrationContactAddressError(address)
+	}
+	return nil
+}
+
+func newRegistrationContactAddressError(address string) *RegistrationError {
+	return &RegistrationError{
+		Class:     RegistrationFailureClassConfig,
+		Reason:    RegistrationFailureReasonInvalidContactAddress,
+		Retryable: false,
+		Cause:     fmt.Errorf("invalid SIP registration contact address: %s", address),
+	}
+}
+
+func newRegistrationValidationError(err error) *RegistrationError {
+	reason := RegistrationFailureReasonInvalidSIPConfig
+	if errors.Is(err, ErrMissingDID) {
+		reason = RegistrationFailureReasonMissingDID
+	}
+	if errors.Is(err, ErrMissingServer) {
+		reason = RegistrationFailureReasonMissingSIPServer
+	}
+	return &RegistrationError{
+		Class:     RegistrationFailureClassConfig,
+		Reason:    reason,
+		Retryable: false,
+		Cause:     err,
+	}
+}
+
+func newRegistrationTransportError(ctx context.Context, err error) *RegistrationError {
+	reason := RegistrationFailureReasonTransportError
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		reason = RegistrationFailureReasonRegisterTimeout
+	}
+	return &RegistrationError{
+		Class:     RegistrationFailureClassNetwork,
+		Reason:    reason,
+		Retryable: true,
+		Cause:     err,
+	}
+}
+
+func newRegistrationAuthError(statusCode int, statusText string, err error) *RegistrationError {
+	cause := err
+	if err != nil && !errors.Is(err, ErrAuthFailed) {
+		cause = fmt.Errorf("%w: %w", ErrAuthFailed, err)
+	}
+	return &RegistrationError{
+		Class:      RegistrationFailureClassAuth,
+		Reason:     RegistrationFailureReasonAuthFailed,
+		StatusCode: statusCode,
+		StatusText: statusText,
+		Retryable:  false,
+		Cause:      cause,
+	}
+}
+
+func newRegistrationResponseError(statusCode int, statusText string) *RegistrationError {
+	if isPermanentSIPResponse(statusCode) {
+		return &RegistrationError{
+			Class:      RegistrationFailureClassRejected,
+			Reason:     RegistrationFailureReasonRegistrarRejected,
+			StatusCode: statusCode,
+			StatusText: statusText,
+			Retryable:  false,
+			Cause:      ErrPermanentFailure,
+		}
+	}
+	return &RegistrationError{
+		Class:      RegistrationFailureClassTransient,
+		Reason:     RegistrationFailureReasonRegistrarUnreachable,
+		StatusCode: statusCode,
+		StatusText: statusText,
+		Retryable:  true,
+		Cause:      ErrRegistrationFailed,
+	}
 }
 
 // isPermanentSIPResponse returns true for SIP response codes that indicate a
@@ -445,4 +732,19 @@ func parseContactExpires(contact string) int {
 		return 0
 	}
 	return parsed
+}
+
+func parseMinExpires(resp *sip.Response) int {
+	if resp == nil {
+		return 0
+	}
+	header := resp.GetHeader("Min-Expires")
+	if header == nil {
+		return 0
+	}
+	minExpires, err := strconv.Atoi(strings.TrimSpace(header.Value()))
+	if err != nil || minExpires <= 0 {
+		return 0
+	}
+	return minExpires
 }

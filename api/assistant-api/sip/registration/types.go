@@ -24,19 +24,93 @@ const (
 	MaxConcurrent       = 10
 	MaxTransientRetries = 10
 
-	StatusActive       = "active"
-	StatusFailed       = "failed"
-	StatusRejected     = "rejected"
-	StatusConfigError  = "config_error"
-	StatusUnreachable  = "unreachable"
-	StatusDisabled     = "disabled"
-	OptKeyPhone        = "phone"
-	OptKeyCredentialID = "rapida.credential_id"
-	OptKeySIPStatus    = "rapida.sip_status"
-	OptKeySIPError     = "rapida.sip_error"
-	OptKeySIPRetry     = "rapida.sip_retry_count"
-	OptKeySIPInbound   = "rapida.sip_inbound"
+	OptKeyPhone            = "phone"
+	OptKeyCredentialID     = "rapida.credential_id"
+	OptKeySIPStatus        = "rapida.sip_status"
+	OptKeySIPError         = "rapida.sip_error"
+	OptKeySIPRetry         = "rapida.sip_retry_count"
+	OptKeySIPInbound       = "rapida.sip_inbound"
+	OptKeySIPFailureClass  = "rapida.sip_failure_class"
+	OptKeySIPFailureReason = "rapida.sip_failure_reason"
+	OptKeySIPResponseCode  = "rapida.sip_response_code"
+	OptKeySIPResponseText  = "rapida.sip_response_text"
+	OptKeySIPLastAttemptAt = "rapida.sip_last_attempt_at"
+	OptKeySIPNextRetryAt   = "rapida.sip_next_retry_at"
+	OptKeySIPOwnerInstance = "rapida.sip_owner_instance"
+	OptKeySIPLastSuccessAt = "rapida.sip_last_success_at"
 )
+
+type RegistrationStatus string
+
+const (
+	StatusActive      RegistrationStatus = "active"
+	StatusFailed      RegistrationStatus = "failed"
+	StatusRejected    RegistrationStatus = "rejected"
+	StatusConfigError RegistrationStatus = "config_error"
+	StatusUnreachable RegistrationStatus = "unreachable"
+	StatusDisabled    RegistrationStatus = "disabled"
+)
+
+func isTerminalRegistrationStatus(status RegistrationStatus) bool {
+	switch status {
+	case StatusDisabled, StatusRejected, StatusConfigError, StatusUnreachable:
+		return true
+	default:
+		return false
+	}
+}
+
+type RegistrationFailureClass = sip_infra.RegistrationFailureClass
+
+const (
+	RegistrationFailureClassConfig     = sip_infra.RegistrationFailureClassConfig
+	RegistrationFailureClassAuth       = sip_infra.RegistrationFailureClassAuth
+	RegistrationFailureClassRejected   = sip_infra.RegistrationFailureClassRejected
+	RegistrationFailureClassTransient  = sip_infra.RegistrationFailureClassTransient
+	RegistrationFailureClassNetwork    = sip_infra.RegistrationFailureClassNetwork
+	RegistrationFailureClassOwnership  = sip_infra.RegistrationFailureClassOwnership
+	RegistrationFailureClassDuplicate  = sip_infra.RegistrationFailureClassDuplicate
+	RegistrationFailureClassRenewal    = sip_infra.RegistrationFailureClassRenewal
+	RegistrationFailureClassUnregister = sip_infra.RegistrationFailureClassUnregister
+)
+
+type RegistrationFailureReason = sip_infra.RegistrationFailureReason
+
+const (
+	RegistrationFailureReasonMissingDID              = sip_infra.RegistrationFailureReasonMissingDID
+	RegistrationFailureReasonMissingCredentialID     = sip_infra.RegistrationFailureReasonMissingCredentialID
+	RegistrationFailureReasonDuplicateDID            = sip_infra.RegistrationFailureReasonDuplicateDID
+	RegistrationFailureReasonAssistantNotFound       = sip_infra.RegistrationFailureReasonAssistantNotFound
+	RegistrationFailureReasonVaultCredentialNotFound = sip_infra.RegistrationFailureReasonVaultCredentialNotFound
+	RegistrationFailureReasonInvalidSIPConfig        = sip_infra.RegistrationFailureReasonInvalidSIPConfig
+	RegistrationFailureReasonMissingSIPServer        = sip_infra.RegistrationFailureReasonMissingSIPServer
+	RegistrationFailureReasonOwnershipClaimFailed    = sip_infra.RegistrationFailureReasonOwnershipClaimFailed
+	RegistrationFailureReasonAuthFailed              = sip_infra.RegistrationFailureReasonAuthFailed
+	RegistrationFailureReasonRegistrarRejected       = sip_infra.RegistrationFailureReasonRegistrarRejected
+	RegistrationFailureReasonRegistrarUnreachable    = sip_infra.RegistrationFailureReasonRegistrarUnreachable
+	RegistrationFailureReasonTransportError          = sip_infra.RegistrationFailureReasonTransportError
+	RegistrationFailureReasonRegisterTimeout         = sip_infra.RegistrationFailureReasonRegisterTimeout
+	RegistrationFailureReasonRenewalFailed           = sip_infra.RegistrationFailureReasonRenewalFailed
+	RegistrationFailureReasonUnregisterFailed        = sip_infra.RegistrationFailureReasonUnregisterFailed
+	RegistrationFailureReasonInvalidContactAddress   = sip_infra.RegistrationFailureReasonInvalidContactAddress
+)
+
+// RegistrationStatusUpdate is the single durable write contract for registration visibility.
+type RegistrationStatusUpdate struct {
+	Status RegistrationStatus // Current deployment-level SIP registration status.
+	Error  string             // Human-readable latest registration failure.
+
+	FailureClass  RegistrationFailureClass  // Stable high-level class for filtering and alerts.
+	FailureReason RegistrationFailureReason // Stable machine-readable reason for the latest failure.
+	ResponseCode  int                       // Registrar SIP response code for the latest attempt.
+	ResponseText  string                    // Registrar SIP response text for the latest attempt.
+
+	RetryCount    *int      // Current retry count for transient registration failures.
+	LastAttemptAt time.Time // Time of the latest REGISTER attempt.
+	NextRetryAt   time.Time // Expected time of the next retry, when retrying.
+	OwnerInstance string    // Rapida instance currently owning or attempting the DID.
+	LastSuccessAt time.Time // Time of the latest successful REGISTER or renewal.
+}
 
 // Record is a single DID-registration work item carried by every Stage. The
 // Outcome field is written by handlers (claimed/peer/registered/...) so

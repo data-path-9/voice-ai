@@ -187,7 +187,7 @@ func TestPersistProducesUserAssistantAndMixedAudio(t *testing.T) {
 	ctx := context.Background()
 	mediaStart := testMediaTimestamp()
 	var recordingAudio internal_type.ConversationRecordingAudio
-	rec.emitPacket = func(_ context.Context, packets ...internal_type.Packet) error {
+	rec.onPacket = func(_ context.Context, packets ...internal_type.Packet) error {
 		recordingAudio = packets[0].(internal_type.ConversationRecordingCompletedPacket).Audio
 		return nil
 	}
@@ -246,7 +246,7 @@ func TestPersistUsesRecordedTimelineLength(t *testing.T) {
 	ctx := context.Background()
 	mediaStart := testMediaTimestamp()
 	var recordingAudio internal_type.ConversationRecordingAudio
-	rec.emitPacket = func(_ context.Context, packets ...internal_type.Packet) error {
+	rec.onPacket = func(_ context.Context, packets ...internal_type.Packet) error {
 		recordingAudio = packets[0].(internal_type.ConversationRecordingCompletedPacket).Audio
 		return nil
 	}
@@ -294,7 +294,7 @@ func TestPushCopiesData(t *testing.T) {
 func TestPersistProducesValidWAVHeader(t *testing.T) {
 	rec := newTestRecorder(t)
 	var recordingAudio internal_type.ConversationRecordingAudio
-	rec.emitPacket = func(_ context.Context, packets ...internal_type.Packet) error {
+	rec.onPacket = func(_ context.Context, packets ...internal_type.Packet) error {
 		recordingAudio = packets[0].(internal_type.ConversationRecordingCompletedPacket).Audio
 		return nil
 	}
@@ -323,7 +323,7 @@ func TestCloseEmitsConversationRecordingCompletedPacket(t *testing.T) {
 	var completedPacket internal_type.ConversationRecordingCompletedPacket
 	rec := &conversationRecordingExecutor{
 		contextID: "ctx-recording",
-		emitPacket: func(_ context.Context, packets ...internal_type.Packet) error {
+		onPacket: func(_ context.Context, packets ...internal_type.Packet) error {
 			if len(packets) != 1 {
 				t.Fatalf("expected 1 packet, got %d", len(packets))
 			}
@@ -365,7 +365,7 @@ func TestCloseEmitsCompletedPacketOnce(t *testing.T) {
 	emittedPackets := 0
 	rec := &conversationRecordingExecutor{
 		contextID: "ctx-recording",
-		emitPacket: func(_ context.Context, packets ...internal_type.Packet) error {
+		onPacket: func(_ context.Context, packets ...internal_type.Packet) error {
 			emittedPackets += len(packets)
 			return nil
 		},

@@ -560,7 +560,7 @@ func TestBridgeTransfer_OnlyEndsOutboundSession(t *testing.T) {
 	srv := bridgeTestServer()
 
 	inbound, _ := newBridgeTestSession(t, CallDirectionInbound, &CodecPCMU)
-	outbound, outRTP := newBridgeTestSession(t, CallDirectionOutbound, &CodecPCMU)
+	outbound, _ := newBridgeTestSession(t, CallDirectionOutbound, &CodecPCMU)
 
 	done := make(chan bridgeResult, 1)
 	go func() {
@@ -571,11 +571,7 @@ func TestBridgeTransfer_OnlyEndsOutboundSession(t *testing.T) {
 	// Give the bridge goroutines time to start
 	time.Sleep(10 * time.Millisecond)
 
-	// Close outbound's AudioIn channel to make the forwardBridgeAudio goroutine exit.
-	// The bridge detects outbound session context done via outbound.End() triggered
-	// by the outbound session lifecycle, or we can trigger it via outbound.End().
-	// Here we simulate outbound ending (e.g., transfer target hangs up).
-	close(outRTP.audioInChan)
+	// Simulate the transfer target ending the call through session lifecycle.
 	outbound.End()
 
 	select {

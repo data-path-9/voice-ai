@@ -45,7 +45,7 @@ type recordedAudioChunk struct {
 // conversationRecordingExecutor captures timestamped user and assistant audio on aligned tracks.
 type conversationRecordingExecutor struct {
 	contextID             string
-	emitPacket            func(context.Context, ...internal_type.Packet) error
+	onPacket              func(context.Context, ...internal_type.Packet) error
 	recorderLock          sync.Mutex
 	recordingClosed       bool
 	timelineAnchorTime    time.Time
@@ -55,11 +55,11 @@ type conversationRecordingExecutor struct {
 
 func NewConversationRecordingExecutor(
 	contextID string,
-	emitPacket func(context.Context, ...internal_type.Packet) error,
+	onPacket func(context.Context, ...internal_type.Packet) error,
 ) (internal_type.ConversationRecordingExecutor, error) {
 	return &conversationRecordingExecutor{
-		contextID:  contextID,
-		emitPacket: emitPacket,
+		contextID: contextID,
+		onPacket:  onPacket,
 	}, nil
 }
 
@@ -144,10 +144,10 @@ func (r *conversationRecordingExecutor) Close(ctx context.Context) error {
 	}
 	r.recorderLock.Unlock()
 
-	if r.emitPacket == nil {
+	if r.onPacket == nil {
 		return nil
 	}
-	if err := r.emitPacket(ctx, internal_type.ConversationRecordingCompletedPacket{
+	if err := r.onPacket(ctx, internal_type.ConversationRecordingCompletedPacket{
 		ContextID: r.contextID,
 		Audio:     recordingAudio,
 	}); err != nil {

@@ -9,6 +9,7 @@ package sip_registration
 import (
 	"context"
 	"errors"
+	"time"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
@@ -24,11 +25,22 @@ import (
 func (m *Manager) handleRegister(ctx context.Context, s RegisterPipeline) Pipeline {
 	rec := s.Record
 
-	if m.regClient.IsRegistered(rec.DID) {
+	snapshot := m.regClient.Snapshot(rec.DID)
+	if snapshot.Active && snapshot.Healthy {
 		rec.Outcome = OutcomeAlreadyActive
 		m.logger.Debugw("SIP DID already registered — renewal loop active",
 			"did", rec.DID, "assistant_id", rec.AssistantID)
-		return MarkActivePipeline{Record: rec}
+		return nil
+	}
+	if snapshot.Active && !snapshot.Healthy {
+		rec.Outcome = OutcomeAlreadyActive
+		m.logger.Warnw("SIP DID registered with renewal failure — preserving failure visibility",
+			"did", rec.DID,
+			"assistant_id", rec.AssistantID,
+			"retry_count", snapshot.RenewalRetryCount,
+			"failure_class", snapshot.FailureClass,
+			"failure_reason", snapshot.FailureReason)
+		return nil
 	}
 
 	db := m.postgres.DB(ctx)
@@ -37,7 +49,13 @@ func (m *Manager) handleRegister(ctx context.Context, s RegisterPipeline) Pipeli
 		rec.Outcome = OutcomeConfigError
 		m.logger.Warnw("Failed to load assistant for registration",
 			"assistant_id", rec.AssistantID, "did", rec.DID, "error", err)
-		m.markStatus(ctx, rec.DeploymentID, StatusConfigError, "assistant not found")
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, RegistrationStatusUpdate{
+			Status:        StatusConfigError,
+			Error:         "assistant not found",
+			FailureClass:  RegistrationFailureClassConfig,
+			FailureReason: RegistrationFailureReasonAssistantNotFound,
+			OwnerInstance: m.instanceID,
+		})
 		return nil
 	}
 
@@ -52,7 +70,13 @@ func (m *Manager) handleRegister(ctx context.Context, s RegisterPipeline) Pipeli
 		m.logger.Warnw("Failed to fetch vault credential for registration",
 			"assistant_id", rec.AssistantID, "did", rec.DID,
 			"credential_id", rec.CredentialID, "error", err)
-		m.markStatus(ctx, rec.DeploymentID, StatusConfigError, "vault credential not found")
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, RegistrationStatusUpdate{
+			Status:        StatusConfigError,
+			Error:         "vault credential not found",
+			FailureClass:  RegistrationFailureClassConfig,
+			FailureReason: RegistrationFailureReasonVaultCredentialNotFound,
+			OwnerInstance: m.instanceID,
+		})
 		return nil
 	}
 
@@ -61,7 +85,13 @@ func (m *Manager) handleRegister(ctx context.Context, s RegisterPipeline) Pipeli
 		rec.Outcome = OutcomeConfigError
 		m.logger.Warnw("Failed to parse SIP config for registration",
 			"assistant_id", rec.AssistantID, "did", rec.DID, "error", err)
-		m.markStatus(ctx, rec.DeploymentID, StatusConfigError, "invalid SIP config: "+err.Error())
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, RegistrationStatusUpdate{
+			Status:        StatusConfigError,
+			Error:         "invalid SIP config: " + err.Error(),
+			FailureClass:  RegistrationFailureClassConfig,
+			FailureReason: RegistrationFailureReasonInvalidSIPConfig,
+			OwnerInstance: m.instanceID,
+		})
 		return nil
 	}
 	if m.opDefaults != nil {
@@ -81,9 +111,10 @@ func (m *Manager) handleRegister(ctx context.Context, s RegisterPipeline) Pipeli
 		"owner", m.instanceID)
 
 	regErr := m.regClient.Register(ctx, &sip_infra.Registration{
-		DID:         rec.DID,
-		Config:      sipConfig,
-		AssistantID: rec.AssistantID,
+		DID:          rec.DID,
+		Config:       sipConfig,
+		DeploymentID: rec.DeploymentID,
+		AssistantID:  rec.AssistantID,
 	})
 	if regErr == nil {
 		rec.Outcome = OutcomeRegistered
@@ -95,20 +126,60 @@ func (m *Manager) handleRegister(ctx context.Context, s RegisterPipeline) Pipeli
 		return MarkActivePipeline{Record: rec}
 	}
 
-	switch {
-	case errors.Is(regErr, sip_infra.ErrPermanentFailure):
+	statusUpdate := m.registrationStatusUpdateFromError(regErr)
+	switch statusUpdate.FailureClass {
+	case RegistrationFailureClassRejected:
 		rec.Outcome = OutcomeRejected
 		m.logger.Errorw("SIP registration permanently rejected — will not retry",
 			"did", rec.DID, "assistant_id", rec.AssistantID, "error", regErr)
-		m.markStatus(ctx, rec.DeploymentID, StatusRejected, regErr.Error())
-	case errors.Is(regErr, sip_infra.ErrAuthFailed):
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, statusUpdate)
+	case RegistrationFailureClassAuth:
 		rec.Outcome = OutcomeAuthFailed
 		m.logger.Errorw("SIP registration auth failed — marking deployment as failed",
 			"did", rec.DID, "assistant_id", rec.AssistantID, "error", regErr)
-		m.markStatus(ctx, rec.DeploymentID, StatusFailed, regErr.Error())
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, statusUpdate)
+	case RegistrationFailureClassConfig:
+		rec.Outcome = OutcomeConfigError
+		m.logger.Errorw("SIP registration config failed — will not retry",
+			"did", rec.DID, "assistant_id", rec.AssistantID, "error", regErr)
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, statusUpdate)
 	default:
 		rec.Outcome = OutcomeTransient
 		m.handleTransient(ctx, rec, regErr)
 	}
 	return nil
+}
+
+func (m *Manager) registrationStatusUpdateFromError(err error) RegistrationStatusUpdate {
+	now := time.Now().UTC()
+	statusUpdate := RegistrationStatusUpdate{
+		Error:         err.Error(),
+		FailureClass:  RegistrationFailureClassTransient,
+		FailureReason: RegistrationFailureReasonRegistrarUnreachable,
+		LastAttemptAt: now,
+		OwnerInstance: m.instanceID,
+	}
+
+	var registrationError *sip_infra.RegistrationError
+	if errors.As(err, &registrationError) {
+		statusUpdate.FailureClass = registrationError.Class
+		statusUpdate.FailureReason = registrationError.Reason
+		statusUpdate.ResponseCode = registrationError.StatusCode
+		statusUpdate.ResponseText = registrationError.StatusText
+	}
+
+	switch {
+	case statusUpdate.FailureClass == RegistrationFailureClassConfig:
+		statusUpdate.Status = StatusConfigError
+	case statusUpdate.FailureClass == RegistrationFailureClassAuth || errors.Is(err, sip_infra.ErrAuthFailed):
+		statusUpdate.Status = StatusFailed
+		statusUpdate.FailureClass = RegistrationFailureClassAuth
+		statusUpdate.FailureReason = RegistrationFailureReasonAuthFailed
+	case statusUpdate.FailureClass == RegistrationFailureClassRejected || errors.Is(err, sip_infra.ErrPermanentFailure):
+		statusUpdate.Status = StatusRejected
+		statusUpdate.FailureClass = RegistrationFailureClassRejected
+		statusUpdate.FailureReason = RegistrationFailureReasonRegistrarRejected
+	}
+
+	return statusUpdate
 }

@@ -53,6 +53,9 @@ func NewManager(cfg Config) *Manager {
 		instanceID: cfg.Sip.InstanceID,
 		opDefaults: cfg.ApplyOpDefaults,
 	}
+	if cfg.RegistrationClient != nil {
+		cfg.RegistrationClient.SetObserver(m)
+	}
 	cfg.Logger.Infow("SIP registration manager initialized",
 		"instance_id", cfg.Sip.InstanceID,
 		"poll_interval", PollInterval,
@@ -64,6 +67,13 @@ func NewManager(cfg Config) *Manager {
 // Start blocks running the periodic reconcile loop until ctx is cancelled.
 func (m *Manager) Start(ctx context.Context) {
 	m.logger.Infow("SIP registration watcher started", "interval", PollInterval)
+	select {
+	case <-ctx.Done():
+		m.logger.Infow("SIP registration watcher stopped")
+		return
+	default:
+		m.Reconcile(ctx)
+	}
 	t := time.NewTicker(PollInterval)
 	defer t.Stop()
 	for {

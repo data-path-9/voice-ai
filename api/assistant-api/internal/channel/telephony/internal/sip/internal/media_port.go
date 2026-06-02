@@ -18,6 +18,7 @@ import (
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type MediaPortConfig struct {
@@ -90,7 +91,7 @@ func NewMediaPort(config MediaPortConfig) (*MediaPort, error) {
 		MediaEngine: mediaPort.audioProcessor,
 		StreamSink:  config.StreamSink,
 		OutputSink: func(frame internal_telephony_media.AssistantOutputFrame) error {
-			return mediaPort.audioProcessor.ConsumeFrame(frame.ProviderAudio)
+			return mediaPort.deliverAssistantFrame(frame)
 		},
 		EventSink: func(event *protos.ConversationEvent) {
 			if event == nil {
@@ -166,9 +167,6 @@ func (port *MediaPort) HandleAssistantAudio(audio []byte, completed bool) error 
 	}
 	if err := port.mediaSession.HandleAssistantAudio(audio, completed); err != nil {
 		return err
-	}
-	if len(audio) > 0 && port.session != nil && port.session.GetInfo().Direction == sip_infra.CallDirectionInbound && port.session.MarkInboundFirstAssistantAudioSent() && port.logger != nil {
-		port.logger.Infow("SIP first assistant audio sent", "call_id", port.session.GetCallID())
 	}
 	return nil
 }
@@ -274,13 +272,81 @@ func (port *MediaPort) forwardIncomingAudio() {
 			if port.transferActive.Load() {
 				continue
 			}
-			if err := port.mediaSession.HandleProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
-				Audio:      audioData,
-				ReceivedAt: time.Now(),
-			}); err != nil && port.logger != nil {
+			if err := port.handleProviderAudioFrame(audioData, time.Now()); err != nil && port.logger != nil {
 				port.logger.Debugw("SIP provider audio processing failed", "error", err.Error())
 			}
 		}
+	}
+}
+
+func (port *MediaPort) handleProviderAudioFrame(providerAudio []byte, receivedAt time.Time) error {
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
+	inputFrame, err := port.audioProcessor.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+		Audio:      providerAudio,
+		ReceivedAt: receivedAt,
+	})
+	if err != nil {
+		return err
+	}
+	port.recordReceivedUserAudio(inputFrame.BridgeAudio, receivedAt)
+	port.sendPipelineUserAudio(inputFrame.PipelineAudio, receivedAt)
+	return nil
+}
+
+func (port *MediaPort) recordReceivedUserAudio(userPCM16k []byte, receivedAt time.Time) {
+	if len(userPCM16k) == 0 || port.streamSink == nil {
+		return
+	}
+	port.streamSink(&protos.ConversationBridgeUserAudio{
+		Audio: userPCM16k,
+		Time:  timestamppb.New(receivedAt),
+	})
+}
+
+func (port *MediaPort) sendPipelineUserAudio(userPCM16k []byte, receivedAt time.Time) {
+	if len(userPCM16k) == 0 || port.streamSink == nil {
+		return
+	}
+	port.streamSink(&protos.ConversationUserMessage{
+		Message: &protos.ConversationUserMessage_Audio{Audio: userPCM16k},
+		Time:    timestamppb.New(receivedAt),
+	})
+}
+
+func (port *MediaPort) deliverAssistantFrame(outputFrame internal_telephony_media.AssistantOutputFrame) error {
+	providerAudio, err := port.audioProcessor.encodeAssistantOutputFrame(outputFrame.ProviderAudio)
+	if err != nil {
+		return err
+	}
+	if len(providerAudio) == 0 {
+		return nil
+	}
+	select {
+	case port.rtpHandler.AudioOut() <- providerAudio:
+	default:
+		return port.audioProcessor.rtpOutputQueueFullError()
+	}
+	if outputFrame.Idle || len(outputFrame.ProviderAudio) == 0 {
+		return nil
+	}
+	port.recordDeliveredAssistantAudio(outputFrame.ProviderAudio)
+	return nil
+}
+
+func (port *MediaPort) recordDeliveredAssistantAudio(assistantPCM16k []byte) {
+	if port.streamSink != nil {
+		port.streamSink(&protos.ConversationBridgeOperatorAudio{
+			Audio: assistantPCM16k,
+			Time:  timestamppb.Now(),
+		})
+	}
+	if port.session == nil || port.session.GetInfo().Direction != sip_infra.CallDirectionInbound {
+		return
+	}
+	if port.session.MarkInboundFirstAssistantAudioSent() && port.logger != nil {
+		port.logger.Infow("SIP first assistant audio sent", "call_id", port.session.GetCallID())
 	}
 }
 

@@ -9,9 +9,11 @@ package sip_registration
 import (
 	"context"
 	"strconv"
+	"time"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	gorm_models "github.com/rapidaai/pkg/models/gorm"
+	"github.com/rapidaai/pkg/validator"
 	"gorm.io/gorm/clause"
 )
 
@@ -25,17 +27,56 @@ func (m *Manager) handleMarkActive(ctx context.Context, p MarkActivePipeline) Pi
 	if rec.Outcome == OutcomeAlreadyActive {
 		return nil
 	}
-	m.upsertOption(ctx, rec.DeploymentID, OptKeySIPStatus, StatusActive)
-	m.upsertOption(ctx, rec.DeploymentID, OptKeySIPError, "")
-	m.upsertOption(ctx, rec.DeploymentID, OptKeySIPRetry, "0")
+	retryCount := 0
+	now := time.Now().UTC()
+	m.writeRegistrationStatus(ctx, rec.DeploymentID, RegistrationStatusUpdate{
+		Status:        StatusActive,
+		Error:         "",
+		RetryCount:    &retryCount,
+		OwnerInstance: m.instanceID,
+		LastSuccessAt: now,
+	})
 	return nil
 }
 
-// markStatus writes a (sip_status, sip_error) pair. Used by handlers that
-// detect a terminal/failure condition before MarkActivePipeline runs.
-func (m *Manager) markStatus(ctx context.Context, deploymentID uint64, status, errMsg string) {
-	m.upsertOption(ctx, deploymentID, OptKeySIPStatus, status)
-	m.upsertOption(ctx, deploymentID, OptKeySIPError, errMsg)
+func (m *Manager) writeRegistrationStatus(ctx context.Context, deploymentID uint64, update RegistrationStatusUpdate) {
+	if validator.NotBlank(string(update.Status)) {
+		m.upsertOption(ctx, deploymentID, OptKeySIPStatus, string(update.Status))
+	}
+	if validator.NotBlank(update.Error) || update.Status == StatusActive {
+		m.upsertOption(ctx, deploymentID, OptKeySIPError, update.Error)
+	}
+	if validator.NotBlank(string(update.FailureClass)) || update.Status == StatusActive {
+		m.upsertOption(ctx, deploymentID, OptKeySIPFailureClass, string(update.FailureClass))
+	}
+	if validator.NotBlank(string(update.FailureReason)) || update.Status == StatusActive {
+		m.upsertOption(ctx, deploymentID, OptKeySIPFailureReason, string(update.FailureReason))
+	}
+	if update.ResponseCode > 0 || update.Status == StatusActive {
+		responseCode := ""
+		if update.ResponseCode > 0 {
+			responseCode = strconv.Itoa(update.ResponseCode)
+		}
+		m.upsertOption(ctx, deploymentID, OptKeySIPResponseCode, responseCode)
+	}
+	if validator.NotBlank(update.ResponseText) || update.Status == StatusActive {
+		m.upsertOption(ctx, deploymentID, OptKeySIPResponseText, update.ResponseText)
+	}
+	if validator.NonNil(update.RetryCount) {
+		m.upsertOption(ctx, deploymentID, OptKeySIPRetry, strconv.Itoa(*update.RetryCount))
+	}
+	if !update.LastAttemptAt.IsZero() {
+		m.upsertOption(ctx, deploymentID, OptKeySIPLastAttemptAt, formatRegistrationTime(update.LastAttemptAt))
+	}
+	if !update.NextRetryAt.IsZero() || update.Status == StatusActive {
+		m.upsertOption(ctx, deploymentID, OptKeySIPNextRetryAt, formatRegistrationTime(update.NextRetryAt))
+	}
+	if validator.NotBlank(update.OwnerInstance) {
+		m.upsertOption(ctx, deploymentID, OptKeySIPOwnerInstance, update.OwnerInstance)
+	}
+	if !update.LastSuccessAt.IsZero() {
+		m.upsertOption(ctx, deploymentID, OptKeySIPLastSuccessAt, formatRegistrationTime(update.LastSuccessAt))
+	}
 }
 
 // upsertOption mirrors the upsert pattern used by CreatePhoneDeployment so
@@ -58,6 +99,13 @@ func (m *Manager) upsertOption(ctx context.Context, deploymentID uint64, key, va
 	}
 }
 
+func formatRegistrationTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
 // handleTransient bumps the retry counter for transport / 5xx style errors.
 // After MaxTransientRetries the deployment is marked unreachable so subsequent
 // reconciles short-circuit it via the terminal-status filter in loadRecords.
@@ -70,16 +118,21 @@ func (m *Manager) handleTransient(ctx context.Context, rec *Record, err error) {
 		retry, _ = strconv.Atoi(opt.Value)
 	}
 	retry++
+	statusUpdate := m.registrationStatusUpdateFromError(err)
+	statusUpdate.RetryCount = &retry
+	statusUpdate.LastAttemptAt = time.Now().UTC()
+	statusUpdate.NextRetryAt = statusUpdate.LastAttemptAt.Add(PollInterval)
+	statusUpdate.OwnerInstance = m.instanceID
 
 	if retry >= MaxTransientRetries {
 		m.logger.Errorw("SIP registration unreachable after max retries — will not retry",
 			"did", rec.DID, "assistant_id", rec.AssistantID, "retries", retry, "error", err)
-		m.markStatus(ctx, rec.DeploymentID, StatusUnreachable, err.Error())
-		m.upsertOption(ctx, rec.DeploymentID, OptKeySIPRetry, strconv.Itoa(retry))
+		statusUpdate.Status = StatusUnreachable
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, statusUpdate)
 		return
 	}
 
 	m.logger.Warnw("SIP registration failed (will retry)",
 		"did", rec.DID, "assistant_id", rec.AssistantID, "retry", retry, "error", err)
-	m.upsertOption(ctx, rec.DeploymentID, OptKeySIPRetry, strconv.Itoa(retry))
+	m.writeRegistrationStatus(ctx, rec.DeploymentID, statusUpdate)
 }

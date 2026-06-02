@@ -23,10 +23,11 @@ func (r *Registration) toCore() *internal_core.Registration {
 		return nil
 	}
 	return &internal_core.Registration{
-		DID:         r.DID,
-		Config:      r.Config.toCore(),
-		AssistantID: r.AssistantID,
-		ExpiresIn:   r.ExpiresIn,
+		DID:          r.DID,
+		Config:       r.Config.toCore(),
+		DeploymentID: r.DeploymentID,
+		AssistantID:  r.AssistantID,
+		ExpiresIn:    r.ExpiresIn,
 	}
 }
 
@@ -40,6 +41,10 @@ func (rc *RegistrationClient) Register(ctx context.Context, reg *Registration) e
 	return rc.inner.Register(ctx, reg.toCore())
 }
 
+func (rc *RegistrationClient) SetObserver(observer RegistrationObserver) {
+	rc.inner.SetObserver(observer)
+}
+
 func (rc *RegistrationClient) Unregister(ctx context.Context, did string) error {
 	return rc.inner.Unregister(ctx, did)
 }
@@ -50,6 +55,10 @@ func (rc *RegistrationClient) UnregisterAll(ctx context.Context) {
 
 func (rc *RegistrationClient) IsRegistered(did string) bool {
 	return rc.inner.IsRegistered(did)
+}
+
+func (rc *RegistrationClient) Snapshot(did string) RegistrationSnapshot {
+	return rc.inner.Snapshot(did)
 }
 
 func (rc *RegistrationClient) ActiveCount() int {

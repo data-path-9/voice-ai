@@ -853,9 +853,6 @@ func (s *Session) GetRTPStats() *RTPStats {
 		return nil
 	}
 
-	sent, received := rtpHandler.GetStats()
-	return &RTPStats{
-		PacketsSent:     sent,
-		PacketsReceived: received,
-	}
+	stats := rtpHandler.GetDetailedStats()
+	return &stats
 }

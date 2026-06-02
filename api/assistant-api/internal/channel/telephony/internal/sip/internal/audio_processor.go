@@ -27,8 +27,15 @@ import (
 )
 
 type bridgeState struct {
-	outputTarget internal_type.SIPRTPBridgeTarget
-	transcode    func([]byte) []byte
+	outputTarget        internal_type.SIPRTPBridgeTarget
+	inputCodecName      string
+	outputCodecName     string
+	forwardingTranscode func([]byte) []byte
+}
+
+type bridgeRecordingFrame struct {
+	audio     []byte
+	codecName string
 }
 
 // AudioProcessor owns SIP RTP codec conversion, buffering, pacing, bridge audio,
@@ -38,16 +45,15 @@ type AudioProcessor struct {
 	rtpHandler *sip_infra.RTPHandler
 	pushInput  func(internal_type.Stream)
 
-	inputBuffer        internal_channel_input.InputBuffer
-	outputBuffer       internal_telephony_output.FrameBuffer
-	bridgeOutputBuffer internal_telephony_output.FrameBuffer
+	inputBuffer  internal_channel_input.InputBuffer
+	outputBuffer internal_telephony_output.FrameBuffer
 
 	// bridgeMu orders ForwardUserAudio with DisconnectTransferMedia so outbound RTP is
 	// not closed while a bridge send is in flight.
 	bridgeMu         sync.Mutex
 	bridge           atomic.Pointer[bridgeState]
-	bridgeUserCh     chan []byte
-	bridgeOperatorCh chan []byte
+	bridgeUserCh     chan bridgeRecordingFrame
+	bridgeOperatorCh chan bridgeRecordingFrame
 
 	ringtoneMu sync.RWMutex
 	ringtone   []byte
@@ -62,15 +68,14 @@ type AudioProcessor struct {
 
 func NewAudioProcessor(cfg AudioProcessorConfig) *AudioProcessor {
 	p := &AudioProcessor{
-		resampler:          cfg.Resampler,
-		rtpHandler:         cfg.RTPHandler,
-		pushInput:          cfg.PushInput,
-		inputBuffer:        internal_channel_input.NewBytesInputBuffer(InputBufferThreshold * 2),
-		outputBuffer:       internal_telephony_output.NewBytesFrameBuffer(MulawFrameSize * 8),
-		bridgeOutputBuffer: internal_telephony_output.NewBytesFrameBuffer(BridgeOutputFrameSize * 8),
-		bridgeUserCh:       make(chan []byte, AudioChannelSize),
-		bridgeOperatorCh:   make(chan []byte, AudioChannelSize),
-		outputHealth:       internal_telephony_output.NewHealthStats(),
+		resampler:        cfg.Resampler,
+		rtpHandler:       cfg.RTPHandler,
+		pushInput:        cfg.PushInput,
+		inputBuffer:      internal_channel_input.NewBytesInputBuffer(InputBufferThreshold * 2),
+		outputBuffer:     internal_telephony_output.NewBytesFrameBuffer(BridgeOutputFrameSize * 8),
+		bridgeUserCh:     make(chan bridgeRecordingFrame, AudioChannelSize),
+		bridgeOperatorCh: make(chan bridgeRecordingFrame, AudioChannelSize),
+		outputHealth:     internal_telephony_output.NewHealthStats(),
 	}
 	p.SetRingtone(cfg.Ringtone)
 	ambientMixer, err := internal_ambient.NewLoopMixer(internal_ambient.MixerSpec{
@@ -118,16 +123,27 @@ func (p *AudioProcessor) ringtoneBytes() []byte {
 	return p.ringtone
 }
 
-func (p *AudioProcessor) convertInputAudio(audioData []byte) ([]byte, error) {
-	codec := p.currentCodec()
-	if codec.Name == sip_infra.CodecPCMA.Name {
-		audioData = internal_audio.AlawToUlaw(audioData)
+func (p *AudioProcessor) decodeProviderAudioToLinear8k(audioData []byte) []byte {
+	return decodeG711ToLinear8k(audioData, p.currentCodec().Name)
+}
+
+func decodeG711ToLinear8k(audioData []byte, codecName string) []byte {
+	if len(audioData) == 0 {
+		return nil
 	}
-	resampled, err := p.resampler.Resample(audioData, Mulaw8kConfig, Rapida16kConfig)
-	if err != nil {
-		return nil, err
+	switch codecName {
+	case sip_infra.CodecPCMA.Name:
+		return g711.DecodeAlaw(audioData)
+	default:
+		return g711.DecodeUlaw(audioData)
 	}
-	return resampled, nil
+}
+
+func (p *AudioProcessor) resampleProviderPCMToInternal(linearPCM8k []byte) ([]byte, error) {
+	if len(linearPCM8k) == 0 {
+		return nil, nil
+	}
+	return p.resampler.Resample(linearPCM8k, Linear8kConfig, Rapida16kConfig)
 }
 
 func (p *AudioProcessor) convertOutputAudio(audioData []byte) ([]byte, error) {
@@ -141,6 +157,17 @@ func (p *AudioProcessor) convertOutputAudio(audioData []byte) ([]byte, error) {
 	return convertedAudio, nil
 }
 
+func (p *AudioProcessor) encodeAssistantOutputFrame(assistantPCM16k []byte) ([]byte, error) {
+	if len(assistantPCM16k) == 0 {
+		return nil, nil
+	}
+	convertedAudio, err := p.convertOutputAudio(assistantPCM16k)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrAssistantAudioConversionFailed, err)
+	}
+	return p.applyAmbient(convertedAudio), nil
+}
+
 func (p *AudioProcessor) ProcessProviderAudioFrame(frame internal_telephony_media.ProviderAudioFrame) (internal_telephony_media.InputAudioFrame, error) {
 	inputFrame := internal_telephony_media.InputAudioFrame{
 		ReceivedAt: frame.ReceivedAt,
@@ -148,7 +175,8 @@ func (p *AudioProcessor) ProcessProviderAudioFrame(frame internal_telephony_medi
 	if len(frame.Audio) == 0 {
 		return inputFrame, nil
 	}
-	resampled, err := p.convertInputAudio(frame.Audio)
+	linearPCM8k := p.decodeProviderAudioToLinear8k(frame.Audio)
+	resampled, err := p.resampleProviderPCMToInternal(linearPCM8k)
 	if err != nil {
 		return inputFrame, fmt.Errorf("%w: %w", ErrProviderAudioConversionFailed, err)
 	}
@@ -168,12 +196,7 @@ func (p *AudioProcessor) ProcessAssistantAudio(audio []byte, completed bool) err
 		return nil
 	}
 	if len(audio) > 0 {
-		convertedAudio, err := p.convertOutputAudio(audio)
-		if err != nil {
-			return fmt.Errorf("%w: %w", ErrAssistantAudioConversionFailed, err)
-		}
-		p.outputBuffer.Write(convertedAudio)
-		p.bridgeOutputBuffer.Write(audio)
+		p.outputBuffer.Write(audio)
 	}
 	if completed {
 		p.Complete()
@@ -182,12 +205,11 @@ func (p *AudioProcessor) ProcessAssistantAudio(audio []byte, completed bool) err
 }
 
 func (p *AudioProcessor) Complete() {
-	p.outputBuffer.Complete(MulawFrameSize, MulawSilenceByte)
-	p.bridgeOutputBuffer.Complete(BridgeOutputFrameSize, 0)
+	p.outputBuffer.Complete(BridgeOutputFrameSize, 0)
 }
 
-func (p *AudioProcessor) getNextChunk() []byte {
-	chunk, ok := p.outputBuffer.Next(MulawFrameSize)
+func (p *AudioProcessor) nextAssistantPCM16kFrame() []byte {
+	chunk, ok := p.outputBuffer.Next(BridgeOutputFrameSize)
 	if !ok {
 		return nil
 	}
@@ -196,7 +218,6 @@ func (p *AudioProcessor) getNextChunk() []byte {
 
 func (p *AudioProcessor) ClearOutputBuffer() {
 	p.outputBuffer.Clear()
-	p.bridgeOutputBuffer.Clear()
 	p.rtpHandler.FlushAudioOut()
 }
 
@@ -251,14 +272,12 @@ func (p *AudioProcessor) NextOutputFrame() (internal_telephony_media.AssistantOu
 	if p.transferActive.Load() {
 		return internal_telephony_media.AssistantOutputFrame{}, false
 	}
-	providerAudio := p.getNextChunk()
-	if len(providerAudio) == 0 {
+	assistantPCM16k := p.nextAssistantPCM16kFrame()
+	if len(assistantPCM16k) == 0 {
 		return internal_telephony_media.AssistantOutputFrame{}, false
 	}
-	bridgeAudio, _ := p.bridgeOutputBuffer.Next(BridgeOutputFrameSize)
 	return internal_telephony_media.AssistantOutputFrame{
-		ProviderAudio: p.applyAmbient(providerAudio),
-		BridgeAudio:   bridgeAudio,
+		ProviderAudio: assistantPCM16k,
 	}, true
 }
 
@@ -266,25 +285,22 @@ func (p *AudioProcessor) IdleOutputFrame() (internal_telephony_media.AssistantOu
 	if p.transferActive.Load() {
 		return internal_telephony_media.AssistantOutputFrame{}, false
 	}
-	frame := p.applyAmbient(nil)
-	if len(frame) == 0 {
+	if p.ambientMixer == nil || !p.ambientMixer.CurrentConfig().Enabled {
 		return internal_telephony_media.AssistantOutputFrame{}, false
 	}
-	return internal_telephony_media.AssistantOutputFrame{ProviderAudio: frame, Idle: true}, true
+	return internal_telephony_media.AssistantOutputFrame{
+		ProviderAudio: make([]byte, BridgeOutputFrameSize),
+		Idle:          true,
+	}, true
 }
 
 func (p *AudioProcessor) SetTransferActive(active bool) {
 	p.transferActive.Store(active)
 }
 
-func (p *AudioProcessor) ConsumeFrame(frame []byte) error {
-	select {
-	case p.rtpHandler.AudioOut() <- frame:
-		return nil
-	default:
-		dropped := p.droppedOutputFrames.Add(1)
-		return fmt.Errorf("%w: dropped_frames_total=%d", ErrRTPOutputQueueFull, dropped)
-	}
+func (p *AudioProcessor) rtpOutputQueueFullError() error {
+	dropped := p.droppedOutputFrames.Add(1)
+	return fmt.Errorf("%w: dropped_frames_total=%d", ErrRTPOutputQueueFull, dropped)
 }
 
 func (p *AudioProcessor) IsBridgeActive() bool {
@@ -295,12 +311,23 @@ func (p *AudioProcessor) ConnectTransferMedia(target internal_type.SIPRTPBridgeT
 	if target == nil {
 		return
 	}
-	state := &bridgeState{outputTarget: target}
-	if inputCodec != nil && outputCodecName != "" && inputCodec.Name != outputCodecName {
-		if inputCodec.Name == sip_infra.CodecPCMA.Name && outputCodecName == sip_infra.CodecPCMU.Name {
-			state.transcode = internal_audio.AlawToUlaw
-		} else if inputCodec.Name == sip_infra.CodecPCMU.Name && outputCodecName == sip_infra.CodecPCMA.Name {
-			state.transcode = internal_audio.UlawToAlaw
+	inputCodecName := sip_infra.CodecPCMU.Name
+	if inputCodec != nil && inputCodec.Name != "" {
+		inputCodecName = inputCodec.Name
+	}
+	if outputCodecName == "" {
+		outputCodecName = inputCodecName
+	}
+	state := &bridgeState{
+		outputTarget:    target,
+		inputCodecName:  inputCodecName,
+		outputCodecName: outputCodecName,
+	}
+	if inputCodecName != outputCodecName {
+		if inputCodecName == sip_infra.CodecPCMA.Name && outputCodecName == sip_infra.CodecPCMU.Name {
+			state.forwardingTranscode = internal_audio.AlawToUlaw
+		} else if inputCodecName == sip_infra.CodecPCMU.Name && outputCodecName == sip_infra.CodecPCMA.Name {
+			state.forwardingTranscode = internal_audio.UlawToAlaw
 		}
 	}
 	p.bridgeMu.Lock()
@@ -323,9 +350,9 @@ func (p *AudioProcessor) ForwardUserAudio(audioData []byte) bool {
 	if state == nil {
 		return false
 	}
-	originalAudio := audioData
-	if state.transcode != nil {
-		audioData = state.transcode(audioData)
+	sourceAudio := audioData
+	if state.forwardingTranscode != nil {
+		audioData = state.forwardingTranscode(audioData)
 	}
 	bridgeFrameDelivered := false
 	select {
@@ -350,7 +377,7 @@ func (p *AudioProcessor) ForwardUserAudio(audioData []byte) bool {
 		return true
 	}
 	select {
-	case p.bridgeUserCh <- originalAudio:
+	case p.bridgeUserCh <- bridgeRecordingFrame{audio: sourceAudio, codecName: state.inputCodecName}:
 	default:
 	}
 	return true
@@ -358,8 +385,12 @@ func (p *AudioProcessor) ForwardUserAudio(audioData []byte) bool {
 
 // RecordTransferOperatorAudio queues transfer target audio for recording.
 func (p *AudioProcessor) RecordTransferOperatorAudio(audio []byte) {
+	codecName := sip_infra.CodecPCMU.Name
+	if state := p.bridge.Load(); state != nil && state.outputCodecName != "" {
+		codecName = state.outputCodecName
+	}
 	select {
-	case p.bridgeOperatorCh <- audio:
+	case p.bridgeOperatorCh <- bridgeRecordingFrame{audio: audio, codecName: codecName}:
 	default:
 	}
 }
@@ -370,15 +401,15 @@ func (p *AudioProcessor) RunBridgeRecorder(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case audio := <-p.bridgeUserCh:
-			if resampled, err := p.resampler.Resample(audio, Mulaw8kConfig, Rapida16kConfig); err == nil {
+		case frame := <-p.bridgeUserCh:
+			if resampled, err := p.resampleBridgeRecordingFrame(frame); err == nil {
 				p.pushInput(&protos.ConversationBridgeUserAudio{
 					Audio: resampled,
 					Time:  timestamppb.Now(),
 				})
 			}
-		case audio := <-p.bridgeOperatorCh:
-			if resampled, err := p.resampler.Resample(audio, Mulaw8kConfig, Rapida16kConfig); err == nil {
+		case frame := <-p.bridgeOperatorCh:
+			if resampled, err := p.resampleBridgeRecordingFrame(frame); err == nil {
 				p.pushInput(&protos.ConversationBridgeOperatorAudio{
 					Audio: resampled,
 					Time:  timestamppb.Now(),
@@ -386,6 +417,14 @@ func (p *AudioProcessor) RunBridgeRecorder(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (p *AudioProcessor) resampleBridgeRecordingFrame(frame bridgeRecordingFrame) ([]byte, error) {
+	linearPCM8k := decodeG711ToLinear8k(frame.audio, frame.codecName)
+	if len(linearPCM8k) == 0 {
+		return nil, nil
+	}
+	return p.resampler.Resample(linearPCM8k, Linear8kConfig, Rapida16kConfig)
 }
 
 // PlayRingback writes ringback frames directly to RTP.

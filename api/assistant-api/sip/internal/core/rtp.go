@@ -24,13 +24,13 @@ import (
 
 // RTP constants
 const (
-	rtpVersion         = 2
-	rtpHeaderSize      = 12
-	rtpReadBufferSize  = 65536
-	rtpWriteBufferSize = 65536
-	rtpPacketMaxSize   = 1500
-	rtpReadTimeout     = 100 * time.Millisecond
-	rtpPacketInterval  = 20 * time.Millisecond
+	rtpVersion             = 2
+	rtpHeaderSize          = 12
+	rtpReadBufferSize      = 65536
+	rtpWriteBufferSize     = 65536
+	rtpPacketMaxSize       = 1500
+	rtpPacketInterval      = 20 * time.Millisecond
+	rtpInputPlayoutTimeout = rtpPacketInterval
 
 	// Audio channel buffer sizes
 	rtpAudioInBufferSize  = 100
@@ -77,6 +77,7 @@ type RTPHandler struct {
 	// Audio channels
 	audioInChan  chan []byte
 	audioOutChan chan []byte
+	inputJitter  *rtpInputJitterBuffer
 
 	// flushAudioCh signals the sendLoop to discard all pending audio
 	// (used on user interruption to silence stale frames immediately).
@@ -88,10 +89,12 @@ type RTPHandler struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	loops  sync.WaitGroup
 
 	// Statistics
 	packetsSent     atomic.Uint64
 	packetsReceived atomic.Uint64
+	packetsDropped  atomic.Uint64
 	bytesReceived   atomic.Uint64
 	bytesSent       atomic.Uint64
 	firstPacketSeen atomic.Bool
@@ -196,6 +199,7 @@ func NewRTPHandler(ctx context.Context, config *RTPConfig) (*RTPHandler, error) 
 		codec:        codec,
 		audioInChan:  make(chan []byte, rtpAudioInBufferSize),
 		audioOutChan: make(chan []byte, rtpAudioOutBufferSize),
+		inputJitter:  newRTPInputJitterBuffer(codec),
 		flushAudioCh: make(chan struct{}, 1),
 		ctx:          handlerCtx,
 		cancel:       cancel,
@@ -225,8 +229,15 @@ func (h *RTPHandler) Start() {
 	// may be too slow.
 	h.sendInitialSilence()
 
-	go h.receiveLoop()
-	go h.sendLoop()
+	h.loops.Add(2)
+	go func() {
+		defer h.loops.Done()
+		h.receiveLoop()
+	}()
+	go func() {
+		defer h.loops.Done()
+		h.sendLoop()
+	}()
 
 	h.logger.Infow("RTP handler started — sendLoop and receiveLoop launched",
 		"local_addr", fmt.Sprintf("%s:%d", h.localIP, h.localPort),
@@ -296,10 +307,7 @@ func (h *RTPHandler) Stop() error {
 
 	h.cancel()
 
-	// Close channels safely
-	h.closeChannels()
-
-	// Close the connected send socket first (if any)
+	// Close sockets before waiting so blocked reads wake up and observe the cancelled context.
 	h.mu.Lock()
 	if h.sendConn != nil {
 		h.sendConn.Close()
@@ -311,6 +319,9 @@ func (h *RTPHandler) Stop() error {
 	if h.conn != nil {
 		err = h.conn.Close()
 	}
+
+	h.loops.Wait()
+	h.closeChannels()
 
 	if h.logger != nil {
 		sent, received := h.GetStats()
@@ -324,11 +335,12 @@ func (h *RTPHandler) Stop() error {
 
 // closeChannels safely closes audio channels
 func (h *RTPHandler) closeChannels() {
-	defer func() {
-		recover() // Recover if channels are already closed
-	}()
-	close(h.audioInChan)
-	close(h.audioOutChan)
+	if h.audioInChan != nil {
+		close(h.audioInChan)
+	}
+	if h.audioOutChan != nil {
+		close(h.audioOutChan)
+	}
 }
 
 // IsRunning returns whether the RTP handler is running
@@ -492,6 +504,11 @@ func (h *RTPHandler) SetCodec(codec *Codec) {
 	old := h.codec
 	h.codec = codec
 	h.codecVersion++
+	if h.inputJitter == nil {
+		h.inputJitter = newRTPInputJitterBuffer(codec)
+	} else {
+		h.inputJitter.reset(codec)
+	}
 	if h.logger != nil {
 		h.logger.Infow("RTP codec updated",
 			"old_codec", old.Name,
@@ -503,16 +520,6 @@ func (h *RTPHandler) SetCodec(codec *Codec) {
 }
 
 func (h *RTPHandler) receiveLoop() {
-	// Safety net: recover from "send on closed channel" panic that can occur
-	// if Stop() closes audioInChan while this goroutine is mid-send.
-	defer func() {
-		if r := recover(); r != nil {
-			if h.logger != nil {
-				h.logger.Warnw("RTP receiveLoop recovered from panic", "panic", r)
-			}
-		}
-	}()
-
 	if h.logger != nil {
 		h.logger.Infow("RTP receiveLoop started",
 			"local_addr", h.conn.LocalAddr().String(),
@@ -559,7 +566,7 @@ func (h *RTPHandler) receiveLoop() {
 			// Connected socket: the kernel delivers packets from the connected
 			// remote peer here. Use Read() — the source address is the
 			// connected remote, which we already know.
-			if deadlineErr := sendConn.SetReadDeadline(time.Now().Add(rtpReadTimeout)); deadlineErr != nil {
+			if deadlineErr := sendConn.SetReadDeadline(time.Now().Add(rtpInputPlayoutTimeout)); deadlineErr != nil {
 				continue
 			}
 			n, err = sendConn.Read(buf)
@@ -572,7 +579,7 @@ func (h *RTPHandler) receiveLoop() {
 		} else {
 			// Unconnected socket: no sendConn yet (remote address not set,
 			// or DialUDP failed). Read from the listener socket.
-			if deadlineErr := h.conn.SetReadDeadline(time.Now().Add(rtpReadTimeout)); deadlineErr != nil {
+			if deadlineErr := h.conn.SetReadDeadline(time.Now().Add(rtpInputPlayoutTimeout)); deadlineErr != nil {
 				continue
 			}
 			n, remoteAddr, err = h.conn.ReadFromUDP(buf)
@@ -580,6 +587,9 @@ func (h *RTPHandler) receiveLoop() {
 
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				if h.writeInboundAudioPayloads(h.flushInboundRTPOnTimeout(), 0) {
+					return
+				}
 				continue
 			}
 			// When SetRemoteAddr replaces sendConn during a re-INVITE, the
@@ -626,22 +636,72 @@ func (h *RTPHandler) receiveLoop() {
 		// Update statistics
 		h.packetsReceived.Add(1)
 		h.bytesReceived.Add(uint64(len(packet.Payload)))
-		h.notifyFirstPacketReceived()
 		// running state and context together with the send.
 		if !h.running.Load() {
 			return
 		}
+		audioPayloads, acceptedAudio := h.processInboundRTPPacket(packet)
+		if acceptedAudio {
+			h.notifyFirstPacketReceived()
+		}
+		if h.writeInboundAudioPayloads(audioPayloads, packet.SequenceNumber) {
+			return
+		}
+	}
+}
+
+func (h *RTPHandler) processInboundRTPPacket(packet *RTPPacket) ([][]byte, bool) {
+	if !h.isInboundAudioPayload(packet) {
+		h.recordDroppedInboundRTPPacket()
+		return nil, false
+	}
+	h.mu.RLock()
+	inputJitter := h.inputJitter
+	h.mu.RUnlock()
+	if inputJitter == nil {
+		return [][]byte{packet.Payload}, true
+	}
+	return inputJitter.push(packet), true
+}
+
+func (h *RTPHandler) isInboundAudioPayload(packet *RTPPacket) bool {
+	h.mu.RLock()
+	codec := h.codec
+	h.mu.RUnlock()
+	if codec == nil {
+		codec = &CodecPCMU
+	}
+	return packet.PayloadType == codec.PayloadType
+}
+
+func (h *RTPHandler) recordDroppedInboundRTPPacket() {
+	h.packetsDropped.Add(1)
+}
+
+func (h *RTPHandler) flushInboundRTPOnTimeout() [][]byte {
+	h.mu.RLock()
+	inputJitter := h.inputJitter
+	h.mu.RUnlock()
+	if inputJitter == nil {
+		return nil
+	}
+	return inputJitter.flushOnPlayoutTimeout()
+}
+
+func (h *RTPHandler) writeInboundAudioPayloads(audioPayloads [][]byte, sequenceNumber uint16) bool {
+	for _, payload := range audioPayloads {
 		select {
 		case <-h.ctx.Done():
-			return
-		case h.audioInChan <- packet.Payload:
-			// Successfully sent to channel
+			return true
+		case h.audioInChan <- payload:
 		default:
+			h.recordDroppedInboundRTPPacket()
 			if h.logger != nil {
-				h.logger.Warnw("RTP: Audio input channel full, dropping packet", "seq", packet.SequenceNumber)
+				h.logger.Warnw("RTP: Audio input channel full, dropping packet", "seq", sequenceNumber)
 			}
 		}
 	}
+	return false
 }
 
 func (h *RTPHandler) SetOnFirstPacket(fn func()) {
@@ -923,10 +983,21 @@ func (h *RTPHandler) GetStats() (sent, received uint64) {
 
 // GetDetailedStats returns detailed RTP statistics
 func (h *RTPHandler) GetDetailedStats() RTPStats {
+	var packetsLost uint64
+	var jitterDropped uint64
+	h.mu.RLock()
+	inputJitter := h.inputJitter
+	h.mu.RUnlock()
+	if inputJitter != nil {
+		packetsLost = inputJitter.lostPackets()
+		jitterDropped = inputJitter.droppedPackets()
+	}
 	return RTPStats{
 		PacketsSent:     h.packetsSent.Load(),
 		PacketsReceived: h.packetsReceived.Load(),
 		BytesSent:       h.bytesSent.Load(),
 		BytesReceived:   h.bytesReceived.Load(),
+		PacketsLost:     packetsLost,
+		PacketsDropped:  h.packetsDropped.Load() + jitterDropped,
 	}
 }

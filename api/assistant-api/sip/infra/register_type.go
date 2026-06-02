@@ -18,11 +18,52 @@ var (
 	ErrPermanentFailure    = internal_core.ErrPermanentFailure
 )
 
+type RegistrationFailureClass = internal_core.RegistrationFailureClass
+
+const (
+	RegistrationFailureClassConfig     = internal_core.RegistrationFailureClassConfig
+	RegistrationFailureClassAuth       = internal_core.RegistrationFailureClassAuth
+	RegistrationFailureClassRejected   = internal_core.RegistrationFailureClassRejected
+	RegistrationFailureClassTransient  = internal_core.RegistrationFailureClassTransient
+	RegistrationFailureClassNetwork    = internal_core.RegistrationFailureClassNetwork
+	RegistrationFailureClassOwnership  = internal_core.RegistrationFailureClassOwnership
+	RegistrationFailureClassDuplicate  = internal_core.RegistrationFailureClassDuplicate
+	RegistrationFailureClassRenewal    = internal_core.RegistrationFailureClassRenewal
+	RegistrationFailureClassUnregister = internal_core.RegistrationFailureClassUnregister
+)
+
+type RegistrationFailureReason = internal_core.RegistrationFailureReason
+
+const (
+	RegistrationFailureReasonMissingDID              = internal_core.RegistrationFailureReasonMissingDID
+	RegistrationFailureReasonMissingCredentialID     = internal_core.RegistrationFailureReasonMissingCredentialID
+	RegistrationFailureReasonDuplicateDID            = internal_core.RegistrationFailureReasonDuplicateDID
+	RegistrationFailureReasonAssistantNotFound       = internal_core.RegistrationFailureReasonAssistantNotFound
+	RegistrationFailureReasonVaultCredentialNotFound = internal_core.RegistrationFailureReasonVaultCredentialNotFound
+	RegistrationFailureReasonInvalidSIPConfig        = internal_core.RegistrationFailureReasonInvalidSIPConfig
+	RegistrationFailureReasonMissingSIPServer        = internal_core.RegistrationFailureReasonMissingSIPServer
+	RegistrationFailureReasonOwnershipClaimFailed    = internal_core.RegistrationFailureReasonOwnershipClaimFailed
+	RegistrationFailureReasonAuthFailed              = internal_core.RegistrationFailureReasonAuthFailed
+	RegistrationFailureReasonRegistrarRejected       = internal_core.RegistrationFailureReasonRegistrarRejected
+	RegistrationFailureReasonRegistrarUnreachable    = internal_core.RegistrationFailureReasonRegistrarUnreachable
+	RegistrationFailureReasonTransportError          = internal_core.RegistrationFailureReasonTransportError
+	RegistrationFailureReasonRegisterTimeout         = internal_core.RegistrationFailureReasonRegisterTimeout
+	RegistrationFailureReasonRenewalFailed           = internal_core.RegistrationFailureReasonRenewalFailed
+	RegistrationFailureReasonUnregisterFailed        = internal_core.RegistrationFailureReasonUnregisterFailed
+	RegistrationFailureReasonInvalidContactAddress   = internal_core.RegistrationFailureReasonInvalidContactAddress
+)
+
+type RegistrationError = internal_core.RegistrationError
+type RegistrationEvent = internal_core.RegistrationEvent
+type RegistrationObserver = internal_core.RegistrationObserver
+type RegistrationSnapshot = internal_core.RegistrationSnapshot
+
 type Registration struct {
-	DID         string
-	Config      *Config
-	AssistantID uint64
-	ExpiresIn   int
+	DID          string
+	Config       *Config
+	DeploymentID uint64
+	AssistantID  uint64
+	ExpiresIn    int
 }
 
 type RegistrationClient struct {

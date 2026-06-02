@@ -464,6 +464,7 @@ type RTPStats struct {
 	BytesSent       uint64        `json:"bytes_sent"`
 	BytesReceived   uint64        `json:"bytes_received"`
 	PacketsLost     uint64        `json:"packets_lost"`
+	PacketsDropped  uint64        `json:"packets_dropped"`
 	Jitter          time.Duration `json:"jitter"`
 }
 
@@ -474,6 +475,7 @@ func rtpStatsFromCore(stats internal_core.RTPStats) RTPStats {
 		BytesSent:       stats.BytesSent,
 		BytesReceived:   stats.BytesReceived,
 		PacketsLost:     stats.PacketsLost,
+		PacketsDropped:  stats.PacketsDropped,
 		Jitter:          stats.Jitter,
 	}
 }

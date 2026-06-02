@@ -14,6 +14,7 @@ import (
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	type_enums "github.com/rapidaai/pkg/types/enums"
+	"github.com/rapidaai/pkg/validator"
 )
 
 // loadRecords implements the "GetRecordToRegister" pipeline entry point.
@@ -43,22 +44,36 @@ func (m *Manager) loadRecords(ctx context.Context) ([]Record, error) {
 	for _, dep := range deployments {
 		opts := dep.GetOptions()
 
-		did, _ := opts.GetString(OptKeyPhone)
-		if did == "" {
-			continue
-		}
-		credentialID, err := opts.GetUint64(OptKeyCredentialID)
-		if err != nil {
-			continue
-		}
 		sipStatus, _ := opts.GetString(OptKeySIPStatus)
-		switch sipStatus {
-		case StatusDisabled, StatusRejected, StatusConfigError:
+		if isTerminalRegistrationStatus(RegistrationStatus(sipStatus)) {
 			continue
 		}
 
 		sipInbound, _ := opts.GetString(OptKeySIPInbound)
-		if sipInbound != "true" {
+		if !validator.NotBlank(sipInbound) || sipInbound != "true" {
+			continue
+		}
+
+		did, _ := opts.GetString(OptKeyPhone)
+		if !validator.NotBlank(did) {
+			m.writeRegistrationStatus(ctx, dep.Id, RegistrationStatusUpdate{
+				Status:        StatusConfigError,
+				Error:         "phone is required for SIP registration",
+				FailureClass:  RegistrationFailureClassConfig,
+				FailureReason: RegistrationFailureReasonMissingDID,
+				OwnerInstance: m.instanceID,
+			})
+			continue
+		}
+		credentialID, err := opts.GetUint64(OptKeyCredentialID)
+		if err != nil {
+			m.writeRegistrationStatus(ctx, dep.Id, RegistrationStatusUpdate{
+				Status:        StatusConfigError,
+				Error:         "credential_id is required for SIP registration",
+				FailureClass:  RegistrationFailureClassConfig,
+				FailureReason: RegistrationFailureReasonMissingCredentialID,
+				OwnerInstance: m.instanceID,
+			})
 			continue
 		}
 
@@ -90,8 +105,8 @@ func (m *Manager) loadRecords(ctx context.Context) ([]Record, error) {
 		// 2) otherwise latest deployment id
 		// 3) finally highest assistant id as stable tie-break
 		sort.Slice(list, func(i, j int) bool {
-			iActive := list[i].sipStatus == StatusActive
-			jActive := list[j].sipStatus == StatusActive
+			iActive := RegistrationStatus(list[i].sipStatus) == StatusActive
+			jActive := RegistrationStatus(list[j].sipStatus) == StatusActive
 			if iActive != jActive {
 				return iActive
 			}
@@ -115,8 +130,15 @@ func (m *Manager) loadRecords(ctx context.Context) ([]Record, error) {
 				"Duplicate DID %s. Inbound registration skipped: kept assistant=%d deployment=%d",
 				didKey, winner.assistant, winner.deployment,
 			)
-			m.markStatus(ctx, loser.deployment, StatusConfigError, reason)
-			m.upsertOption(ctx, loser.deployment, OptKeySIPRetry, "0")
+			retryCount := 0
+			m.writeRegistrationStatus(ctx, loser.deployment, RegistrationStatusUpdate{
+				Status:        StatusConfigError,
+				Error:         reason,
+				FailureClass:  RegistrationFailureClassDuplicate,
+				FailureReason: RegistrationFailureReasonDuplicateDID,
+				RetryCount:    &retryCount,
+				OwnerInstance: m.instanceID,
+			})
 		}
 	}
 
@@ -125,7 +147,7 @@ func (m *Manager) loadRecords(ctx context.Context) ([]Record, error) {
 
 func normalizeDIDForCollision(did string) string {
 	v := strings.TrimSpace(did)
-	if v == "" {
+	if !validator.NotBlank(v) {
 		return ""
 	}
 	if strings.HasPrefix(v, "+") {
