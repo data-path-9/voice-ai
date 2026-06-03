@@ -52,12 +52,12 @@ func TestDSLEngine_BuildRequestURLAndEvaluateRequestRules(t *testing.T) {
 	assert.Equal(t, "hi", parsedURL.Query().Get("language"))
 	assert.Equal(t, "16000", parsedURL.Query().Get("sample_rate"))
 
-	requests, err := engine.EvaluateRequestRules(requestPacketAudio, config.newRequestScope("ctx-1", []byte{0x00, 0x01}, []byte("wav")))
+	requests, err := engine.EvaluateRequestRules(requestPacketAudio, config.newRequestScope("ctx-1", []byte{0x00, 0x01}))
 	require.NoError(t, err)
 	require.Len(t, requests, 1)
 	assert.Equal(t, frameTypeJSON, requests[0].Frame)
 	assert.Equal(t, map[string]any{
-		"audio":            "d2F2",
+		"audio":            "UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAQ==",
 		"language":         "hi",
 		"speech_enhance":   true,
 		"max_tokens":       1024,

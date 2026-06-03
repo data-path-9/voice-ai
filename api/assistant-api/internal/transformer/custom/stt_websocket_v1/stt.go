@@ -103,7 +103,7 @@ func (transformer *speechToText) Initialize() error {
 		return fmt.Errorf("custom-stt websocket_v1: failed to connect: %w", err)
 	}
 
-	transformer.emitPackets(internal_type.ConversationEventPacket{
+	transformer.onPacket(internal_type.ConversationEventPacket{
 		ContextID: transformer.currentContextID(),
 		Name:      "stt",
 		Data: map[string]string{
@@ -123,7 +123,7 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		transformer.contextID = input.ContextID
 		transformer.mu.Unlock()
 		if err := transformer.handlePacketRequests(requestPacketTurnChange, input.ContextID, nil, true); err != nil {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     err,
 				Type:      internal_type.STTNetworkTimeout,
@@ -140,7 +140,7 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		}
 		transformer.mu.Unlock()
 		if err := transformer.handlePacketRequests(requestPacketInterrupt, input.ContextID, nil, false); err != nil {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     err,
 				Type:      internal_type.STTNetworkTimeout,
@@ -177,7 +177,7 @@ func (transformer *speechToText) Close(_ context.Context) error {
 	}
 
 	if !connectedAt.IsZero() {
-		transformer.emitPackets(
+		transformer.onPacket(
 			internal_type.ConversationEventPacket{
 				ContextID: contextID,
 				Name:      "stt",
@@ -188,7 +188,6 @@ func (transformer *speechToText) Close(_ context.Context) error {
 				Time: time.Now(),
 			},
 			internal_type.ConversationMetricPacket{
-				ContextID: 0,
 				Metrics: []*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
 					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
@@ -211,7 +210,7 @@ func (transformer *speechToText) handleAudio(contextID string, audio []byte) err
 
 	chunk, err := transformer.prepareAudioChunk(audio)
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: effectiveContextID,
 			Error:     err,
 			Type:      internal_type.STTInvalidInput,
@@ -221,7 +220,7 @@ func (transformer *speechToText) handleAudio(contextID string, audio []byte) err
 
 	err = transformer.handlePacketRequests(requestPacketAudio, effectiveContextID, chunk, true)
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: effectiveContextID,
 			Error:     err,
 			Type:      internal_type.STTNetworkTimeout,
@@ -294,7 +293,7 @@ func (transformer *speechToText) readLoop(conn *websocket.Conn) {
 		messageType, payload, err := conn.ReadMessage()
 		if err != nil {
 			if transformer.classifyReadError(conn, err) == readErrorFail {
-				transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+				transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 					ContextID: transformer.currentContextID(),
 					Error:     fmt.Errorf("custom-stt websocket_v1: read failed: %w", err),
 					Type:      internal_type.STTNetworkTimeout,
@@ -304,7 +303,7 @@ func (transformer *speechToText) readLoop(conn *websocket.Conn) {
 		}
 		frame, err := transformer.engine.ParseFrame(messageType, payload)
 		if err != nil {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     err,
 				Type:      internal_type.STTSystemPanic,
@@ -314,7 +313,7 @@ func (transformer *speechToText) readLoop(conn *websocket.Conn) {
 
 		outcome, err := transformer.engine.EvaluateResponse(frame)
 		if err != nil {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     err,
 				Type:      internal_type.STTSystemPanic,
@@ -325,7 +324,7 @@ func (transformer *speechToText) readLoop(conn *websocket.Conn) {
 			continue
 		}
 		if strings.TrimSpace(outcome.ErrorText) != "" {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     errors.New(strings.TrimSpace(outcome.ErrorText)),
 				Type:      internal_type.STTSystemPanic,
@@ -403,7 +402,7 @@ func (transformer *speechToText) emitTranscript(outcome responseOutcome) {
 		eventData["char_count"] = fmt.Sprintf("%d", len(outcome.Script))
 	}
 
-	transformer.emitPackets(internal_type.InterruptionDetectedPacket{
+	transformer.onPacket(internal_type.InterruptionDetectedPacket{
 		ContextID: contextID,
 		Source:    internal_type.InterruptionSourceWord,
 	},
@@ -431,7 +430,7 @@ func (transformer *speechToText) emitTranscript(outcome responseOutcome) {
 	transformer.mu.Unlock()
 
 	if !interruptionStartedAt.IsZero() {
-		transformer.emitPackets(internal_type.UserMessageMetricPacket{
+		transformer.onPacket(internal_type.UserMessageMetricPacket{
 			ContextID: contextID,
 			Metrics: []*protos.Metric{{
 				Name:  "stt_latency_ms",
@@ -544,12 +543,6 @@ func (transformer *speechToText) currentContextID() string {
 	return transformer.contextID
 }
 
-func (transformer *speechToText) emitPackets(packets ...internal_type.Packet) {
-	if err := transformer.onPacket(packets...); err != nil {
-		transformer.logger.Errorf("custom-stt websocket_v1: onPacket failed: %v", err)
-	}
-}
-
 func parseAudioEncoding(encoding string) protos.AudioConfig_AudioFormat {
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "mulaw", "mu-law", "mulaw8", "mu_law", "ulaw", "u-law", "pcmu", "g711_ulaw":
@@ -557,13 +550,4 @@ func parseAudioEncoding(encoding string) protos.AudioConfig_AudioFormat {
 	default:
 		return protos.AudioConfig_LINEAR16
 	}
-}
-
-func isSameAudioConfig(left, right *protos.AudioConfig) bool {
-	if left == nil || right == nil {
-		return false
-	}
-	return left.GetSampleRate() == right.GetSampleRate() &&
-		left.GetAudioFormat() == right.GetAudioFormat() &&
-		left.GetChannels() == right.GetChannels()
 }

@@ -240,10 +240,6 @@ func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context
 	default:
 		switch p.Event {
 		case internal_type.InterruptionEventStart:
-			// if p.StartAt < 5 {
-			// 	return
-			// }
-			h.r.logger.Debugf("interuption %+v", p)
 			h.r.Transition(Interrupt)
 			h.r.OnPacket(
 				ctx,

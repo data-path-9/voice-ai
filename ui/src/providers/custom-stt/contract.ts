@@ -168,7 +168,8 @@ const REQUEST_RULE_VALIDATION_CONTEXTS: Record<
         bytes: 'AAEC',
         base64: 'AAEC',
         pcm_base64: 'AAEC',
-        wav_base64: 'UklGRg==',
+        wav_base64:
+          'UklGRicAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQMAAAAAAQI=',
       },
     },
   },

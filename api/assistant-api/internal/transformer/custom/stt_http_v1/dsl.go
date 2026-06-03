@@ -8,6 +8,7 @@ package internal_transformer_custom_stt_http_v1
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 
 	internal_transformer_custom_dsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/dsl"
 )
@@ -57,7 +58,8 @@ func (config *Config) newQueryScope() queryScope {
 	}
 }
 
-func (config *Config) newRequestScope(contextID string, pcmAudio []byte, wavAudio []byte) map[string]any {
+func (config *Config) newRequestScope(contextID string, pcmAudio []byte) map[string]any {
+	pcmBase64 := base64.StdEncoding.EncodeToString(pcmAudio)
 	return map[string]any{
 		"config": map[string]any{
 			"model":    config.Model,
@@ -72,12 +74,34 @@ func (config *Config) newRequestScope(contextID string, pcmAudio []byte, wavAudi
 			"context_id": contextID,
 			"audio": map[string]any{
 				"bytes":      append([]byte(nil), pcmAudio...),
-				"base64":     base64.StdEncoding.EncodeToString(pcmAudio),
-				"pcm_base64": base64.StdEncoding.EncodeToString(pcmAudio),
-				"wav_base64": base64.StdEncoding.EncodeToString(wavAudio),
+				"base64":     pcmBase64,
+				"pcm_base64": pcmBase64,
+				"wav_base64": base64.StdEncoding.EncodeToString(makePCM16MonoWAV(pcmAudio, config.SampleRate)),
 			},
 		},
 	}
+}
+
+func makePCM16MonoWAV(pcmAudio []byte, sampleRate int) []byte {
+	dataSize := len(pcmAudio)
+	byteRate := sampleRate * 2
+	totalSize := 36 + dataSize
+
+	wavAudio := make([]byte, 44, 44+dataSize)
+	copy(wavAudio[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(wavAudio[4:8], uint32(totalSize))
+	copy(wavAudio[8:12], "WAVE")
+	copy(wavAudio[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(wavAudio[16:20], 16)
+	binary.LittleEndian.PutUint16(wavAudio[20:22], 1)
+	binary.LittleEndian.PutUint16(wavAudio[22:24], 1)
+	binary.LittleEndian.PutUint32(wavAudio[24:28], uint32(sampleRate))
+	binary.LittleEndian.PutUint32(wavAudio[28:32], uint32(byteRate))
+	binary.LittleEndian.PutUint16(wavAudio[32:34], 2)
+	binary.LittleEndian.PutUint16(wavAudio[34:36], 16)
+	copy(wavAudio[36:40], "data")
+	binary.LittleEndian.PutUint32(wavAudio[40:44], uint32(dataSize))
+	return append(wavAudio, pcmAudio...)
 }
 
 func (engine *dslEngine) BuildRequestURL(scope queryScope) (string, error) {

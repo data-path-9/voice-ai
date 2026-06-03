@@ -74,6 +74,52 @@ func TestNewConfig_WithOverrides(t *testing.T) {
 	assert.Equal(t, requestPacketAudio, config.RequestRules[1].When.Packet)
 }
 
+func TestNewConfig_OptionalQueryParams(t *testing.T) {
+	tests := []struct {
+		name        string
+		raw         any
+		want        map[string]any
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "empty string leaves query params empty",
+			raw:  "",
+			want: map[string]any{},
+		},
+		{
+			name: "blank string leaves query params empty",
+			raw:  " \t\n ",
+			want: map[string]any{},
+		},
+		{
+			name:        "invalid json errors with option key",
+			raw:         `{"sample_rate":{"$cast":"number"`,
+			wantErr:     true,
+			errContains: optionKeyQueryParams,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			opts := baseOptions()
+			opts[optionKeyQueryParams] = test.raw
+
+			config, err := NewConfig(testCredential(t, map[string]any{
+				credentialKeyBaseURLCamel: "wss://example.com/stt",
+			}), opts)
+			if test.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), test.errContains)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, test.want, config.QueryParams)
+		})
+	}
+}
+
 func TestNewConfig_ValidateRequired(t *testing.T) {
 	_, err := NewConfig(testCredential(t, map[string]any{}), baseOptions())
 	require.Error(t, err)

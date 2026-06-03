@@ -15,6 +15,7 @@ import (
 
 	internal_transformer_custom_dsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/dsl"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
 
@@ -106,7 +107,7 @@ var requestRuleContract = internal_transformer_custom_dsl.Contract{
 					"bytes":      []byte{0x00, 0x01},
 					"base64":     "AAE=",
 					"pcm_base64": "AAE=",
-					"wav_base64": "UklGRg==",
+					"wav_base64": "UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAQ==",
 				},
 			},
 		},
@@ -268,6 +269,12 @@ func (parser *configParser) decodeJSONObject(key string, required bool, destinat
 			return false, fmt.Errorf("custom-stt http_v1: %s is required", key)
 		}
 		return false, nil
+	}
+	if !required {
+		rawString, ok := raw.(string)
+		if !ok || !validator.NotBlank(rawString) {
+			return false, nil
+		}
 	}
 
 	payload, err := parser.toJSONBytes(raw, key)

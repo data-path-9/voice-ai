@@ -170,6 +170,14 @@ const REQUEST_PATH_DEFINITIONS: Record<
       key: 'packet.audio.base64',
       description: 'The current audio packet encoded as base64.',
     },
+    {
+      key: 'packet.audio.pcm_base64',
+      description: 'The current PCM audio packet encoded as base64.',
+    },
+    {
+      key: 'packet.audio.wav_base64',
+      description: 'The current audio packet wrapped in a WAV container and encoded as base64.',
+    },
   ],
 };
 

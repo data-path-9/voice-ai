@@ -9,7 +9,6 @@ package internal_transformer_custom_stt_http_v1
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -97,7 +96,7 @@ func (transformer *speechToText) Initialize() error {
 	contextID := transformer.contextID
 	transformer.mu.Unlock()
 
-	transformer.emitPackets(internal_type.ConversationEventPacket{
+	transformer.onPacket(internal_type.ConversationEventPacket{
 		ContextID: contextID,
 		Name:      "stt",
 		Data: map[string]string{
@@ -118,9 +117,11 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		transformer.mu.Unlock()
 		return nil
 	case internal_type.SpeechToTextEndPacket:
+		transformer.logger.Debugf("Test -> STT END Packet received for context %s", input.ContextID)
 		transformer.flushBufferedSpeech(input.ContextID)
 		return nil
 	case internal_type.SpeechToTextStartPacket:
+		transformer.logger.Debugf("Test -> STT Start Packet received for context %s", input.ContextID)
 		transformer.mu.Lock()
 		if input.ContextID != "" {
 			transformer.contextID = input.ContextID
@@ -136,7 +137,7 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		}
 		chunk, err := transformer.prepareAudioChunk(input.Audio)
 		if err != nil {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     err,
 				Type:      internal_type.STTInvalidInput,
@@ -171,7 +172,7 @@ func (transformer *speechToText) Close(_ context.Context) error {
 	transformer.mu.Unlock()
 
 	if !connectedAt.IsZero() {
-		transformer.emitPackets(
+		transformer.onPacket(
 			internal_type.ConversationEventPacket{
 				ContextID: contextID,
 				Name:      "stt",
@@ -182,7 +183,6 @@ func (transformer *speechToText) Close(_ context.Context) error {
 				Time: time.Now(),
 			},
 			internal_type.ConversationMetricPacket{
-				ContextID: 0,
 				Metrics: []*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
 					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
@@ -215,7 +215,7 @@ func (transformer *speechToText) flushBufferedSpeech(contextID string) {
 		return
 	}
 
-	// VAD end is the HTTP flush boundary; the provider receives one WAV per user turn.
+	// VAD end is the HTTP flush boundary; request rules decide the provider payload shape.
 	utils.Go(transformer.ctx, func() {
 		defer func() {
 			transformer.mu.Lock()
@@ -227,32 +227,21 @@ func (transformer *speechToText) flushBufferedSpeech(contextID string) {
 }
 
 func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, startedAt time.Time) {
-	wavAudio, err := createPCM16MonoWAV(pcmAudio, transformer.config.SampleRate)
-	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
-			ContextID: contextID,
-			Error:     err,
-			Type:      internal_type.STTInvalidInput,
-		})
-		return
-	}
-
 	requestURL, err := transformer.engine.BuildRequestURL(transformer.config.newQueryScope())
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     err,
 			Type:      internal_type.STTInvalidInput,
 		})
 		return
 	}
-
 	requests, err := transformer.engine.EvaluateRequestRules(
 		requestPacketAudio,
-		transformer.config.newRequestScope(contextID, pcmAudio, wavAudio),
+		transformer.config.newRequestScope(contextID, pcmAudio),
 	)
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     fmt.Errorf("custom-stt http_v1: failed to evaluate request rules: %w", err),
 			Type:      internal_type.STTInvalidInput,
@@ -260,7 +249,7 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 		return
 	}
 	if len(requests) == 0 {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     fmt.Errorf("custom-stt http_v1: request rules produced no audio request"),
 			Type:      internal_type.STTInvalidInput,
@@ -269,7 +258,7 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 	}
 	requestBody := requests[0].Body
 	if requests[0].Frame != frameTypeJSON {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     fmt.Errorf("custom-stt http_v1: audio request rule send.frame must be json"),
 			Type:      internal_type.STTInvalidInput,
@@ -278,7 +267,7 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 	}
 	requestBodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     fmt.Errorf("custom-stt http_v1: failed to marshal request body: %w", err),
 			Type:      internal_type.STTInvalidInput,
@@ -288,7 +277,7 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 
 	request, err := http.NewRequestWithContext(transformer.ctx, http.MethodPost, requestURL, bytes.NewReader(requestBodyBytes))
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     fmt.Errorf("custom-stt http_v1: failed to create request: %w", err),
 			Type:      internal_type.STTNetworkTimeout,
@@ -307,7 +296,7 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 		if transformer.ctx.Err() != nil || errors.Is(err, context.Canceled) {
 			return
 		}
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     fmt.Errorf("custom-stt http_v1: request failed: %w", err),
 			Type:      internal_type.STTNetworkTimeout,
@@ -317,9 +306,8 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 	defer response.Body.Close()
 
 	responseBody, err := io.ReadAll(response.Body)
-	transformer.logger.Debugf("************* %s", string(responseBody))
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     fmt.Errorf("custom-stt http_v1: failed to read response: %w", err),
 			Type:      internal_type.STTNetworkTimeout,
@@ -327,7 +315,7 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 		return
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     fmt.Errorf("custom-stt http_v1: status %d: %s", response.StatusCode, string(responseBody)),
 			Type:      classifyHTTPStatus(response.StatusCode),
@@ -337,7 +325,7 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 
 	frame, err := transformer.engine.ParseHTTPResponse(responseBody)
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     err,
 			Type:      internal_type.STTSystemPanic,
@@ -346,7 +334,7 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 	}
 	outcome, err := transformer.engine.EvaluateResponse(frame)
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     err,
 			Type:      internal_type.STTSystemPanic,
@@ -357,7 +345,7 @@ func (transformer *speechToText) transcribe(contextID string, pcmAudio []byte, s
 		return
 	}
 	if strings.TrimSpace(outcome.ErrorText) != "" {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: contextID,
 			Error:     errors.New(strings.TrimSpace(outcome.ErrorText)),
 			Type:      internal_type.STTSystemPanic,
@@ -397,7 +385,6 @@ func (transformer *speechToText) emitTranscript(contextID string, outcome respon
 		internal_type.SpeechToTextPacket{
 			ContextID:  contextID,
 			Script:     outcome.Script,
-			Concat:     utils.Ptr(""),
 			Confidence: outcome.Confidence,
 			Language:   language,
 			Interim:    false,
@@ -419,7 +406,7 @@ func (transformer *speechToText) emitTranscript(contextID string, outcome respon
 		})
 	}
 
-	transformer.emitPackets(packets...)
+	transformer.onPacket(packets...)
 }
 
 func (transformer *speechToText) prepareAudioChunk(audio []byte) ([]byte, error) {
@@ -440,12 +427,6 @@ func (transformer *speechToText) currentContextID() string {
 	return transformer.contextID
 }
 
-func (transformer *speechToText) emitPackets(packets ...internal_type.Packet) {
-	if err := transformer.onPacket(packets...); err != nil {
-		transformer.logger.Errorf("custom-stt http_v1: onPacket failed: %v", err)
-	}
-}
-
 func classifyHTTPStatus(statusCode int) internal_type.STTErrorType {
 	switch {
 	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
@@ -455,66 +436,4 @@ func classifyHTTPStatus(statusCode int) internal_type.STTErrorType {
 	default:
 		return internal_type.STTNetworkTimeout
 	}
-}
-
-func createPCM16MonoWAV(pcmAudio []byte, sampleRate int) ([]byte, error) {
-	if sampleRate <= 0 {
-		return nil, fmt.Errorf("custom-stt http_v1: sample rate must be positive")
-	}
-	if len(pcmAudio)%2 != 0 {
-		return nil, fmt.Errorf("custom-stt http_v1: LINEAR16 audio must contain complete samples")
-	}
-
-	dataSize := len(pcmAudio)
-	byteRate := sampleRate * 2
-	totalSize := 36 + dataSize
-
-	header := make([]byte, 44)
-	copy(header[0:4], "RIFF")
-	binary.LittleEndian.PutUint32(header[4:8], uint32(totalSize))
-	copy(header[8:12], "WAVE")
-	copy(header[12:16], "fmt ")
-	binary.LittleEndian.PutUint32(header[16:20], 16)
-	binary.LittleEndian.PutUint16(header[20:22], 1)
-	binary.LittleEndian.PutUint16(header[22:24], 1)
-	binary.LittleEndian.PutUint32(header[24:28], uint32(sampleRate))
-	binary.LittleEndian.PutUint32(header[28:32], uint32(byteRate))
-	binary.LittleEndian.PutUint16(header[32:34], 2)
-	binary.LittleEndian.PutUint16(header[34:36], 16)
-	copy(header[36:40], "data")
-	binary.LittleEndian.PutUint32(header[40:44], uint32(dataSize))
-
-	wavAudio := make([]byte, 0, len(header)+len(pcmAudio))
-	wavAudio = append(wavAudio, header...)
-	wavAudio = append(wavAudio, pcmAudio...)
-	return wavAudio, nil
-}
-
-func parseAudioEncoding(encoding string) protos.AudioConfig_AudioFormat {
-	switch strings.ToLower(strings.TrimSpace(encoding)) {
-	case "mulaw", "mu-law", "mulaw8", "mu_law", "ulaw", "u-law", "pcmu", "g711_ulaw":
-		return protos.AudioConfig_MuLaw8
-	default:
-		return protos.AudioConfig_LINEAR16
-	}
-}
-
-func cloneAudioConfig(config *protos.AudioConfig) *protos.AudioConfig {
-	if config == nil {
-		return &protos.AudioConfig{SampleRate: 16000, AudioFormat: protos.AudioConfig_LINEAR16, Channels: 1}
-	}
-	return &protos.AudioConfig{
-		SampleRate:  config.GetSampleRate(),
-		AudioFormat: config.GetAudioFormat(),
-		Channels:    config.GetChannels(),
-	}
-}
-
-func isSameAudioConfig(left, right *protos.AudioConfig) bool {
-	if left == nil || right == nil {
-		return false
-	}
-	return left.GetSampleRate() == right.GetSampleRate() &&
-		left.GetAudioFormat() == right.GetAudioFormat() &&
-		left.GetChannels() == right.GetChannels()
 }

@@ -161,18 +161,3 @@ func TestSpeechToText_HTTPFlow_FlushesBufferedSpeechOnVADEnd(t *testing.T) {
 	}
 	assert.True(t, hasLatencyMetric, "expected stt_latency_ms metric")
 }
-
-func TestCreatePCM16MonoWAV(t *testing.T) {
-	wavAudio, err := createPCM16MonoWAV([]byte{0x01, 0x02, 0x03, 0x04}, 16000)
-	require.NoError(t, err)
-
-	assert.Equal(t, "RIFF", string(wavAudio[0:4]))
-	assert.Equal(t, "WAVE", string(wavAudio[8:12]))
-	assert.Equal(t, "fmt ", string(wavAudio[12:16]))
-	assert.Equal(t, "data", string(wavAudio[36:40]))
-	assert.Equal(t, []byte{0x01, 0x02, 0x03, 0x04}, wavAudio[44:])
-
-	_, err = createPCM16MonoWAV([]byte{0x01}, 16000)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "complete samples")
-}

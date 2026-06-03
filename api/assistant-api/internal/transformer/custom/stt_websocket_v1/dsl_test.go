@@ -43,7 +43,7 @@ func TestDSLEngine_BuildConnectionURLAndEvaluateRequestRules(t *testing.T) {
 				Send: RequestSend{
 					Frame: frameTypeJSON,
 					Body: map[string]any{
-						"audio":    map[string]any{"$path": "packet.audio.base64"},
+						"audio":    map[string]any{"$path": "packet.audio.wav_base64"},
 						"encoding": map[string]any{"$path": "config.audio.encoding"},
 					},
 				},
@@ -85,7 +85,7 @@ func TestDSLEngine_BuildConnectionURLAndEvaluateRequestRules(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, audioRequests, 2)
 	assert.Equal(t, frameTypeJSON, audioRequests[0].Frame)
-	assert.Equal(t, "AAE=", audioRequests[0].Body.(map[string]any)["audio"])
+	assert.Equal(t, "UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAQ==", audioRequests[0].Body.(map[string]any)["audio"])
 	assert.Equal(t, "LINEAR16", audioRequests[0].Body.(map[string]any)["encoding"])
 	assert.Equal(t, frameTypeBinary, audioRequests[1].Frame)
 	assert.Equal(t, []byte{0x00, 0x01}, audioRequests[1].Body)
