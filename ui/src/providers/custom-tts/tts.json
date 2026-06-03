@@ -60,7 +60,7 @@
       "errorMessage": "Please select a valid sample rate for custom TTS."
     },
     {
-      "key": "speak.ws.query_params",
+      "key": "speak.query_params",
       "label": "Query Parameters",
       "type": "json",
       "required": false,
@@ -72,7 +72,7 @@
       "errorMessage": "Please provide valid query parameters for custom TTS."
     },
     {
-      "key": "speak.ws.request_rules",
+      "key": "speak.request_rules",
       "label": "Request Rules",
       "type": "json",
       "required": true,
@@ -85,7 +85,7 @@
       "errorMessage": "Please provide valid request rules for custom TTS."
     },
     {
-      "key": "speak.ws.response_rules",
+      "key": "speak.response_rules",
       "label": "Response Rules",
       "type": "json",
       "required": true,

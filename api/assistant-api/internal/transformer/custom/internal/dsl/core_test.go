@@ -108,7 +108,7 @@ func TestCoreValidateRequestObject_RejectsUnknownVariable(t *testing.T) {
 
 	err := core.ValidateRequestObject(map[string]any{
 		"audio": map[string]any{"$var": "chunk"},
-	}, contract, "speak.ws.query_params")
+	}, contract, "speak.query_params")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unsupported variable "chunk"`)
 }

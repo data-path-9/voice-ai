@@ -666,12 +666,3 @@ func parseAudioEncoding(encoding string) protos.AudioConfig_AudioFormat {
 		return protos.AudioConfig_LINEAR16
 	}
 }
-
-func isSameAudioConfig(left, right *protos.AudioConfig) bool {
-	if left == nil || right == nil {
-		return false
-	}
-	return left.GetSampleRate() == right.GetSampleRate() &&
-		left.GetAudioFormat() == right.GetAudioFormat() &&
-		left.GetChannels() == right.GetChannels()
-}

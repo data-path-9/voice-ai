@@ -36,9 +36,9 @@ const (
 	optionKeyLanguage      = "speak.language"
 	optionKeyEncoding      = "speak.audio.encoding"
 	optionKeySampleRate    = "speak.audio.sample_rate"
-	optionKeyQueryParams   = "speak.ws.query_params"
-	optionKeyRequestRules  = "speak.ws.request_rules"
-	optionKeyResponseRules = "speak.ws.response_rules"
+	optionKeyQueryParams   = "speak.query_params"
+	optionKeyRequestRules  = "speak.request_rules"
+	optionKeyResponseRules = "speak.response_rules"
 )
 
 const (

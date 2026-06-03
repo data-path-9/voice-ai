@@ -3,6 +3,7 @@ import { loadProviderConfig } from '../config-loader';
 import { getDefaultsFromConfig, validateFromConfig } from '../config-defaults';
 import {
   CUSTOM_TTS_DEFAULT_REQUEST_RULES_EXAMPLE,
+  CUSTOM_TTS_QUERY_PARAMS_KEY,
   CUSTOM_TTS_REQUEST_RULES_KEY,
   CUSTOM_TTS_RESPONSE_RULES_KEY,
 } from '../custom-tts/contract';
@@ -82,7 +83,7 @@ describe('Custom TTS config contract', () => {
     );
 
     return upsertMetadata(
-      upsertMetadata(defaults, 'speak.ws.query_params', validQueryParams),
+      upsertMetadata(defaults, CUSTOM_TTS_QUERY_PARAMS_KEY, validQueryParams),
       CUSTOM_TTS_RESPONSE_RULES_KEY,
       validResponseRules,
     );
@@ -95,7 +96,7 @@ describe('Custom TTS config contract', () => {
       expect.arrayContaining([
         'speak.audio.encoding',
         'speak.audio.sample_rate',
-        'speak.ws.query_params',
+        CUSTOM_TTS_QUERY_PARAMS_KEY,
         CUSTOM_TTS_REQUEST_RULES_KEY,
         CUSTOM_TTS_RESPONSE_RULES_KEY,
       ]),
@@ -175,7 +176,7 @@ describe('Custom TTS config contract', () => {
 
   it('allows query params to be omitted', () => {
     const options = buildValidOptions().filter(
-      item => item.getKey() !== 'speak.ws.query_params',
+      item => item.getKey() !== CUSTOM_TTS_QUERY_PARAMS_KEY,
     );
 
     expect(
@@ -185,8 +186,8 @@ describe('Custom TTS config contract', () => {
 
   it('rejects invalid JSON in optional query params', () => {
     const options = upsertMetadata(
-      removeMetadata(buildValidOptions(), 'speak.ws.query_params'),
-      'speak.ws.query_params',
+      removeMetadata(buildValidOptions(), CUSTOM_TTS_QUERY_PARAMS_KEY),
+      CUSTOM_TTS_QUERY_PARAMS_KEY,
       '{"language":{"$var":"language"',
     );
 
@@ -197,8 +198,8 @@ describe('Custom TTS config contract', () => {
 
   it('rejects query params that use removed text variable', () => {
     const options = upsertMetadata(
-      removeMetadata(buildValidOptions(), 'speak.ws.query_params'),
-      'speak.ws.query_params',
+      removeMetadata(buildValidOptions(), CUSTOM_TTS_QUERY_PARAMS_KEY),
+      CUSTOM_TTS_QUERY_PARAMS_KEY,
       '{"text":{"$var":"text"}}',
     );
 

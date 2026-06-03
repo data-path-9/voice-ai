@@ -16,9 +16,9 @@ import {
   validateWebsocketDslResponseRules,
 } from '../websocket-dsl/core';
 
-export const CUSTOM_TTS_QUERY_PARAMS_KEY = 'speak.ws.query_params';
-export const CUSTOM_TTS_REQUEST_RULES_KEY = 'speak.ws.request_rules';
-export const CUSTOM_TTS_RESPONSE_RULES_KEY = 'speak.ws.response_rules';
+export const CUSTOM_TTS_QUERY_PARAMS_KEY = 'speak.query_params';
+export const CUSTOM_TTS_REQUEST_RULES_KEY = 'speak.request_rules';
+export const CUSTOM_TTS_RESPONSE_RULES_KEY = 'speak.response_rules';
 
 export const CUSTOM_TTS_DSL_VARIABLES = [
   'message_id',
