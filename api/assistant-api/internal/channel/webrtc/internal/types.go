@@ -51,7 +51,7 @@ const (
 // Channel and buffer sizes
 const (
 	InternalPCM16BytesPerMs    = 32
-	InputBufferThresholdMs     = 60
+	InputBufferThresholdMs     = 40
 	InputChannelSize           = 500
 	OutputChannelSize          = 1500
 	PeerEventChannelSize       = 128
@@ -219,6 +219,7 @@ const (
 	ReasonRemoteAnswerDeadline  = "remote_answer_deadline"
 	ReasonICEConnectedDeadline  = "ice_connected_deadline"
 	ReasonPeerConnectedDeadline = "peer_connected_deadline"
+	ReasonConnectedNoUserAudio  = "connected_no_user_audio"
 )
 
 // Quality state values emitted for conversation-level WebRTC quality.

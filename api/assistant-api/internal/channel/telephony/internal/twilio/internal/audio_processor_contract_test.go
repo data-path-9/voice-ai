@@ -114,13 +114,12 @@ func TestAudioProcessor_ProcessProviderAudioFrame_EmitsBridgeAndThresholdedPipel
 		t.Fatalf("pipelineAudio length=%d want=0", len(firstFrame.PipelineAudio))
 	}
 
-	_, _ = processor.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: []byte{2}})
-	thirdFrame, err := processor.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: []byte{3}})
+	secondFrame, err := processor.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: []byte{2}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(thirdFrame.PipelineAudio) != InputBufferThreshold {
-		t.Fatalf("pipelineAudio length=%d want=%d", len(thirdFrame.PipelineAudio), InputBufferThreshold)
+	if len(secondFrame.PipelineAudio) != InputBufferThreshold {
+		t.Fatalf("pipelineAudio length=%d want=%d", len(secondFrame.PipelineAudio), InputBufferThreshold)
 	}
 	if !firstFrame.ReceivedAt.Equal(receivedAt) {
 		t.Fatalf("receivedAt=%s want=%s", firstFrame.ReceivedAt, receivedAt)

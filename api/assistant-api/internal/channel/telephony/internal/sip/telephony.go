@@ -68,8 +68,6 @@ func (t *sipTelephony) parseConfig(vaultCredential *protos.VaultCredential) (*si
 			inboundConfig.MinRingDuration,
 			inboundConfig.MaxRingDuration,
 			inboundConfig.ACKTimeout,
-			inboundConfig.AssistantAudioReadyTimeout,
-			inboundConfig.RequireAssistantAudioReady,
 		)
 	}
 

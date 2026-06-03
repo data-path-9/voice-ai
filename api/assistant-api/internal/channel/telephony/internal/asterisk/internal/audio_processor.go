@@ -29,7 +29,7 @@ const (
 	maxOptimalFrameSize   = 320
 	linear16BytesPerMs    = 32
 	bridgeOutputFrameSize = linear16BytesPerMs * 20
-	inputBufferThreshold  = linear16BytesPerMs * 60
+	inputBufferThreshold  = linear16BytesPerMs * 40
 )
 
 type AudioProcessorConfig struct {

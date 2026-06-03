@@ -384,42 +384,6 @@ func TestBehavior_GetBehavior(t *testing.T) {
 	})
 }
 
-// InitializeBehavior should fan out greeting, idle timeout, and max duration setup.
-func TestBehavior_InitializeBehavior(t *testing.T) {
-	t.Run("no behavior configured is no-op", func(t *testing.T) {
-		r := newBehaviorDisconnectTestRequestor(t, &behaviorCapturingStreamer{})
-		r.assistant = nil
-
-		require.NoError(t, r.initializeBehavior(context.Background()))
-		assert.Zero(t, len(r.channels.EgressChannel()))
-		assert.Zero(t, len(r.channels.BackgroundChannel()))
-		assert.Nil(t, r.maxSessionTimer)
-	})
-
-	t.Run("configured greeting and idle timeout enqueue packets", func(t *testing.T) {
-		r := newBehaviorDisconnectTestRequestor(t, &behaviorCapturingStreamer{})
-		setBehaviorForSource(r, utils.Debugger, internal_assistant_entity.AssistantDeploymentBehavior{
-			Greeting:    behaviorStr("Hello from behavior"),
-			IdleTimeout: behaviorU64(9),
-		})
-
-		require.NoError(t, r.initializeBehavior(context.Background()))
-
-		egressPackets := collectBehaviorPackets(r.channels.EgressChannel())
-		require.Len(t, egressPackets, 3)
-		assert.Equal(t, 1, countBehaviorPacketType[internal_type.InjectMessagePacket](egressPackets))
-		assert.Equal(t, 2, countBehaviorPacketType[internal_type.StartIdleTimeoutPacket](egressPackets))
-
-		backgroundPackets := collectBehaviorPackets(r.channels.BackgroundChannel())
-		require.Len(t, backgroundPackets, 1)
-		event, ok := backgroundPackets[0].(internal_type.ConversationEventPacket)
-		require.True(t, ok)
-		assert.Equal(t, "behavior", event.Name)
-		assert.Equal(t, "greeting", event.Data["type"])
-		assert.Equal(t, "19", event.Data["text_chars"])
-	})
-}
-
 // Greeting should be ignored when empty and queued when configured.
 func TestBehavior_InitializeGreeting(t *testing.T) {
 	cases := []struct {

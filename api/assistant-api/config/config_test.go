@@ -72,12 +72,10 @@ sip:
   server: "0.0.0.0"
   port: 5070
   inbound:
-    answer_mode: "answer_when_assistant_ready"
+    answer_mode: "answer_immediately"
     min_ring_duration: 0s
     max_ring_duration: 30s
     ack_timeout: 5s
-    assistant_audio_ready_timeout: 2s
-    require_assistant_audio_ready: true
 `
 
 func TestInitConfig(t *testing.T) {
@@ -115,14 +113,11 @@ func TestInitConfig(t *testing.T) {
 	if appConfig.SIPConfig == nil {
 		t.Fatal("Expected SIPConfig to be parsed")
 	}
-	if appConfig.SIPConfig.Inbound.AnswerMode != "answer_when_assistant_ready" {
+	if appConfig.SIPConfig.Inbound.AnswerMode != "answer_immediately" {
 		t.Errorf("Expected nested SIP inbound answer mode, got %q", appConfig.SIPConfig.Inbound.AnswerMode)
 	}
 	if appConfig.SIPConfig.Inbound.ACKTimeout.String() != "5s" {
 		t.Errorf("Expected nested SIP inbound ack timeout 5s, got %s", appConfig.SIPConfig.Inbound.ACKTimeout)
-	}
-	if !appConfig.SIPConfig.Inbound.RequireAssistantAudioReady {
-		t.Error("Expected nested SIP inbound require assistant audio ready to be true")
 	}
 }
 
@@ -159,17 +154,13 @@ func TestGetApplicationConfig_ParsesNestedSIPInboundConfig(t *testing.T) {
 	v := viper.New()
 	v.SetConfigType("yaml")
 
-	inboundYAML := strings.Replace(baseAssistantYAML, `    answer_mode: "answer_when_assistant_ready"
+	inboundYAML := strings.Replace(baseAssistantYAML, `    answer_mode: "answer_immediately"
     min_ring_duration: 0s
     max_ring_duration: 30s
-    ack_timeout: 5s
-    assistant_audio_ready_timeout: 2s
-    require_assistant_audio_ready: true`, `    answer_mode: "answer_after_min_ring_ms"
+    ack_timeout: 5s`, `    answer_mode: "answer_after_min_ring_ms"
     min_ring_duration: 750ms
     max_ring_duration: 45s
-    ack_timeout: 7s
-    assistant_audio_ready_timeout: 3s
-    require_assistant_audio_ready: false`, 1)
+    ack_timeout: 7s`, 1)
 
 	if err := v.ReadConfig(strings.NewReader(inboundYAML)); err != nil {
 		t.Fatalf("ReadConfig returned an error: %v", err)
@@ -195,12 +186,6 @@ func TestGetApplicationConfig_ParsesNestedSIPInboundConfig(t *testing.T) {
 	}
 	if inboundConfig.ACKTimeout != 7*time.Second {
 		t.Fatalf("Inbound.ACKTimeout = %s, want 7s", inboundConfig.ACKTimeout)
-	}
-	if inboundConfig.AssistantAudioReadyTimeout != 3*time.Second {
-		t.Fatalf("Inbound.AssistantAudioReadyTimeout = %s, want 3s", inboundConfig.AssistantAudioReadyTimeout)
-	}
-	if inboundConfig.RequireAssistantAudioReady {
-		t.Fatal("Inbound.RequireAssistantAudioReady = true, want false")
 	}
 }
 

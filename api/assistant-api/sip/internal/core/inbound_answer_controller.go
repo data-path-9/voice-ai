@@ -153,18 +153,12 @@ func (controller *inboundAnswerController) WaitUntilAnswerReady(ctx context.Cont
 	}
 
 	switch policy.Mode {
-	case InboundAnswerModeImmediate, InboundAnswerModeAssistantReady:
+	case InboundAnswerModeImmediate:
 	case InboundAnswerModeAfterMinRingDuration:
+		if policy.MinRingDuration <= 0 {
+			return fmt.Errorf("%w: min_ring_duration is required for answer_after_min_ring_ms", ErrInvalidConfig)
+		}
 		if err := controller.waitForMinimumRing(ctx, policy.MinRingDuration); err != nil {
-			return err
-		}
-	case InboundAnswerModeBeforeMaxRingDuration:
-		if err := controller.failIfMaximumRingExceeded(policy.MaxRingDuration); err != nil {
-			return err
-		}
-	}
-	if policy.RequireAssistantAudioReady {
-		if err := controller.waitForAssistantAudioReady(ctx, policy.AssistantAudioReadyTimeout); err != nil {
 			return err
 		}
 	}
@@ -266,49 +260,6 @@ func (controller *inboundAnswerController) waitForMinimumRing(ctx context.Contex
 		}
 	}
 	return nil
-}
-
-func (controller *inboundAnswerController) failIfMaximumRingExceeded(maxRingDuration time.Duration) error {
-	timings := controller.session.GetInboundSetupTimings()
-	if maxRingDuration <= 0 || timings.RingingSentAt.IsZero() {
-		return nil
-	}
-	if time.Since(timings.RingingSentAt) <= maxRingDuration {
-		return nil
-	}
-	return fmt.Errorf("%w: maximum inbound ring duration exceeded", ErrInboundAnswerPolicyTimeout)
-}
-
-func (controller *inboundAnswerController) waitForAssistantAudioReady(ctx context.Context, timeout time.Duration) error {
-	if controller.session == nil {
-		return fmt.Errorf("%w: inbound session is not available", ErrInboundAnswerPolicyTimeout)
-	}
-	if !controller.session.GetInboundSetupTimings().FirstAssistantAudioReadyAt.IsZero() {
-		return nil
-	}
-	if timeout <= 0 {
-		return fmt.Errorf("%w: assistant audio readiness required before answer", ErrInboundAnswerPolicyTimeout)
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-controller.server.ctx.Done():
-			return controller.server.ctx.Err()
-		case <-controller.session.Context().Done():
-			return controller.session.Context().Err()
-		case <-timer.C:
-			return fmt.Errorf("%w: assistant audio readiness timeout", ErrInboundAnswerPolicyTimeout)
-		case <-ticker.C:
-			if !controller.session.GetInboundSetupTimings().FirstAssistantAudioReadyAt.IsZero() {
-				return nil
-			}
-		}
-	}
 }
 
 func (controller *inboundAnswerController) sendSessionFinalResponse(statusCode int) {

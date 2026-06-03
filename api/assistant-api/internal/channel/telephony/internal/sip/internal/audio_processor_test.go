@@ -174,19 +174,13 @@ func TestProcessProviderAudioFrame_EmitsBridgeImmediatelyAndBuffersPipelineAudio
 	assert.Empty(t, firstFrame.PipelineAudio)
 	assert.Equal(t, receivedAt, firstFrame.ReceivedAt)
 
-	_, err = proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+	secondFrame, err := proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
 		Audio:      make([]byte, MulawFrameSize),
 		ReceivedAt: receivedAt,
 	})
 	require.NoError(t, err)
-
-	thirdFrame, err := proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
-		Audio:      make([]byte, MulawFrameSize),
-		ReceivedAt: receivedAt,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, resampledAudio, thirdFrame.BridgeAudio)
-	assert.Len(t, thirdFrame.PipelineAudio, InputBufferThreshold)
+	assert.Equal(t, resampledAudio, secondFrame.BridgeAudio)
+	assert.Len(t, secondFrame.PipelineAudio, InputBufferThreshold)
 }
 
 func TestProcessProviderAudioFrame_PCMUDecodesToLinearBeforeResample(t *testing.T) {
@@ -402,14 +396,12 @@ func TestClearOutputBuffer_PreservesInputBuffer(t *testing.T) {
 	rec := &pushRecorder{}
 	proc := newTestAudioProcessor(t, &sip_infra.CodecPCMU, &mockResampler{out: make([]byte, BridgeOutputFrameSize)}, rec)
 
-	for i := 0; i < 2; i++ {
-		inputFrame, err := proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: make([]byte, MulawFrameSize)})
-		require.NoError(t, err)
-		assert.Empty(t, inputFrame.PipelineAudio)
-	}
+	inputFrame, err := proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: make([]byte, MulawFrameSize)})
+	require.NoError(t, err)
+	assert.Empty(t, inputFrame.PipelineAudio)
 	proc.ClearOutputBuffer()
 
-	inputFrame, err := proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: make([]byte, MulawFrameSize)})
+	inputFrame, err = proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: make([]byte, MulawFrameSize)})
 	require.NoError(t, err)
 	assert.Len(t, inputFrame.PipelineAudio, InputBufferThreshold)
 }
@@ -418,14 +410,12 @@ func TestClearInputBuffer_ResetsInputBuffer(t *testing.T) {
 	rec := &pushRecorder{}
 	proc := newTestAudioProcessor(t, &sip_infra.CodecPCMU, &mockResampler{out: make([]byte, BridgeOutputFrameSize)}, rec)
 
-	for i := 0; i < 2; i++ {
-		inputFrame, err := proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: make([]byte, MulawFrameSize)})
-		require.NoError(t, err)
-		assert.Empty(t, inputFrame.PipelineAudio)
-	}
+	inputFrame, err := proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: make([]byte, MulawFrameSize)})
+	require.NoError(t, err)
+	assert.Empty(t, inputFrame.PipelineAudio)
 	proc.ClearInputBuffer()
 
-	inputFrame, err := proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: make([]byte, MulawFrameSize)})
+	inputFrame, err = proc.ProcessProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{Audio: make([]byte, MulawFrameSize)})
 	require.NoError(t, err)
 	assert.Empty(t, inputFrame.PipelineAudio)
 }

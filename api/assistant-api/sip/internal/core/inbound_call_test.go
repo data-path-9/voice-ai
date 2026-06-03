@@ -544,62 +544,56 @@ func TestInboundCall_MinRingPolicyDelaysAnswer(t *testing.T) {
 	assert.Equal(t, 200, transaction.lastStatus())
 }
 
-func TestInboundCall_AssistantAudioReadyPolicyAnswersWithoutWaitingForSentAudio(t *testing.T) {
+func TestInboundCall_MinRingConfigRequiresDuration(t *testing.T) {
 	server := newServerForCommandTests(t)
-	server.rtpAllocator = &testRTPAllocator{nextPort: 19000}
-	server.newRTPHandler = inboundNoopRTPHandler(server)
 	config := bridgeTestConfig()
-	config.InboundRequireAssistantAudioReady = true
-	config.InboundAssistantAudioReadyTimeout = time.Second
+	config.InboundAnswerMode = InboundAnswerModeAfterMinRingDuration
 	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
 		return Allow(config), nil
 	})
-	server.SetOnApplicationReady(func(session *Session, _, _ string) error {
-		require.True(t, session.MarkInboundAssistantAudioReady())
-		return nil
-	})
-	transaction := newActiveAckableTestServerTx()
-	request := newInboundInviteRequest("inbound-assistant-audio-ready")
-	transaction.PushACK(newACKRequest("inbound-assistant-audio-ready"))
+	transaction := newTestServerTx()
+	request := newInboundInviteRequest("inbound-min-ring-requires-duration")
 
 	server.handleInvite(request, transaction)
 
 	require.NotEmpty(t, transaction.responses)
-	assert.Equal(t, 200, transaction.lastStatus())
-	session, exists := server.GetSession("inbound-assistant-audio-ready")
-	require.True(t, exists)
-	timings := session.GetInboundSetupTimings()
-	assert.False(t, timings.FirstAssistantAudioReadyAt.IsZero())
-	assert.True(t, timings.FirstAssistantAudioSentAt.IsZero())
-	metrics := session.GetInboundLatencyMetrics()
-	assert.Contains(t, metrics, "assistant_audio_ready_to_answer_ms")
-	assert.NotContains(t, metrics, "answer_to_first_assistant_audio_sent_ms")
+	assert.Equal(t, 500, transaction.lastStatus())
+	assertNoSIPStatus(t, transaction.responses, 200)
+	session, exists := server.GetSession("inbound-min-ring-requires-duration")
+	assert.False(t, exists)
+	assert.Nil(t, session)
 }
 
-func TestInboundCall_AssistantAudioReadyPolicyTimesOutBeforeAnswer(t *testing.T) {
+func TestInboundCall_AnswersAfterApplicationReadyWithoutAssistantAudio(t *testing.T) {
 	server := newServerForCommandTests(t)
 	server.rtpAllocator = &testRTPAllocator{nextPort: 19000}
 	server.newRTPHandler = inboundNoopRTPHandler(server)
 	config := bridgeTestConfig()
-	config.InboundRequireAssistantAudioReady = true
-	config.InboundAssistantAudioReadyTimeout = 25 * time.Millisecond
 	server.SetConfigResolver(func(_ *SIPRequestContext) (*InviteResult, error) {
 		return Allow(config), nil
 	})
-	server.SetOnInvite(func(_ *Session, _, _ string) error {
-		t.Fatal("onInvite should not run when assistant audio readiness times out")
+	applicationReadyCalled := false
+	server.SetOnApplicationReady(func(_ *Session, _, _ string) error {
+		applicationReadyCalled = true
 		return nil
 	})
 	transaction := newActiveAckableTestServerTx()
-	request := newInboundInviteRequest("inbound-assistant-audio-ready-timeout")
+	request := newInboundInviteRequest("inbound-application-ready-no-audio")
+	transaction.PushACK(newACKRequest("inbound-application-ready-no-audio"))
 
 	server.handleInvite(request, transaction)
 
 	require.NotEmpty(t, transaction.responses)
-	assert.Equal(t, 408, transaction.lastStatus())
-	assertNoSIPStatus(t, transaction.responses, 200)
-	_, exists := server.GetSession("inbound-assistant-audio-ready-timeout")
-	assert.False(t, exists)
+	assert.True(t, applicationReadyCalled)
+	assert.Equal(t, 200, transaction.lastStatus())
+	session, exists := server.GetSession("inbound-application-ready-no-audio")
+	require.True(t, exists)
+	timings := session.GetInboundSetupTimings()
+	assert.True(t, timings.FirstAssistantAudioReadyAt.IsZero())
+	assert.True(t, timings.FirstAssistantAudioSentAt.IsZero())
+	metrics := session.GetInboundLatencyMetrics()
+	assert.NotContains(t, metrics, "assistant_audio_ready_to_answer_ms")
+	assert.NotContains(t, metrics, "answer_to_first_assistant_audio_sent_ms")
 }
 
 func TestInboundCall_UDPFinalResponseRetransmitsUntilACKTimeout(t *testing.T) {

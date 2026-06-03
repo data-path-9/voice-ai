@@ -76,6 +76,25 @@ func TestConfigValidate_AllowsEmptyAuth(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
+func TestConfigValidate_MinRingAnswerModeRequiresDuration(t *testing.T) {
+	cfg := &Config{
+		Server:            "trunk.example.com",
+		Port:              5060,
+		Transport:         TransportUDP,
+		RTPPortRangeStart: 10000,
+		RTPPortRangeEnd:   10100,
+		InboundAnswerMode: InboundAnswerModeAfterMinRingDuration,
+	}
+
+	err := cfg.Validate()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "min_ring_duration is required for answer_after_min_ring_ms")
+
+	cfg.InboundMinRingDuration = time.Second
+	require.NoError(t, cfg.Validate())
+}
+
 func TestParseConfigFromVault_SIPURIWithPort(t *testing.T) {
 	cfg, err := ParseConfigFromVault(makeVaultCredential(map[string]interface{}{
 		"sip_uri":      "sip:192.168.1.5:5060",
@@ -262,26 +281,20 @@ func TestApplyInboundAnswerDefaults(t *testing.T) {
 		50*time.Millisecond,
 		5*time.Second,
 		2*time.Second,
-		250*time.Millisecond,
-		true,
 	)
 
 	assert.Equal(t, InboundAnswerModeAfterMinRingDuration, cfg.InboundAnswerMode)
 	assert.Equal(t, 50*time.Millisecond, cfg.InboundMinRingDuration)
 	assert.Equal(t, 5*time.Second, cfg.InboundMaxRingDuration)
 	assert.Equal(t, 2*time.Second, cfg.InboundACKTimeout)
-	assert.Equal(t, 250*time.Millisecond, cfg.InboundAssistantAudioReadyTimeout)
-	assert.True(t, cfg.InboundRequireAssistantAudioReady)
 }
 
 func TestApplyInboundAnswerDefaults_DoesNotOverwrite(t *testing.T) {
 	cfg := &Config{
-		InboundAnswerMode:                 InboundAnswerModeImmediate,
-		InboundMinRingDuration:            10 * time.Millisecond,
-		InboundMaxRingDuration:            time.Second,
-		InboundACKTimeout:                 500 * time.Millisecond,
-		InboundAssistantAudioReadyTimeout: 100 * time.Millisecond,
-		InboundRequireAssistantAudioReady: true,
+		InboundAnswerMode:      InboundAnswerModeImmediate,
+		InboundMinRingDuration: 10 * time.Millisecond,
+		InboundMaxRingDuration: time.Second,
+		InboundACKTimeout:      500 * time.Millisecond,
 	}
 
 	cfg.ApplyInboundAnswerDefaults(
@@ -289,14 +302,17 @@ func TestApplyInboundAnswerDefaults_DoesNotOverwrite(t *testing.T) {
 		50*time.Millisecond,
 		5*time.Second,
 		2*time.Second,
-		250*time.Millisecond,
-		false,
 	)
 
 	assert.Equal(t, InboundAnswerModeImmediate, cfg.InboundAnswerMode)
 	assert.Equal(t, 10*time.Millisecond, cfg.InboundMinRingDuration)
 	assert.Equal(t, time.Second, cfg.InboundMaxRingDuration)
 	assert.Equal(t, 500*time.Millisecond, cfg.InboundACKTimeout)
-	assert.Equal(t, 100*time.Millisecond, cfg.InboundAssistantAudioReadyTimeout)
-	assert.True(t, cfg.InboundRequireAssistantAudioReady)
+}
+
+func TestDefaultInboundAnswerPolicyAnswersImmediately(t *testing.T) {
+	policy := DefaultInboundAnswerPolicy()
+
+	assert.Equal(t, InboundAnswerModeImmediate, policy.Mode)
+	assert.Equal(t, defaultInboundACKTimeout, policy.ACKTimeout)
 }

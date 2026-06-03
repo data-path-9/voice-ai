@@ -354,19 +354,50 @@ func TestSIPCommand_InitialAnswerRequiresDialogOwnership(t *testing.T) {
 	assert.False(t, session.HasInitialACKReceived())
 }
 
-func TestSIPCommand_InitialAnswerAcceptsACKHandledOutsideTransaction(t *testing.T) {
+func TestSIPCommand_InitialAnswerWakesWhenACKHandledOutsideTransaction(t *testing.T) {
 	s := newServerForCommandTests(t)
-	s.inboundACKTimeout = time.Millisecond
-	session := registerConnectedInboundDialogSession(t, s, "call-ack-outside-tx")
-	req := session.GetDialogServerSession().InviteRequest
-	tx := newAckableTestServerTx()
+	s.inboundACKTimeout = 500 * time.Millisecond
+	request := newInboundInviteRequest("call-ack-outside-tx")
+	inviteTransaction := newActiveTestServerTx()
+	inboundCall := newInboundCall(s, request, inviteTransaction)
+	require.NoError(t, inboundCall.loadIdentity())
+	require.NoError(t, inboundCall.parseMediaOffer())
+	inboundCall.resolvedConfig = inboundResolvedConfig{config: bridgeTestConfig()}
+	require.NoError(t, inboundCall.createSession())
+	s.registerSession(inboundCall.session, inboundCall.identity.callID)
+	require.NoError(t, inboundCall.createDialog())
+	require.True(t, s.TransitionCall(inboundCall.session, CallStateRinging, LifecycleReasonInboundInviteRinging))
 
-	err := s.sendSDPResponseAndWaitACK(tx, req, session, validInboundOfferSDP(), LifecycleReasonInboundInviteACKReceived, s.effectiveInboundACKTimeout())
+	answerTransaction := newAckableTestServerTx()
+	answerDone := make(chan error, 1)
+	go func() {
+		answerDone <- s.sendSDPResponseAndWaitACK(
+			answerTransaction,
+			inboundCall.session.GetDialogServerSession().InviteRequest,
+			inboundCall.session,
+			validInboundOfferSDP(),
+			LifecycleReasonInboundInviteACKReceived,
+			s.effectiveInboundACKTimeout(),
+		)
+	}()
 
-	require.NoError(t, err)
-	require.NotEmpty(t, tx.responses)
-	assert.Equal(t, 200, tx.lastStatus())
-	assert.True(t, session.HasInitialACKReceived())
+	require.Eventually(t, func() bool {
+		return answerTransaction.lastStatus() == 200
+	}, time.Second, time.Millisecond)
+
+	ackStartedAt := time.Now()
+	s.handleAck(newInboundDialogRequest(t, inboundCall.session, sip.ACK), newTestServerTx())
+
+	select {
+	case err := <-answerDone:
+		require.NoError(t, err)
+		assert.Less(t, time.Since(ackStartedAt), 250*time.Millisecond)
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("timed out waiting for external ACK to release initial answer wait")
+	}
+	require.NotEmpty(t, answerTransaction.responses)
+	assert.Equal(t, 200, answerTransaction.lastStatus())
+	assert.True(t, inboundCall.session.HasInitialACKReceived())
 }
 
 func TestSIPCommand_BYE_InboundSession_NotifiesAndEnds(t *testing.T) {

@@ -28,7 +28,7 @@ const (
 
 	Linear16BytesPerMs    = 32
 	BridgeOutputFrameSize = Linear16BytesPerMs * 20
-	InputBufferThreshold  = Linear16BytesPerMs * 60
+	InputBufferThreshold  = Linear16BytesPerMs * 40
 )
 
 var (

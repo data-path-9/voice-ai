@@ -8,6 +8,7 @@ package channel_webrtc
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	pionwebrtc "github.com/pion/webrtc/v4"
@@ -107,6 +108,43 @@ func (s *webrtcStreamer) applyRemoteAnswer(operation webrtc_internal.WebRTCOpera
 		s.Logger.Errorw("Failed to set remote description", "error", err)
 		return
 	}
+
+	audioMediaSectionFound := false
+	insideAudioMediaSection := false
+	negotiatedAudioDirection := "missing"
+	audioMediaHasClientStream := false
+	for _, answerSDPLine := range strings.Split(operation.RemoteAnswerSDP, "\n") {
+		answerSDPLine = strings.TrimSpace(answerSDPLine)
+		if strings.HasPrefix(answerSDPLine, "m=") {
+			insideAudioMediaSection = strings.HasPrefix(answerSDPLine, "m=audio ")
+			if insideAudioMediaSection {
+				audioMediaSectionFound = true
+				negotiatedAudioDirection = "sendrecv"
+			}
+			continue
+		}
+		if !insideAudioMediaSection {
+			continue
+		}
+		switch answerSDPLine {
+		case "a=sendrecv", "a=sendonly", "a=recvonly", "a=inactive":
+			negotiatedAudioDirection = strings.TrimPrefix(answerSDPLine, "a=")
+		default:
+			if strings.HasPrefix(answerSDPLine, "a=msid:") {
+				audioMediaHasClientStream = true
+			}
+		}
+	}
+	if !audioMediaSectionFound {
+		negotiatedAudioDirection = "missing"
+	}
+	s.Logger.Debugw("WebRTC remote answer audio negotiation",
+		"session", s.sessionID,
+		"media_session_id", operation.MediaSessionID,
+		"audio", audioMediaSectionFound,
+		"direction", negotiatedAudioDirection,
+		"msid", audioMediaHasClientStream,
+	)
 
 	remoteDescriptionSetAt := time.Now()
 	s.Mu.Lock()

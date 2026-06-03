@@ -23,7 +23,7 @@ const (
 	Linear16kHzBytesPerMs = 32
 	OutputChunkSize       = Linear8kHzBytesPerMs * 20
 	BridgeOutputFrameSize = Linear16kHzBytesPerMs * 20
-	InputBufferThreshold  = Linear16kHzBytesPerMs * 60
+	InputBufferThreshold  = Linear16kHzBytesPerMs * 40
 )
 
 type EventType string

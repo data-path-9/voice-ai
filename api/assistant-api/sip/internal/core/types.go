@@ -106,12 +106,10 @@ type Config struct {
 	SessionTimeout   time.Duration `json:"session_timeout,omitempty" mapstructure:"session_timeout"`
 	KeepAliveEnabled bool          `json:"keepalive_enabled,omitempty" mapstructure:"keepalive_enabled"`
 
-	InboundAnswerMode                 InboundAnswerMode `json:"inbound_answer_mode,omitempty" mapstructure:"inbound_answer_mode"`
-	InboundMinRingDuration            time.Duration     `json:"inbound_min_ring_duration,omitempty" mapstructure:"inbound_min_ring_duration"`
-	InboundMaxRingDuration            time.Duration     `json:"inbound_max_ring_duration,omitempty" mapstructure:"inbound_max_ring_duration"`
-	InboundACKTimeout                 time.Duration     `json:"inbound_ack_timeout,omitempty" mapstructure:"inbound_ack_timeout"`
-	InboundAssistantAudioReadyTimeout time.Duration     `json:"inbound_assistant_audio_ready_timeout,omitempty" mapstructure:"inbound_assistant_audio_ready_timeout"`
-	InboundRequireAssistantAudioReady bool              `json:"inbound_require_assistant_audio_ready,omitempty" mapstructure:"inbound_require_assistant_audio_ready"`
+	InboundAnswerMode      InboundAnswerMode `json:"inbound_answer_mode,omitempty" mapstructure:"inbound_answer_mode"`
+	InboundMinRingDuration time.Duration     `json:"inbound_min_ring_duration,omitempty" mapstructure:"inbound_min_ring_duration"`
+	InboundMaxRingDuration time.Duration     `json:"inbound_max_ring_duration,omitempty" mapstructure:"inbound_max_ring_duration"`
+	InboundACKTimeout      time.Duration     `json:"inbound_ack_timeout,omitempty" mapstructure:"inbound_ack_timeout"`
 }
 
 // Validate validates the shared SIP network configuration.
@@ -152,8 +150,6 @@ func (c *Config) ApplyInboundAnswerDefaults(
 	minRingDuration time.Duration,
 	maxRingDuration time.Duration,
 	ackTimeout time.Duration,
-	assistantAudioReadyTimeout time.Duration,
-	requireAssistantAudioReady bool,
 ) {
 	if c.InboundAnswerMode == "" && mode != "" {
 		c.InboundAnswerMode = mode
@@ -167,12 +163,6 @@ func (c *Config) ApplyInboundAnswerDefaults(
 	if c.InboundACKTimeout <= 0 && ackTimeout > 0 {
 		c.InboundACKTimeout = ackTimeout
 	}
-	if c.InboundAssistantAudioReadyTimeout <= 0 && assistantAudioReadyTimeout > 0 {
-		c.InboundAssistantAudioReadyTimeout = assistantAudioReadyTimeout
-	}
-	if !c.InboundRequireAssistantAudioReady {
-		c.InboundRequireAssistantAudioReady = requireAssistantAudioReady
-	}
 }
 
 func (c *Config) EffectiveRegisterTimeout() time.Duration {
@@ -185,15 +175,13 @@ func (c *Config) EffectiveRegisterTimeout() time.Duration {
 type InboundAnswerMode string
 
 const (
-	InboundAnswerModeImmediate             InboundAnswerMode = "answer_immediately"
-	InboundAnswerModeAssistantReady        InboundAnswerMode = "answer_when_assistant_ready"
-	InboundAnswerModeAfterMinRingDuration  InboundAnswerMode = "answer_after_min_ring_ms"
-	InboundAnswerModeBeforeMaxRingDuration InboundAnswerMode = "answer_before_max_ring_ms"
+	InboundAnswerModeImmediate            InboundAnswerMode = "answer_immediately"
+	InboundAnswerModeAfterMinRingDuration InboundAnswerMode = "answer_after_min_ring_ms"
 )
 
 func (m InboundAnswerMode) IsValid() bool {
 	switch m {
-	case "", InboundAnswerModeImmediate, InboundAnswerModeAssistantReady, InboundAnswerModeAfterMinRingDuration, InboundAnswerModeBeforeMaxRingDuration:
+	case "", InboundAnswerModeImmediate, InboundAnswerModeAfterMinRingDuration:
 		return true
 	default:
 		return false
@@ -201,17 +189,14 @@ func (m InboundAnswerMode) IsValid() bool {
 }
 
 type InboundAnswerPolicy struct {
-	Mode                       InboundAnswerMode
-	MinRingDuration            time.Duration
-	MaxRingDuration            time.Duration
-	ACKTimeout                 time.Duration
-	AssistantAudioReadyTimeout time.Duration
-	RequireAssistantAudioReady bool
+	Mode            InboundAnswerMode
+	MinRingDuration time.Duration
+	ACKTimeout      time.Duration
 }
 
 func DefaultInboundAnswerPolicy() InboundAnswerPolicy {
 	return InboundAnswerPolicy{
-		Mode:       InboundAnswerModeAssistantReady,
+		Mode:       InboundAnswerModeImmediate,
 		ACKTimeout: defaultInboundACKTimeout,
 	}
 }
@@ -230,16 +215,9 @@ func (c *Config) EffectiveInboundAnswerPolicy(defaultACKTimeout time.Duration) I
 	if c.InboundMinRingDuration > 0 {
 		policy.MinRingDuration = c.InboundMinRingDuration
 	}
-	if c.InboundMaxRingDuration > 0 {
-		policy.MaxRingDuration = c.InboundMaxRingDuration
-	}
 	if c.InboundACKTimeout > 0 {
 		policy.ACKTimeout = c.InboundACKTimeout
 	}
-	if c.InboundAssistantAudioReadyTimeout > 0 {
-		policy.AssistantAudioReadyTimeout = c.InboundAssistantAudioReadyTimeout
-	}
-	policy.RequireAssistantAudioReady = c.InboundRequireAssistantAudioReady
 	return policy
 }
 
@@ -264,6 +242,9 @@ func (c *Config) ValidateRTP() error {
 	}
 	if !c.InboundAnswerMode.IsValid() {
 		return fmt.Errorf("%w: invalid inbound_answer_mode: %s", ErrInvalidConfig, c.InboundAnswerMode)
+	}
+	if c.InboundAnswerMode == InboundAnswerModeAfterMinRingDuration && c.InboundMinRingDuration <= 0 {
+		return fmt.Errorf("%w: min_ring_duration is required for answer_after_min_ring_ms", ErrInvalidConfig)
 	}
 	return nil
 }

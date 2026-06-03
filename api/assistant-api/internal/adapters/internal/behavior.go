@@ -50,20 +50,6 @@ func (r *genericRequestor) GetBehavior() (*internal_assistant_entity.AssistantDe
 	return nil, errDeploymentNotEnabled
 }
 
-// InitializeBehavior sets up the initial behavior configuration including greeting,
-// idle timeout, and max session duration timers.
-func (r *genericRequestor) initializeBehavior(ctx context.Context) error {
-	behavior, err := r.GetBehavior()
-	if err != nil {
-		r.logger.Errorf("error while fetching deployment behavior: %v", err)
-		return nil
-	}
-	r.initializeGreeting(ctx, behavior)
-	r.initializeIdleTimeout(ctx, behavior)
-	r.initializeMaxSessionDuration(ctx, behavior)
-	return nil
-}
-
 // initializeGreeting sends the greeting message if configured.
 func (r *genericRequestor) initializeGreeting(ctx context.Context, behavior *internal_assistant_entity.AssistantDeploymentBehavior) {
 	if behavior.Greeting == nil {

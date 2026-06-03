@@ -99,12 +99,10 @@ type Config struct {
 	SessionTimeout   time.Duration `json:"session_timeout,omitempty" mapstructure:"session_timeout"`
 	KeepAliveEnabled bool          `json:"keepalive_enabled,omitempty" mapstructure:"keepalive_enabled"`
 
-	InboundAnswerMode                 InboundAnswerMode `json:"inbound_answer_mode,omitempty" mapstructure:"inbound_answer_mode"`
-	InboundMinRingDuration            time.Duration     `json:"inbound_min_ring_duration,omitempty" mapstructure:"inbound_min_ring_duration"`
-	InboundMaxRingDuration            time.Duration     `json:"inbound_max_ring_duration,omitempty" mapstructure:"inbound_max_ring_duration"`
-	InboundACKTimeout                 time.Duration     `json:"inbound_ack_timeout,omitempty" mapstructure:"inbound_ack_timeout"`
-	InboundAssistantAudioReadyTimeout time.Duration     `json:"inbound_assistant_audio_ready_timeout,omitempty" mapstructure:"inbound_assistant_audio_ready_timeout"`
-	InboundRequireAssistantAudioReady bool              `json:"inbound_require_assistant_audio_ready,omitempty" mapstructure:"inbound_require_assistant_audio_ready"`
+	InboundAnswerMode      InboundAnswerMode `json:"inbound_answer_mode,omitempty" mapstructure:"inbound_answer_mode"`
+	InboundMinRingDuration time.Duration     `json:"inbound_min_ring_duration,omitempty" mapstructure:"inbound_min_ring_duration"`
+	InboundMaxRingDuration time.Duration     `json:"inbound_max_ring_duration,omitempty" mapstructure:"inbound_max_ring_duration"`
+	InboundACKTimeout      time.Duration     `json:"inbound_ack_timeout,omitempty" mapstructure:"inbound_ack_timeout"`
 }
 
 func (c *Config) Validate() error {
@@ -134,8 +132,6 @@ func (c *Config) ApplyInboundAnswerDefaults(
 	minRingDuration time.Duration,
 	maxRingDuration time.Duration,
 	ackTimeout time.Duration,
-	assistantAudioReadyTimeout time.Duration,
-	requireAssistantAudioReady bool,
 ) {
 	if c == nil {
 		return
@@ -146,8 +142,6 @@ func (c *Config) ApplyInboundAnswerDefaults(
 		minRingDuration,
 		maxRingDuration,
 		ackTimeout,
-		assistantAudioReadyTimeout,
-		requireAssistantAudioReady,
 	)
 	*c = configFromCore(coreConfig)
 }
@@ -177,28 +171,26 @@ func (c *Config) toCore() *internal_core.Config {
 		return nil
 	}
 	return &internal_core.Config{
-		Server:                            c.Server,
-		Username:                          c.Username,
-		Password:                          c.Password,
-		Realm:                             c.Realm,
-		Domain:                            c.Domain,
-		CallerID:                          c.CallerID,
-		CustomHeaders:                     c.CustomHeaders,
-		Port:                              c.Port,
-		Transport:                         internal_core.Transport(c.Transport),
-		RTPPortRangeStart:                 c.RTPPortRangeStart,
-		RTPPortRangeEnd:                   c.RTPPortRangeEnd,
-		SRTPEnabled:                       c.SRTPEnabled,
-		RegisterTimeout:                   c.RegisterTimeout,
-		InviteTimeout:                     c.InviteTimeout,
-		SessionTimeout:                    c.SessionTimeout,
-		KeepAliveEnabled:                  c.KeepAliveEnabled,
-		InboundAnswerMode:                 internal_core.InboundAnswerMode(c.InboundAnswerMode),
-		InboundMinRingDuration:            c.InboundMinRingDuration,
-		InboundMaxRingDuration:            c.InboundMaxRingDuration,
-		InboundACKTimeout:                 c.InboundACKTimeout,
-		InboundAssistantAudioReadyTimeout: c.InboundAssistantAudioReadyTimeout,
-		InboundRequireAssistantAudioReady: c.InboundRequireAssistantAudioReady,
+		Server:                 c.Server,
+		Username:               c.Username,
+		Password:               c.Password,
+		Realm:                  c.Realm,
+		Domain:                 c.Domain,
+		CallerID:               c.CallerID,
+		CustomHeaders:          c.CustomHeaders,
+		Port:                   c.Port,
+		Transport:              internal_core.Transport(c.Transport),
+		RTPPortRangeStart:      c.RTPPortRangeStart,
+		RTPPortRangeEnd:        c.RTPPortRangeEnd,
+		SRTPEnabled:            c.SRTPEnabled,
+		RegisterTimeout:        c.RegisterTimeout,
+		InviteTimeout:          c.InviteTimeout,
+		SessionTimeout:         c.SessionTimeout,
+		KeepAliveEnabled:       c.KeepAliveEnabled,
+		InboundAnswerMode:      internal_core.InboundAnswerMode(c.InboundAnswerMode),
+		InboundMinRingDuration: c.InboundMinRingDuration,
+		InboundMaxRingDuration: c.InboundMaxRingDuration,
+		InboundACKTimeout:      c.InboundACKTimeout,
 	}
 }
 
@@ -207,28 +199,26 @@ func configFromCore(c *internal_core.Config) Config {
 		return Config{}
 	}
 	return Config{
-		Server:                            c.Server,
-		Username:                          c.Username,
-		Password:                          c.Password,
-		Realm:                             c.Realm,
-		Domain:                            c.Domain,
-		CallerID:                          c.CallerID,
-		CustomHeaders:                     c.CustomHeaders,
-		Port:                              c.Port,
-		Transport:                         Transport(c.Transport),
-		RTPPortRangeStart:                 c.RTPPortRangeStart,
-		RTPPortRangeEnd:                   c.RTPPortRangeEnd,
-		SRTPEnabled:                       c.SRTPEnabled,
-		RegisterTimeout:                   c.RegisterTimeout,
-		InviteTimeout:                     c.InviteTimeout,
-		SessionTimeout:                    c.SessionTimeout,
-		KeepAliveEnabled:                  c.KeepAliveEnabled,
-		InboundAnswerMode:                 InboundAnswerMode(c.InboundAnswerMode),
-		InboundMinRingDuration:            c.InboundMinRingDuration,
-		InboundMaxRingDuration:            c.InboundMaxRingDuration,
-		InboundACKTimeout:                 c.InboundACKTimeout,
-		InboundAssistantAudioReadyTimeout: c.InboundAssistantAudioReadyTimeout,
-		InboundRequireAssistantAudioReady: c.InboundRequireAssistantAudioReady,
+		Server:                 c.Server,
+		Username:               c.Username,
+		Password:               c.Password,
+		Realm:                  c.Realm,
+		Domain:                 c.Domain,
+		CallerID:               c.CallerID,
+		CustomHeaders:          c.CustomHeaders,
+		Port:                   c.Port,
+		Transport:              Transport(c.Transport),
+		RTPPortRangeStart:      c.RTPPortRangeStart,
+		RTPPortRangeEnd:        c.RTPPortRangeEnd,
+		SRTPEnabled:            c.SRTPEnabled,
+		RegisterTimeout:        c.RegisterTimeout,
+		InviteTimeout:          c.InviteTimeout,
+		SessionTimeout:         c.SessionTimeout,
+		KeepAliveEnabled:       c.KeepAliveEnabled,
+		InboundAnswerMode:      InboundAnswerMode(c.InboundAnswerMode),
+		InboundMinRingDuration: c.InboundMinRingDuration,
+		InboundMaxRingDuration: c.InboundMaxRingDuration,
+		InboundACKTimeout:      c.InboundACKTimeout,
 	}
 }
 
@@ -297,10 +287,8 @@ const (
 type InboundAnswerMode string
 
 const (
-	InboundAnswerModeImmediate             InboundAnswerMode = "answer_immediately"
-	InboundAnswerModeAssistantReady        InboundAnswerMode = "answer_when_assistant_ready"
-	InboundAnswerModeAfterMinRingDuration  InboundAnswerMode = "answer_after_min_ring_ms"
-	InboundAnswerModeBeforeMaxRingDuration InboundAnswerMode = "answer_before_max_ring_ms"
+	InboundAnswerModeImmediate            InboundAnswerMode = "answer_immediately"
+	InboundAnswerModeAfterMinRingDuration InboundAnswerMode = "answer_after_min_ring_ms"
 )
 
 type InboundSetupTimings struct {

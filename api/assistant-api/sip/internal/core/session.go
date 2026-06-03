@@ -91,10 +91,12 @@ type Session struct {
 
 	// Inbound dialog session — stored so we can send BYE when ending an inbound call.
 	// nil for outbound calls.
-	dialogServerSession *sipgo.DialogServerSession
-	initialACKReceived  bool
-	reInviteACKPending  bool
-	reInviteACKCount    uint64
+	dialogServerSession    *sipgo.DialogServerSession
+	initialACKReceived     bool
+	initialACKReceivedOnce sync.Once
+	initialACKSignal       chan struct{}
+	reInviteACKPending     bool
+	reInviteACKCount       uint64
 
 	// onDisconnect is called via Disconnect() to perform transport-level call teardown
 	// (e.g., sending SIP BYE). NOT called by End() — the caller must invoke
@@ -149,18 +151,19 @@ func NewSession(ctx context.Context, cfg *SessionConfig) (*Session, error) {
 			Codec:      codec.Name,
 			SampleRate: int(codec.ClockRate),
 		},
-		config:          cfg.Config,
-		ctx:             sessionCtx,
-		cancel:          cancel,
-		eventChan:       make(chan Event, eventBufferSize),
-		errorChan:       make(chan error, errorBufferSize),
-		negotiatedCodec: codec,
-		auth:            cfg.Auth,
-		assistant:       cfg.Assistant,
-		conversationID:  cfg.ConversationID,
-		contextID:       cfg.ContextID,
-		vaultCredential: cfg.VaultCredential,
-		byeReceived:     make(chan struct{}),
+		config:           cfg.Config,
+		ctx:              sessionCtx,
+		cancel:           cancel,
+		eventChan:        make(chan Event, eventBufferSize),
+		errorChan:        make(chan error, errorBufferSize),
+		negotiatedCodec:  codec,
+		auth:             cfg.Auth,
+		assistant:        cfg.Assistant,
+		conversationID:   cfg.ConversationID,
+		contextID:        cfg.ContextID,
+		vaultCredential:  cfg.VaultCredential,
+		byeReceived:      make(chan struct{}),
+		initialACKSignal: make(chan struct{}),
 	}
 	if cfg.Direction == CallDirectionOutbound {
 		session.outboundDialogPhase = OutboundDialogPhaseInviting
@@ -517,11 +520,18 @@ func (s *Session) GetDialogServerSession() *sipgo.DialogServerSession {
 
 func (s *Session) MarkInitialACKReceived() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.initialACKReceived {
+		s.mu.Unlock()
 		return false
 	}
 	s.initialACKReceived = true
+	initialACKSignal := s.initialACKSignal
+	s.mu.Unlock()
+	if initialACKSignal != nil {
+		s.initialACKReceivedOnce.Do(func() {
+			close(initialACKSignal)
+		})
+	}
 	return true
 }
 
@@ -529,6 +539,12 @@ func (s *Session) HasInitialACKReceived() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.initialACKReceived
+}
+
+func (s *Session) InitialACKSignal() <-chan struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.initialACKSignal
 }
 
 func (s *Session) BeginReInviteACKWait() {

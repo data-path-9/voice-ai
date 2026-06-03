@@ -170,9 +170,8 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 		s.Mu.Unlock()
 		qualityState := mediaHealthState.QualityState(watchdogCheckedAt)
 
-		if !mediaHealthState.PeerConnectedAt.IsZero() &&
-			mediaHealthState.FirstUserAudioReceivedAt.IsZero() &&
-			watchdogCheckedAt.Sub(mediaHealthState.PeerConnectedAt) >= webrtc_internal.ConnectedNoUserAudioThreshold &&
+		missingRemoteAudioTrackMediaSessionID, shouldRestartMissingRemoteAudioTrack := s.shouldRestartConnectedNoRemoteAudioTrack(mediaHealthState, watchdogCheckedAt)
+		if shouldRestartMissingRemoteAudioTrack &&
 			(lastConnectedNoUserAudioEventAt.IsZero() || watchdogCheckedAt.Sub(lastConnectedNoUserAudioEventAt) >= webrtc_internal.HealthWatchdogEventCooldown) {
 			s.Input(&protos.ConversationEvent{
 				Name: observe.ComponentWebRTC,
@@ -190,6 +189,7 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 				Time: timestamppb.Now(),
 			})
 			lastConnectedNoUserAudioEventAt = watchdogCheckedAt
+			s.queueMediaSessionRestart(missingRemoteAudioTrackMediaSessionID, webrtc_internal.ReasonConnectedNoUserAudio, watchdogCheckedAt)
 		}
 
 		if outputAudioFrames > 0 &&
@@ -258,4 +258,15 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 			lastRepeatedWriteFailuresEventAt = watchdogCheckedAt
 		}
 	}
+}
+
+func (s *webrtcStreamer) shouldRestartConnectedNoRemoteAudioTrack(mediaHealthState webrtc_internal.MediaHealthState, watchdogCheckedAt time.Time) (uint64, bool) {
+	if mediaHealthState.PeerConnectedAt.IsZero() || watchdogCheckedAt.Sub(mediaHealthState.PeerConnectedAt) < webrtc_internal.ConnectedNoUserAudioThreshold {
+		return 0, false
+	}
+	activeMediaSessionID := s.sessionState.ActiveMediaSessionID()
+	if activeMediaSessionID == 0 || s.sessionState.RemoteAudioReaderMediaSessionID() == activeMediaSessionID {
+		return 0, false
+	}
+	return activeMediaSessionID, true
 }

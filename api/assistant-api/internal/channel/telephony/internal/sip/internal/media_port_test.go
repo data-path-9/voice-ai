@@ -80,7 +80,7 @@ func TestMediaPort_StartForwardsProviderAudio(t *testing.T) {
 	mediaPort.Start()
 	defer func() { require.NoError(t, mediaPort.Close()) }()
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		audioIn <- make([]byte, MulawFrameSize)
 	}
 
@@ -107,7 +107,7 @@ func TestMediaPort_ProviderAudioRecordsBeforePipelineAudio(t *testing.T) {
 	mediaPort.Start()
 	defer func() { require.NoError(t, mediaPort.Close()) }()
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		audioIn <- make([]byte, MulawFrameSize)
 	}
 
@@ -123,7 +123,7 @@ func TestMediaPort_ProviderAudioRecordsBeforePipelineAudio(t *testing.T) {
 						t.Fatalf("unexpected bridge user audio length: %d", len(message.GetAudio()))
 					}
 				case *protos.ConversationUserMessage:
-					return bridgeUserAudioCount == 3 && len(message.GetAudio()) == InputBufferThreshold
+					return bridgeUserAudioCount == 2 && len(message.GetAudio()) == InputBufferThreshold
 				}
 			default:
 				return false
@@ -243,7 +243,6 @@ func TestMediaPort_InterruptPreservesBufferedInput(t *testing.T) {
 
 	mediaPort.Start()
 	defer func() { require.NoError(t, mediaPort.Close()) }()
-	audioIn <- make([]byte, MulawFrameSize)
 	audioIn <- make([]byte, MulawFrameSize)
 	mediaPort.HandleInterrupt()
 	audioIn <- make([]byte, MulawFrameSize)

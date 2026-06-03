@@ -17,12 +17,15 @@ import (
 )
 
 type SIPInboundConfig struct {
-	AnswerMode                 string        `mapstructure:"answer_mode"`
-	MinRingDuration            time.Duration `mapstructure:"min_ring_duration"`
-	MaxRingDuration            time.Duration `mapstructure:"max_ring_duration"`
-	ACKTimeout                 time.Duration `mapstructure:"ack_timeout"`
-	AssistantAudioReadyTimeout time.Duration `mapstructure:"assistant_audio_ready_timeout"`
-	RequireAssistantAudioReady bool          `mapstructure:"require_assistant_audio_ready"`
+	// Supported answer modes:
+	// - answer_immediately: no mode-specific argument is needed.
+	// - answer_after_min_ring_ms: requires min_ring_duration.
+	// max_ring_duration bounds pre-answer runtime readiness independently of answer_mode.
+	// ack_timeout bounds the ACK wait after 200 OK independently of answer_mode.
+	AnswerMode      string        `mapstructure:"answer_mode"`
+	MinRingDuration time.Duration `mapstructure:"min_ring_duration"`
+	MaxRingDuration time.Duration `mapstructure:"max_ring_duration"`
+	ACKTimeout      time.Duration `mapstructure:"ack_timeout"`
 }
 
 // SIPConfig holds the SIP server configuration.

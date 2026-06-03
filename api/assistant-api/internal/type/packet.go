@@ -448,7 +448,6 @@ func (f InitializeBehaviorPacket) ContextId() string { return f.ContextID }
 // InitializationCompletedPacket is emitted when the connect initialization chain succeeds.
 type InitializationCompletedPacket struct {
 	ContextID string
-	Event     utils.AssistantWebhookEvent
 	Config    *protos.ConversationInitialization
 }
 

@@ -142,12 +142,10 @@ func TestParseConfig_AppliesPlatformTimeouts(t *testing.T) {
 func TestParseConfig_AppliesInboundAnswerPolicyDefaults(t *testing.T) {
 	telephony := newSIPTelephonyForTest()
 	telephony.appCfg.SIPConfig.Inbound = config.SIPInboundConfig{
-		AnswerMode:                 string(sip_infra.InboundAnswerModeAfterMinRingDuration),
-		MinRingDuration:            50 * time.Millisecond,
-		MaxRingDuration:            5 * time.Second,
-		ACKTimeout:                 2 * time.Second,
-		AssistantAudioReadyTimeout: 250 * time.Millisecond,
-		RequireAssistantAudioReady: true,
+		AnswerMode:      string(sip_infra.InboundAnswerModeAfterMinRingDuration),
+		MinRingDuration: 50 * time.Millisecond,
+		MaxRingDuration: 5 * time.Second,
+		ACKTimeout:      2 * time.Second,
 	}
 	cred := vaultCredential(t, map[string]interface{}{
 		"host": "example.org:5060",
@@ -163,9 +161,7 @@ func TestParseConfig_AppliesInboundAnswerPolicyDefaults(t *testing.T) {
 	}
 	if cfg.InboundMinRingDuration != 50*time.Millisecond ||
 		cfg.InboundMaxRingDuration != 5*time.Second ||
-		cfg.InboundACKTimeout != 2*time.Second ||
-		cfg.InboundAssistantAudioReadyTimeout != 250*time.Millisecond ||
-		!cfg.InboundRequireAssistantAudioReady {
+		cfg.InboundACKTimeout != 2*time.Second {
 		t.Fatalf("expected inbound answer policy defaults from app config, got %#v", cfg)
 	}
 }

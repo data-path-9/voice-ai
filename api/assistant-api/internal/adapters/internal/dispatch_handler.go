@@ -1166,7 +1166,15 @@ func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx conte
 			internal_type.InitializeAssistantExecutorPacket{
 				ContextID: p.ContextID,
 				Config:    p.Initialization,
+			}, internal_type.InitializeBehaviorPacket{
+				ContextID: p.ContextID,
+				Config:    p.Initialization,
+			},
+			internal_type.InitializationCompletedPacket{
+				ContextID: p.ContextID,
+				Config:    p.Initialization,
 			})
+
 	case protos.StreamMode_STREAM_MODE_AUDIO:
 		h.r.OnPacket(ctx,
 			internal_type.InitializeSpeechToTextPacket{
@@ -1193,6 +1201,14 @@ func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx conte
 				ContextID: p.ContextID,
 				Config:    p.Initialization,
 			},
+			internal_type.InitializeBehaviorPacket{
+				ContextID: p.ContextID,
+				Config:    p.Initialization,
+			},
+			internal_type.InitializationCompletedPacket{
+				ContextID: p.ContextID,
+				Config:    p.Initialization,
+			},
 		)
 		h.r.SwitchMode(type_enums.AudioMode)
 	}
@@ -1210,10 +1226,6 @@ func (h requestorDispatchHandler) HandleInitializeAssistantExecutorPacket(ctx co
 		return
 	}
 	h.r.assistantExecutor = assistantExec
-	h.r.OnPacket(ctx, internal_type.InitializeBehaviorPacket{
-		ContextID: p.ContextID,
-		Config:    p.Config,
-	})
 }
 
 func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Context, p internal_type.InitializeSpeechToTextPacket) {
@@ -1410,16 +1422,13 @@ func (h requestorDispatchHandler) HandleInitializeEndOfSpeech(ctx context.Contex
 	h.r.endOfSpeechExecutor = endOfSpeech
 }
 func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, p internal_type.InitializeBehaviorPacket) {
-	h.r.initializeBehavior(ctx)
-	event := utils.ConversationResume
-	if p.Config.GetAssistantConversationId() == 0 {
-		event = utils.ConversationBegin
+	behavior, err := h.r.GetBehavior()
+	if err != nil {
+		h.r.logger.Errorf("error while fetching deployment behavior: %v", err)
 	}
-	h.r.OnPacket(ctx, internal_type.InitializationCompletedPacket{
-		ContextID: p.ContextID,
-		Config:    p.Config,
-		Event:     event,
-	})
+	h.r.initializeGreeting(ctx, behavior)
+	h.r.initializeIdleTimeout(ctx, behavior)
+	h.r.initializeMaxSessionDuration(ctx, behavior)
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context, p internal_type.ModeSwitchRequestedPacket) {
@@ -1789,20 +1798,25 @@ func (h requestorDispatchHandler) HandleInitializationCompleted(ctx context.Cont
 	if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventInitializationCompleted); err != nil {
 		h.r.logger.Tracef(ctx, "session lifecycle init-completed transition ignored: %v", err)
 	}
-	h.r.notifyConfiguration(ctx, p.Config, h.r.assistantConversation)
+	h.r.OnNotifyAssistantConfiguration(ctx, p.Config, h.r.assistantConversation)
 	h.r.OnPacket(ctx, internal_type.InitializeInboundDispatcherPacket{ContextID: p.ContextID})
+
+	event := utils.ConversationResume
+	if p.Config.GetAssistantConversationId() == 0 {
+		event = utils.ConversationBegin
+	}
 	h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
 		ContextID: p.ContextID,
 		Name:      observe.ComponentSession,
 		Data: map[string]string{
 			observe.DataType: observe.EventInitialized,
-			"event":          p.Event.Get(),
+			"event":          event.Get(),
 			observe.DataMode: h.r.GetMode().String(),
 		},
 		Time: time.Now(),
 	}, internal_type.ExecuteWebhookPacket{
 		ContextID: p.ContextID,
-		Event:     p.Event,
+		Event:     event,
 	})
 
 }
@@ -1996,7 +2010,7 @@ func (h requestorDispatchHandler) callInputNormalizer(ctx context.Context, vl in
 	return nil
 }
 
-func (r *genericRequestor) notifyConfiguration(ctx context.Context, config *protos.ConversationInitialization, conversation *internal_conversation_entity.AssistantConversation) {
+func (r *genericRequestor) OnNotifyAssistantConfiguration(ctx context.Context, config *protos.ConversationInitialization, conversation *internal_conversation_entity.AssistantConversation) {
 	conversationConfigurationObj := &protos.ConversationInitialization{
 		AssistantConversationId: conversation.Id,
 		Assistant: &protos.AssistantDefinition{

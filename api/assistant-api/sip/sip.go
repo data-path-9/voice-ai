@@ -220,8 +220,6 @@ func (m *SIPEngine) applySIPConfigDefaults(c *sip_infra.Config) {
 		inboundConfig.MinRingDuration,
 		inboundConfig.MaxRingDuration,
 		inboundConfig.ACKTimeout,
-		inboundConfig.AssistantAudioReadyTimeout,
-		inboundConfig.RequireAssistantAudioReady,
 	)
 }
 

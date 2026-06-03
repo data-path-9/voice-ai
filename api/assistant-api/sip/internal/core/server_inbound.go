@@ -699,6 +699,10 @@ func (s *Server) sendSDPResponseAndWaitACK(
 		return err
 	}
 
+	var initialACKReceived <-chan struct{}
+	if ackReason == LifecycleReasonInboundInviteACKReceived {
+		initialACKReceived = session.InitialACKSignal()
+	}
 	if ackTimeout <= 0 {
 		ackTimeout = s.effectiveInboundACKTimeout()
 	}
@@ -721,6 +725,9 @@ func (s *Server) sendSDPResponseAndWaitACK(
 				return fmt.Errorf("inbound ACK request is nil")
 			}
 			s.acceptInboundACKWithReason(ackRequest, tx, session, ackReason)
+			ackAccepted = true
+			return nil
+		case <-initialACKReceived:
 			ackAccepted = true
 			return nil
 		case <-tx.Done():

@@ -566,6 +566,52 @@ func TestTryStartRemoteAudioReader_RejectsStalePeerConnection(t *testing.T) {
 	assert.Zero(t, s.sessionState.RemoteAudioReaderMediaSessionID())
 }
 
+func TestShouldRestartConnectedNoRemoteAudioTrack(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	watchdogCheckedAt := time.Now()
+	mediaHealthState := webrtc_internal.MediaHealthState{
+		PeerConnectedAt: watchdogCheckedAt.Add(-webrtc_internal.ConnectedNoUserAudioThreshold),
+	}
+
+	missingRemoteAudioTrackMediaSessionID, shouldRestartMissingRemoteAudioTrack := s.shouldRestartConnectedNoRemoteAudioTrack(mediaHealthState, watchdogCheckedAt)
+
+	assert.True(t, shouldRestartMissingRemoteAudioTrack)
+	assert.Equal(t, mediaSessionID, missingRemoteAudioTrackMediaSessionID)
+}
+
+func TestShouldRestartConnectedNoRemoteAudioTrack_SkipsWhenTrackReceived(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	mediaSessionID := s.sessionState.StartMediaSession()
+	assert.True(t, s.sessionState.TryStartRemoteAudioReader(mediaSessionID))
+	watchdogCheckedAt := time.Now()
+	mediaHealthState := webrtc_internal.MediaHealthState{
+		PeerConnectedAt: watchdogCheckedAt.Add(-webrtc_internal.ConnectedNoUserAudioThreshold),
+	}
+
+	missingRemoteAudioTrackMediaSessionID, shouldRestartMissingRemoteAudioTrack := s.shouldRestartConnectedNoRemoteAudioTrack(mediaHealthState, watchdogCheckedAt)
+
+	assert.False(t, shouldRestartMissingRemoteAudioTrack)
+	assert.Zero(t, missingRemoteAudioTrackMediaSessionID)
+}
+
+func TestShouldRestartConnectedNoRemoteAudioTrack_SkipsBeforeThreshold(t *testing.T) {
+	t.Parallel()
+	s := newTestStreamer(t)
+	s.sessionState.StartMediaSession()
+	watchdogCheckedAt := time.Now()
+	mediaHealthState := webrtc_internal.MediaHealthState{
+		PeerConnectedAt: watchdogCheckedAt.Add(-(webrtc_internal.ConnectedNoUserAudioThreshold - time.Millisecond)),
+	}
+
+	missingRemoteAudioTrackMediaSessionID, shouldRestartMissingRemoteAudioTrack := s.shouldRestartConnectedNoRemoteAudioTrack(mediaHealthState, watchdogCheckedAt)
+
+	assert.False(t, shouldRestartMissingRemoteAudioTrack)
+	assert.Zero(t, missingRemoteAudioTrackMediaSessionID)
+}
+
 func TestHandleConfigurationMessage_AudioNegotiatingNoop(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)

@@ -891,10 +891,6 @@ func (s *webrtcStreamer) handleConfigurationMessage(mode protos.StreamMode) {
 	}
 
 	mediaState := s.sessionState.MediaState()
-	if mode == currentMode && !(mode == protos.StreamMode_STREAM_MODE_TEXT && mediaState != webrtc_internal.MediaStateText) {
-		return
-	}
-
 	switch mode {
 	case protos.StreamMode_STREAM_MODE_AUDIO:
 		if mediaState == webrtc_internal.MediaStateAudioNegotiating || mediaState == webrtc_internal.MediaStateAudioConnected {
@@ -909,6 +905,9 @@ func (s *webrtcStreamer) handleConfigurationMessage(mode protos.StreamMode) {
 			s.stopMediaSessionAndFallbackToText()
 		}
 	case protos.StreamMode_STREAM_MODE_TEXT:
+		if currentMode == protos.StreamMode_STREAM_MODE_TEXT && mediaState == webrtc_internal.MediaStateText {
+			return
+		}
 		s.clearBufferedOutputAudio()
 		s.signalClear()
 		s.stopMediaSessionAndFallbackToText()
@@ -1089,6 +1088,7 @@ func (s *webrtcStreamer) Send(response internal_type.Stream) error {
 	case *protos.ConversationInitialization:
 		s.handleConfigurationMessage(data.GetStreamMode())
 		if ambientCfg, ok := internal_ambient.ParseFromInitialization(data); ok {
+			s.Logger.Debugf("Parsed ambient configuration from initialization message: %+v", ambientCfg)
 			s.applyAmbientConfig(ambientCfg, "server_initialization")
 		}
 		s.Output(data)

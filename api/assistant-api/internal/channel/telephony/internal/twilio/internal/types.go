@@ -51,7 +51,7 @@ const (
 	Linear16BytesPerMs    = 32
 	OutputChunkSize       = MulawBytesPerMs * 20
 	BridgeOutputFrameSize = Linear16BytesPerMs * 20
-	InputBufferThreshold  = Linear16BytesPerMs * 60
+	InputBufferThreshold  = Linear16BytesPerMs * 40
 	MulawSilence          = 0xFF
 )
 
