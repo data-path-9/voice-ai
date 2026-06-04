@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
 	"github.com/rapidaai/openapi"
+	pkg_errors "github.com/rapidaai/pkg/errors"
 	"github.com/rapidaai/pkg/preset"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
@@ -24,13 +25,13 @@ import (
 func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 	auth, isAuthenticated := types.GetAuthPrinciple(c)
 	if !isAuthenticated {
-		c.JSON(http.StatusForbidden, openapi.ErrorResponse{
-			Code:    utils.Ptr(int32(401)),
+		c.JSON(pkg_errors.CreatePhoneCallUnauthenticated.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(pkg_errors.CreatePhoneCallUnauthenticated.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
 			Error: &openapi.Error{
-				ErrorCode:    utils.Ptr(openapi.Uint64String("401")),
-				ErrorMessage: utils.Ptr("unauthenticated request"),
-				HumanMessage: utils.Ptr("Unauthenticated request, please try again with valid authentication."),
+				ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreatePhoneCallUnauthenticated.CodeString())),
+				ErrorMessage: utils.Ptr(pkg_errors.CreatePhoneCallUnauthenticated.Error),
+				HumanMessage: utils.Ptr(pkg_errors.CreatePhoneCallUnauthenticated.ErrorMessage),
 			},
 		})
 		return
@@ -38,26 +39,27 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 
 	var ir openapi.CreatePhoneCallRequest
 	if err := c.ShouldBindJSON(&ir); err != nil {
-		c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
-			Code:    utils.Ptr(int32(400)),
+		cApi.logger.Errorf("create phone call invalid request: %v", err)
+		c.JSON(pkg_errors.CreatePhoneCallInvalidRequest.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(pkg_errors.CreatePhoneCallInvalidRequest.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
 			Error: &openapi.Error{
-				ErrorCode:    utils.Ptr(openapi.Uint64String("400")),
-				ErrorMessage: utils.Ptr(err.Error()),
-				HumanMessage: utils.Ptr("Invalid request."),
+				ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreatePhoneCallInvalidRequest.CodeString())),
+				ErrorMessage: utils.Ptr(pkg_errors.CreatePhoneCallInvalidRequest.Error),
+				HumanMessage: utils.Ptr(pkg_errors.CreatePhoneCallInvalidRequest.ErrorMessage),
 			},
 		})
 		return
 	}
 
 	if !validator.NonNil(ir.ToNumber) || !validator.NotBlank(*ir.ToNumber) {
-		c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
-			Code:    utils.Ptr(int32(200)),
+		c.JSON(pkg_errors.CreatePhoneCallMissingToNumber.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(pkg_errors.CreatePhoneCallMissingToNumber.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
 			Error: &openapi.Error{
-				ErrorCode:    utils.Ptr(openapi.Uint64String("200")),
-				ErrorMessage: utils.Ptr("missing to_phone parameter"),
-				HumanMessage: utils.Ptr("Please provide the required to_phone parameter."),
+				ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreatePhoneCallMissingToNumber.CodeString())),
+				ErrorMessage: utils.Ptr(pkg_errors.CreatePhoneCallMissingToNumber.Error),
+				HumanMessage: utils.Ptr(pkg_errors.CreatePhoneCallMissingToNumber.ErrorMessage),
 			},
 		})
 		return
@@ -79,13 +81,13 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 	}
 	preset.AssistantDefinition(assistant)
 	if !validator.OfAssistantDefinition(assistant) {
-		c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
-			Code:    utils.Ptr(int32(200)),
+		c.JSON(pkg_errors.CreatePhoneCallInvalidAssistant.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(pkg_errors.CreatePhoneCallInvalidAssistant.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
 			Error: &openapi.Error{
-				ErrorCode:    utils.Ptr(openapi.Uint64String("200")),
-				ErrorMessage: utils.Ptr("invalid assistant"),
-				HumanMessage: utils.Ptr("Please provide a valid assistant."),
+				ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreatePhoneCallInvalidAssistant.CodeString())),
+				ErrorMessage: utils.Ptr(pkg_errors.CreatePhoneCallInvalidAssistant.Error),
+				HumanMessage: utils.Ptr(pkg_errors.CreatePhoneCallInvalidAssistant.ErrorMessage),
 			},
 		})
 		return
@@ -121,13 +123,13 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 	})
 	if result.Error != nil {
 		cApi.logger.Errorf("outbound call failed: %v", result.Error)
-		c.JSON(http.StatusInternalServerError, openapi.ErrorResponse{
-			Code:    utils.Ptr(int32(500)),
+		c.JSON(pkg_errors.CreatePhoneCallInitiateOutbound.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(pkg_errors.CreatePhoneCallInitiateOutbound.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
 			Error: &openapi.Error{
-				ErrorCode:    utils.Ptr(openapi.Uint64String("500")),
-				ErrorMessage: utils.Ptr(result.Error.Error()),
-				HumanMessage: utils.Ptr("Failed to initiate outbound call"),
+				ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreatePhoneCallInitiateOutbound.CodeString())),
+				ErrorMessage: utils.Ptr(pkg_errors.CreatePhoneCallInitiateOutbound.Error),
+				HumanMessage: utils.Ptr(pkg_errors.CreatePhoneCallInitiateOutbound.ErrorMessage),
 			},
 		})
 		return

@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
 	"github.com/rapidaai/openapi"
+	pkg_errors "github.com/rapidaai/pkg/errors"
 	"github.com/rapidaai/pkg/preset"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
@@ -24,13 +25,13 @@ import (
 func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 	auth, isAuthenticated := types.GetAuthPrinciple(c)
 	if !isAuthenticated {
-		c.JSON(http.StatusForbidden, openapi.ErrorResponse{
-			Code:    utils.Ptr(int32(401)),
+		c.JSON(pkg_errors.CreateBulkPhoneCallUnauthenticated.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(pkg_errors.CreateBulkPhoneCallUnauthenticated.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
 			Error: &openapi.Error{
-				ErrorCode:    utils.Ptr(openapi.Uint64String("401")),
-				ErrorMessage: utils.Ptr("unauthenticated request"),
-				HumanMessage: utils.Ptr("Unauthenticated request, please try again with valid authentication."),
+				ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateBulkPhoneCallUnauthenticated.CodeString())),
+				ErrorMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallUnauthenticated.Error),
+				HumanMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallUnauthenticated.ErrorMessage),
 			},
 		})
 		return
@@ -38,26 +39,27 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 
 	var ir openapi.CreateBulkPhoneCallRequest
 	if err := c.ShouldBindJSON(&ir); err != nil {
-		c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
-			Code:    utils.Ptr(int32(400)),
+		cApi.logger.Errorf("create bulk phone call invalid request: %v", err)
+		c.JSON(pkg_errors.CreateBulkPhoneCallInvalidRequest.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(pkg_errors.CreateBulkPhoneCallInvalidRequest.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
 			Error: &openapi.Error{
-				ErrorCode:    utils.Ptr(openapi.Uint64String("400")),
-				ErrorMessage: utils.Ptr(err.Error()),
-				HumanMessage: utils.Ptr("Invalid request."),
+				ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateBulkPhoneCallInvalidRequest.CodeString())),
+				ErrorMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallInvalidRequest.Error),
+				HumanMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallInvalidRequest.ErrorMessage),
 			},
 		})
 		return
 	}
 
 	if !validator.NonNil(ir.PhoneCalls) || !validator.NotEmpty(*ir.PhoneCalls) {
-		c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
-			Code:    utils.Ptr(int32(200)),
+		c.JSON(pkg_errors.CreateBulkPhoneCallMissingPhoneCalls.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(pkg_errors.CreateBulkPhoneCallMissingPhoneCalls.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
 			Error: &openapi.Error{
-				ErrorCode:    utils.Ptr(openapi.Uint64String("200")),
-				ErrorMessage: utils.Ptr("missing phone_calls parameter"),
-				HumanMessage: utils.Ptr("Please provide at least one phone call."),
+				ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateBulkPhoneCallMissingPhoneCalls.CodeString())),
+				ErrorMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallMissingPhoneCalls.Error),
+				HumanMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallMissingPhoneCalls.ErrorMessage),
 			},
 		})
 		return
@@ -66,13 +68,13 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 	conversations := make([]openapi.AssistantConversation, 0, len(*ir.PhoneCalls))
 	for _, phoneCall := range *ir.PhoneCalls {
 		if !validator.NonNil(phoneCall.ToNumber) || !validator.NotBlank(*phoneCall.ToNumber) {
-			c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
-				Code:    utils.Ptr(int32(200)),
+			c.JSON(pkg_errors.CreateBulkPhoneCallMissingToNumber.HTTPStatusCode, openapi.ErrorResponse{
+				Code:    utils.Ptr(pkg_errors.CreateBulkPhoneCallMissingToNumber.HTTPStatusCodeInt32()),
 				Success: utils.Ptr(false),
 				Error: &openapi.Error{
-					ErrorCode:    utils.Ptr(openapi.Uint64String("200")),
-					ErrorMessage: utils.Ptr("missing to_phone parameter"),
-					HumanMessage: utils.Ptr("Please provide the required to_phone parameter."),
+					ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateBulkPhoneCallMissingToNumber.CodeString())),
+					ErrorMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallMissingToNumber.Error),
+					HumanMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallMissingToNumber.ErrorMessage),
 				},
 			})
 			return
@@ -94,13 +96,13 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 		}
 		preset.AssistantDefinition(assistant)
 		if !validator.OfAssistantDefinition(assistant) {
-			c.JSON(http.StatusBadRequest, openapi.ErrorResponse{
-				Code:    utils.Ptr(int32(200)),
+			c.JSON(pkg_errors.CreateBulkPhoneCallInvalidAssistant.HTTPStatusCode, openapi.ErrorResponse{
+				Code:    utils.Ptr(pkg_errors.CreateBulkPhoneCallInvalidAssistant.HTTPStatusCodeInt32()),
 				Success: utils.Ptr(false),
 				Error: &openapi.Error{
-					ErrorCode:    utils.Ptr(openapi.Uint64String("200")),
-					ErrorMessage: utils.Ptr("invalid assistant"),
-					HumanMessage: utils.Ptr("Please provide a valid assistant."),
+					ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateBulkPhoneCallInvalidAssistant.CodeString())),
+					ErrorMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallInvalidAssistant.Error),
+					HumanMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallInvalidAssistant.ErrorMessage),
 				},
 			})
 			return
@@ -136,13 +138,13 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 		})
 		if result.Error != nil {
 			cApi.logger.Errorf("bulk outbound call failed: %v", result.Error)
-			c.JSON(http.StatusInternalServerError, openapi.ErrorResponse{
-				Code:    utils.Ptr(int32(500)),
+			c.JSON(pkg_errors.CreateBulkPhoneCallInitiateOutbound.HTTPStatusCode, openapi.ErrorResponse{
+				Code:    utils.Ptr(pkg_errors.CreateBulkPhoneCallInitiateOutbound.HTTPStatusCodeInt32()),
 				Success: utils.Ptr(false),
 				Error: &openapi.Error{
-					ErrorCode:    utils.Ptr(openapi.Uint64String("500")),
-					ErrorMessage: utils.Ptr(result.Error.Error()),
-					HumanMessage: utils.Ptr("Failed to initiate outbound call"),
+					ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateBulkPhoneCallInitiateOutbound.CodeString())),
+					ErrorMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallInitiateOutbound.Error),
+					HumanMessage: utils.Ptr(pkg_errors.CreateBulkPhoneCallInitiateOutbound.ErrorMessage),
 				},
 			})
 			return
