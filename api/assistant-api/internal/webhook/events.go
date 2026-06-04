@@ -31,6 +31,16 @@ const (
 )
 
 const (
+	WebRTCReceived   Event = "webrtc.received"
+	WebRTCInitiated  Event = "webrtc.initiated"
+	WebRTCStarted    Event = "webrtc.started"
+	WebRTCInProgress Event = "webrtc.in_progress"
+	WebRTCHangup     Event = "webrtc.hangup"
+	WebRTCCompleted  Event = "webrtc.completed"
+	WebRTCFailed     Event = "webrtc.failed"
+)
+
+const (
 	ConversationBegin     Event = "conversation.begin"
 	ConversationResume    Event = "conversation.resume"
 	ConversationStarted   Event = "conversation.started"

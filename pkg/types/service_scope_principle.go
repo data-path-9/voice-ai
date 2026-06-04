@@ -38,7 +38,6 @@ func (ss *ServiceScope) HasProject() bool {
 }
 
 func (ss *ServiceScope) IsAuthenticated() bool {
-	// org scope is already to have only org
 	return (ss.HasUser() || ss.HasProject()) && ss.HasOrganization()
 }
 
