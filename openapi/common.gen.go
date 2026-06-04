@@ -90,11 +90,26 @@ type AssistantDefinition struct {
 	Version     *string       `json:"version,omitempty"`
 }
 
-// Error defines model for Error.
+// Error Platform error response details. `errorCode` is a stable platform error code.
+// See `PlatformErrorCode` for documented code/message mappings.
 type Error struct {
-	ErrorCode    *Uint64String `json:"errorCode,omitempty"`
-	ErrorMessage *string       `json:"errorMessage,omitempty"`
-	HumanMessage *string       `json:"humanMessage,omitempty"`
+	ErrorCode *Uint64String `json:"errorCode,omitempty"`
+
+	// ErrorMessage Stable client-safe error message.
+	ErrorMessage *string `json:"errorMessage,omitempty"`
+
+	// HumanMessage Client-safe human-readable message.
+	HumanMessage *string `json:"humanMessage,omitempty"`
+}
+
+// ErrorResponse defines model for ErrorResponse.
+type ErrorResponse struct {
+	Code *int32 `json:"code,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error   *Error `json:"error,omitempty"`
+	Success *bool  `json:"success,omitempty"`
 }
 
 // Metadata defines model for Metadata.
@@ -110,6 +125,34 @@ type Metric struct {
 	Name        *string `json:"name,omitempty"`
 	Value       *string `json:"value,omitempty"`
 }
+
+// PlatformErrorCode Stable platform error code.
+//
+// Create Assistant:
+// - `1001001`: invalid request - Invalid request.
+// - `1001002`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1001003`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1001004`: missing name parameter - Please provide the required name parameter.
+// - `1001005`: missing assistant_provider parameter - Please provide the required assistantProvider parameter.
+// - `1001006`: invalid assistant_provider parameter - Please provide exactly one assistant provider.
+// - `1001007`: missing model_provider_name parameter - Please provide the required modelProviderName parameter.
+// - `1001008`: missing agent_kit_url parameter - Please provide the required agentKitUrl parameter.
+// - `1001009`: missing websocket_url parameter - Please provide the required websocketUrl parameter.
+// - `1001010`: invalid source_identifier parameter - Please provide a valid sourceIdentifier parameter.
+// - `1001011`: unable to create assistant - Unable to create assistant, please try again later.
+// - `1001012`: invalid assistant provider template - Invalid assistant provider template.
+// - `1001013`: unable to create assistant provider model - Unable to create assistant provider model, please try again later.
+// - `1001014`: unable to attach assistant provider model - Unable to attach assistant provider model, please try again later.
+// - `1001015`: unable to create assistant provider agentkit - Unable to create assistant provider agentkit, please try again later.
+// - `1001016`: unable to attach assistant provider agentkit - Unable to attach assistant provider agentkit, please try again later.
+// - `1001017`: unable to create assistant provider websocket - Unable to create assistant provider websocket, please try again later.
+// - `1001018`: unable to attach assistant provider websocket - Unable to attach assistant provider websocket, please try again later.
+// - `1001019`: invalid knowledge_id parameter - Please provide a valid knowledgeId parameter.
+// - `1001020`: invalid reranker_model_provider_id parameter - Please provide a valid rerankerModelProviderId parameter.
+// - `1001021`: unable to create assistant tools - Unable to create assistant tools, please try again later.
+// - `1001022`: unable to create assistant knowledge - Unable to create assistant knowledge, please try again later.
+// - `1001023`: unable to create assistant tags - Unable to create assistant tags, please try again.
+type PlatformErrorCode = string
 
 // Uint64String defines model for Uint64String.
 type Uint64String = string

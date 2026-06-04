@@ -168,6 +168,6 @@ func (aP *PlainAuthPrinciple) SwitchProject(projectId uint64) error {
 	return nil
 }
 
-func (aP *PlainAuthPrinciple) Type() string {
-	return "user"
+func (aP *PlainAuthPrinciple) Type() AuthType {
+	return AuthTypeUser
 }

@@ -1,0 +1,258 @@
+package assistant_api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
+	pkg_errors "github.com/rapidaai/pkg/errors"
+	gorm_types "github.com/rapidaai/pkg/models/gorm/types"
+	"github.com/rapidaai/pkg/types"
+	type_enums "github.com/rapidaai/pkg/types/enums"
+	"github.com/rapidaai/protos"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type createAssistantRestAssistantServiceStub struct {
+	createAssistantCalled bool
+	createProviderCalled  bool
+	attachProviderCalled  bool
+	createTagCalled       bool
+	providerDescription   string
+	createAssistantErr    error
+}
+
+func (s *createAssistantRestAssistantServiceStub) Get(context.Context, types.SimplePrinciple, uint64, *uint64, *internal_services.GetAssistantOption) (*internal_assistant_entity.Assistant, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *createAssistantRestAssistantServiceStub) GetAll(context.Context, types.SimplePrinciple, []*protos.Criteria, *protos.Paginate, *internal_services.GetAssistantOption) (int64, []*internal_assistant_entity.Assistant, error) {
+	return 0, nil, errors.New("not implemented")
+}
+
+func (s *createAssistantRestAssistantServiceStub) GetAllAssistantProviderModel(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantProviderModel, error) {
+	return 0, nil, errors.New("not implemented")
+}
+
+func (s *createAssistantRestAssistantServiceStub) GetAllAssistantProviderWebsocket(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantProviderWebsocket, error) {
+	return 0, nil, errors.New("not implemented")
+}
+
+func (s *createAssistantRestAssistantServiceStub) GetAllAssistantProviderAgentkit(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantProviderAgentkit, error) {
+	return 0, nil, errors.New("not implemented")
+}
+
+func (s *createAssistantRestAssistantServiceStub) UpdateAssistantVersion(context.Context, types.SimplePrinciple, uint64, type_enums.AssistantProvider, uint64) (*internal_assistant_entity.Assistant, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *createAssistantRestAssistantServiceStub) UpdateAssistantDetail(context.Context, types.SimplePrinciple, uint64, string, string) (*internal_assistant_entity.Assistant, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *createAssistantRestAssistantServiceStub) CreateAssistant(_ context.Context, auth types.SimplePrinciple, name, description string, visibility string, source string, sourceIdentifier *uint64, language string) (*internal_assistant_entity.Assistant, error) {
+	s.createAssistantCalled = true
+	if s.createAssistantErr != nil {
+		return nil, s.createAssistantErr
+	}
+	return &internal_assistant_entity.Assistant{
+		Name:        name,
+		Description: description,
+		Visibility:  visibility,
+	}, nil
+}
+
+func (s *createAssistantRestAssistantServiceStub) DeleteAssistant(context.Context, types.SimplePrinciple, uint64) (*internal_assistant_entity.Assistant, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *createAssistantRestAssistantServiceStub) CreateAssistantProviderModel(_ context.Context, _ types.SimplePrinciple, _ uint64, providerDescription string, _ string, _ string, _ []*protos.Metadata) (*internal_assistant_entity.AssistantProviderModel, error) {
+	s.createProviderCalled = true
+	s.providerDescription = providerDescription
+	providerModel := &internal_assistant_entity.AssistantProviderModel{}
+	providerModel.Id = 2
+	return providerModel, nil
+}
+
+func (s *createAssistantRestAssistantServiceStub) CreateAssistantProviderWebsocket(_ context.Context, _ types.SimplePrinciple, _ uint64, providerDescription string, _ string, _ map[string]string, _ map[string]string) (*internal_assistant_entity.AssistantProviderWebsocket, error) {
+	s.createProviderCalled = true
+	s.providerDescription = providerDescription
+	websocketProvider := &internal_assistant_entity.AssistantProviderWebsocket{}
+	websocketProvider.Id = 2
+	return websocketProvider, nil
+}
+
+func (s *createAssistantRestAssistantServiceStub) CreateAssistantProviderAgentkit(_ context.Context, _ types.SimplePrinciple, _ uint64, providerDescription string, _ string, _ string, _ map[string]string) (*internal_assistant_entity.AssistantProviderAgentkit, error) {
+	s.createProviderCalled = true
+	s.providerDescription = providerDescription
+	agentkitProvider := &internal_assistant_entity.AssistantProviderAgentkit{}
+	agentkitProvider.Id = 2
+	return agentkitProvider, nil
+}
+
+func (s *createAssistantRestAssistantServiceStub) AttachProviderModelToAssistant(context.Context, types.SimplePrinciple, uint64, type_enums.AssistantProvider, uint64) (*internal_assistant_entity.Assistant, error) {
+	s.attachProviderCalled = true
+	return &internal_assistant_entity.Assistant{}, nil
+}
+
+func (s *createAssistantRestAssistantServiceStub) CreateOrUpdateAssistantTag(context.Context, types.SimplePrinciple, uint64, []string) (*internal_assistant_entity.AssistantTag, error) {
+	s.createTagCalled = true
+	return &internal_assistant_entity.AssistantTag{}, nil
+}
+
+type createAssistantRestKnowledgeServiceStub struct{}
+
+func (s createAssistantRestKnowledgeServiceStub) Get(context.Context, types.SimplePrinciple, uint64, uint64) (*internal_assistant_entity.AssistantKnowledge, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s createAssistantRestKnowledgeServiceStub) GetAll(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantKnowledge, error) {
+	return 0, nil, errors.New("not implemented")
+}
+
+func (s createAssistantRestKnowledgeServiceStub) Create(context.Context, types.SimplePrinciple, uint64, uint64, gorm_types.RetrievalMethod, bool, float32, uint32, *uint64, *string, []*protos.Metadata) (*internal_assistant_entity.AssistantKnowledge, error) {
+	return &internal_assistant_entity.AssistantKnowledge{}, nil
+}
+
+func (s createAssistantRestKnowledgeServiceStub) Update(context.Context, types.SimplePrinciple, uint64, uint64, uint64, gorm_types.RetrievalMethod, bool, float32, uint32, *uint64, *string, []*protos.Metadata) (*internal_assistant_entity.AssistantKnowledge, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s createAssistantRestKnowledgeServiceStub) Delete(context.Context, types.SimplePrinciple, uint64, uint64) (*internal_assistant_entity.AssistantKnowledge, error) {
+	return nil, errors.New("not implemented")
+}
+
+func TestCreateAssistantRest_HappyPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	assistantService := &createAssistantRestAssistantServiceStub{}
+	assistantApi := &assistantApi{
+		assistantService:          assistantService,
+		assistantKnowledgeService: createAssistantRestKnowledgeServiceStub{},
+	}
+	requestBody := []byte(`{
+		"name": "Support Assistant",
+		"description": "Handles support calls",
+		"assistantProvider": {
+			"description": "Primary model",
+			"model": {
+				"modelProviderName": "openai",
+				"template": {
+					"prompt": [{"role": "system", "content": "Help users"}]
+				}
+			}
+		},
+		"tags": ["support"]
+	}`)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/assistant/create-assistant", bytes.NewReader(requestBody))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set(string(types.CTX_), createAssistantRestAuth())
+
+	assistantApi.CreateAssistantRest(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.True(t, assistantService.createAssistantCalled)
+	assert.True(t, assistantService.createProviderCalled)
+	assert.True(t, assistantService.attachProviderCalled)
+	assert.True(t, assistantService.createTagCalled)
+	assert.Equal(t, "Primary model", assistantService.providerDescription)
+
+	var response map[string]interface{}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, true, response["success"])
+}
+
+func TestCreateAssistantRest_MissingAuthScope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	assistantApi := &assistantApi{}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/assistant/create-assistant", bytes.NewReader([]byte(`{}`)))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set(string(types.CTX_), &types.PlainAuthPrinciple{
+		User:             types.UserInfo{Id: 11},
+		OrganizationRole: &types.OrganizaitonRole{OrganizationId: 22},
+	})
+
+	assistantApi.CreateAssistantRest(context)
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), pkg_errors.CreateAssistantMissingAuthScope.Error)
+}
+
+func TestCreateAssistantRest_MissingName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	assistantApi := &assistantApi{}
+	requestBody := []byte(`{"assistantProvider":{"model":{"modelProviderName":"openai"}}}`)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/assistant/create-assistant", bytes.NewReader(requestBody))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set(string(types.CTX_), createAssistantRestAuth())
+
+	assistantApi.CreateAssistantRest(context)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), pkg_errors.CreateAssistantMissingName.Error)
+}
+
+func TestCreateAssistantRest_CreateAssistantErrorDoesNotExposeInternalError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	assistantApi := &assistantApi{
+		assistantService: &createAssistantRestAssistantServiceStub{
+			createAssistantErr: errors.New("database password leaked"),
+		},
+	}
+	requestBody := []byte(`{"name":"Support Assistant","assistantProvider":{"model":{"modelProviderName":"openai"}}}`)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/assistant/create-assistant", bytes.NewReader(requestBody))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set(string(types.CTX_), createAssistantRestAuth())
+
+	assistantApi.CreateAssistantRest(context)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), pkg_errors.CreateAssistantCreateAssistant.Error)
+	assert.NotContains(t, recorder.Body.String(), "database password leaked")
+}
+
+func TestCreateAssistantRest_Unauthenticated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	assistantApi := &assistantApi{}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/assistant/create-assistant", bytes.NewReader([]byte(`{}`)))
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	assistantApi.CreateAssistantRest(context)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), pkg_errors.CreateAssistantUnauthenticated.Error)
+}
+
+func createAssistantRestAuth() *types.PlainAuthPrinciple {
+	return &types.PlainAuthPrinciple{
+		User: types.UserInfo{Id: 11},
+		OrganizationRole: &types.OrganizaitonRole{
+			OrganizationId: 22,
+		},
+		CurrentProjectRole: &types.ProjectRole{
+			ProjectId: 33,
+		},
+	}
+}

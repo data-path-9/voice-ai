@@ -1053,7 +1053,7 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 	}
 
 	for _, webhook := range h.r.assistant.AssistantWebhooks {
-		exec, err := internal_webhook.NewExecutor(h.r.logger, ctx, webhook, h.r, h.r)
+		exec, err := internal_webhook.NewExecutor(h.r.logger, ctx, webhook, h.r)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,

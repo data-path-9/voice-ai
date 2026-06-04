@@ -20,15 +20,24 @@ var (
 	PROJECT_KEY               = "x-project-id"
 	SERVICE_SCOPE_KEY         = "x-internal-service-key"
 
-	//
-	PROJECT_SCOPE_KEY = "x-api-key"
-	// later we will check the prefix and drop the request, this will not overload the server with random request
-	// another way to find length and pattern of our generated key, validate first if the given key in the same format
-	// only needed for scale
+	PROJECT_SCOPE_KEY  = "x-api-key"
 	ORG_SCOPE_KEY      = "x-org-key"
 	ORG_KEY_PREFIX     = "rpd-org-"
 	PROJECT_KEY_PREFIX = "rpd-prj-"
 )
+
+type AuthType string
+
+const (
+	AuthTypeUser    AuthType = "user"
+	AuthTypeService AuthType = "service"
+	AuthTypeProject AuthType = "project"
+	AuthTypeOrg     AuthType = "org"
+)
+
+func (a AuthType) String() string {
+	return string(a)
+}
 
 type Authenticator interface {
 	Authorize(ctx context.Context, authToken string, userId uint64) (Principle, error)
@@ -62,8 +71,8 @@ type SimplePrinciple interface {
 	IsAuthenticated() bool
 	//
 	GetCurrentToken() string
-
-	Type() string
+	// type of the principle, can be used for checking the type in runtime and do type assertion
+	Type() AuthType
 }
 
 /*

@@ -15,7 +15,7 @@ import (
 )
 
 // CreateAssistantWebpluginDeployment implements assistant_api.AssistantDeploymentServiceServer.
-func (deploymentApi *assistantDeploymentApi) CreateAssistantWebpluginDeployment(ctx context.Context, deployment *assistant_api.CreateAssistantDeploymentRequest) (*assistant_api.GetAssistantWebpluginDeploymentResponse, error) {
+func (deploymentApi *assistantDeploymentGrpcApi) CreateAssistantWebpluginDeployment(ctx context.Context, deployment *assistant_api.CreateAssistantDeploymentRequest) (*assistant_api.GetAssistantWebpluginDeploymentResponse, error) {
 	iAuth, isAuthenticated := types.GetSimplePrincipleGRPC(ctx)
 	if !isAuthenticated || iAuth.GetCurrentProjectId() == nil {
 		deploymentApi.logger.Errorf("unauthenticated request for invoke")

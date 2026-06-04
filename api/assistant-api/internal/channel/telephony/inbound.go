@@ -150,7 +150,7 @@ func (d *InboundDispatcher) SaveCallContext(ctx context.Context, auth types.Simp
 		ConversationID:      conversationID,
 		AssistantProviderId: assistant.AssistantProviderId,
 		AuthToken:           auth.GetCurrentToken(),
-		AuthType:            auth.Type(),
+		AuthType:            auth.Type().String(),
 		Direction:           direction,
 		CallerNumber:        callInfo.CallerNumber,
 		FromNumber:          callInfo.FromNumber,

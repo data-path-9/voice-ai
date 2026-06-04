@@ -17,7 +17,7 @@ import (
 	"github.com/rapidaai/protos"
 )
 
-type assistantDeploymentApi struct {
+type AssistantDeploymentApi struct {
 	cfg               *config.AssistantConfig
 	logger            commons.Logger
 	postgres          connectors.PostgresConnector
@@ -26,19 +26,31 @@ type assistantDeploymentApi struct {
 }
 
 type assistantDeploymentGrpcApi struct {
-	assistantDeploymentApi
+	AssistantDeploymentApi
 }
 
 func NewAssistantDeploymentGRPCApi(config *config.AssistantConfig, logger commons.Logger,
 	postgres connectors.PostgresConnector,
 ) protos.AssistantDeploymentServiceServer {
 	return &assistantDeploymentGrpcApi{
-		assistantDeploymentApi{
+		AssistantDeploymentApi: AssistantDeploymentApi{
 			cfg:               config,
 			logger:            logger,
 			postgres:          postgres,
 			deploymentService: internal_assistant_service.NewAssistantDeploymentService(config, logger, postgres),
 			storage:           storage_files.NewStorage(config.AssetStoreConfig, logger),
 		},
+	}
+}
+
+func NewAssistantDeploymentApi(config *config.AssistantConfig, logger commons.Logger,
+	postgres connectors.PostgresConnector,
+) *AssistantDeploymentApi {
+	return &AssistantDeploymentApi{
+		cfg:               config,
+		logger:            logger,
+		postgres:          postgres,
+		deploymentService: internal_assistant_service.NewAssistantDeploymentService(config, logger, postgres),
+		storage:           storage_files.NewStorage(config.AssetStoreConfig, logger),
 	}
 }

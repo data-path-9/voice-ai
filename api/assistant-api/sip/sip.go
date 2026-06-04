@@ -667,7 +667,7 @@ func (m *SIPEngine) pipelineEnsureCallContext(
 		AssistantID:    assistantID,
 		ConversationID: conversationID,
 		AuthToken:      auth.GetCurrentToken(),
-		AuthType:       auth.Type(),
+		AuthType:       auth.Type().String(),
 		Direction:      dirStr,
 		Provider:       "sip",
 		CallerNumber:   extractDIDOrRaw(fromURI),
@@ -708,7 +708,7 @@ func (m *SIPEngine) reconstructCallContext(
 		AssistantID:    assistantID,
 		ConversationID: conversationID,
 		AuthToken:      auth.GetCurrentToken(),
-		AuthType:       auth.Type(),
+		AuthType:       auth.Type().String(),
 		Direction:      direction,
 		Provider:       "sip",
 		ChannelUUID:    callID,
@@ -758,7 +758,7 @@ func (m *SIPEngine) pipelineCallSetup(ctx context.Context, session *sip_infra.Se
 		ConversationID:      conversationID,
 		AssistantProviderId: assistant.AssistantProviderId,
 		AuthToken:           auth.GetCurrentToken(),
-		AuthType:            auth.Type(),
+		AuthType:            auth.Type().String(),
 		CallContext:         cc,
 	}
 	if auth.GetCurrentProjectId() != nil {

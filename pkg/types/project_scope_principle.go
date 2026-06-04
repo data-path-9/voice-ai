@@ -49,6 +49,6 @@ func (ss *ProjectScope) GetCurrentToken() string {
 	return ss.CurrentToken
 }
 
-func (aP *ProjectScope) Type() string {
-	return "project"
+func (aP *ProjectScope) Type() AuthType {
+	return AuthTypeProject
 }

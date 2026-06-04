@@ -46,6 +46,6 @@ func (ss *ServiceScope) GetCurrentToken() string {
 	return ss.CurrentToken
 }
 
-func (ss *ServiceScope) Type() string {
-	return "service"
+func (ss *ServiceScope) Type() AuthType {
+	return AuthTypeService
 }

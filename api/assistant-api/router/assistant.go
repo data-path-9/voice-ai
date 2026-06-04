@@ -22,19 +22,26 @@ import (
 func AssistantApiRoute(
 	Cfg *config.AssistantConfig,
 	S *grpc.Server,
+	engine *gin.Engine,
 	Logger commons.Logger,
 	Postgres connectors.PostgresConnector,
 	Redis connectors.RedisConnector,
 	Opensearch connectors.OpenSearchConnector,
 ) {
-	workflow_api.RegisterAssistantServiceServer(S,
-		assistantApi.NewAssistantGRPCApi(Cfg,
-			Logger,
-			Postgres,
-			Redis,
-			Opensearch,
-			Opensearch,
-		))
+	assistantServiceServer := assistantApi.NewAssistantGRPCApi(Cfg,
+		Logger,
+		Postgres,
+		Redis,
+		Opensearch,
+		Opensearch,
+	)
+	workflow_api.RegisterAssistantServiceServer(S, assistantServiceServer)
+
+	apiv1 := engine.Group("v1/assistant")
+	createAssistantRestHandler := assistantServiceServer.(interface {
+		CreateAssistantRest(*gin.Context)
+	})
+	apiv1.POST("/create-assistant", createAssistantRestHandler.CreateAssistantRest)
 }
 
 func AssistantDeploymentApiRoute(Cfg *config.AssistantConfig,

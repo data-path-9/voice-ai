@@ -51,6 +51,6 @@ func (ss *OrganizationScope) GetCurrentToken() string {
 	return ss.CurrentToken
 }
 
-func (aP *OrganizationScope) Type() string {
-	return "organization"
+func (aP *OrganizationScope) Type() AuthType {
+	return AuthTypeOrg
 }
