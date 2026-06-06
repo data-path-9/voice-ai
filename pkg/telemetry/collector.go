@@ -14,13 +14,13 @@ import (
 
 // EventCollector fans out EventRecord to all registered exporters.
 type EventCollector interface {
-	Collect(ctx context.Context, rec EventRecord)
+	Collect(ctx context.Context, scope Scope, rec EventRecord)
 	Close(ctx context.Context)
 }
 
 // MetricCollector fans out MetricRecord to all registered exporters.
 type MetricCollector interface {
-	Collect(ctx context.Context, rec MetricRecord)
+	Collect(ctx context.Context, scope Scope, rec MetricRecord)
 	Close(ctx context.Context)
 }
 
@@ -43,13 +43,13 @@ func NewEventCollector(logger commons.Logger, exporters ...Exporter) EventCollec
 	return &fanoutEventCollector{logger: logger, exporters: exporters}
 }
 
-func (c *fanoutEventCollector) Collect(_ context.Context, rec EventRecord) {
+func (c *fanoutEventCollector) Collect(_ context.Context, scope Scope, rec EventRecord) {
 	for _, exp := range c.exporters {
 		exp := exp
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			if err := exp.Export(context.Background(), rec); err != nil {
+			if err := exp.Export(context.Background(), scope, rec); err != nil {
 				c.logger.Errorf("telemetry: event export error: %v", err)
 			}
 		}()
@@ -86,13 +86,13 @@ func NewMetricCollector(logger commons.Logger, exporters ...Exporter) MetricColl
 	return &fanoutMetricCollector{logger: logger, exporters: exporters}
 }
 
-func (c *fanoutMetricCollector) Collect(_ context.Context, rec MetricRecord) {
+func (c *fanoutMetricCollector) Collect(_ context.Context, scope Scope, rec MetricRecord) {
 	for _, exp := range c.exporters {
 		exp := exp
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			if err := exp.Export(context.Background(), rec); err != nil {
+			if err := exp.Export(context.Background(), scope, rec); err != nil {
 				c.logger.Errorf("telemetry: metric export error: %v", err)
 			}
 		}()
@@ -116,10 +116,10 @@ func (c *fanoutMetricCollector) Close(ctx context.Context) {
 
 type noopEventCollector struct{}
 
-func (noopEventCollector) Collect(_ context.Context, _ EventRecord) {}
-func (noopEventCollector) Close(_ context.Context)                  {}
+func (noopEventCollector) Collect(_ context.Context, _ Scope, _ EventRecord) {}
+func (noopEventCollector) Close(_ context.Context)                           {}
 
 type noopMetricCollector struct{}
 
-func (noopMetricCollector) Collect(_ context.Context, _ MetricRecord) {}
-func (noopMetricCollector) Close(_ context.Context)                   {}
+func (noopMetricCollector) Collect(_ context.Context, _ Scope, _ MetricRecord) {}
+func (noopMetricCollector) Close(_ context.Context)                            {}

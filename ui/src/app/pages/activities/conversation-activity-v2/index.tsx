@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Button,
   CodeSnippet,
-  HeaderGlobalAction,
-  HeaderPanel,
-  Switcher,
   Table,
   TableBody,
   TableCell,
@@ -80,7 +78,7 @@ const TelemetryStreamTable = ({
           <TableHeader>Kind</TableHeader>
           <TableHeader>Scope</TableHeader>
           <TableHeader>Summary</TableHeader>
-          <TableHeader>Time</TableHeader>
+          <TableHeader>Occurred at</TableHeader>
         </TableRow>
       </TableHead>
       <TableBody>
@@ -90,7 +88,7 @@ const TelemetryStreamTable = ({
             className={[
               'cursor-pointer',
               document.id === selectedDocumentId
-                ? '!bg-blue-50 dark:!bg-blue-950/20'
+                ? 'outline outline-2 -outline-offset-2 outline-[var(--cds-border-interactive)]'
                 : '',
             ].join(' ')}
             tabIndex={0}
@@ -99,7 +97,7 @@ const TelemetryStreamTable = ({
               if (event.key === 'Enter') onSelectRecord(document);
             }}
           >
-            <TableCell className="max-w-[220px] truncate font-mono text-xs text-blue-600">
+            <TableCell className="max-w-[220px] truncate font-mono text-sm text-blue-600">
               {document.id}
             </TableCell>
             <TableCell>
@@ -111,7 +109,7 @@ const TelemetryStreamTable = ({
             <TableCell>
               <div className="max-w-[520px]">
                 {document.kind === 'metric' ? (
-                  <p className="truncate font-mono text-sm">
+                  <p className="truncate font-mono text-[13px]">
                     [{document.name}] {getMetricSummary(document)?.value}
                     <span className="text-gray-500">
                       {' '}
@@ -119,7 +117,7 @@ const TelemetryStreamTable = ({
                     </span>
                   </p>
                 ) : (
-                  <p className="truncate font-mono text-sm">
+                  <p className="truncate font-mono text-[13px]">
                     {document.kind === 'log'
                       ? `[${document.level.toLowerCase()}] ${
                           document.title || document.name
@@ -131,7 +129,7 @@ const TelemetryStreamTable = ({
                 )}
               </div>
             </TableCell>
-            <TableCell className="whitespace-nowrap text-xs">
+            <TableCell className="whitespace-nowrap text-sm">
               {formatDateTime(document.occurredAt)}
             </TableCell>
           </TableRow>
@@ -564,72 +562,68 @@ export const ListingPage = () => {
                 setSearchText(event.target?.value || '')
               }
             />
-            <HeaderGlobalAction
-              aria-label="Reload"
-              tooltipAlignment="end"
+            <Button
+              hasIconOnly
+              kind="ghost"
+              renderIcon={Renew}
+              iconDescription="Reload"
+              tooltipPosition="bottom"
               onClick={() => setRefreshKey(key => key + 1)}
-            >
-              <Renew size={20} />
-            </HeaderGlobalAction>
-            <HeaderGlobalAction
-              aria-label="Filter"
-              isActive={isFilterOpen}
-              tooltipAlignment="end"
+            />
+            <Button
+              hasIconOnly
+              kind="ghost"
+              renderIcon={Filter}
+              iconDescription="Filter"
+              tooltipPosition="bottom"
+              className={isFilterOpen ? 'cds--btn--selected' : ''}
+              aria-pressed={isFilterOpen}
               onClick={() => setIsFilterOpen(open => !open)}
-            >
-              <Filter size={20} />
-            </HeaderGlobalAction>
+            />
           </TableToolbarContent>
         </TableToolbar>
 
-        <HeaderPanel
-          expanded={isFilterOpen}
-          onHeaderPanelFocus={() => setIsFilterOpen(false)}
-          className="!absolute !bottom-0 !right-0 !top-12 !z-20 !h-auto !w-[440px] !max-w-none !overflow-visible"
+        <div
+          className={[
+            'absolute bottom-0 right-0 top-12 z-20 w-[440px] transform transition-transform duration-200 ease-out',
+            isFilterOpen
+              ? 'translate-x-0 shadow-xl'
+              : 'pointer-events-none translate-x-full',
+          ].join(' ')}
         >
-          <Switcher
-            aria-label="Trace filters"
-            expanded={isFilterOpen}
-            className="!h-full !w-full !overflow-visible"
-          >
-            <li className="h-full">
-              <ExplorerFilter
-                assistantId={assistantIdInput}
-                conversationId={conversationIdInput}
-                dateRange={dateRange}
-                eventOptions={eventFilterOptions}
-                level={selectedLevel}
-                messageId={messageIdInput}
-                metricName={metricNameInput}
-                role={selectedRole}
-                selectedComponentId={selectedComponentId}
-                selectedEvent={selectedEvent}
-                selectedKind={selectedKind}
-                selectedScope={selectedScope}
-                onAssistantIdChange={setAssistantIdInput}
-                onComponentChange={componentId =>
-                  setSelectedComponents(
-                    componentId === 'all' ? [] : [componentId],
-                  )
-                }
-                onConversationIdChange={setConversationIdInput}
-                onDateRangeChange={setDateRange}
-                onEventChange={setSelectedEvent}
-                onKindChange={setSelectedKind}
-                onLevelChange={setSelectedLevel}
-                onMessageIdChange={setMessageIdInput}
-                onMetricNameChange={setMetricNameInput}
-                onApply={() => {
-                  setRefreshKey(key => key + 1);
-                  setIsFilterOpen(false);
-                }}
-                onReset={resetExplorerFilters}
-                onRoleChange={setSelectedRole}
-                onScopeChange={setSelectedScope}
-              />
-            </li>
-          </Switcher>
-        </HeaderPanel>
+          <ExplorerFilter
+            assistantId={assistantIdInput}
+            conversationId={conversationIdInput}
+            dateRange={dateRange}
+            eventOptions={eventFilterOptions}
+            level={selectedLevel}
+            messageId={messageIdInput}
+            metricName={metricNameInput}
+            role={selectedRole}
+            selectedComponentId={selectedComponentId}
+            selectedEvent={selectedEvent}
+            selectedKind={selectedKind}
+            selectedScope={selectedScope}
+            onAssistantIdChange={setAssistantIdInput}
+            onComponentChange={componentId =>
+              setSelectedComponents(componentId === 'all' ? [] : [componentId])
+            }
+            onConversationIdChange={setConversationIdInput}
+            onDateRangeChange={setDateRange}
+            onEventChange={setSelectedEvent}
+            onKindChange={setSelectedKind}
+            onLevelChange={setSelectedLevel}
+            onMessageIdChange={setMessageIdInput}
+            onMetricNameChange={setMetricNameInput}
+            onApply={() => {
+              setRefreshKey(key => key + 1);
+              setIsFilterOpen(false);
+            }}
+            onReset={resetExplorerFilters}
+            onRoleChange={setSelectedRole}
+            onScopeChange={setSelectedScope}
+          />
+        </div>
 
         <div className="flex min-h-0 flex-1">
           {isLoading ? (

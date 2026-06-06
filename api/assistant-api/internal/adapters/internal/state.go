@@ -217,10 +217,8 @@ func (tc *genericRequestor) applyArguments(args map[string]interface{}) {
 		); err != nil {
 			tc.OnPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{
 				ContextID: tc.GetID(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
-					CommonRecord: observability.CommonRecord{
-						Scope: observability.ConversationScope{},
-					},
 					Level:   observability.LevelError,
 					Message: "conversation arguments persistence failed",
 					Attributes: observability.Attributes{
@@ -247,10 +245,8 @@ func (tc *genericRequestor) applyOptions(opts map[string]interface{}) {
 		); err != nil {
 			tc.OnPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{
 				ContextID: tc.GetID(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
-					CommonRecord: observability.CommonRecord{
-						Scope: observability.ConversationScope{},
-					},
 					Level:   observability.LevelError,
 					Message: "conversation options persistence failed",
 					Attributes: observability.Attributes{
@@ -283,10 +279,8 @@ func (gr *genericRequestor) CreateConversationRecording(_ context.Context, user,
 		if _, err := gr.conversationService.CreateConversationRecording(dbCtx, gr.auth, gr.assistant.Id, gr.assistantConversation.Id, user, assistant, conversation); err != nil {
 			gr.OnPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{
 				ContextID: gr.GetID(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
-					CommonRecord: observability.CommonRecord{
-						Scope: observability.ConversationScope{},
-					},
 					Level:   observability.LevelError,
 					Message: "conversation recording persistence failed",
 					Attributes: observability.Attributes{

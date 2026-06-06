@@ -11,37 +11,40 @@ type Record interface {
 	isTelemetryRecord()
 }
 
-type CommonRecord struct {
-	ID              string
+type Scope struct {
 	ProjectID       uint64
 	OrganizationID  uint64
-	Scope           string
+	Name            string
 	ScopeAttributes map[string]string
-	Attributes      map[string]string
-	OccurredAt      time.Time
 }
 
 type LogRecord struct {
-	CommonRecord
-	Level   string
-	Message string
+	ID         string
+	Level      string
+	Message    string
+	Attributes map[string]string
+	OccurredAt time.Time
 }
 
 func (LogRecord) isTelemetryRecord() {}
 
 type EventRecord struct {
-	CommonRecord
-	Event     string
-	Component string
+	ID         string
+	Event      string
+	Component  string
+	Attributes map[string]string
+	OccurredAt time.Time
 }
 
 func (EventRecord) isTelemetryRecord() {}
 
 type MetricRecord struct {
-	CommonRecord
+	ID          string
 	Name        string
 	Value       string
 	Description string
+	Attributes  map[string]string
+	OccurredAt  time.Time
 }
 
 func (MetricRecord) isTelemetryRecord() {}

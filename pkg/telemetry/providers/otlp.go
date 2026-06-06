@@ -62,7 +62,7 @@ func NewOTLPExporter(ctx context.Context, cfg OTLPConfig) (*OTLPExporter, error)
 	}, nil
 }
 
-func (e *OTLPExporter) Export(ctx context.Context, rec telemetry.Record) error {
+func (e *OTLPExporter) Export(ctx context.Context, scope telemetry.Scope, rec telemetry.Record) error {
 	switch typed := rec.(type) {
 	case telemetry.LogRecord:
 		t := typed.OccurredAt
@@ -73,11 +73,11 @@ func (e *OTLPExporter) Export(ctx context.Context, rec telemetry.Record) error {
 			attribute.String("rapida.telemetry.kind", "log"),
 			attribute.String("rapida.log.level", typed.Level),
 			attribute.String("rapida.log.message", typed.Message),
-			attribute.Int64("rapida.project.id", int64(typed.ProjectID)),
-			attribute.Int64("rapida.organization.id", int64(typed.OrganizationID)),
-			attribute.String("rapida.scope", typed.Scope),
+			attribute.Int64("rapida.project.id", int64(scope.ProjectID)),
+			attribute.Int64("rapida.organization.id", int64(scope.OrganizationID)),
+			attribute.String("rapida.scope", scope.Name),
 		}
-		for k, v := range typed.ScopeAttributes {
+		for k, v := range scope.ScopeAttributes {
 			attrs = append(attrs, attribute.String("rapida.scope."+k, v))
 		}
 		for k, v := range typed.Attributes {
@@ -97,11 +97,11 @@ func (e *OTLPExporter) Export(ctx context.Context, rec telemetry.Record) error {
 			attribute.String("rapida.telemetry.kind", "event"),
 			attribute.String("rapida.event", typed.Event),
 			attribute.String("rapida.component", typed.Component),
-			attribute.Int64("rapida.project.id", int64(typed.ProjectID)),
-			attribute.Int64("rapida.organization.id", int64(typed.OrganizationID)),
-			attribute.String("rapida.scope", typed.Scope),
+			attribute.Int64("rapida.project.id", int64(scope.ProjectID)),
+			attribute.Int64("rapida.organization.id", int64(scope.OrganizationID)),
+			attribute.String("rapida.scope", scope.Name),
 		}
-		for k, v := range typed.ScopeAttributes {
+		for k, v := range scope.ScopeAttributes {
 			attrs = append(attrs, attribute.String("rapida.scope."+k, v))
 		}
 		for k, v := range typed.Attributes {
@@ -122,11 +122,11 @@ func (e *OTLPExporter) Export(ctx context.Context, rec telemetry.Record) error {
 			attribute.String("rapida.metric.name", typed.Name),
 			attribute.String("rapida.metric.value", typed.Value),
 			attribute.String("rapida.metric.description", typed.Description),
-			attribute.Int64("rapida.project.id", int64(typed.ProjectID)),
-			attribute.Int64("rapida.organization.id", int64(typed.OrganizationID)),
-			attribute.String("rapida.scope", typed.Scope),
+			attribute.Int64("rapida.project.id", int64(scope.ProjectID)),
+			attribute.Int64("rapida.organization.id", int64(scope.OrganizationID)),
+			attribute.String("rapida.scope", scope.Name),
 		}
-		for k, v := range typed.ScopeAttributes {
+		for k, v := range scope.ScopeAttributes {
 			attrs = append(attrs, attribute.String("rapida.scope."+k, v))
 		}
 		for k, v := range typed.Attributes {

@@ -43,7 +43,7 @@ type conversationServiceStub struct {
 	messageMetadata               []*protos.Metadata
 }
 
-func (s *conversationServiceStub) ApplyConversationMetrics(
+func (s *conversationServiceStub) CreateOrUpdateConversationMetrics(
 	_ context.Context,
 	auth types.SimplePrinciple,
 	assistantID uint64,
@@ -57,7 +57,7 @@ func (s *conversationServiceStub) ApplyConversationMetrics(
 	return nil, nil
 }
 
-func (s *conversationServiceStub) ApplyConversationMetadata(
+func (s *conversationServiceStub) CreateOrUpdateConversationMetadata(
 	_ context.Context,
 	auth types.SimplePrinciple,
 	assistantID uint64,
@@ -71,7 +71,7 @@ func (s *conversationServiceStub) ApplyConversationMetadata(
 	return nil, nil
 }
 
-func (s *conversationServiceStub) ApplyMessageMetrics(
+func (s *conversationServiceStub) CreateOrUpdateMessageMetrics(
 	_ context.Context,
 	auth types.SimplePrinciple,
 	conversationID uint64,
@@ -85,7 +85,7 @@ func (s *conversationServiceStub) ApplyMessageMetrics(
 	return nil, nil
 }
 
-func (s *conversationServiceStub) ApplyMessageMetadata(
+func (s *conversationServiceStub) CreateOrUpdateMessageMetadata(
 	_ context.Context,
 	auth types.SimplePrinciple,
 	conversationID uint64,
@@ -101,13 +101,13 @@ func (s *conversationServiceStub) ApplyMessageMetadata(
 
 func TestCollectMetric_RequiresValidConversationScope(t *testing.T) {
 	collector := New(Config{ConversationService: &conversationServiceStub{}})
+	auth := testAuth()
 
-	err := collector.Collect(context.Background(), observability.RecordMetric{
-		CommonRecord: observability.CommonRecord{
-			Scope: observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{AssistantID: 10},
-			},
+	err := collector.Collect(contextWithAuth(context.Background(), auth), observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{
+			AssistantID: 10,
 		},
+	}, observability.RecordMetric{
 		Metrics: []*protos.Metric{{Name: observability.MetricConversationDuration, Value: "1000"}},
 	})
 	if !errors.Is(err, ErrScopeRequired) {
@@ -117,7 +117,7 @@ func TestCollectMetric_RequiresValidConversationScope(t *testing.T) {
 
 func TestCollectMetric_EmptyMetricsAreNoop(t *testing.T) {
 	collector := New(Config{ConversationService: &conversationServiceStub{}})
-	if err := collector.Collect(context.Background(), observability.RecordMetric{}); err != nil {
+	if err := collector.Collect(context.Background(), observability.ConversationScope{}, observability.RecordMetric{}); err != nil {
 		t.Fatalf("empty metrics should be noop, got %v", err)
 	}
 }
@@ -125,23 +125,13 @@ func TestCollectMetric_EmptyMetricsAreNoop(t *testing.T) {
 func TestCollectMetric_ForwardsConversationScopedRecords(t *testing.T) {
 	service := &conversationServiceStub{}
 	collector := New(Config{ConversationService: service})
-	organizationID := uint64(1)
-	projectID := uint64(2)
-	userID := uint64(99)
-	auth := &types.ServiceScope{
-		UserId:         &userID,
-		OrganizationId: &organizationID,
-		ProjectId:      &projectID,
+	auth := testAuth()
+	scope := observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: 10},
+		ConversationID: 20,
 	}
 
-	err := collector.Collect(context.Background(), observability.RecordMetric{
-		CommonRecord: observability.CommonRecord{
-			Auth: auth,
-			Scope: observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{AssistantID: 10},
-				ConversationID: 20,
-			},
-		},
+	err := collector.Collect(contextWithAuth(context.Background(), auth), scope, observability.RecordMetric{
 		Metrics: []*protos.Metric{{
 			Name:        observability.MetricConversationDuration,
 			Value:       "1000",
@@ -162,21 +152,17 @@ func TestCollectMetric_ForwardsConversationScopedRecords(t *testing.T) {
 func TestCollectMetadata_ForwardsMessageScopedRecords(t *testing.T) {
 	service := &conversationServiceStub{}
 	collector := New(Config{ConversationService: service})
-	userID := uint64(99)
-	auth := &types.ServiceScope{UserId: &userID}
-
-	err := collector.Collect(context.Background(), observability.RecordMetadata{
-		CommonRecord: observability.CommonRecord{
-			Auth: auth,
-			Scope: observability.MessageScope{
-				ConversationScope: observability.ConversationScope{
-					AssistantScope: observability.AssistantScope{AssistantID: 10},
-					ConversationID: 20,
-				},
-				MessageID: "user-ctx-1",
-				Role:      observability.MessageRoleUser,
-			},
+	auth := testAuth()
+	scope := observability.MessageScope{
+		ConversationScope: observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: 10},
+			ConversationID: 20,
 		},
+		MessageID: "user-ctx-1",
+		Role:      observability.MessageRoleUser,
+	}
+
+	err := collector.Collect(contextWithAuth(context.Background(), auth), scope, observability.RecordMetadata{
 		Metadata: []*protos.Metadata{{
 			Key:   observability.MetadataLanguage,
 			Value: "en",
@@ -185,17 +171,15 @@ func TestCollectMetadata_ForwardsMessageScopedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CollectMetadata returned error: %v", err)
 	}
-	if service.messageMetadataAuth != auth || service.messageMetadataConversationID != 20 || service.messageMetadataMessageID != "user-ctx-1" {
+	if service.messageMetadataAuth != auth || service.messageMetadataConversationID != 20 || service.messageMetadataMessageID != "user-user-ctx-1" {
 		t.Fatalf("unexpected message metadata call: auth=%v conversation=%d message=%s", service.messageMetadataAuth, service.messageMetadataConversationID, service.messageMetadataMessageID)
 	}
 }
 
 func TestCollectMetadata_AssistantScopeUnsupported(t *testing.T) {
 	collector := New(Config{ConversationService: &conversationServiceStub{}})
-	err := collector.Collect(context.Background(), observability.RecordMetadata{
-		CommonRecord: observability.CommonRecord{
-			Scope: observability.AssistantScope{AssistantID: 10},
-		},
+	auth := testAuth()
+	err := collector.Collect(contextWithAuth(context.Background(), auth), observability.AssistantScope{AssistantID: 10}, observability.RecordMetadata{
 		Metadata: []*protos.Metadata{{Key: observability.MetadataLanguage, Value: "en"}},
 	})
 	if !errors.Is(err, ErrScopeUnsupported) {
@@ -220,4 +204,19 @@ func TestConversionToServiceTypes(t *testing.T) {
 	if len(metadata) != 1 || metadata[0].Key != observability.MetadataDisconnectReason || metadata[0].Value != "normal_clearing" {
 		t.Fatalf("unexpected service metadata: %+v", metadata)
 	}
+}
+
+func testAuth() *types.ServiceScope {
+	organizationID := uint64(1)
+	projectID := uint64(2)
+	userID := uint64(99)
+	return &types.ServiceScope{
+		UserId:         &userID,
+		OrganizationId: &organizationID,
+		ProjectId:      &projectID,
+	}
+}
+
+func contextWithAuth(ctx context.Context, auth *types.ServiceScope) context.Context {
+	return context.WithValue(ctx, types.CTX_, &types.PlainClaimPrinciple[*types.ServiceScope]{Info: auth})
 }

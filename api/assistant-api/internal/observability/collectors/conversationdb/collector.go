@@ -22,6 +22,7 @@ import (
 var (
 	ErrLoggerRequired   = errors.New("conversationdb: logger is required")
 	ErrPostgresRequired = errors.New("conversationdb: postgres is required")
+	ErrAuthRequired     = errors.New("conversationdb: auth is required")
 	ErrScopeRequired    = errors.New("conversationdb: assistant_id and conversation_id are required")
 	ErrMessageRequired  = errors.New("conversationdb: conversation_id and message_id are required")
 	ErrScopeUnsupported = errors.New("conversationdb: scope is not supported")
@@ -44,12 +45,12 @@ func New(cfg Config) observability.Collector {
 	}
 }
 
-func (c *Collector) Collect(ctx context.Context, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
 	switch typed := record.(type) {
 	case observability.RecordMetric:
-		return c.collectMetrics(ctx, typed)
+		return c.collectMetrics(ctx, scope, typed)
 	case observability.RecordMetadata:
-		return c.collectMetadata(ctx, typed)
+		return c.collectMetadata(ctx, scope, typed)
 	default:
 		return nil
 	}
@@ -59,22 +60,26 @@ func (c *Collector) Close(context.Context) error {
 	return nil
 }
 
-func (c *Collector) collectMetrics(ctx context.Context, record observability.RecordMetric) error {
+func (c *Collector) collectMetrics(ctx context.Context, scope observability.Scope, record observability.RecordMetric) error {
 	if !validator.NotEmpty(record.Metrics) {
 		return nil
 	}
 	if err := validateCollector(c); err != nil {
 		return err
 	}
+	auth, err := authFromContext(ctx)
+	if err != nil {
+		return err
+	}
 
-	switch scope := record.Scope.(type) {
+	switch scope := scope.(type) {
 	case observability.MessageScope:
 		if err := validateMessageScope(scope); err != nil {
 			return err
 		}
 		_, err := c.service.CreateOrUpdateMessageMetrics(
 			ctx,
-			record.Auth,
+			auth,
 			scope.ConversationScopeID(),
 			scope.MessageScopeID(),
 			record.Metrics,
@@ -86,7 +91,7 @@ func (c *Collector) collectMetrics(ctx context.Context, record observability.Rec
 		}
 		_, err := c.service.CreateOrUpdateConversationMetrics(
 			ctx,
-			record.Auth,
+			auth,
 			scope.AssistantScopeID(),
 			scope.ConversationScopeID(),
 			toServiceMetrics(record.Metrics),
@@ -95,26 +100,30 @@ func (c *Collector) collectMetrics(ctx context.Context, record observability.Rec
 	case observability.AssistantScope:
 		return fmt.Errorf("%w: %s", ErrScopeUnsupported, observability.ScopeAssistant)
 	default:
-		return fmt.Errorf("%w: %T", ErrScopeUnsupported, record.Scope)
+		return fmt.Errorf("%w: %T", ErrScopeUnsupported, scope)
 	}
 }
 
-func (c *Collector) collectMetadata(ctx context.Context, record observability.RecordMetadata) error {
+func (c *Collector) collectMetadata(ctx context.Context, scope observability.Scope, record observability.RecordMetadata) error {
 	if !validator.NotEmpty(record.Metadata) {
 		return nil
 	}
 	if err := validateCollector(c); err != nil {
 		return err
 	}
+	auth, err := authFromContext(ctx)
+	if err != nil {
+		return err
+	}
 
-	switch scope := record.Scope.(type) {
+	switch scope := scope.(type) {
 	case observability.MessageScope:
 		if err := validateMessageScope(scope); err != nil {
 			return err
 		}
 		_, err := c.service.CreateOrUpdateMessageMetadata(
 			ctx,
-			record.Auth,
+			auth,
 			scope.ConversationScopeID(),
 			scope.MessageScopeID(),
 			record.Metadata,
@@ -126,7 +135,7 @@ func (c *Collector) collectMetadata(ctx context.Context, record observability.Re
 		}
 		_, err := c.service.CreateOrUpdateConversationMetadata(
 			ctx,
-			record.Auth,
+			auth,
 			scope.AssistantScopeID(),
 			scope.ConversationScopeID(),
 			toServiceMetadata(record.Metadata),
@@ -135,8 +144,16 @@ func (c *Collector) collectMetadata(ctx context.Context, record observability.Re
 	case observability.AssistantScope:
 		return fmt.Errorf("%w: %s", ErrScopeUnsupported, observability.ScopeAssistant)
 	default:
-		return fmt.Errorf("%w: %T", ErrScopeUnsupported, record.Scope)
+		return fmt.Errorf("%w: %T", ErrScopeUnsupported, scope)
 	}
+}
+
+func authFromContext(ctx context.Context) (types.SimplePrinciple, error) {
+	auth, ok := types.GetSimplePrincipleGRPC(ctx)
+	if !ok || !validator.NonNil(auth) {
+		return nil, ErrAuthRequired
+	}
+	return auth, nil
 }
 
 func toServiceMetrics(metrics []*protos.Metric) []*types.Metric {

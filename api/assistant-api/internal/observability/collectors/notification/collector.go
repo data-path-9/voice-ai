@@ -50,7 +50,7 @@ func New(cfg Config) observability.Collector {
 	return &Collector{notifier: cfg.Notifier, selector: selector}
 }
 
-func (c *Collector) Collect(ctx context.Context, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
 	event, ok := record.(observability.RecordEvent)
 	if !ok || !c.selector(event) {
 		return nil
@@ -59,7 +59,7 @@ func (c *Collector) Collect(ctx context.Context, record observability.Record) er
 		ID:         event.ID,
 		Event:      event.Event,
 		Component:  event.Component,
-		Scope:      event.Scope,
+		Scope:      scope,
 		Attributes: event.Attributes.Clone(),
 		OccurredAt: event.OccurredAt,
 	})

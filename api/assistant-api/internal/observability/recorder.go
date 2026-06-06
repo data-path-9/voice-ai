@@ -19,7 +19,7 @@ import (
 )
 
 type Recorder interface {
-	Record(ctx context.Context, record Record) error
+	Record(ctx context.Context, scope Scope, record Record) error
 	Close(ctx context.Context) error
 }
 
@@ -27,7 +27,6 @@ type recorderOptions struct {
 	logger      commons.Logger
 	auth        types.SimplePrinciple
 	globalScope GlobalScope
-	defaultScope Scope
 	clock       func() time.Time
 	buffer      int
 	collectors  []Collector
@@ -71,21 +70,6 @@ func WithScope(scope GlobalScope) Option {
 	return WithGlobalScope(scope)
 }
 
-func WithAssistantScope(assistantID uint64) Option {
-	return newOption(func(recorderOptions *recorderOptions) {
-		recorderOptions.defaultScope = AssistantScope{AssistantID: assistantID}
-	})
-}
-
-func WithConversationScope(assistantID uint64, conversationID uint64) Option {
-	return newOption(func(recorderOptions *recorderOptions) {
-		recorderOptions.defaultScope = ConversationScope{
-			AssistantScope: AssistantScope{AssistantID: assistantID},
-			ConversationID: conversationID,
-		}
-	})
-}
-
 func WithClock(clock func() time.Time) Option {
 	return newOption(func(recorderOptions *recorderOptions) {
 		recorderOptions.clock = clock
@@ -112,15 +96,19 @@ type recorder struct {
 	logger      commons.Logger
 	auth        types.SimplePrinciple
 	globalScope GlobalScope
-	defaultScope Scope
 	clock       func() time.Time
 	fanout      Collector
-	queue       chan Record
+	queue       chan observation
 	done        chan struct{}
 	closed      bool
 	mu          sync.RWMutex
 	errMu       sync.Mutex
 	errs        []error
+}
+
+type observation struct {
+	scope  Scope
+	record Record
 }
 
 const defaultBufferSize = 1024
@@ -160,18 +148,17 @@ func New(options ...Option) Recorder {
 		logger:      resolvedOptions.logger,
 		auth:        resolvedOptions.auth,
 		globalScope: globalScope,
-		defaultScope: resolvedOptions.defaultScope,
 		clock:       clock,
 		fanout:      NewCollectors(resolvedOptions.collectors...),
-		queue:       make(chan Record, buffer),
+		queue:       make(chan observation, buffer),
 		done:        make(chan struct{}),
 	}
 	go r.run()
 	return r
 }
 
-func (r *recorder) Record(ctx context.Context, record Record) error {
-	normalized, err := r.normalize(record)
+func (r *recorder) Record(ctx context.Context, scope Scope, record Record) error {
+	normalized, err := r.normalize(scope, record)
 	if err != nil {
 		return err
 	}
@@ -194,150 +181,120 @@ func (r *recorder) Record(ctx context.Context, record Record) error {
 	}
 }
 
-func (r *recorder) normalize(record Record) (Record, error) {
+func (r *recorder) normalize(scope Scope, record Record) (observation, error) {
 	if !validator.NonNil(record) {
-		return nil, errors.New("observability: record is nil")
+		return observation{}, errors.New("observability: record is nil")
 	}
 	now := r.clock()
+	normalizedScope, err := normalizeScope(scope, r.globalScope)
+	if err != nil {
+		return observation{}, err
+	}
 	switch typed := record.(type) {
 	case RecordLog:
-		if err := normalizeCommonRecord(&typed.CommonRecord, now, r.auth, r.globalScope, r.defaultScope); err != nil {
-			return nil, err
-		}
 		if !validator.NotBlank(typed.Message) {
-			return nil, errors.New("observability: log message is required")
+			return observation{}, errors.New("observability: log message is required")
 		}
 		switch typed.Level {
 		case "":
 			typed.Level = LevelInfo
 		case LevelInfo, LevelError, LevelDebug, LevelCritical:
 		default:
-			return nil, fmt.Errorf("observability: invalid log level %q", typed.Level)
+			return observation{}, fmt.Errorf("observability: invalid log level %q", typed.Level)
+		}
+		if typed.OccurredAt.IsZero() {
+			typed.OccurredAt = now
 		}
 		typed.Attributes = typed.Attributes.Clone()
-		return typed, nil
+		return observation{scope: normalizedScope, record: typed}, nil
 	case RecordEvent:
-		if err := normalizeCommonRecord(&typed.CommonRecord, now, r.auth, r.globalScope, r.defaultScope); err != nil {
-			return nil, err
-		}
 		if !validator.NotBlank(typed.Event.String()) {
-			return nil, errors.New("observability: event is required")
+			return observation{}, errors.New("observability: event is required")
 		}
 		if typed.Component == "" {
 			typed.Component = typed.Event.Component()
 		}
 		if typed.Component == ComponentUnknown {
-			return nil, fmt.Errorf("observability: component is required for event %q", typed.Event)
+			return observation{}, fmt.Errorf("observability: component is required for event %q", typed.Event)
+		}
+		if typed.OccurredAt.IsZero() {
+			typed.OccurredAt = now
 		}
 		typed.Attributes = typed.Attributes.Clone()
-		return typed, nil
+		return observation{scope: normalizedScope, record: typed}, nil
 	case RecordMetric:
-		if err := normalizeCommonRecord(&typed.CommonRecord, now, r.auth, r.globalScope, r.defaultScope); err != nil {
-			return nil, err
-		}
 		if len(typed.Metrics) == 0 {
-			return nil, errors.New("observability: at least one metric is required")
+			return observation{}, errors.New("observability: at least one metric is required")
 		}
 		for i, metric := range typed.Metrics {
 			if !validator.NotBlank(metric.Name) {
-				return nil, fmt.Errorf("observability: metric[%d] name is required", i)
+				return observation{}, fmt.Errorf("observability: metric[%d] name is required", i)
 			}
 		}
-		return typed, nil
-	case RecordMetadata:
-		if err := normalizeCommonRecord(&typed.CommonRecord, now, r.auth, r.globalScope, r.defaultScope); err != nil {
-			return nil, err
+		if typed.OccurredAt.IsZero() {
+			typed.OccurredAt = now
 		}
+		return observation{scope: normalizedScope, record: typed}, nil
+	case RecordMetadata:
 		if len(typed.Metadata) == 0 {
-			return nil, errors.New("observability: at least one metadata entry is required")
+			return observation{}, errors.New("observability: at least one metadata entry is required")
 		}
 		for i, metadata := range typed.Metadata {
 			if !validator.NotBlank(metadata.Key) {
-				return nil, fmt.Errorf("observability: metadata[%d] key is required", i)
+				return observation{}, fmt.Errorf("observability: metadata[%d] key is required", i)
 			}
 		}
-		return typed, nil
-	case RecordUsage:
-		if err := normalizeCommonRecord(&typed.CommonRecord, now, r.auth, r.globalScope, r.defaultScope); err != nil {
-			return nil, err
+		if typed.OccurredAt.IsZero() {
+			typed.OccurredAt = now
 		}
-		if typed.Scope.ScopeType() == ScopeMessage {
-			return nil, errors.New("observability: usage cannot be message-scoped")
+		return observation{scope: normalizedScope, record: typed}, nil
+	case RecordUsage:
+		if normalizedScope.ScopeType() == ScopeMessage {
+			return observation{}, errors.New("observability: usage cannot be message-scoped")
 		}
 		if typed.Duration <= 0 {
-			return nil, errors.New("observability: usage duration must be greater than zero")
+			return observation{}, errors.New("observability: usage duration must be greater than zero")
+		}
+		if typed.OccurredAt.IsZero() {
+			typed.OccurredAt = now
 		}
 		typed.Attributes = typed.Attributes.Clone()
-		return typed, nil
+		return observation{scope: normalizedScope, record: typed}, nil
 	case RecordWebhook:
-		if err := normalizeCommonRecord(&typed.CommonRecord, now, r.auth, r.globalScope, r.defaultScope); err != nil {
-			return nil, err
-		}
 		if !validator.NotBlank(typed.Event.String()) {
-			return nil, errors.New("observability: webhook event is required")
+			return observation{}, errors.New("observability: webhook event is required")
 		}
 		if typed.Payload == nil {
 			typed.Payload = map[string]interface{}{}
 		}
-		return typed, nil
-	default:
-		return nil, fmt.Errorf("observability: unsupported record type %T", record)
-	}
-}
-
-func normalizeCommonRecord(record *CommonRecord, now time.Time, auth types.SimplePrinciple, global GlobalScope, defaultScope Scope) error {
-	if !validator.NonNil(record) {
-		return errors.New("observability: record is nil")
-	}
-	record.Auth = auth
-	if !validator.NonNil(record.Scope) {
-		return errors.New("observability: scope is required")
-	}
-	record.Scope = resolveScope(record.Scope, defaultScope)
-	record.Scope = record.Scope.WithGlobal(global)
-	if err := ValidateScope(record.Scope); err != nil {
-		return err
-	}
-	if record.OccurredAt.IsZero() {
-		record.OccurredAt = now
-	}
-	return nil
-}
-
-func resolveScope(scope Scope, defaultScope Scope) Scope {
-	if !validator.NonNil(scope) || !validator.NonNil(defaultScope) {
-		return scope
-	}
-	switch typed := scope.(type) {
-	case AssistantScope:
-		if typed.AssistantID == 0 {
-			typed.AssistantID = defaultScope.AssistantScopeID()
+		if typed.OccurredAt.IsZero() {
+			typed.OccurredAt = now
 		}
-		return typed
-	case ConversationScope:
-		return resolveConversationScope(typed, defaultScope)
-	case MessageScope:
-		typed.ConversationScope = resolveConversationScope(typed.ConversationScope, defaultScope)
-		return typed
+		return observation{scope: normalizedScope, record: typed}, nil
 	default:
-		return scope
+		return observation{}, fmt.Errorf("observability: unsupported record type %T", record)
 	}
 }
 
-func resolveConversationScope(scope ConversationScope, defaultScope Scope) ConversationScope {
-	if scope.AssistantScope.AssistantID == 0 {
-		scope.AssistantScope.AssistantID = defaultScope.AssistantScopeID()
+func normalizeScope(scope Scope, global GlobalScope) (Scope, error) {
+	if !validator.NonNil(scope) {
+		return nil, errors.New("observability: scope is required")
 	}
-	if scope.ConversationID == 0 {
-		scope.ConversationID = defaultScope.ConversationScopeID()
+	scope = scope.WithGlobal(global)
+	if err := ValidateScope(scope); err != nil {
+		return nil, err
 	}
-	return scope
+	return scope, nil
 }
 
 func (r *recorder) run() {
 	defer close(r.done)
-	for record := range r.queue {
-		err := r.fanout.Collect(context.Background(), record)
+	for item := range r.queue {
+		ctx := context.Background()
+		if validator.NonNil(r.auth) {
+			ctx = context.WithValue(ctx, types.CTX_, r.auth)
+		}
+		err := r.fanout.Collect(ctx, item.scope, item.record)
 		if err != nil {
 			r.addError(err)
 		}

@@ -25,7 +25,7 @@ type fakeExporter struct {
 	blockUntil  <-chan struct{}
 }
 
-func (f *fakeExporter) Export(_ context.Context, rec telemetry.Record) error {
+func (f *fakeExporter) Export(_ context.Context, _ telemetry.Scope, rec telemetry.Record) error {
 	if f.blockUntil != nil {
 		<-f.blockUntil
 	}
@@ -63,11 +63,12 @@ func testLogger(t *testing.T) commons.Logger {
 
 func TestCollectors_FanoutAndClose(t *testing.T) {
 	logger := testLogger(t)
+	scope := telemetry.Scope{Name: "conversation"}
 
 	evt1 := &fakeExporter{}
 	evt2 := &fakeExporter{}
 	eventCollector := telemetry.NewEventCollector(logger, evt1, evt2)
-	eventCollector.Collect(context.Background(), telemetry.EventRecord{Event: "session"})
+	eventCollector.Collect(context.Background(), scope, telemetry.EventRecord{Event: "session"})
 	eventCollector.Close(context.Background())
 
 	assert.Equal(t, 1, evt1.eventCalls)
@@ -78,7 +79,7 @@ func TestCollectors_FanoutAndClose(t *testing.T) {
 	met1 := &fakeExporter{}
 	met2 := &fakeExporter{}
 	metricCollector := telemetry.NewMetricCollector(logger, met1, met2)
-	metricCollector.Collect(context.Background(), telemetry.MetricRecord{})
+	metricCollector.Collect(context.Background(), scope, telemetry.MetricRecord{})
 	metricCollector.Close(context.Background())
 
 	assert.Equal(t, 1, met1.metricCalls)
@@ -94,8 +95,8 @@ func TestCollectors_Noop(t *testing.T) {
 	metricCollector := telemetry.NewMetricCollector(logger)
 
 	assert.NotPanics(t, func() {
-		eventCollector.Collect(context.Background(), telemetry.EventRecord{Event: "x"})
-		metricCollector.Collect(context.Background(), telemetry.MetricRecord{})
+		eventCollector.Collect(context.Background(), telemetry.Scope{Name: "conversation"}, telemetry.EventRecord{Event: "x"})
+		metricCollector.Collect(context.Background(), telemetry.Scope{Name: "conversation"}, telemetry.MetricRecord{})
 		eventCollector.Close(context.Background())
 		metricCollector.Close(context.Background())
 	})
@@ -112,10 +113,11 @@ func TestCollectors_ExporterErrorsDoNotPanic(t *testing.T) {
 
 	eventCollector := telemetry.NewEventCollector(logger, exp)
 	metricCollector := telemetry.NewMetricCollector(logger, exp)
+	scope := telemetry.Scope{Name: "conversation"}
 
 	assert.NotPanics(t, func() {
-		eventCollector.Collect(context.Background(), telemetry.EventRecord{Event: "session"})
-		metricCollector.Collect(context.Background(), telemetry.MetricRecord{})
+		eventCollector.Collect(context.Background(), scope, telemetry.EventRecord{Event: "session"})
+		metricCollector.Collect(context.Background(), scope, telemetry.MetricRecord{})
 		eventCollector.Close(context.Background())
 		metricCollector.Close(context.Background())
 	})
@@ -128,9 +130,10 @@ func TestCollectors_CloseWaitsForInflightExports(t *testing.T) {
 	exp := &fakeExporter{blockUntil: blocker}
 	eventCollector := telemetry.NewEventCollector(logger, exp)
 	metricCollector := telemetry.NewMetricCollector(logger, exp)
+	scope := telemetry.Scope{Name: "conversation"}
 
-	eventCollector.Collect(context.Background(), telemetry.EventRecord{Event: "session"})
-	metricCollector.Collect(context.Background(), telemetry.MetricRecord{})
+	eventCollector.Collect(context.Background(), scope, telemetry.EventRecord{Event: "session"})
+	metricCollector.Collect(context.Background(), scope, telemetry.MetricRecord{})
 
 	done := make(chan struct{})
 	go func() {

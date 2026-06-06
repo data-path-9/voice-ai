@@ -12,13 +12,13 @@ import (
 )
 
 type Collector interface {
-	Collect(ctx context.Context, record Record) error
+	Collect(ctx context.Context, scope Scope, record Record) error
 	Close(ctx context.Context) error
 }
 
 type NoopCollector struct{}
 
-func (NoopCollector) Collect(context.Context, Record) error {
+func (NoopCollector) Collect(context.Context, Scope, Record) error {
 	return nil
 }
 
@@ -37,13 +37,13 @@ func NewCollectors(collectors ...Collector) Collector {
 	return &Collectors{collectors: append([]Collector(nil), collectors...)}
 }
 
-func (c *Collectors) Collect(ctx context.Context, record Record) error {
+func (c *Collectors) Collect(ctx context.Context, scope Scope, record Record) error {
 	var errs []error
 	for _, collector := range c.collectors {
 		if collector == nil {
 			continue
 		}
-		if err := collector.Collect(ctx, record); err != nil {
+		if err := collector.Collect(ctx, scope, record); err != nil {
 			errs = append(errs, err)
 		}
 	}

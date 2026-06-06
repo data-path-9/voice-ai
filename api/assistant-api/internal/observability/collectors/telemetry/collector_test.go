@@ -21,11 +21,13 @@ type exporterStub struct {
 	events  []telemetry.EventRecord
 	metrics []telemetry.MetricRecord
 	logs    []telemetry.LogRecord
+	scopes  []telemetry.Scope
 	closed  bool
 	err     error
 }
 
-func (e *exporterStub) Export(_ context.Context, rec telemetry.Record) error {
+func (e *exporterStub) Export(_ context.Context, scope telemetry.Scope, rec telemetry.Record) error {
+	e.scopes = append(e.scopes, scope)
 	switch typed := rec.(type) {
 	case telemetry.LogRecord:
 		e.logs = append(e.logs, typed)
@@ -60,47 +62,34 @@ func TestCollector_ExportsEventsAndMetrics(t *testing.T) {
 	}
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 
-	err = collector.Collect(context.Background(), observability.RecordEvent{
-		CommonRecord: observability.CommonRecord{
-			Scope: observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{
-					GlobalScope: observability.GlobalScope{
-						ProjectID:      30,
-						OrganizationID: 40,
-					},
-					AssistantID: 10,
-				},
-				ConversationID: 20,
+	scope := observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{
+			GlobalScope: observability.GlobalScope{
+				ProjectID:      30,
+				OrganizationID: 40,
 			},
-			OccurredAt: now,
+			AssistantID: 10,
 		},
+		ConversationID: 20,
+	}
+
+	err = collector.Collect(context.Background(), scope, observability.RecordEvent{
 		Component:  observability.ComponentCall,
 		Event:      observability.CallRinging,
 		Attributes: observability.Attributes{"status": "ringing"},
+		OccurredAt: now,
 	})
 	if err != nil {
 		t.Fatalf("CollectEvent returned error: %v", err)
 	}
 
-	err = collector.Collect(context.Background(), observability.RecordMetric{
-		CommonRecord: observability.CommonRecord{
-			Scope: observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{
-					GlobalScope: observability.GlobalScope{
-						ProjectID:      30,
-						OrganizationID: 40,
-					},
-					AssistantID: 10,
-				},
-				ConversationID: 20,
-			},
-			OccurredAt: now,
-		},
+	err = collector.Collect(context.Background(), scope, observability.RecordMetric{
 		Metrics: []*protos.Metric{{
 			Name:        observability.MetricConversationDuration,
 			Value:       "1000",
 			Description: "duration",
 		}},
+		OccurredAt: now,
 	})
 	if err != nil {
 		t.Fatalf("CollectMetric returned error: %v", err)
@@ -116,10 +105,14 @@ func TestCollector_ExportsEventsAndMetrics(t *testing.T) {
 	if event.Component != observability.ComponentCall.String() {
 		t.Fatalf("unexpected event component: %+v", event)
 	}
-	if event.ProjectID != 30 || event.OrganizationID != 40 ||
-		event.ScopeAttributes["assistantId"] != "10" ||
-		event.ScopeAttributes["assistantConversationId"] != "20" {
-		t.Fatalf("unexpected event scope: %+v", event)
+	if len(exporter.scopes) < 2 {
+		t.Fatalf("expected exported scopes, got %d", len(exporter.scopes))
+	}
+	eventScope := exporter.scopes[0]
+	if eventScope.ProjectID != 30 || eventScope.OrganizationID != 40 ||
+		eventScope.ScopeAttributes["assistantId"] != "10" ||
+		eventScope.ScopeAttributes["assistantConversationId"] != "20" {
+		t.Fatalf("unexpected event scope: %+v", eventScope)
 	}
 	if event.Attributes["status"] != "ringing" {
 		t.Fatalf("unexpected event attributes: %+v", event.Attributes)
@@ -129,10 +122,11 @@ func TestCollector_ExportsEventsAndMetrics(t *testing.T) {
 		t.Fatalf("expected one metric, got %d", len(exporter.metrics))
 	}
 	metric := exporter.metrics[0]
-	if metric.ScopeAttributes["assistantConversationId"] != "20" ||
+	metricScope := exporter.scopes[1]
+	if metricScope.ScopeAttributes["assistantConversationId"] != "20" ||
 		metric.Name != observability.MetricConversationDuration ||
 		metric.Value != "1000" {
-		t.Fatalf("unexpected metric record: %+v", metric)
+		t.Fatalf("unexpected metric record: scope=%+v metric=%+v", metricScope, metric)
 	}
 }
 
@@ -143,17 +137,15 @@ func TestCollector_ExportsMessageMetrics(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	err = collector.Collect(context.Background(), observability.RecordMetric{
-		CommonRecord: observability.CommonRecord{
-			Scope: observability.MessageScope{
-				ConversationScope: observability.ConversationScope{
-					AssistantScope: observability.AssistantScope{AssistantID: 10},
-					ConversationID: 20,
-				},
-				MessageID: "user-ctx-1",
-				Role:      observability.MessageRoleUser,
-			},
+	scope := observability.MessageScope{
+		ConversationScope: observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: 10},
+			ConversationID: 20,
 		},
+		MessageID: "user-ctx-1",
+		Role:      observability.MessageRoleUser,
+	}
+	err = collector.Collect(context.Background(), scope, observability.RecordMetric{
 		Metrics: []*protos.Metric{{
 			Name:  observability.MetricUserTurn,
 			Value: "complete",
@@ -163,10 +155,11 @@ func TestCollector_ExportsMessageMetrics(t *testing.T) {
 		t.Fatalf("CollectMetric returned error: %v", err)
 	}
 	metric := exporter.metrics[0]
-	if metric.ScopeAttributes["messageId"] != "user-ctx-1" ||
-		metric.ScopeAttributes["messageRole"] != "user" ||
-		metric.ScopeAttributes["assistantConversationId"] != "20" {
-		t.Fatalf("unexpected message metric: %+v", metric)
+	metricScope := exporter.scopes[0]
+	if metricScope.ScopeAttributes["messageId"] != "user-ctx-1" ||
+		metricScope.ScopeAttributes["messageRole"] != "user" ||
+		metricScope.ScopeAttributes["assistantConversationId"] != "20" {
+		t.Fatalf("unexpected message metric: scope=%+v metric=%+v", metricScope, metric)
 	}
 }
 
@@ -177,13 +170,10 @@ func TestCollector_ReturnsExporterErrors(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	err = collector.Collect(context.Background(), observability.RecordEvent{
-		CommonRecord: observability.CommonRecord{
-			Scope: observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{AssistantID: 10},
-				ConversationID: 20,
-			},
-		},
+	err = collector.Collect(context.Background(), observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: 10},
+		ConversationID: 20,
+	}, observability.RecordEvent{
 		Event: observability.CallRinging,
 	})
 	if !errors.Is(err, exportErr) {

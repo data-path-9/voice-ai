@@ -21,17 +21,17 @@ func NewLoggingExporter(logger commons.Logger, _ LoggingConfig) *LoggingExporter
 	return &LoggingExporter{logger: logger}
 }
 
-func (e *LoggingExporter) Export(_ context.Context, rec telemetry.Record) error {
+func (e *LoggingExporter) Export(_ context.Context, scope telemetry.Scope, rec telemetry.Record) error {
 	switch typed := rec.(type) {
 	case telemetry.LogRecord:
 		e.logger.Infof("[telemetry/log] scope=%s scopeAttributes=%v message=%s level=%s attributes=%v",
-			typed.Scope, typed.ScopeAttributes, typed.Message, typed.Level, typed.Attributes)
+			scope.Name, scope.ScopeAttributes, typed.Message, typed.Level, typed.Attributes)
 	case telemetry.EventRecord:
 		e.logger.Infof("[telemetry/event] scope=%s scopeAttributes=%v event=%s component=%s attributes=%v",
-			typed.Scope, typed.ScopeAttributes, typed.Event, typed.Component, typed.Attributes)
+			scope.Name, scope.ScopeAttributes, typed.Event, typed.Component, typed.Attributes)
 	case telemetry.MetricRecord:
 		e.logger.Infof("[telemetry/metric] scope=%s scopeAttributes=%v name=%s value=%s",
-			typed.Scope, typed.ScopeAttributes, typed.Name, typed.Value)
+			scope.Name, scope.ScopeAttributes, typed.Name, typed.Value)
 	}
 	return nil
 }

@@ -95,10 +95,10 @@ func (r *genericRequestor) dispatch(ctx context.Context, p internal_type.Packet)
 				if _, ok := p.(internal_type.ObservabilityRecordPacket); !ok {
 					r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 						ContextID: p.ContextId(),
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
 						Record: observability.RecordLog{
-							CommonRecord: observability.CommonRecord{Scope: observability.ConversationScope{}},
-							Level:        observability.LevelError,
-							Message:      "unknown packet type received in dispatcher",
+							Level:   observability.LevelError,
+							Message: "unknown packet type received in dispatcher",
 							Attributes: observability.Attributes{
 								"component": observability.ComponentSession.String(),
 								"packet":    fmt.Sprintf("%T", p),
@@ -114,10 +114,10 @@ func (r *genericRequestor) dispatch(ctx context.Context, p internal_type.Packet)
 			if _, ok := p.(internal_type.ObservabilityRecordPacket); !ok {
 				r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 					ContextID: p.ContextId(),
+					Scope:     internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.RecordLog{
-						CommonRecord: observability.CommonRecord{Scope: observability.ConversationScope{}},
-						Level:        observability.LevelError,
-						Message:      "unknown packet type received in dispatcher",
+						Level:   observability.LevelError,
+						Message: "unknown packet type received in dispatcher",
 						Attributes: observability.Attributes{
 							"component": observability.ComponentSession.String(),
 							"packet":    fmt.Sprintf("%T", p),

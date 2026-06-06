@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
@@ -224,49 +223,37 @@ func ValidateScope(scope Scope) error {
 	}
 }
 
-type CommonRecord struct {
-	ID         string
-	Auth       types.SimplePrinciple
-	Scope      Scope
-	OccurredAt time.Time
-}
-
 type Record interface {
 	isRecord()
 }
 
 type RecordLog struct {
-	CommonRecord
+	ID         string
 	Message    string
 	Level      Level
 	Attributes Attributes
+	OccurredAt time.Time
 }
 
 func (RecordLog) isRecord() {}
 
 type RecordEvent struct {
-	CommonRecord
+	ID         string
 	Component  ComponentName
 	Event      EventName
 	Attributes Attributes
+	OccurredAt time.Time
 }
 
 func NewConversationEventRecord(event EventName, attr Attributes) RecordEvent {
 	return RecordEvent{
-		CommonRecord: CommonRecord{Scope: ConversationScope{}},
-		Event:        event,
-		Attributes:   attr,
+		Event:      event,
+		Attributes: attr,
 	}
 }
 
 func NewMessageEventRecord(messageID string, role MessageRole, event EventName, attr Attributes) RecordEvent {
 	return RecordEvent{
-		CommonRecord: CommonRecord{
-			Scope: MessageScope{
-				MessageID: messageID,
-				Role:      role,
-			},
-		},
 		Event:      event,
 		Attributes: attr,
 	}
@@ -281,25 +268,19 @@ func NewMessageRecord(ctxID string, component ComponentName, event EventName, ro
 func (RecordEvent) isRecord() {}
 
 type RecordMetric struct {
-	CommonRecord
-	Metrics []*protos.Metric
+	ID         string
+	Metrics    []*protos.Metric
+	OccurredAt time.Time
 }
 
 func NewConversationMetricRecord(metrics []*protos.Metric) RecordMetric {
 	return RecordMetric{
-		CommonRecord: CommonRecord{Scope: ConversationScope{}},
-		Metrics:      metrics,
+		Metrics: metrics,
 	}
 }
 
 func NewMessageMetricRecord(messageID string, role MessageRole, metrics []*protos.Metric) RecordMetric {
 	return RecordMetric{
-		CommonRecord: CommonRecord{
-			Scope: MessageScope{
-				MessageID: messageID,
-				Role:      role,
-			},
-		},
 		Metrics: metrics,
 	}
 }
@@ -307,25 +288,19 @@ func NewMessageMetricRecord(messageID string, role MessageRole, metrics []*proto
 func (RecordMetric) isRecord() {}
 
 type RecordMetadata struct {
-	CommonRecord
-	Metadata []*protos.Metadata
+	ID         string
+	Metadata   []*protos.Metadata
+	OccurredAt time.Time
 }
 
 func NewConversationMetadataRecord(metadata []*protos.Metadata) RecordMetadata {
 	return RecordMetadata{
-		CommonRecord: CommonRecord{Scope: ConversationScope{}},
-		Metadata:     metadata,
+		Metadata: metadata,
 	}
 }
 
 func NewMessageMetadataRecord(messageID string, role MessageRole, metadata []*protos.Metadata) RecordMetadata {
 	return RecordMetadata{
-		CommonRecord: CommonRecord{
-			Scope: MessageScope{
-				MessageID: messageID,
-				Role:      role,
-			},
-		},
 		Metadata: metadata,
 	}
 }
@@ -333,19 +308,21 @@ func NewMessageMetadataRecord(messageID string, role MessageRole, metadata []*pr
 func (RecordMetadata) isRecord() {}
 
 type RecordUsage struct {
-	CommonRecord
+	ID         string
 	Component  ComponentName
 	Provider   string
 	Duration   time.Duration
 	Attributes Attributes
+	OccurredAt time.Time
 }
 
 func (RecordUsage) isRecord() {}
 
 type RecordWebhook struct {
-	CommonRecord
-	Event   EventName
-	Payload map[string]interface{}
+	ID         string
+	Event      EventName
+	Payload    map[string]interface{}
+	OccurredAt time.Time
 }
 
 func (RecordWebhook) isRecord() {}

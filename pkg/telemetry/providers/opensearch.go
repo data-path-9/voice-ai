@@ -133,7 +133,7 @@ type opensearchMetricDoc struct {
 	OccurredAt      time.Time         `json:"occurredAt"`
 }
 
-func (e *OpenSearchExporter) Export(ctx context.Context, rec telemetry.Record) error {
+func (e *OpenSearchExporter) Export(ctx context.Context, scope telemetry.Scope, rec telemetry.Record) error {
 	switch typed := rec.(type) {
 	case telemetry.LogRecord:
 		occurredAt := typed.OccurredAt
@@ -149,10 +149,10 @@ func (e *OpenSearchExporter) Export(ctx context.Context, rec telemetry.Record) e
 			Kind:            "log",
 			Level:           typed.Level,
 			Message:         typed.Message,
-			ProjectID:       typed.ProjectID,
-			OrganizationID:  typed.OrganizationID,
-			Scope:           typed.Scope,
-			ScopeAttributes: typed.ScopeAttributes,
+			ProjectID:       scope.ProjectID,
+			OrganizationID:  scope.OrganizationID,
+			Scope:           scope.Name,
+			ScopeAttributes: scope.ScopeAttributes,
 			Attributes:      typed.Attributes,
 			OccurredAt:      occurredAt,
 		}
@@ -171,10 +171,10 @@ func (e *OpenSearchExporter) Export(ctx context.Context, rec telemetry.Record) e
 			Kind:            "event",
 			Event:           typed.Event,
 			Component:       typed.Component,
-			ProjectID:       typed.ProjectID,
-			OrganizationID:  typed.OrganizationID,
-			Scope:           typed.Scope,
-			ScopeAttributes: typed.ScopeAttributes,
+			ProjectID:       scope.ProjectID,
+			OrganizationID:  scope.OrganizationID,
+			Scope:           scope.Name,
+			ScopeAttributes: scope.ScopeAttributes,
 			Attributes:      typed.Attributes,
 			OccurredAt:      occurredAt,
 		}
@@ -194,10 +194,10 @@ func (e *OpenSearchExporter) Export(ctx context.Context, rec telemetry.Record) e
 			Name:            typed.Name,
 			Value:           typed.Value,
 			Description:     typed.Description,
-			ProjectID:       typed.ProjectID,
-			OrganizationID:  typed.OrganizationID,
-			Scope:           typed.Scope,
-			ScopeAttributes: typed.ScopeAttributes,
+			ProjectID:       scope.ProjectID,
+			OrganizationID:  scope.OrganizationID,
+			Scope:           scope.Name,
+			ScopeAttributes: scope.ScopeAttributes,
 			Attributes:      typed.Attributes,
 			OccurredAt:      occurredAt,
 		}

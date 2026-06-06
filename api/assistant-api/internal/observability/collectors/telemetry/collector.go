@@ -49,10 +49,11 @@ func New(ctx context.Context, cfg Config) (observability.Collector, error) {
 	return &Collector{exporter: exporter}, nil
 }
 
-func (c *Collector) Collect(ctx context.Context, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
 	if !validator.NonNil(c.exporter) {
 		return nil
 	}
+	telemetryScope := toTelemetryScope(scope)
 	switch typed := record.(type) {
 	case observability.RecordLog:
 		occurredAt := typed.OccurredAt
@@ -63,30 +64,12 @@ func (c *Collector) Collect(ctx context.Context, record observability.Record) er
 		for key, value := range typed.Attributes {
 			attributes[key] = value
 		}
-		global := typed.Scope.GlobalScopeValue()
-		scopeAttributes := map[string]string{
-			"assistantId": strconv.FormatUint(typed.Scope.AssistantScopeID(), 10),
-		}
-		switch typed.Scope.ScopeType() {
-		case observability.ScopeConversation:
-			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
-		case observability.ScopeMessage:
-			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
-			scopeAttributes["messageId"] = typed.Scope.ContextID()
-			scopeAttributes["messageRole"] = string(typed.Scope.MessageScopeRole())
-		}
-		return c.exporter.Export(ctx, telemetry.LogRecord{
-			CommonRecord: telemetry.CommonRecord{
-				ID:              typed.ID,
-				ProjectID:       global.ProjectID,
-				OrganizationID:  global.OrganizationID,
-				Scope:           string(typed.Scope.ScopeType()),
-				ScopeAttributes: scopeAttributes,
-				Attributes:      attributes,
-				OccurredAt:      occurredAt,
-			},
-			Level:   string(typed.Level),
-			Message: typed.Message,
+		return c.exporter.Export(ctx, telemetryScope, telemetry.LogRecord{
+			ID:         typed.ID,
+			Level:      string(typed.Level),
+			Message:    typed.Message,
+			Attributes: attributes,
+			OccurredAt: occurredAt,
 		})
 	case observability.RecordEvent:
 		occurredAt := typed.OccurredAt
@@ -97,30 +80,12 @@ func (c *Collector) Collect(ctx context.Context, record observability.Record) er
 		for key, value := range typed.Attributes {
 			attributes[key] = value
 		}
-		global := typed.Scope.GlobalScopeValue()
-		scopeAttributes := map[string]string{
-			"assistantId": strconv.FormatUint(typed.Scope.AssistantScopeID(), 10),
-		}
-		switch typed.Scope.ScopeType() {
-		case observability.ScopeConversation:
-			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
-		case observability.ScopeMessage:
-			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
-			scopeAttributes["messageId"] = typed.Scope.ContextID()
-			scopeAttributes["messageRole"] = string(typed.Scope.MessageScopeRole())
-		}
-		return c.exporter.Export(ctx, telemetry.EventRecord{
-			CommonRecord: telemetry.CommonRecord{
-				ID:              typed.ID,
-				ProjectID:       global.ProjectID,
-				OrganizationID:  global.OrganizationID,
-				Scope:           string(typed.Scope.ScopeType()),
-				ScopeAttributes: scopeAttributes,
-				Attributes:      attributes,
-				OccurredAt:      occurredAt,
-			},
-			Event:     typed.Event.String(),
-			Component: typed.Component.String(),
+		return c.exporter.Export(ctx, telemetryScope, telemetry.EventRecord{
+			ID:         typed.ID,
+			Event:      typed.Event.String(),
+			Component:  typed.Component.String(),
+			Attributes: attributes,
+			OccurredAt: occurredAt,
 		})
 	case observability.RecordMetric:
 		if !validator.NotEmpty(typed.Metrics) {
@@ -130,35 +95,17 @@ func (c *Collector) Collect(ctx context.Context, record observability.Record) er
 		if occurredAt.IsZero() {
 			occurredAt = time.Now()
 		}
-		global := typed.Scope.GlobalScopeValue()
-		scopeAttributes := map[string]string{
-			"assistantId": strconv.FormatUint(typed.Scope.AssistantScopeID(), 10),
-		}
-		switch typed.Scope.ScopeType() {
-		case observability.ScopeConversation:
-			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
-		case observability.ScopeMessage:
-			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
-			scopeAttributes["messageId"] = typed.Scope.ContextID()
-			scopeAttributes["messageRole"] = string(typed.Scope.MessageScopeRole())
-		}
 		var errs []error
 		for _, metric := range typed.Metrics {
 			if metric == nil {
 				continue
 			}
-			if err := c.exporter.Export(ctx, telemetry.MetricRecord{
-				CommonRecord: telemetry.CommonRecord{
-					ID:              typed.ID,
-					ProjectID:       global.ProjectID,
-					OrganizationID:  global.OrganizationID,
-					Scope:           string(typed.Scope.ScopeType()),
-					ScopeAttributes: scopeAttributes,
-					OccurredAt:      occurredAt,
-				},
+			if err := c.exporter.Export(ctx, telemetryScope, telemetry.MetricRecord{
+				ID:          typed.ID,
 				Name:        metric.GetName(),
 				Value:       metric.GetValue(),
 				Description: metric.GetDescription(),
+				OccurredAt:  occurredAt,
 			}); err != nil {
 				errs = append(errs, err)
 			}
@@ -166,6 +113,27 @@ func (c *Collector) Collect(ctx context.Context, record observability.Record) er
 		return errors.Join(errs...)
 	default:
 		return nil
+	}
+}
+
+func toTelemetryScope(scope observability.Scope) telemetry.Scope {
+	global := scope.GlobalScopeValue()
+	scopeAttributes := map[string]string{
+		"assistantId": strconv.FormatUint(scope.AssistantScopeID(), 10),
+	}
+	switch scope.ScopeType() {
+	case observability.ScopeConversation:
+		scopeAttributes["assistantConversationId"] = strconv.FormatUint(scope.ConversationScopeID(), 10)
+	case observability.ScopeMessage:
+		scopeAttributes["assistantConversationId"] = strconv.FormatUint(scope.ConversationScopeID(), 10)
+		scopeAttributes["messageId"] = scope.ContextID()
+		scopeAttributes["messageRole"] = string(scope.MessageScopeRole())
+	}
+	return telemetry.Scope{
+		ProjectID:       global.ProjectID,
+		OrganizationID:  global.OrganizationID,
+		Name:            string(scope.ScopeType()),
+		ScopeAttributes: scopeAttributes,
 	}
 }
 

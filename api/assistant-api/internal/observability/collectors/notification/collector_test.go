@@ -28,14 +28,12 @@ func TestCollector_NotifiesSelectedEvent(t *testing.T) {
 	notifier := &notifierStub{}
 	collector := New(Config{Notifier: notifier})
 
-	err := collector.Collect(context.Background(), observability.RecordEvent{
-		CommonRecord: observability.CommonRecord{
-			ID: "evt-1",
-			Scope: observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{AssistantID: 10},
-				ConversationID: 20,
-			},
-		},
+	scope := observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: 10},
+		ConversationID: 20,
+	}
+	err := collector.Collect(context.Background(), scope, observability.RecordEvent{
+		ID:        "evt-1",
 		Component: observability.ComponentCall,
 		Event:     observability.CallFailed,
 	})
@@ -55,7 +53,7 @@ func TestCollector_DefaultSelectorSkipsOtherEvents(t *testing.T) {
 	notifier := &notifierStub{}
 	collector := New(Config{Notifier: notifier})
 
-	err := collector.Collect(context.Background(), observability.RecordEvent{
+	err := collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 10}, observability.RecordEvent{
 		Event: observability.CallRinging,
 	})
 	if err != nil {
@@ -70,7 +68,7 @@ func TestCollector_ReturnsNotifierError(t *testing.T) {
 	notifyErr := errors.New("notify failed")
 	collector := New(Config{Notifier: &notifierStub{err: notifyErr}})
 
-	err := collector.Collect(context.Background(), observability.RecordEvent{
+	err := collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 10}, observability.RecordEvent{
 		Event: observability.ErrorRaised,
 	})
 	if !errors.Is(err, notifyErr) {

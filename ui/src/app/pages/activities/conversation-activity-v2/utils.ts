@@ -541,13 +541,7 @@ export const formatTime = (value: string): string => {
 export const formatDateTime = (value: string | number): string => {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return String(value);
-  return date.toLocaleString([], {
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  return date.toUTCString();
 };
 
 export const sampleTimelineDocuments: TimelineDocument[] = [

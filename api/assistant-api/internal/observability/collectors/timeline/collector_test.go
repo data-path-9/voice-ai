@@ -79,21 +79,22 @@ func TestCollector_PushesEventDocumentToOpenSearchBulk(t *testing.T) {
 	}
 	now := time.Date(2026, 6, 5, 12, 30, 0, 0, time.UTC)
 
-	err = collector.Collect(context.Background(), observability.RecordEvent{
-		CommonRecord: observability.CommonRecord{
-			ID: "evt-1",
-			Scope: observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{
-					GlobalScope: observability.GlobalScope{OrganizationID: 1, ProjectID: 2},
-					AssistantID: 3,
-				},
-				ConversationID: 4,
+	scope := observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{
+			GlobalScope: observability.GlobalScope{
+				OrganizationID: 1,
+				ProjectID:      2,
 			},
-			OccurredAt: now,
+			AssistantID: 3,
 		},
+		ConversationID: 4,
+	}
+	err = collector.Collect(context.Background(), scope, observability.RecordEvent{
+		ID:         "evt-1",
 		Component:  observability.ComponentCall,
 		Event:      observability.CallRinging,
 		Attributes: observability.Attributes{"status": "ringing"},
+		OccurredAt: now,
 	})
 	if err != nil {
 		t.Fatalf("CollectEvent returned error: %v", err)
@@ -133,15 +134,12 @@ func TestCollector_UsesCustomIndexPrefix(t *testing.T) {
 	}
 	now := time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)
 
-	err = collector.Collect(context.Background(), observability.RecordMetric{
-		CommonRecord: observability.CommonRecord{
-			ID: "metric-1",
-			Scope: observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{AssistantID: 3},
-				ConversationID: 4,
-			},
-			OccurredAt: now,
-		},
+	err = collector.Collect(context.Background(), observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: 3},
+		ConversationID: 4,
+	}, observability.RecordMetric{
+		ID:         "metric-1",
+		OccurredAt: now,
 	})
 	if err != nil {
 		t.Fatalf("CollectMetric returned error: %v", err)
@@ -158,10 +156,7 @@ func TestCollector_ReturnsBulkError(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	err = collector.Collect(context.Background(), observability.RecordLog{
-		CommonRecord: observability.CommonRecord{
-			Scope: observability.AssistantScope{AssistantID: 3},
-		},
+	err = collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 3}, observability.RecordLog{
 		Message: "hello",
 	})
 	if !errors.Is(err, bulkErr) {
@@ -170,9 +165,7 @@ func TestCollector_ReturnsBulkError(t *testing.T) {
 }
 
 func TestNewDocumentFallsBackToNowWhenOccurredAtMissing(t *testing.T) {
-	doc := newDocument("event", observability.CommonRecord{
-		Scope: observability.AssistantScope{AssistantID: 1},
-	})
+	doc := newDocument("event", observability.AssistantScope{AssistantID: 1}, "", time.Time{})
 	if doc.OccurredAt.IsZero() {
 		t.Fatal("expected occurred_at to be set")
 	}

@@ -1139,73 +1139,131 @@ func (f UserMessageMetadataPacket) ContextId() string { return f.ContextID }
 // =============================================================================
 
 // ObservabilityRecordPacket is the base packet for emitting a typed observability record.
+type ObservabilityRecordScope string
+
+const (
+	ObservabilityRecordScopeAssistant    ObservabilityRecordScope = "assistant"
+	ObservabilityRecordScopeConversation ObservabilityRecordScope = "conversation"
+	ObservabilityRecordScopeMessage      ObservabilityRecordScope = "message"
+)
+
 type ObservabilityRecordPacket interface {
 	ContextId() string
+	GetScope() ObservabilityRecordScope
+	GetMessageRole() observability.MessageRole
 	GetRecord() observability.Record
 }
 
 // ObservabilityLogRecordPacket emits an observability.RecordLog.
 type ObservabilityLogRecordPacket struct {
-	ContextID string
-	Record    observability.RecordLog
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordLog
 }
 
 func (p ObservabilityLogRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityLogRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityLogRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
 func (p ObservabilityLogRecordPacket) GetRecord() observability.Record {
 	return p.Record
 }
 
 // ObservabilityEventRecordPacket emits an observability.RecordEvent.
 type ObservabilityEventRecordPacket struct {
-	ContextID string
-	Record    observability.RecordEvent
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordEvent
 }
 
 func (p ObservabilityEventRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityEventRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityEventRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
 func (p ObservabilityEventRecordPacket) GetRecord() observability.Record {
 	return p.Record
 }
 
 // ObservabilityMetricRecordPacket emits an observability.RecordMetric.
 type ObservabilityMetricRecordPacket struct {
-	ContextID string
-	Record    observability.RecordMetric
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordMetric
 }
 
 func (p ObservabilityMetricRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityMetricRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityMetricRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
 func (p ObservabilityMetricRecordPacket) GetRecord() observability.Record {
 	return p.Record
 }
 
 // ObservabilityMetadataRecordPacket emits an observability.RecordMetadata.
 type ObservabilityMetadataRecordPacket struct {
-	ContextID string
-	Record    observability.RecordMetadata
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordMetadata
 }
 
 func (p ObservabilityMetadataRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityMetadataRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityMetadataRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
 func (p ObservabilityMetadataRecordPacket) GetRecord() observability.Record {
 	return p.Record
 }
 
 // ObservabilityUsageRecordPacket emits an observability.RecordUsage.
 type ObservabilityUsageRecordPacket struct {
-	ContextID string
-	Record    observability.RecordUsage
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordUsage
 }
 
 func (p ObservabilityUsageRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityUsageRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityUsageRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
 func (p ObservabilityUsageRecordPacket) GetRecord() observability.Record {
 	return p.Record
 }
 
 // ObservabilityWebhookRecordPacket emits an observability.RecordWebhook.
 type ObservabilityWebhookRecordPacket struct {
-	ContextID string
-	Record    observability.RecordWebhook
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordWebhook
 }
 
 func (p ObservabilityWebhookRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityWebhookRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityWebhookRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
 func (p ObservabilityWebhookRecordPacket) GetRecord() observability.Record {
 	return p.Record
 }

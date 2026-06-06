@@ -39,14 +39,14 @@ func New(publisher Publisher) observability.Collector {
 	return &Collector{publisher: publisher}
 }
 
-func (c *Collector) Collect(ctx context.Context, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
 	usage, ok := record.(observability.RecordUsage)
 	if !ok {
 		return nil
 	}
 	return c.publisher.PublishUsage(ctx, Usage{
 		ID:         usage.ID,
-		Scope:      usage.Scope,
+		Scope:      scope,
 		Component:  usage.Component,
 		Provider:   usage.Provider,
 		Duration:   usage.Duration,

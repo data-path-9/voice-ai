@@ -30,19 +30,17 @@ func TestCollector_ForwardsUsageRecord(t *testing.T) {
 	collector := New(publisher)
 	now := time.Date(2026, 6, 5, 10, 0, 0, 0, time.UTC)
 
-	err := collector.Collect(context.Background(), observability.RecordUsage{
-		CommonRecord: observability.CommonRecord{
-			ID: "usage-1",
-			Scope: observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{AssistantID: 10},
-				ConversationID: 20,
-			},
-			OccurredAt: now,
-		},
+	scope := observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: 10},
+		ConversationID: 20,
+	}
+	err := collector.Collect(context.Background(), scope, observability.RecordUsage{
+		ID:         "usage-1",
 		Component:  observability.ComponentUsage,
 		Provider:   "deepgram",
 		Duration:   2 * time.Second,
 		Attributes: observability.Attributes{"source": "stt"},
+		OccurredAt: now,
 	})
 	if err != nil {
 		t.Fatalf("CollectUsage returned error: %v", err)
@@ -63,7 +61,7 @@ func TestCollector_ReturnsPublisherError(t *testing.T) {
 	publishErr := errors.New("publish failed")
 	collector := New(&usagePublisherStub{err: publishErr})
 
-	err := collector.Collect(context.Background(), observability.RecordUsage{})
+	err := collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 10}, observability.RecordUsage{})
 	if !errors.Is(err, publishErr) {
 		t.Fatalf("expected publish error, got %v", err)
 	}

@@ -63,6 +63,7 @@ func (r *genericRequestor) initializeGreeting(ctx context.Context, behavior *int
 		internal_type.InjectMessagePacket{ContextID: r.GetID(), Text: greetingContent},
 		internal_type.ObservabilityEventRecordPacket{
 			ContextID: r.GetID(),
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.NewConversationEventRecord(observability.ConversationAgentStateChanged, observability.Attributes{
 				"type":       "greeting",
 				"text_chars": fmt.Sprintf("%d", len(greetingContent)),
@@ -93,12 +94,14 @@ func (r *genericRequestor) initializeMaxSessionDuration(ctx context.Context, beh
 			r.OnPacket(r.sessionCtx,
 				internal_type.ObservabilityEventRecordPacket{
 					ContextID: r.GetID(),
+					Scope:     internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.NewConversationEventRecord(observability.SessionDisconnectRequested, observability.Attributes{
 						"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
 					}),
 				},
 				internal_type.ObservabilityMetadataRecordPacket{
 					ContextID: r.GetID(),
+					Scope:     internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
 						Key:   "disconnect_reason",
 						Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
@@ -132,6 +135,7 @@ func (r *genericRequestor) OnError(ctx context.Context) error {
 		internal_type.InjectMessagePacket{ContextID: r.GetID(), Text: mistakeContent},
 		internal_type.ObservabilityEventRecordPacket{
 			ContextID: r.GetID(),
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.NewConversationEventRecord(observability.ConversationAgentStateChanged, observability.Attributes{
 				"type":       "error",
 				"text_chars": fmt.Sprintf("%d", len(mistakeContent)),
@@ -163,12 +167,14 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 				r.OnPacket(r.sessionCtx,
 					internal_type.ObservabilityEventRecordPacket{
 						ContextID: r.GetID(),
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
 						Record: observability.NewConversationEventRecord(observability.SessionDisconnectRequested, observability.Attributes{
 							"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT.String(),
 						}),
 					},
 					internal_type.ObservabilityMetadataRecordPacket{
 						ContextID: r.GetID(),
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
 						Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
 							Key:   "disconnect_reason",
 							Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT.String(),
@@ -205,6 +211,7 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 		internal_type.InjectMessagePacket{ContextID: contextID, Text: timeoutContent},
 		internal_type.ObservabilityEventRecordPacket{
 			ContextID: contextID,
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.NewConversationEventRecord(observability.ConversationAgentStateChanged, observability.Attributes{
 				"type":      "idle_timeout",
 				"count":     fmt.Sprintf("%d", r.idleTimeoutCount),

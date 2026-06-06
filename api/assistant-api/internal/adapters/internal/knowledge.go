@@ -38,7 +38,9 @@ func (kr *genericRequestor) RetrieveToolKnowledge(ctx context.Context, knowledge
 
 	knowledgeIDStr := fmt.Sprintf("%d", knowledge.Id)
 	kr.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
-		ContextID: messageId,
+		ContextID:   messageId,
+		Scope:       internal_type.ObservabilityRecordScopeMessage,
+		MessageRole: observability.MessageRoleAssistant,
 		Record: observability.NewMessageRecord(messageId, observability.ComponentTool, observability.ToolCallStarted, observability.MessageRoleAssistant, observability.Attributes{
 			"name":             "knowledge",
 			"knowledge_id":     knowledgeIDStr,
@@ -55,7 +57,9 @@ func (kr *genericRequestor) RetrieveToolKnowledge(ctx context.Context, knowledge
 	if err != nil {
 		kr.OnPacket(ctx,
 			internal_type.ObservabilityEventRecordPacket{
-				ContextID: messageId,
+				ContextID:   messageId,
+				Scope:       internal_type.ObservabilityRecordScopeMessage,
+				MessageRole: observability.MessageRoleAssistant,
 				Record: observability.NewMessageRecord(messageId, observability.ComponentTool, observability.ToolCallFailed, observability.MessageRoleAssistant, observability.Attributes{
 					"name":         "knowledge",
 					"knowledge_id": knowledgeIDStr,
@@ -70,7 +74,9 @@ func (kr *genericRequestor) RetrieveToolKnowledge(ctx context.Context, knowledge
 		}
 		kr.OnPacket(ctx,
 			internal_type.ObservabilityEventRecordPacket{
-				ContextID: messageId,
+				ContextID:   messageId,
+				Scope:       internal_type.ObservabilityRecordScopeMessage,
+				MessageRole: observability.MessageRoleAssistant,
 				Record: observability.NewMessageRecord(messageId, observability.ComponentTool, observability.ToolCallCompleted, observability.MessageRoleAssistant, observability.Attributes{
 					"name":         "knowledge",
 					"knowledge_id": knowledgeIDStr,
@@ -81,7 +87,9 @@ func (kr *genericRequestor) RetrieveToolKnowledge(ctx context.Context, knowledge
 				}),
 			},
 			internal_type.ObservabilityMetricRecordPacket{
-				ContextID: messageId,
+				ContextID:   messageId,
+				Scope:       internal_type.ObservabilityRecordScopeMessage,
+				MessageRole: observability.MessageRoleAssistant,
 				Record: observability.NewMessageMetricRecord(messageId, observability.MessageRoleAssistant, []*protos.Metric{{
 					Name:  "knowledge_latency_ms",
 					Value: fmt.Sprintf("%d", latencyMs),

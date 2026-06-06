@@ -55,31 +55,31 @@ func New(ctx context.Context, cfg Config) (observability.Collector, error) {
 	}, nil
 }
 
-func (c *Collector) Collect(ctx context.Context, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
 	if !validator.NonNil(c) || !validator.NonNil(c.opensearch) {
 		return nil
 	}
 	switch typed := record.(type) {
 	case observability.RecordLog:
-		doc := newDocument("log", typed.CommonRecord)
+		doc := newDocument("log", scope, typed.ID, typed.OccurredAt)
 		doc.Level = string(typed.Level)
 		doc.Title = typed.Message
 		doc.Attributes = typed.Attributes.Clone()
 		return c.bulk(ctx, c.index(doc.OccurredAt), doc)
 	case observability.RecordEvent:
-		doc := newDocument("event", typed.CommonRecord)
+		doc := newDocument("event", scope, typed.ID, typed.OccurredAt)
 		doc.Name = typed.Event.String()
 		doc.Component = typed.Component.String()
 		doc.Attributes = typed.Attributes.Clone()
 		return c.bulk(ctx, c.index(doc.OccurredAt), doc)
 	case observability.RecordMetric:
-		doc := newDocument("metric", typed.CommonRecord)
+		doc := newDocument("metric", scope, typed.ID, typed.OccurredAt)
 		return c.bulk(ctx, c.index(doc.OccurredAt), doc)
 	case observability.RecordMetadata:
-		doc := newDocument("metadata", typed.CommonRecord)
+		doc := newDocument("metadata", scope, typed.ID, typed.OccurredAt)
 		return c.bulk(ctx, c.index(doc.OccurredAt), doc)
 	case observability.RecordUsage:
-		doc := newDocument("usage", typed.CommonRecord)
+		doc := newDocument("usage", scope, typed.ID, typed.OccurredAt)
 		doc.Component = typed.Component.String()
 		doc.Attributes = typed.Attributes.Clone()
 		return c.bulk(ctx, c.index(doc.OccurredAt), doc)
@@ -162,22 +162,21 @@ type document struct {
 	OccurredAt              time.Time         `json:"occurredAt"`
 }
 
-func newDocument(kind string, common observability.CommonRecord) document {
-	occurredAt := common.OccurredAt
+func newDocument(kind string, scope observability.Scope, id string, occurredAt time.Time) document {
 	if occurredAt.IsZero() {
 		occurredAt = time.Now().UTC()
 	}
 	return document{
-		ID:                      common.ID,
+		ID:                      id,
 		Kind:                    kind,
-		ProjectID:               common.Scope.GlobalScopeValue().ProjectID,
-		OrganizationID:          common.Scope.GlobalScopeValue().OrganizationID,
-		Scope:                   string(common.Scope.ScopeType()),
-		AssistantID:             common.Scope.AssistantScopeID(),
-		AssistantConversationID: common.Scope.ConversationScopeID(),
-		MessageID:               common.Scope.MessageScopeID(),
-		MessageRole:             string(common.Scope.MessageScopeRole()),
-		ContextID:               common.Scope.ContextID(),
+		ProjectID:               scope.GlobalScopeValue().ProjectID,
+		OrganizationID:          scope.GlobalScopeValue().OrganizationID,
+		Scope:                   string(scope.ScopeType()),
+		AssistantID:             scope.AssistantScopeID(),
+		AssistantConversationID: scope.ConversationScopeID(),
+		MessageID:               scope.MessageScopeID(),
+		MessageRole:             string(scope.MessageScopeRole()),
+		ContextID:               scope.ContextID(),
 		OccurredAt:              occurredAt,
 	}
 }

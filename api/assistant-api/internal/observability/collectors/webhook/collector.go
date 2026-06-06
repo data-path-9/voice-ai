@@ -52,7 +52,7 @@ func New(cfg Config) observability.Collector {
 	}
 }
 
-func (c *Collector) Collect(ctx context.Context, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
 	webhookRecord, ok := record.(observability.RecordWebhook)
 	if !ok {
 		return nil
@@ -60,7 +60,7 @@ func (c *Collector) Collect(ctx context.Context, record observability.Record) er
 	if !validator.NonNil(c) || !validator.NotEmpty(c.webhooks) {
 		return nil
 	}
-	payload := webhookPayload(webhookRecord)
+	payload := webhookPayload(scope, webhookRecord)
 
 	var errs []error
 	for _, assistantWebhook := range c.webhooks {
@@ -177,17 +177,22 @@ func isRetryableStatus(statusCode int, retryStatusCodes []string) bool {
 	return slices.Contains(retryStatusCodes, strconv.Itoa(statusCode))
 }
 
-func webhookPayload(record observability.RecordWebhook) map[string]interface{} {
+func webhookPayload(scope observability.Scope, record observability.RecordWebhook) map[string]interface{} {
 	if len(record.Payload) == 0 {
-		return map[string]interface{}{}
+		payload := map[string]interface{}{}
+		if scope != nil {
+			payload["scope"] = scope.ScopeType()
+			payload["context_id"] = scope.ContextID()
+		}
+		return payload
 	}
 	payload := make(map[string]interface{}, len(record.Payload))
 	for key, value := range record.Payload {
 		payload[key] = value
 	}
-	if record.Scope != nil {
-		payload["scope"] = record.Scope.ScopeType()
-		payload["context_id"] = record.Scope.ContextID()
+	if scope != nil {
+		payload["scope"] = scope.ScopeType()
+		payload["context_id"] = scope.ContextID()
 	}
 	return payload
 }
