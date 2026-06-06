@@ -66,9 +66,6 @@ const ComponentRow: FC<{
         <p className="truncate text-sm text-gray-900 dark:text-gray-100">
           {item.title || item.name}
         </p>
-        <p className="truncate font-mono text-[11px] text-gray-500">
-          {item.name}
-        </p>
       </div>
     </div>
     <div className="flex items-center px-3 py-2">
@@ -102,9 +99,6 @@ const GroupRow: FC<{
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
           {group.title}
-        </p>
-        <p className="truncate font-mono text-[11px] text-gray-500">
-          {group.contextId}
         </p>
       </div>
     </div>

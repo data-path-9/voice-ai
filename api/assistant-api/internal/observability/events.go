@@ -187,6 +187,7 @@ const (
 const (
 	EOSStarted   EventName = "eos.started"
 	EOSCompleted EventName = "eos.completed"
+	EOSClosed    EventName = "eos.closed"
 	EOSError     EventName = "eos.error"
 )
 
@@ -388,6 +389,7 @@ var eventsByComponent = map[ComponentName][]EventName{
 	ComponentEOS: {
 		EOSStarted,
 		EOSCompleted,
+		EOSClosed,
 		EOSError,
 	},
 	ComponentDenoise: {
