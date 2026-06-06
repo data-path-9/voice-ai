@@ -120,7 +120,6 @@ func newObserverFactory(cfg *config.AssistantConfig, logger commons.Logger, open
 			ConversationID: conversationID,
 			ProjectID:      projectID,
 			OrganizationID: orgID,
-			Persist:        conversationService,
 			Events:         observe.NewEventCollector(logger, meta, eventExporters...),
 			Metrics:        observe.NewMetricCollector(logger, meta, metricExporters...),
 		})

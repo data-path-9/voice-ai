@@ -9,8 +9,13 @@ import (
 	"github.com/rapidaai/pkg/telemetry"
 )
 
-type SessionMeta = telemetry.SessionMeta
+type SessionMeta struct {
+	AssistantID             uint64
+	AssistantConversationID uint64
+	ProjectID               uint64
+	OrganizationID          uint64
+}
+
+type CommonRecord = telemetry.CommonRecord
 type EventRecord = telemetry.EventRecord
 type MetricRecord = telemetry.MetricRecord
-type ConversationMetricRecord = telemetry.ConversationMetricRecord
-type MessageMetricRecord = telemetry.MessageMetricRecord

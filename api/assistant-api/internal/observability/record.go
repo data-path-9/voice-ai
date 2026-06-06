@@ -169,7 +169,7 @@ func (scope MessageScope) ConversationScopeID() uint64 {
 }
 
 func (scope MessageScope) MessageScopeID() string {
-	return scope.MessageID
+	return fmt.Sprintf("%s-%s", scope.MessageScopeRole(), scope.MessageID)
 }
 
 func (scope MessageScope) MessageScopeRole() MessageRole {

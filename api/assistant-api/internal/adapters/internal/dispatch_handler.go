@@ -2584,7 +2584,9 @@ func (h requestorDispatchHandler) HandleFinalizeAssistant(ctx context.Context, p
 		}
 	}
 	if h.r.observabilityRecorder != nil {
-		_ = h.r.observabilityRecorder.Close(ctx)
+		if err := h.r.observabilityRecorder.Close(ctx); err != nil {
+			h.r.logger.Error("failed to close observability recorder", "error", err)
+		}
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizationCompletedPacket{ContextID: p.ContextID})
 }

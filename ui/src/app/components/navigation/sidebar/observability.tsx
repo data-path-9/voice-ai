@@ -7,6 +7,7 @@ import {
   Activity,
   DataBase,
   Chat,
+  DataCheck,
   EventSchedule,
   ToolKit,
 } from '@carbon/icons-react';
@@ -19,6 +20,16 @@ export const Observability = memo(({ isLoading }: { isLoading?: boolean }) => {
 
   return (
     <li>
+      <SidebarSimpleListItem
+        active={pathname.includes('/logs/traces')}
+        navigate="/logs/traces"
+        loading={isLoading}
+      >
+        <SidebarIconWrapper>
+          <DataCheck size={20} />
+        </SidebarIconWrapper>
+        <SidebarLabel isLoading={isLoading}>Trace</SidebarLabel>
+      </SidebarSimpleListItem>
       <SidebarSimpleListItem
         active={pathname.endsWith('/logs')}
         navigate="/logs"

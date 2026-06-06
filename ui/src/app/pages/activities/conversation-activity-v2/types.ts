@@ -1,16 +1,16 @@
 export type TimelineDocument = {
   id: string;
-  kind: string;
+  kind: 'log' | 'event' | 'metric';
   name: string;
   category: string;
   level: string;
   outcome: string;
   title: string;
-  projectId: number;
-  organizationId: number;
-  scope: 'assistant' | 'conversation' | 'message';
-  assistantId: number;
-  assistantConversationId: number;
+  projectId: number | string;
+  organizationId: number | string;
+  scope: string;
+  assistantId: number | string;
+  assistantConversationId: number | string;
   messageId?: string;
   messageRole?: string;
   contextId: string;
@@ -38,8 +38,8 @@ export type TimelineGroup = {
 };
 
 export type TraceSummary = {
-  assistantConversationId: number;
-  assistantId: number;
+  assistantConversationId: number | string;
+  assistantId: number | string;
   components: string[];
   contextId: string;
   durationMs: number;
@@ -60,23 +60,4 @@ export type MetricSummary = {
   p95DurationMs: number;
   slowestContextId: string;
   slowestDurationMs: number;
-};
-
-export type SpanCountBucket = {
-  endMs: number;
-  failureCount: number;
-  label: string;
-  spanCount: number;
-  startMs: number;
-};
-
-export type LatencyBucket = {
-  endMs: number;
-  eos: number;
-  label: string;
-  llm: number;
-  startMs: number;
-  stt: number;
-  total: number;
-  tts: number;
 };

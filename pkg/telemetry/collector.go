@@ -30,18 +30,17 @@ type MetricCollector interface {
 
 type fanoutEventCollector struct {
 	logger    commons.Logger
-	meta      SessionMeta
 	exporters []Exporter
 	wg        sync.WaitGroup
 }
 
 // NewEventCollector returns a fan-out EventCollector. When no exporters are
 // provided, a no-op implementation is returned to avoid any allocations.
-func NewEventCollector(logger commons.Logger, meta SessionMeta, exporters ...Exporter) EventCollector {
+func NewEventCollector(logger commons.Logger, exporters ...Exporter) EventCollector {
 	if len(exporters) == 0 {
 		return noopEventCollector{}
 	}
-	return &fanoutEventCollector{logger: logger, meta: meta, exporters: exporters}
+	return &fanoutEventCollector{logger: logger, exporters: exporters}
 }
 
 func (c *fanoutEventCollector) Collect(_ context.Context, rec EventRecord) {
@@ -50,7 +49,7 @@ func (c *fanoutEventCollector) Collect(_ context.Context, rec EventRecord) {
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			if err := exp.ExportEvent(context.Background(), c.meta, rec); err != nil {
+			if err := exp.Export(context.Background(), rec); err != nil {
 				c.logger.Errorf("telemetry: event export error: %v", err)
 			}
 		}()
@@ -74,18 +73,17 @@ func (c *fanoutEventCollector) Close(ctx context.Context) {
 
 type fanoutMetricCollector struct {
 	logger    commons.Logger
-	meta      SessionMeta
 	exporters []Exporter
 	wg        sync.WaitGroup
 }
 
 // NewMetricCollector returns a fan-out MetricCollector. When no exporters are
 // provided, a no-op implementation is returned to avoid any allocations.
-func NewMetricCollector(logger commons.Logger, meta SessionMeta, exporters ...Exporter) MetricCollector {
+func NewMetricCollector(logger commons.Logger, exporters ...Exporter) MetricCollector {
 	if len(exporters) == 0 {
 		return noopMetricCollector{}
 	}
-	return &fanoutMetricCollector{logger: logger, meta: meta, exporters: exporters}
+	return &fanoutMetricCollector{logger: logger, exporters: exporters}
 }
 
 func (c *fanoutMetricCollector) Collect(_ context.Context, rec MetricRecord) {
@@ -94,7 +92,7 @@ func (c *fanoutMetricCollector) Collect(_ context.Context, rec MetricRecord) {
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			if err := exp.ExportMetric(context.Background(), c.meta, rec); err != nil {
+			if err := exp.Export(context.Background(), rec); err != nil {
 				c.logger.Errorf("telemetry: metric export error: %v", err)
 			}
 		}()

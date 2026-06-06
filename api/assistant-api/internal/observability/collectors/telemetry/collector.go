@@ -9,7 +9,7 @@ package telemetry
 import (
 	"context"
 	"errors"
-	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,7 +39,6 @@ func New(ctx context.Context, cfg Config) (observability.Collector, error) {
 	if validator.NonNil(cfg.Exporters) {
 		return &Collector{exporter: cfg.Exporters}, nil
 	}
-
 	exporter, err := newExporter(ctx, cfg.Logger, cfg.Providers)
 	if err != nil {
 		return nil, err
@@ -55,12 +54,116 @@ func (c *Collector) Collect(ctx context.Context, record observability.Record) er
 		return nil
 	}
 	switch typed := record.(type) {
+	case observability.RecordLog:
+		occurredAt := typed.OccurredAt
+		if occurredAt.IsZero() {
+			occurredAt = time.Now()
+		}
+		attributes := make(map[string]string, len(typed.Attributes))
+		for key, value := range typed.Attributes {
+			attributes[key] = value
+		}
+		global := typed.Scope.GlobalScopeValue()
+		scopeAttributes := map[string]string{
+			"assistantId": strconv.FormatUint(typed.Scope.AssistantScopeID(), 10),
+		}
+		switch typed.Scope.ScopeType() {
+		case observability.ScopeConversation:
+			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
+		case observability.ScopeMessage:
+			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
+			scopeAttributes["messageId"] = typed.Scope.ContextID()
+			scopeAttributes["messageRole"] = string(typed.Scope.MessageScopeRole())
+		}
+		return c.exporter.Export(ctx, telemetry.LogRecord{
+			CommonRecord: telemetry.CommonRecord{
+				ID:              typed.ID,
+				ProjectID:       global.ProjectID,
+				OrganizationID:  global.OrganizationID,
+				Scope:           string(typed.Scope.ScopeType()),
+				ScopeAttributes: scopeAttributes,
+				Attributes:      attributes,
+				OccurredAt:      occurredAt,
+			},
+			Level:   string(typed.Level),
+			Message: typed.Message,
+		})
 	case observability.RecordEvent:
-		meta := sessionMeta(typed.Scope.GlobalScopeValue(), typed.Scope)
-		return c.exportEvent(ctx, meta, typed)
+		occurredAt := typed.OccurredAt
+		if occurredAt.IsZero() {
+			occurredAt = time.Now()
+		}
+		attributes := make(map[string]string, len(typed.Attributes))
+		for key, value := range typed.Attributes {
+			attributes[key] = value
+		}
+		global := typed.Scope.GlobalScopeValue()
+		scopeAttributes := map[string]string{
+			"assistantId": strconv.FormatUint(typed.Scope.AssistantScopeID(), 10),
+		}
+		switch typed.Scope.ScopeType() {
+		case observability.ScopeConversation:
+			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
+		case observability.ScopeMessage:
+			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
+			scopeAttributes["messageId"] = typed.Scope.ContextID()
+			scopeAttributes["messageRole"] = string(typed.Scope.MessageScopeRole())
+		}
+		return c.exporter.Export(ctx, telemetry.EventRecord{
+			CommonRecord: telemetry.CommonRecord{
+				ID:              typed.ID,
+				ProjectID:       global.ProjectID,
+				OrganizationID:  global.OrganizationID,
+				Scope:           string(typed.Scope.ScopeType()),
+				ScopeAttributes: scopeAttributes,
+				Attributes:      attributes,
+				OccurredAt:      occurredAt,
+			},
+			Event:     typed.Event.String(),
+			Component: typed.Component.String(),
+		})
 	case observability.RecordMetric:
-		meta := sessionMeta(typed.Scope.GlobalScopeValue(), typed.Scope)
-		return c.exportMetric(ctx, meta, typed)
+		if !validator.NotEmpty(typed.Metrics) {
+			return nil
+		}
+		occurredAt := typed.OccurredAt
+		if occurredAt.IsZero() {
+			occurredAt = time.Now()
+		}
+		global := typed.Scope.GlobalScopeValue()
+		scopeAttributes := map[string]string{
+			"assistantId": strconv.FormatUint(typed.Scope.AssistantScopeID(), 10),
+		}
+		switch typed.Scope.ScopeType() {
+		case observability.ScopeConversation:
+			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
+		case observability.ScopeMessage:
+			scopeAttributes["assistantConversationId"] = strconv.FormatUint(typed.Scope.ConversationScopeID(), 10)
+			scopeAttributes["messageId"] = typed.Scope.ContextID()
+			scopeAttributes["messageRole"] = string(typed.Scope.MessageScopeRole())
+		}
+		var errs []error
+		for _, metric := range typed.Metrics {
+			if metric == nil {
+				continue
+			}
+			if err := c.exporter.Export(ctx, telemetry.MetricRecord{
+				CommonRecord: telemetry.CommonRecord{
+					ID:              typed.ID,
+					ProjectID:       global.ProjectID,
+					OrganizationID:  global.OrganizationID,
+					Scope:           string(typed.Scope.ScopeType()),
+					ScopeAttributes: scopeAttributes,
+					OccurredAt:      occurredAt,
+				},
+				Name:        metric.GetName(),
+				Value:       metric.GetValue(),
+				Description: metric.GetDescription(),
+			}); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return errors.Join(errs...)
 	default:
 		return nil
 	}
@@ -81,94 +184,12 @@ func newExporter(ctx context.Context, logger commons.Logger, provider Provider) 
 	if !validator.NotBlank(providerName) {
 		return nil, nil
 	}
-	return providers.NewExporterFromOptions(logger, ctx, providerName, cloneOptions(provider.Options))
-}
-
-func (c *Collector) exportEvent(ctx context.Context, meta telemetry.SessionMeta, record observability.RecordEvent) error {
-	rec := telemetry.EventRecord{
-		ConversationID: record.Scope.ConversationScopeID(),
-		MessageID:      messageID(record.Scope),
-		Name:           record.Event.String(),
-		Data:           eventData(record.Attributes),
-		Time:           occurredAt(record.OccurredAt),
+	if len(provider.Options) == 0 {
+		return providers.NewExporterFromOptions(logger, ctx, providerName, nil)
 	}
-
-	var errs []error
-	if validator.NonNil(c.exporter) {
-		if err := c.exporter.ExportEvent(ctx, meta, rec); err != nil {
-			errs = append(errs, err)
-		}
+	options := make(map[string]interface{}, len(provider.Options))
+	for key, value := range provider.Options {
+		options[key] = value
 	}
-	return errors.Join(errs...)
-}
-
-func (c *Collector) exportMetric(ctx context.Context, meta telemetry.SessionMeta, record observability.RecordMetric) error {
-	if !validator.NotEmpty(record.Metrics) {
-		return nil
-	}
-
-	rec := newMetricRecord(record)
-	var errs []error
-	if validator.NonNil(c.exporter) {
-		if err := c.exporter.ExportMetric(ctx, meta, rec); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func sessionMeta(global observability.GlobalScope, scope observability.Scope) telemetry.SessionMeta {
-	return telemetry.SessionMeta{
-		AssistantID:             scope.AssistantScopeID(),
-		AssistantConversationID: scope.ConversationScopeID(),
-		ProjectID:               global.ProjectID,
-		OrganizationID:          global.OrganizationID,
-	}
-}
-
-func newMetricRecord(record observability.RecordMetric) telemetry.MetricRecord {
-	conversationID := fmt.Sprintf("%d", record.Scope.ConversationScopeID())
-	if record.Scope.ScopeType() == observability.ScopeMessage {
-		return telemetry.MessageMetricRecord{
-			MessageID:      record.Scope.MessageScopeID(),
-			ConversationID: conversationID,
-			Metrics:        record.Metrics,
-			Time:           occurredAt(record.OccurredAt),
-		}
-	}
-	return telemetry.ConversationMetricRecord{
-		ConversationID: conversationID,
-		Metrics:        record.Metrics,
-		Time:           occurredAt(record.OccurredAt),
-	}
-}
-
-func eventData(attributes observability.Attributes) map[string]string {
-	data := make(map[string]string, len(attributes))
-	for key, value := range attributes {
-		data[key] = value
-	}
-	return data
-}
-
-func messageID(scope observability.Scope) string {
-	return scope.ContextID()
-}
-
-func occurredAt(at time.Time) time.Time {
-	if !at.IsZero() {
-		return at
-	}
-	return time.Now()
-}
-
-func cloneOptions(options map[string]interface{}) map[string]interface{} {
-	if len(options) == 0 {
-		return nil
-	}
-	cloned := make(map[string]interface{}, len(options))
-	for key, value := range options {
-		cloned[key] = value
-	}
-	return cloned
+	return providers.NewExporterFromOptions(logger, ctx, providerName, options)
 }

@@ -1,19 +1,18 @@
 import type {
-  LatencyBucket,
   MetricSummary,
-  SpanCountBucket,
   TimelineDocument,
   TimelineGroup,
   TimelineItem,
   TraceSummary,
 } from './types';
+import type {
+  ObservabilityEventRecord,
+  ObservabilityLogRecord,
+  ObservabilityMetricRecord,
+  ObservabilityRecord,
+} from '@rapidaai/react';
 
 const MIN_VISIBLE_WIDTH_PCT = 0.75;
-const LATENCY_COMPONENTS = ['stt', 'tts', 'llm', 'eos'] as const;
-type LatencyComponent = (typeof LATENCY_COMPONENTS)[number];
-
-const isLatencyComponent = (component: string): component is LatencyComponent =>
-  LATENCY_COMPONENTS.includes(component as LatencyComponent);
 
 export const COMPONENT_COLORS: Record<string, string> = {
   call: '#0f62fe',
@@ -32,6 +31,291 @@ export const COMPONENT_COLORS: Record<string, string> = {
 const getTimeMs = (value: string): number => {
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const timestampToIso = (
+  timestamp: { toDate: () => Date } | undefined,
+): string => {
+  const date = timestamp?.toDate();
+  return date && Number.isFinite(date.getTime())
+    ? date.toISOString()
+    : new Date(0).toISOString();
+};
+
+const mapToObject = (map: {
+  toArray: () => Array<[string, string]>;
+}): Record<string, string> => Object.fromEntries(map.toArray());
+
+const firstPresent = (...values: Array<string | undefined>): string =>
+  values.find(value => value && value.trim() !== '') || '';
+
+const inferOutcome = ({
+  attributes,
+  level,
+  name,
+}: {
+  attributes: Record<string, string>;
+  level?: string;
+  name?: string;
+}): string => {
+  const normalized = [
+    level,
+    name,
+    attributes.status,
+    attributes.outcome,
+    attributes.result,
+    attributes.error,
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  if (
+    normalized.includes('error') ||
+    normalized.includes('fail') ||
+    normalized.includes('exception')
+  ) {
+    return 'failure';
+  }
+
+  if (
+    normalized.includes('success') ||
+    normalized.includes('complete') ||
+    normalized.includes('ok')
+  ) {
+    return 'success';
+  }
+
+  return 'unknown';
+};
+
+const getDurationFromAttributes = (
+  attributes: Record<string, string>,
+): number | undefined => {
+  const candidate = firstPresent(
+    attributes.durationMs,
+    attributes.duration_ms,
+    attributes.latencyMs,
+    attributes.latency_ms,
+    attributes.elapsedMs,
+    attributes.elapsed_ms,
+  );
+  const value = Number(candidate);
+  return Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined;
+};
+
+const isDurationMetricName = (name: string): boolean =>
+  ['duration', 'duration_ms', 'latency', 'latency_ms', 'elapsed_ms'].includes(
+    name.toLowerCase(),
+  );
+
+const getDurationFromMetric = (
+  metric: ObservabilityMetricRecord,
+): number | undefined => {
+  if (!isDurationMetricName(metric.getName())) return undefined;
+  const value = Number(metric.getValue());
+  return Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined;
+};
+
+const getScopeAttributes = (
+  record:
+    | ObservabilityLogRecord
+    | ObservabilityEventRecord
+    | ObservabilityMetricRecord,
+): Record<string, string> => mapToObject(record.getScopeattributesMap());
+
+const getScopeContext = (scopeAttributes: Record<string, string>) => ({
+  assistantConversationId: firstPresent(
+    scopeAttributes.assistantConversationId,
+    scopeAttributes.conversationId,
+  ),
+  assistantId: scopeAttributes.assistantId || '',
+  contextId: firstPresent(
+    scopeAttributes.contextId,
+    scopeAttributes.messageId,
+    scopeAttributes.assistantConversationId,
+    scopeAttributes.conversationId,
+  ),
+  messageId: scopeAttributes.messageId || '',
+  messageRole: scopeAttributes.messageRole || '',
+});
+
+const buildBaseDocument = ({
+  id,
+  kind,
+  name,
+  title,
+  level,
+  component,
+  organizationId,
+  projectId,
+  assistantId,
+  assistantConversationId,
+  scope,
+  messageId,
+  messageRole,
+  contextId,
+  occurredAt,
+  attributes,
+  data,
+  durationMs,
+}: {
+  id: string;
+  kind: TimelineDocument['kind'];
+  name: string;
+  title: string;
+  level: string;
+  component: string;
+  organizationId: string;
+  projectId: string;
+  assistantId: string;
+  assistantConversationId: string;
+  scope: string;
+  messageId: string;
+  messageRole: string;
+  contextId: string;
+  occurredAt: string;
+  attributes: Record<string, string>;
+  data: Record<string, unknown>;
+  durationMs?: number;
+}): TimelineDocument => ({
+  id,
+  kind,
+  name,
+  category: component || name.split('.')[0] || kind,
+  level,
+  outcome: inferOutcome({ attributes, level, name }),
+  title,
+  organizationId,
+  projectId,
+  assistantId,
+  assistantConversationId,
+  scope: scope || 'unknown',
+  messageId: messageId || undefined,
+  messageRole: messageRole || undefined,
+  contextId:
+    contextId ||
+    messageId ||
+    `conversation-${assistantConversationId || 'unknown'}`,
+  occurredAt,
+  receivedAt: occurredAt,
+  durationMs,
+  attributes,
+  data,
+});
+
+const eventToTimelineDocument = (
+  event: ObservabilityEventRecord,
+  index: number,
+): TimelineDocument => {
+  const attributes = mapToObject(event.getAttributesMap());
+  const scopeAttributes = getScopeAttributes(event);
+  const scopeContext = getScopeContext(scopeAttributes);
+  const name = event.getEvent() || 'event';
+  return buildBaseDocument({
+    id: event.getId() || `event-${index}`,
+    kind: 'event',
+    name,
+    title: name,
+    level: attributes.level || 'info',
+    component:
+      event.getComponent() || attributes.component || name.split('.')[0],
+    organizationId: event.getOrganizationid(),
+    projectId: event.getProjectid(),
+    assistantId: scopeContext.assistantId,
+    assistantConversationId: scopeContext.assistantConversationId,
+    scope: event.getScope(),
+    messageId: scopeContext.messageId,
+    messageRole: scopeContext.messageRole,
+    contextId: scopeContext.contextId,
+    occurredAt: timestampToIso(event.getOccurredat()),
+    attributes,
+    data: { scopeAttributes },
+    durationMs: getDurationFromAttributes(attributes),
+  });
+};
+
+const metricToTimelineDocument = (
+  metric: ObservabilityMetricRecord,
+  index: number,
+): TimelineDocument => {
+  const attributes = mapToObject(metric.getAttributesMap());
+  const scopeAttributes = getScopeAttributes(metric);
+  const scopeContext = getScopeContext(scopeAttributes);
+  const name = metric.getName() || attributes.name || 'metric';
+  const metrics = [
+    {
+      description: metric.getDescription(),
+      name,
+      value: metric.getValue(),
+    },
+  ];
+  return buildBaseDocument({
+    id: metric.getId() || `metric-${scopeContext.contextId || index}`,
+    kind: 'metric',
+    name,
+    title: `Metric: ${name}`,
+    level: attributes.level || 'info',
+    component: attributes.component || name.split('.')[0] || 'metric',
+    organizationId: metric.getOrganizationid(),
+    projectId: metric.getProjectid(),
+    assistantId: scopeContext.assistantId,
+    assistantConversationId: scopeContext.assistantConversationId,
+    scope: metric.getScope(),
+    messageId: scopeContext.messageId,
+    messageRole: scopeContext.messageRole,
+    contextId: scopeContext.contextId,
+    occurredAt: timestampToIso(metric.getOccurredat()),
+    attributes,
+    data: { description: metric.getDescription(), metrics, scopeAttributes },
+    durationMs:
+      getDurationFromMetric(metric) || getDurationFromAttributes(attributes),
+  });
+};
+
+const logToTimelineDocument = (
+  log: ObservabilityLogRecord,
+  index: number,
+): TimelineDocument => {
+  const attributes = mapToObject(log.getAttributesMap());
+  const scopeAttributes = getScopeAttributes(log);
+  const scopeContext = getScopeContext(scopeAttributes);
+  const message = log.getMessage() || 'Log record';
+  return buildBaseDocument({
+    id: log.getId() || `log-${index}`,
+    kind: 'log',
+    name: message,
+    title: message,
+    level: log.getLevel() || attributes.level || 'info',
+    component: attributes.component || attributes.provider || 'log',
+    organizationId: log.getOrganizationid(),
+    projectId: log.getProjectid(),
+    assistantId: scopeContext.assistantId,
+    assistantConversationId: scopeContext.assistantConversationId,
+    scope: log.getScope(),
+    messageId: scopeContext.messageId,
+    messageRole: scopeContext.messageRole,
+    contextId: scopeContext.contextId,
+    occurredAt: timestampToIso(log.getOccurredat()),
+    attributes,
+    data: { message, scopeAttributes },
+    durationMs: getDurationFromAttributes(attributes),
+  });
+};
+
+export const telemetryRecordToTimelineDocument = (
+  record: ObservabilityRecord,
+  index: number,
+): TimelineDocument | null => {
+  const log = record.getLog();
+  if (log) return logToTimelineDocument(log, index);
+
+  const event = record.getEvent();
+  if (event) return eventToTimelineDocument(event, index);
+
+  const metric = record.getMetric();
+  if (metric) return metricToTimelineDocument(metric, index);
+
+  return null;
 };
 
 export const getDocumentComponent = (doc: TimelineDocument): string => {
@@ -208,91 +492,6 @@ export const getMetricSummaries = (
     .sort(
       (a, b) => b.count - a.count || a.component.localeCompare(b.component),
     );
-};
-
-export const getSpanCountBuckets = (
-  documents: TimelineDocument[],
-  bucketCount = 18,
-): SpanCountBucket[] => {
-  if (documents.length === 0) return [];
-
-  const timestamps = documents.map(document => getTimeMs(document.occurredAt));
-  const minTime = Math.min(...timestamps);
-  const maxTime = Math.max(...timestamps);
-  const range = Math.max(maxTime - minTime, 1);
-  const bucketSize = Math.max(Math.ceil(range / bucketCount), 1);
-
-  const buckets = Array.from({ length: bucketCount }, (_, index) => {
-    const startMs = minTime + index * bucketSize;
-    return {
-      endMs: startMs + bucketSize,
-      failureCount: 0,
-      label: formatTime(new Date(startMs).toISOString()),
-      spanCount: 0,
-      startMs,
-    };
-  });
-
-  documents.forEach(document => {
-    const offset = getTimeMs(document.occurredAt) - minTime;
-    const index = Math.min(
-      buckets.length - 1,
-      Math.max(0, Math.floor(offset / bucketSize)),
-    );
-    buckets[index].spanCount += 1;
-    if (document.outcome === 'failure' || document.level === 'error') {
-      buckets[index].failureCount += 1;
-    }
-  });
-
-  return buckets;
-};
-
-export const getLatencyBuckets = (
-  documents: TimelineDocument[],
-  bucketCount = 18,
-): LatencyBucket[] => {
-  if (documents.length === 0) return [];
-
-  const timestamps = documents.map(document => getTimeMs(document.occurredAt));
-  const minTime = Math.min(...timestamps);
-  const maxTime = Math.max(...timestamps);
-  const range = Math.max(maxTime - minTime, 1);
-  const bucketSize = Math.max(Math.ceil(range / bucketCount), 1);
-
-  const buckets: LatencyBucket[] = Array.from(
-    { length: bucketCount },
-    (_, index) => {
-      const startMs = minTime + index * bucketSize;
-      return {
-        endMs: startMs + bucketSize,
-        eos: 0,
-        label: formatTime(new Date(startMs).toISOString()),
-        llm: 0,
-        startMs,
-        stt: 0,
-        total: 0,
-        tts: 0,
-      };
-    },
-  );
-
-  documents.forEach(document => {
-    const component = getDocumentComponent(document);
-    if (!isLatencyComponent(component)) return;
-
-    const offset = getTimeMs(document.occurredAt) - minTime;
-    const index = Math.min(
-      buckets.length - 1,
-      Math.max(0, Math.floor(offset / bucketSize)),
-    );
-    const durationMs = Math.max(document.durationMs || 0, 0);
-    const bucket = buckets[index];
-    bucket[component] += durationMs;
-    bucket.total += durationMs;
-  });
-
-  return buckets;
 };
 
 export const matchesTimelineSearch = (

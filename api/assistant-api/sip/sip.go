@@ -1200,7 +1200,6 @@ func (m *SIPEngine) createObserver(ctx context.Context, setup *sip_pipeline.Call
 		ConversationID: setup.ConversationID,
 		ProjectID:      setup.ProjectID,
 		OrganizationID: setup.OrganizationID,
-		Persist:        m.assistantConversationService,
 		Events:         observe.NewEventCollector(m.logger, meta, eventExporters...),
 		Metrics:        observe.NewMetricCollector(m.logger, meta, metricExporters...),
 	})

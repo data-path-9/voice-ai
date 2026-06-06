@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
@@ -200,11 +199,7 @@ func (tc *genericRequestor) applyMetadata(mt map[string]interface{}) {
 	utils.Go(context.Background(), func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
-		start := time.Now()
-		tc.conversationService.ApplyConversationMetadata(
-			dbCtx,
-			tc.auth, tc.assistant.Id, tc.assistantConversation.Id, types.NewMetadataList(modified))
-		tc.logger.Benchmark("genericRequestor.applyMetadata", time.Since(start))
+		tc.conversationService.CreateOrUpdateConversationMetadata(dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, types.NewMetadataList(modified))
 	})
 }
 

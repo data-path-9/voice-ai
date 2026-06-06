@@ -98,7 +98,7 @@ func (d *OutboundDispatcher) monitorCallConnect(ctx context.Context, contextID s
 
 	if d.conversationService != nil {
 		auth := cc.ToAuth()
-		d.conversationService.PersistMetrics(ctx, auth, cc.AssistantID, cc.ConversationID, []*types.Metric{
+		d.conversationService.CreateOrUpdateConversationMetrics(ctx, auth, cc.AssistantID, cc.ConversationID, []*types.Metric{
 			{Name: "status", Value: "FAILED", Description: "no_answer_timeout"},
 		})
 	}

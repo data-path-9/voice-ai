@@ -4,9 +4,46 @@ export type FilterOption = {
 };
 
 export const SCOPE_OPTIONS: FilterOption[] = [
+  { id: 'all', text: 'All scopes' },
   { id: 'assistant', text: 'Assistant' },
   { id: 'conversation', text: 'Conversation' },
   { id: 'message', text: 'Message' },
+];
+
+export const KIND_OPTIONS: FilterOption[] = [
+  { id: 'all', text: 'All records' },
+  { id: 'log', text: 'Logs' },
+  { id: 'event', text: 'Events' },
+  { id: 'metric', text: 'Metrics' },
+];
+
+export const LEVEL_OPTIONS: FilterOption[] = [
+  { id: 'all', text: 'All levels' },
+  { id: 'debug', text: 'Debug' },
+  { id: 'info', text: 'Info' },
+  { id: 'warn', text: 'Warn' },
+  { id: 'error', text: 'Error' },
+];
+
+export const ROLE_OPTIONS: FilterOption[] = [
+  { id: 'all', text: 'All roles' },
+  { id: 'user', text: 'User' },
+  { id: 'assistant', text: 'Assistant' },
+  { id: 'system', text: 'System' },
+  { id: 'tool', text: 'Tool' },
+];
+
+export const METRIC_NAME_OPTIONS: FilterOption[] = [
+  { id: 'all', text: 'All metrics' },
+  { id: 'duration_ms', text: 'duration_ms' },
+  { id: 'latency_ms', text: 'latency_ms' },
+  { id: 'stt_latency_ms', text: 'stt_latency_ms' },
+  { id: 'tts_latency_ms', text: 'tts_latency_ms' },
+  { id: 'llm_latency_ms', text: 'llm_latency_ms' },
+  { id: 'eos_latency_ms', text: 'eos_latency_ms' },
+  { id: 'input_tokens', text: 'input_tokens' },
+  { id: 'output_tokens', text: 'output_tokens' },
+  { id: 'total_tokens', text: 'total_tokens' },
 ];
 
 export const COMPONENT_OPTIONS: FilterOption[] = [

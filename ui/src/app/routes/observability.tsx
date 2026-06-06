@@ -5,6 +5,7 @@ import {
   KnowledgeActivityListingPage,
   LLMActivityListingPage,
   RequestActivityListingPage,
+  TraceExplorerPage,
   ToolActivityListingPage,
 } from '@/app/pages/activities';
 import { Routes, Route, Outlet } from 'react-router-dom';
@@ -45,6 +46,11 @@ export function ObservabilityRoute() {
           key="conversation-logs"
           path="/conversation"
           element={<ConversationActivityListingPage />}
+        />
+        <Route
+          key="trace-explorer"
+          path="/traces"
+          element={<TraceExplorerPage />}
         />
       </Route>
     </Routes>

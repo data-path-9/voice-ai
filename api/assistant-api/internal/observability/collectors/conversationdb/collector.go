@@ -33,11 +33,13 @@ type Config struct {
 }
 
 type Collector struct {
+	logger  commons.Logger
 	service internal_services.AssistantConversationService
 }
 
 func New(cfg Config) observability.Collector {
 	return &Collector{
+		logger:  cfg.Logger,
 		service: cfg.ConversationService,
 	}
 }
@@ -70,7 +72,7 @@ func (c *Collector) collectMetrics(ctx context.Context, record observability.Rec
 		if err := validateMessageScope(scope); err != nil {
 			return err
 		}
-		_, err := c.service.ApplyMessageMetrics(
+		_, err := c.service.CreateOrUpdateMessageMetrics(
 			ctx,
 			record.Auth,
 			scope.ConversationScopeID(),
@@ -82,7 +84,7 @@ func (c *Collector) collectMetrics(ctx context.Context, record observability.Rec
 		if err := validateConversationScope(scope); err != nil {
 			return err
 		}
-		_, err := c.service.ApplyConversationMetrics(
+		_, err := c.service.CreateOrUpdateConversationMetrics(
 			ctx,
 			record.Auth,
 			scope.AssistantScopeID(),
@@ -110,7 +112,7 @@ func (c *Collector) collectMetadata(ctx context.Context, record observability.Re
 		if err := validateMessageScope(scope); err != nil {
 			return err
 		}
-		_, err := c.service.ApplyMessageMetadata(
+		_, err := c.service.CreateOrUpdateMessageMetadata(
 			ctx,
 			record.Auth,
 			scope.ConversationScopeID(),
@@ -122,7 +124,7 @@ func (c *Collector) collectMetadata(ctx context.Context, record observability.Re
 		if err := validateConversationScope(scope); err != nil {
 			return err
 		}
-		_, err := c.service.ApplyConversationMetadata(
+		_, err := c.service.CreateOrUpdateConversationMetadata(
 			ctx,
 			record.Auth,
 			scope.AssistantScopeID(),

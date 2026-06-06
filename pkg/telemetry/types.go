@@ -5,49 +5,43 @@
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
 package telemetry
 
-import (
-	"time"
+import "time"
 
-	"github.com/rapidaai/protos"
-)
-
-// SessionMeta holds stable per-session identifiers passed to every exporter.
-type SessionMeta struct {
-	AssistantID             uint64
-	AssistantConversationID uint64
-	ProjectID               uint64
-	OrganizationID          uint64
+type Record interface {
+	isTelemetryRecord()
 }
 
-// EventRecord represents a named event fired during a voice session.
-// MessageID identifies the interaction turn (context ID) in which the event occurred.
+type CommonRecord struct {
+	ID              string
+	ProjectID       uint64
+	OrganizationID  uint64
+	Scope           string
+	ScopeAttributes map[string]string
+	Attributes      map[string]string
+	OccurredAt      time.Time
+}
+
+type LogRecord struct {
+	CommonRecord
+	Level   string
+	Message string
+}
+
+func (LogRecord) isTelemetryRecord() {}
+
 type EventRecord struct {
-	ConversationID uint64 // assistant conversation ID
-	MessageID      string // turn/interaction context ID
-	Name           string
-	Data           map[string]string
-	Time           time.Time
+	CommonRecord
+	Event     string
+	Component string
 }
 
-// MetricRecord is a sealed interface for typed metrics.
-// Implementations: ConversationMetricRecord, MessageMetricRecord.
-type MetricRecord interface{ isMetricRecord() }
+func (EventRecord) isTelemetryRecord() {}
 
-// ConversationMetricRecord carries metrics scoped to an entire conversation.
-type ConversationMetricRecord struct {
-	ConversationID string
-	Metrics        []*protos.Metric
-	Time           time.Time
+type MetricRecord struct {
+	CommonRecord
+	Name        string
+	Value       string
+	Description string
 }
 
-func (ConversationMetricRecord) isMetricRecord() {}
-
-// MessageMetricRecord carries metrics scoped to a single message/turn.
-type MessageMetricRecord struct {
-	MessageID      string // turn context ID
-	ConversationID string // for correlation
-	Metrics        []*protos.Metric
-	Time           time.Time
-}
-
-func (MessageMetricRecord) isMetricRecord() {}
+func (MetricRecord) isTelemetryRecord() {}

@@ -87,7 +87,7 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 
 	inbound := channel_telephony.NewInboundDispatcher(telephonyDeps)
 	outboundDisp := channel_telephony.NewOutboundDispatcher(telephonyDeps)
-	conversationObserver := NewConversationObserver(cfg, logger, opensearch, conversationService)
+	conversationObserver := NewConversationObserver(cfg, logger, opensearch)
 	cApi := &ConversationApi{
 		cfg:                          cfg,
 		logger:                       logger,
@@ -139,7 +139,7 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 					for k, v := range metadata {
 						md = append(md, types.NewMetadata(k, fmt.Sprintf("%v", v)))
 					}
-					if _, err := conversationService.ApplyConversationMetadata(ctx, auth, assistantID, conversationID, md); err != nil {
+					if _, err := conversationService.CreateOrUpdateConversationMetadata(ctx, auth, assistantID, conversationID, md); err != nil {
 						return err
 					}
 				}

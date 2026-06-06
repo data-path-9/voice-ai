@@ -25,24 +25,22 @@ type fakeExporter struct {
 	blockUntil  <-chan struct{}
 }
 
-func (f *fakeExporter) ExportEvent(_ context.Context, _ telemetry.SessionMeta, _ telemetry.EventRecord) error {
+func (f *fakeExporter) Export(_ context.Context, rec telemetry.Record) error {
 	if f.blockUntil != nil {
 		<-f.blockUntil
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.eventCalls++
-	return f.eventErr
-}
-
-func (f *fakeExporter) ExportMetric(_ context.Context, _ telemetry.SessionMeta, _ telemetry.MetricRecord) error {
-	if f.blockUntil != nil {
-		<-f.blockUntil
+	switch rec.(type) {
+	case telemetry.EventRecord:
+		f.eventCalls++
+		return f.eventErr
+	case telemetry.MetricRecord:
+		f.metricCalls++
+		return f.metricErr
+	default:
+		return nil
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.metricCalls++
-	return f.metricErr
 }
 
 func (f *fakeExporter) Close(_ context.Context) error {
@@ -65,12 +63,11 @@ func testLogger(t *testing.T) commons.Logger {
 
 func TestCollectors_FanoutAndClose(t *testing.T) {
 	logger := testLogger(t)
-	meta := telemetry.SessionMeta{AssistantID: 1}
 
 	evt1 := &fakeExporter{}
 	evt2 := &fakeExporter{}
-	eventCollector := telemetry.NewEventCollector(logger, meta, evt1, evt2)
-	eventCollector.Collect(context.Background(), telemetry.EventRecord{Name: "session"})
+	eventCollector := telemetry.NewEventCollector(logger, evt1, evt2)
+	eventCollector.Collect(context.Background(), telemetry.EventRecord{Event: "session"})
 	eventCollector.Close(context.Background())
 
 	assert.Equal(t, 1, evt1.eventCalls)
@@ -80,8 +77,8 @@ func TestCollectors_FanoutAndClose(t *testing.T) {
 
 	met1 := &fakeExporter{}
 	met2 := &fakeExporter{}
-	metricCollector := telemetry.NewMetricCollector(logger, meta, met1, met2)
-	metricCollector.Collect(context.Background(), telemetry.ConversationMetricRecord{})
+	metricCollector := telemetry.NewMetricCollector(logger, met1, met2)
+	metricCollector.Collect(context.Background(), telemetry.MetricRecord{})
 	metricCollector.Close(context.Background())
 
 	assert.Equal(t, 1, met1.metricCalls)
@@ -92,14 +89,13 @@ func TestCollectors_FanoutAndClose(t *testing.T) {
 
 func TestCollectors_Noop(t *testing.T) {
 	logger := testLogger(t)
-	meta := telemetry.SessionMeta{}
 
-	eventCollector := telemetry.NewEventCollector(logger, meta)
-	metricCollector := telemetry.NewMetricCollector(logger, meta)
+	eventCollector := telemetry.NewEventCollector(logger)
+	metricCollector := telemetry.NewMetricCollector(logger)
 
 	assert.NotPanics(t, func() {
-		eventCollector.Collect(context.Background(), telemetry.EventRecord{Name: "x"})
-		metricCollector.Collect(context.Background(), telemetry.ConversationMetricRecord{})
+		eventCollector.Collect(context.Background(), telemetry.EventRecord{Event: "x"})
+		metricCollector.Collect(context.Background(), telemetry.MetricRecord{})
 		eventCollector.Close(context.Background())
 		metricCollector.Close(context.Background())
 	})
@@ -107,7 +103,6 @@ func TestCollectors_Noop(t *testing.T) {
 
 func TestCollectors_ExporterErrorsDoNotPanic(t *testing.T) {
 	logger := testLogger(t)
-	meta := telemetry.SessionMeta{AssistantID: 1}
 
 	exp := &fakeExporter{
 		eventErr:  errors.New("event export failed"),
@@ -115,12 +110,12 @@ func TestCollectors_ExporterErrorsDoNotPanic(t *testing.T) {
 		CloseErr:  errors.New("Close failed"),
 	}
 
-	eventCollector := telemetry.NewEventCollector(logger, meta, exp)
-	metricCollector := telemetry.NewMetricCollector(logger, meta, exp)
+	eventCollector := telemetry.NewEventCollector(logger, exp)
+	metricCollector := telemetry.NewMetricCollector(logger, exp)
 
 	assert.NotPanics(t, func() {
-		eventCollector.Collect(context.Background(), telemetry.EventRecord{Name: "session"})
-		metricCollector.Collect(context.Background(), telemetry.ConversationMetricRecord{})
+		eventCollector.Collect(context.Background(), telemetry.EventRecord{Event: "session"})
+		metricCollector.Collect(context.Background(), telemetry.MetricRecord{})
 		eventCollector.Close(context.Background())
 		metricCollector.Close(context.Background())
 	})
@@ -128,15 +123,14 @@ func TestCollectors_ExporterErrorsDoNotPanic(t *testing.T) {
 
 func TestCollectors_CloseWaitsForInflightExports(t *testing.T) {
 	logger := testLogger(t)
-	meta := telemetry.SessionMeta{AssistantID: 1}
 
 	blocker := make(chan struct{})
 	exp := &fakeExporter{blockUntil: blocker}
-	eventCollector := telemetry.NewEventCollector(logger, meta, exp)
-	metricCollector := telemetry.NewMetricCollector(logger, meta, exp)
+	eventCollector := telemetry.NewEventCollector(logger, exp)
+	metricCollector := telemetry.NewMetricCollector(logger, exp)
 
-	eventCollector.Collect(context.Background(), telemetry.EventRecord{Name: "session"})
-	metricCollector.Collect(context.Background(), telemetry.ConversationMetricRecord{})
+	eventCollector.Collect(context.Background(), telemetry.EventRecord{Event: "session"})
+	metricCollector.Collect(context.Background(), telemetry.MetricRecord{})
 
 	done := make(chan struct{})
 	go func() {

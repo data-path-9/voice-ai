@@ -20,7 +20,7 @@ import (
 	"github.com/rapidaai/pkg/telemetry"
 )
 
-// OpenSearchExporter indexes events and metrics to dedicated OpenSearch indices.
+// OpenSearchExporter indexes logs, events, and metrics to dedicated OpenSearch indices.
 type OpenSearchExporter struct {
 	logger    commons.Logger
 	config    OpenSearchConfig
@@ -70,97 +70,141 @@ func NewOpenSearchExporterFromOptions(
 	}, nil
 }
 
-func (e *OpenSearchExporter) eventIndex() string {
+func (e *OpenSearchExporter) index(kind string, occurredAt time.Time) string {
 	prefix := "rapida"
 	if strings.TrimSpace(e.config.IndexPrefix) != "" {
 		prefix = strings.TrimSpace(e.config.IndexPrefix)
 	}
-	return prefix + "-events-" + time.Now().UTC().Format("20060102")
+	if occurredAt.IsZero() {
+		occurredAt = time.Now().UTC()
+	}
+	return prefix + "-" + kind + "-" + occurredAt.UTC().Format("20060102")
 }
 
-func (e *OpenSearchExporter) metricIndex() string {
-	prefix := "rapida"
-	if strings.TrimSpace(e.config.IndexPrefix) != "" {
-		prefix = strings.TrimSpace(e.config.IndexPrefix)
-	}
-	return prefix + "-metrics-" + time.Now().UTC().Format("20060102")
+func (e *OpenSearchExporter) logIndex(occurredAt time.Time) string {
+	return e.index("logs", occurredAt)
+}
+
+func (e *OpenSearchExporter) eventIndex(occurredAt time.Time) string {
+	return e.index("events", occurredAt)
+}
+
+func (e *OpenSearchExporter) metricIndex(occurredAt time.Time) string {
+	return e.index("metrics", occurredAt)
 }
 
 type opensearchEventDoc struct {
-	ProjectID               uint64            `json:"projectId"`
-	OrganizationID          uint64            `json:"organizationId"`
-	AssistantID             uint64            `json:"assistantId"`
-	AssistantConversationID uint64            `json:"assistantConversationId"`
-	MessageID               string            `json:"messageId"`
-	Name                    string            `json:"name"`
-	Data                    map[string]string `json:"data"`
-	Time                    time.Time         `json:"time"`
+	ID              string            `json:"id,omitempty"`
+	Kind            string            `json:"kind"`
+	Event           string            `json:"event"`
+	Component       string            `json:"component,omitempty"`
+	ProjectID       uint64            `json:"projectId"`
+	OrganizationID  uint64            `json:"organizationId"`
+	Scope           string            `json:"scope,omitempty"`
+	ScopeAttributes map[string]string `json:"scopeAttributes,omitempty"`
+	Attributes      map[string]string `json:"attributes,omitempty"`
+	OccurredAt      time.Time         `json:"occurredAt"`
 }
 
-type opensearchMetricEntry struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+type opensearchLogDoc struct {
+	ID              string            `json:"id,omitempty"`
+	Kind            string            `json:"kind"`
+	Level           string            `json:"level"`
+	Message         string            `json:"message"`
+	ProjectID       uint64            `json:"projectId"`
+	OrganizationID  uint64            `json:"organizationId"`
+	Scope           string            `json:"scope,omitempty"`
+	ScopeAttributes map[string]string `json:"scopeAttributes,omitempty"`
+	Attributes      map[string]string `json:"attributes,omitempty"`
+	OccurredAt      time.Time         `json:"occurredAt"`
 }
 
 type opensearchMetricDoc struct {
-	ProjectID               uint64                  `json:"projectId"`
-	OrganizationID          uint64                  `json:"organizationId"`
-	AssistantID             uint64                  `json:"assistantId"`
-	AssistantConversationID uint64                  `json:"assistantConversationId"`
-	Scope                   string                  `json:"scope"` // "conversation" or "message"
-	ContextID               string                  `json:"contextId"`
-	Metrics                 []opensearchMetricEntry `json:"metrics"`
-	Time                    time.Time               `json:"time"`
+	ID              string            `json:"id,omitempty"`
+	Kind            string            `json:"kind"`
+	Name            string            `json:"name"`
+	Value           string            `json:"value"`
+	Description     string            `json:"description,omitempty"`
+	ProjectID       uint64            `json:"projectId"`
+	OrganizationID  uint64            `json:"organizationId"`
+	Scope           string            `json:"scope,omitempty"`
+	ScopeAttributes map[string]string `json:"scopeAttributes,omitempty"`
+	Attributes      map[string]string `json:"attributes,omitempty"`
+	OccurredAt      time.Time         `json:"occurredAt"`
 }
 
-func (e *OpenSearchExporter) ExportEvent(ctx context.Context, meta telemetry.SessionMeta, rec telemetry.EventRecord) error {
-	conversationID := rec.ConversationID
-	if conversationID == 0 {
-		conversationID = meta.AssistantConversationID
-	}
-	doc := opensearchEventDoc{
-		ProjectID:               meta.ProjectID,
-		OrganizationID:          meta.OrganizationID,
-		AssistantID:             meta.AssistantID,
-		AssistantConversationID: conversationID,
-		MessageID:               rec.MessageID,
-		Name:                    rec.Name,
-		Data:                    rec.Data,
-		Time:                    rec.Time,
-	}
-	return e.bulk(ctx, e.eventIndex(), doc)
-}
-
-func (e *OpenSearchExporter) ExportMetric(ctx context.Context, meta telemetry.SessionMeta, rec telemetry.MetricRecord) error {
-	doc := opensearchMetricDoc{
-		ProjectID:               meta.ProjectID,
-		OrganizationID:          meta.OrganizationID,
-		AssistantID:             meta.AssistantID,
-		AssistantConversationID: meta.AssistantConversationID,
-	}
-	switch m := rec.(type) {
-	case telemetry.ConversationMetricRecord:
-		doc.Scope = "conversation"
-		doc.ContextID = m.ConversationID
-		doc.Time = m.Time
-		for _, metric := range m.Metrics {
-			doc.Metrics = append(doc.Metrics, opensearchMetricEntry{
-				Name:  metric.GetName(),
-				Value: metric.GetValue(),
-			})
+func (e *OpenSearchExporter) Export(ctx context.Context, rec telemetry.Record) error {
+	switch typed := rec.(type) {
+	case telemetry.LogRecord:
+		occurredAt := typed.OccurredAt
+		if occurredAt.IsZero() {
+			occurredAt = time.Now().UTC()
 		}
-	case telemetry.MessageMetricRecord:
-		doc.Scope = "message"
-		doc.ContextID = m.MessageID
-		doc.Time = m.Time
-		for _, metric := range m.Metrics {
-			doc.Metrics = append(doc.Metrics, opensearchMetricEntry{
-				Name:  metric.GetName(),
-				Value: metric.GetValue(),
-			})
+		id := typed.ID
+		if strings.TrimSpace(id) == "" {
+			id = uuid.NewString()
 		}
+		doc := opensearchLogDoc{
+			ID:              id,
+			Kind:            "log",
+			Level:           typed.Level,
+			Message:         typed.Message,
+			ProjectID:       typed.ProjectID,
+			OrganizationID:  typed.OrganizationID,
+			Scope:           typed.Scope,
+			ScopeAttributes: typed.ScopeAttributes,
+			Attributes:      typed.Attributes,
+			OccurredAt:      occurredAt,
+		}
+		return e.bulk(ctx, e.logIndex(doc.OccurredAt), doc.ID, doc)
+	case telemetry.EventRecord:
+		occurredAt := typed.OccurredAt
+		if occurredAt.IsZero() {
+			occurredAt = time.Now().UTC()
+		}
+		id := typed.ID
+		if strings.TrimSpace(id) == "" {
+			id = uuid.NewString()
+		}
+		doc := opensearchEventDoc{
+			ID:              id,
+			Kind:            "event",
+			Event:           typed.Event,
+			Component:       typed.Component,
+			ProjectID:       typed.ProjectID,
+			OrganizationID:  typed.OrganizationID,
+			Scope:           typed.Scope,
+			ScopeAttributes: typed.ScopeAttributes,
+			Attributes:      typed.Attributes,
+			OccurredAt:      occurredAt,
+		}
+		return e.bulk(ctx, e.eventIndex(doc.OccurredAt), doc.ID, doc)
+	case telemetry.MetricRecord:
+		occurredAt := typed.OccurredAt
+		if occurredAt.IsZero() {
+			occurredAt = time.Now().UTC()
+		}
+		id := typed.ID
+		if strings.TrimSpace(id) == "" {
+			id = uuid.NewString()
+		}
+		doc := opensearchMetricDoc{
+			ID:              id,
+			Kind:            "metric",
+			Name:            typed.Name,
+			Value:           typed.Value,
+			Description:     typed.Description,
+			ProjectID:       typed.ProjectID,
+			OrganizationID:  typed.OrganizationID,
+			Scope:           typed.Scope,
+			ScopeAttributes: typed.ScopeAttributes,
+			Attributes:      typed.Attributes,
+			OccurredAt:      occurredAt,
+		}
+		return e.bulk(ctx, e.metricIndex(doc.OccurredAt), doc.ID, doc)
+	default:
+		return nil
 	}
-	return e.bulk(ctx, e.metricIndex(), doc)
 }
 
 func (e *OpenSearchExporter) Close(ctx context.Context) error {
@@ -170,9 +214,12 @@ func (e *OpenSearchExporter) Close(ctx context.Context) error {
 	return nil
 }
 
-func (e *OpenSearchExporter) bulk(ctx context.Context, index string, doc interface{}) error {
+func (e *OpenSearchExporter) bulk(ctx context.Context, index string, id string, doc interface{}) error {
 	var sb strings.Builder
-	meta := fmt.Sprintf(`{ "index": { "_index": "%s", "_id": "%s" } }`, index, uuid.NewString())
+	if strings.TrimSpace(id) == "" {
+		id = uuid.NewString()
+	}
+	meta := fmt.Sprintf(`{ "index": { "_index": "%s", "_id": "%s" } }`, index, id)
 	sb.WriteString(meta + "\n")
 	b, err := json.Marshal(doc)
 	if err != nil {

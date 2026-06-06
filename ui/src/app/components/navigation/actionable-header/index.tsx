@@ -126,13 +126,13 @@ export const CustomerOptions: FC<{
       <HeaderPanel expanded={accountDropdownOpen}>
         <Switcher aria-label="Account" expanded={accountDropdownOpen}>
           <li className="cds--switcher__item--divider">
-            <span>Account</span>
+            <span className="uppercase">Account</span>
           </li>
           <SwitcherItem aria-label="Account Settings" href="/account">
             Account Settings
           </SwitcherItem>
           <li className="cds--switcher__item--divider">
-            <span>Resources</span>
+            <span className="uppercase">Resources</span>
           </li>
           <SwitcherItem
             aria-label="Documentation"
@@ -149,7 +149,7 @@ export const CustomerOptions: FC<{
             Contact us
           </SwitcherItem>
           <li className="cds--switcher__item--divider">
-            <span>Session</span>
+            <span className="uppercase">Session</span>
           </li>
           <SwitcherItem aria-label="Sign out" href="/auth/signin">
             Sign out

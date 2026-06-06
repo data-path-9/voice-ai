@@ -20,20 +20,20 @@ type conversationObserver struct {
 	cfg        *config.AssistantConfig
 	logger     commons.Logger
 	opensearch connectors.OpenSearchConnector
-	persist    observe.ConversationPersister
+	// persist    observe.ConversationPersister
 }
 
 func NewConversationObserver(
 	cfg *config.AssistantConfig,
 	logger commons.Logger,
 	opensearch connectors.OpenSearchConnector,
-	persist observe.ConversationPersister,
+	// persist observe.ConversationPersister,
 ) *conversationObserver {
 	return &conversationObserver{
 		cfg:        cfg,
 		logger:     logger,
 		opensearch: opensearch,
-		persist:    persist,
+		// persist:    persist,
 	}
 }
 
@@ -44,13 +44,6 @@ func (o *conversationObserver) ConversationObserver(auth types.SimplePrinciple, 
 	}
 	if oid := auth.GetCurrentOrganizationId(); oid != nil {
 		orgID = *oid
-	}
-
-	meta := observe.SessionMeta{
-		AssistantID:             assistantID,
-		AssistantConversationID: conversationID,
-		ProjectID:               projectID,
-		OrganizationID:          orgID,
 	}
 
 	var eventExporters []observe.EventExporter
@@ -76,8 +69,8 @@ func (o *conversationObserver) ConversationObserver(auth types.SimplePrinciple, 
 		ConversationID: conversationID,
 		ProjectID:      projectID,
 		OrganizationID: orgID,
-		Persist:        o.persist,
-		Events:         observe.NewEventCollector(o.logger, meta, eventExporters...),
-		Metrics:        observe.NewMetricCollector(o.logger, meta, metricExporters...),
+		// // Persist:        o.persist,
+		// Events:  observe.NewEventCollector(o.logger, eventExporters...),
+		// Metrics: observe.NewMetricCollector(o.logger, metricExporters...),
 	})
 }
