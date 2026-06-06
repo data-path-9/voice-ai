@@ -26,14 +26,12 @@ import (
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
 	observability_collector_conversationdb "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationdb"
-	observe "github.com/rapidaai/api/assistant-api/internal/observe"
 	internal_transformer "github.com/rapidaai/api/assistant-api/internal/transformer"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	internal_vad "github.com/rapidaai/api/assistant-api/internal/vad"
 	"github.com/rapidaai/api/assistant-api/internal/variable"
 	internal_namespace "github.com/rapidaai/api/assistant-api/internal/variable/namespace"
 	internal_webhook "github.com/rapidaai/api/assistant-api/internal/webhook"
-	pkg_types "github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/pkg/validator"
@@ -47,7 +45,6 @@ type requestorDispatchHandler struct {
 
 func (h requestorDispatchHandler) HandleUserText(ctx context.Context, vl internal_type.UserTextReceivedPacket) {
 	if !h.r.canAcceptInput() {
-		h.r.logger.Tracef(ctx, "dropping user text: session not ready, state=%s", h.r.getSessionState().String())
 		return
 	}
 	h.HandleInterruptionDetected(ctx, internal_type.InterruptionDetectedPacket{
@@ -76,7 +73,6 @@ func (h requestorDispatchHandler) HandleUserText(ctx context.Context, vl interna
 
 func (h requestorDispatchHandler) HandleUserAudio(ctx context.Context, vl internal_type.UserAudioReceivedPacket) {
 	if !h.r.canAcceptInput() {
-		h.r.logger.Tracef(ctx, "dropping user audio: session not ready, state=%s", h.r.getSessionState().String())
 		return
 	}
 	if h.r.denoiserExecutor != nil {
@@ -97,24 +93,18 @@ func (h requestorDispatchHandler) HandleUserAudio(ctx context.Context, vl intern
 
 func (h requestorDispatchHandler) HandleEndOfSpeechAudio(ctx context.Context, vl internal_type.EndOfSpeechAudioPacket) {
 	if h.r.endOfSpeechExecutor != nil {
-		if err := h.r.endOfSpeechExecutor.Execute(ctx, vl); err != nil {
-			h.r.logger.Errorf("end of speech analyze error: %v", err)
-		}
+		_ = h.r.endOfSpeechExecutor.Execute(ctx, vl)
 	}
 }
 
 func (h requestorDispatchHandler) HandleSpeechToTextAudio(ctx context.Context, vl internal_type.SpeechToTextAudioPacket) {
 	if h.r.speechToTextTransformer != nil {
-		if err := h.r.speechToTextTransformer.Transform(ctx, vl); err != nil {
-			h.r.logger.Tracef(ctx, "error while transforming input %s and error %s", h.r.speechToTextTransformer.Name(), err.Error())
-		}
+		_ = h.r.speechToTextTransformer.Transform(ctx, vl)
 	}
 }
 
 func (h requestorDispatchHandler) HandleDenoise(ctx context.Context, vl internal_type.DenoiseAudioPacket) {
-	if err := h.r.denoiserExecutor.Execute(ctx, vl); err != nil {
-		h.r.logger.Warnf("denoiser returned unexpected error: %+v", err)
-	}
+	_ = h.r.denoiserExecutor.Execute(ctx, vl)
 }
 
 func (h requestorDispatchHandler) HandleDenoisedAudio(ctx context.Context, vl internal_type.DenoisedAudioPacket) {
@@ -129,23 +119,17 @@ func (h requestorDispatchHandler) HandleDenoisedAudio(ctx context.Context, vl in
 }
 
 func (h requestorDispatchHandler) HandleVadAudio(ctx context.Context, vl internal_type.VadAudioPacket) {
-	if err := h.r.vadExecutor.Execute(ctx, internal_type.UserAudioReceivedPacket{ContextID: vl.ContextID, Audio: vl.Audio}); err != nil {
-		h.r.logger.Warnf("error while processing with vad %s", err.Error())
-	}
+	_ = h.r.vadExecutor.Execute(ctx, internal_type.UserAudioReceivedPacket{ContextID: vl.ContextID, Audio: vl.Audio})
 }
 func (h requestorDispatchHandler) HandleVadSpeechActivity(ctx context.Context, vl internal_type.VadSpeechActivityPacket) {
 	if h.r.endOfSpeechExecutor != nil {
-		if err := h.r.endOfSpeechExecutor.Execute(ctx, vl); err != nil {
-			h.r.logger.Errorf("end of speech analyze error: %v", err)
-		}
+		_ = h.r.endOfSpeechExecutor.Execute(ctx, vl)
 	}
 }
 func (h requestorDispatchHandler) HandleSpeechToText(ctx context.Context, p internal_type.SpeechToTextPacket) {
 	p.ContextID = h.r.GetID()
 	if h.r.endOfSpeechExecutor != nil {
-		if err := h.r.endOfSpeechExecutor.Execute(ctx, p); err != nil {
-			h.r.logger.Errorf("end of speech analyze error: %v", err)
-		}
+		_ = h.r.endOfSpeechExecutor.Execute(ctx, p)
 		return
 	}
 	// just a fallback to trigger the end of speech event in case endOfSpeechExecutor is not configured.
@@ -180,7 +164,23 @@ func (h requestorDispatchHandler) HandleUserInput(ctx context.Context, p interna
 	})
 
 	if err := h.r.Transition(LLMGenerating); err != nil {
-		h.r.logger.Errorf("messaging transition error: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: h.r.GetID(),
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: h.r.GetID(),
+						Role:      observability.MessageRoleUser,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "messaging transition failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentTurn.String(),
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
 
 	contextID := h.r.GetID()
@@ -192,7 +192,6 @@ func (h requestorDispatchHandler) HandleUserInput(ctx context.Context, p interna
 		Completed: true,
 		Time:      timestamppb.New(time.Now()),
 	}); err != nil {
-		h.r.logger.Tracef(ctx, "might be returning processing the duplicate message so cut it out.")
 		return
 	}
 	h.r.OnPacket(ctx,
@@ -285,7 +284,24 @@ func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context
 func (h requestorDispatchHandler) HandleEndOfSpeechInterruption(ctx context.Context, p internal_type.EndOfSpeechInterruptionPacket) {
 	if h.r.endOfSpeechExecutor != nil {
 		if err := h.r.endOfSpeechExecutor.Execute(ctx, p); err != nil {
-			h.r.logger.Errorf("end of speech analyze error: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.MessageScope{
+							MessageID: p.ContextID,
+							Role:      observability.MessageRoleUser,
+						},
+					},
+					Level:   observability.LevelError,
+					Message: "end of speech analysis failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentEOS.String(),
+						"source":    "interruption",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 }
@@ -293,14 +309,46 @@ func (h requestorDispatchHandler) HandleEndOfSpeechInterruption(ctx context.Cont
 func (h requestorDispatchHandler) HandleTextToSpeechInterrupt(ctx context.Context, p internal_type.TextToSpeechInterruptPacket) {
 	if h.r.textToSpeechTransformer != nil {
 		if err := h.r.textToSpeechTransformer.Transform(ctx, p); err != nil {
-			h.r.logger.Errorf("tts interrupt: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.MessageScope{
+							MessageID: p.ContextID,
+							Role:      observability.MessageRoleAssistant,
+						},
+					},
+					Level:   observability.LevelError,
+					Message: "text to speech interrupt failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentTTS.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 }
 func (h requestorDispatchHandler) HandleLLMInterrupt(ctx context.Context, p internal_type.LLMInterruptPacket) {
 	if h.r.assistantExecutor != nil {
 		if err := h.r.assistantExecutor.Execute(ctx, h.r, p); err != nil {
-			h.r.logger.Errorf("llm interrupt: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.MessageScope{
+							MessageID: p.ContextID,
+							Role:      observability.MessageRoleAssistant,
+						},
+					},
+					Level:   observability.LevelError,
+					Message: "llm interrupt failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentLLM.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 }
@@ -308,7 +356,23 @@ func (h requestorDispatchHandler) HandleLLMInterrupt(ctx context.Context, p inte
 func (h requestorDispatchHandler) HandleSpeechToTextStart(ctx context.Context, p internal_type.SpeechToTextStartPacket) {
 	if h.r.speechToTextTransformer != nil {
 		if err := h.r.speechToTextTransformer.Transform(ctx, p); err != nil {
-			h.r.logger.Errorf("stt end: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.MessageScope{
+							MessageID: p.ContextID,
+							Role:      observability.MessageRoleUser,
+						},
+					},
+					Level:   observability.LevelError,
+					Message: "speech to text start failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentSTT.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 }
@@ -316,7 +380,23 @@ func (h requestorDispatchHandler) HandleSpeechToTextStart(ctx context.Context, p
 func (h requestorDispatchHandler) HandleSpeechToTextEnd(ctx context.Context, p internal_type.SpeechToTextEndPacket) {
 	if h.r.speechToTextTransformer != nil {
 		if err := h.r.speechToTextTransformer.Transform(ctx, p); err != nil {
-			h.r.logger.Errorf("stt start: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.MessageScope{
+							MessageID: p.ContextID,
+							Role:      observability.MessageRoleUser,
+						},
+					},
+					Level:   observability.LevelError,
+					Message: "speech to text end failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentSTT.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 }
@@ -330,12 +410,38 @@ func (h requestorDispatchHandler) HandleTurnChange(ctx context.Context, p intern
 
 	if h.r.speechToTextTransformer != nil {
 		if err := h.r.speechToTextTransformer.Transform(ctx, p); err != nil {
-			h.r.logger.Errorf("stt context-change update failed: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "turn change update failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentSTT.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 	if h.r.textToSpeechTransformer != nil {
 		if err := h.r.textToSpeechTransformer.Transform(ctx, p); err != nil {
-			h.r.logger.Errorf("tts context-change update failed: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "turn change update failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentTTS.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 
@@ -370,7 +476,23 @@ func (h requestorDispatchHandler) HandleLLMResponseDelta(ctx context.Context, p 
 		return
 	}
 	if err := h.r.Transition(LLMGenerating); err != nil {
-		h.r.logger.Errorf("messaging transition error: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: p.ContextID,
+						Role:      observability.MessageRoleAssistant,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "messaging transition failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentLLM.String(),
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
 	if h.r.outputNormalizer != nil {
 		h.r.outputNormalizer.Normalize(ctx, p)
@@ -393,12 +515,44 @@ func (h requestorDispatchHandler) HandleLLMResponseDone(ctx context.Context, p i
 	}
 	if h.r.endOfSpeechExecutor != nil {
 		if err := h.r.endOfSpeechExecutor.Execute(ctx, p); err != nil {
-			h.r.logger.Errorf("end of speech analyze error: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.MessageScope{
+							MessageID: p.ContextID,
+							Role:      observability.MessageRoleUser,
+						},
+					},
+					Level:   observability.LevelError,
+					Message: "end of speech analysis failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentEOS.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 	h.r.OnPacket(ctx, internal_type.StartIdleTimeoutPacket{ContextID: p.ContextID})
 	if err := h.r.Transition(LLMGenerated); err != nil {
-		h.r.logger.Errorf("messaging transition error: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: p.ContextID,
+						Role:      observability.MessageRoleAssistant,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "messaging transition failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentLLM.String(),
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
 	h.r.OnPacket(ctx,
 		internal_type.MessageCreatePacket{ContextID: p.ContextID, MessageRole: "assistant", Text: p.Text},
@@ -420,9 +574,7 @@ func (h requestorDispatchHandler) HandleLLMResponseDone(ctx context.Context, p i
 func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_type.ErrorPacket) {
 	switch errPkt := p.(type) {
 	case internal_type.InitializationFailedPacket:
-		if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventInitializationFailed); err != nil {
-			h.r.logger.Tracef(ctx, "session lifecycle init-failed transition ignored: %v", err)
-		}
+		_ = h.r.sessionLifecycle.Transition(adapter_lifecycle.EventInitializationFailed)
 		h.r.OnPacket(ctx,
 			internal_type.InitializeOutboundDispatcherPacket{ContextID: p.ContextId()},
 			internal_type.ObservabilityEventRecordPacket{
@@ -493,13 +645,9 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 			})
 	case internal_type.ModeSwitchErrorPacket:
 		if errPkt.IsRecoverable() {
-			if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventSwitchFailedRecoverable); err != nil {
-				h.r.logger.Tracef(ctx, "session lifecycle switch-failed(recoverable) transition ignored: %v", err)
-			}
+			_ = h.r.sessionLifecycle.Transition(adapter_lifecycle.EventSwitchFailedRecoverable)
 		} else {
-			if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventSwitchFailedFatal); err != nil {
-				h.r.logger.Tracef(ctx, "session lifecycle switch-failed(fatal) transition ignored: %v", err)
-			}
+			_ = h.r.sessionLifecycle.Transition(adapter_lifecycle.EventSwitchFailedFatal)
 		}
 		h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
 			ContextID: p.ContextId(),
@@ -523,7 +671,7 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 			internal_type.ObservabilityEventRecordPacket{
 				ContextID: h.r.GetID(),
 				Record: observability.NewConversationEventRecord(observability.SessionDisconnectRequested, observability.Attributes{
-					observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String(),
+					"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String(),
 				}),
 			},
 			internal_type.ObservabilityMetadataRecordPacket{
@@ -558,13 +706,45 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 }
 func (h requestorDispatchHandler) HandleInjectMessage(ctx context.Context, p internal_type.InjectMessagePacket) {
 	if err := h.r.Transition(LLMGenerating); err != nil {
-		h.r.logger.Errorf("messaging transition error: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: h.r.GetID(),
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: h.r.GetID(),
+						Role:      observability.MessageRoleAssistant,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "messaging transition failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentLLM.String(),
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
 
 	if h.r.assistantExecutor != nil {
 		utils.Go(ctx, func() {
 			if err := h.r.assistantExecutor.Execute(ctx, h.r, p); err != nil {
-				h.r.logger.Errorf("assistant executor error: %v", err)
+				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+					ContextID: h.r.GetID(),
+					Record: observability.RecordLog{
+						CommonRecord: observability.CommonRecord{
+							Scope: observability.MessageScope{
+								MessageID: h.r.GetID(),
+								Role:      observability.MessageRoleAssistant,
+							},
+						},
+						Level:   observability.LevelError,
+						Message: "assistant executor failed",
+						Attributes: observability.Attributes{
+							"component": observability.ComponentLLM.String(),
+							"error":     err.Error(),
+						},
+					},
+				})
 			}
 		})
 	}
@@ -584,7 +764,23 @@ func (h requestorDispatchHandler) HandleInjectMessage(ctx context.Context, p int
 		)
 		h.r.outputNormalizer.Normalize(ctx, internal_type.InjectMessagePacket{ContextID: contextID, Text: p.Text})
 		if err := h.r.Transition(LLMGenerated); err != nil {
-			h.r.logger.Errorf("messaging transition error: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: contextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.MessageScope{
+							MessageID: contextID,
+							Role:      observability.MessageRoleAssistant,
+						},
+					},
+					Level:   observability.LevelError,
+					Message: "messaging transition failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentLLM.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	} else {
 		h.r.OnPacket(ctx,
@@ -609,7 +805,20 @@ func (h requestorDispatchHandler) HandleStartIdleTimeout(ctx context.Context, p 
 	h.r.idleTimeoutDeadline = time.Now().Add(timeoutDuration)
 	h.r.idleTimeoutTimer = time.AfterFunc(timeoutDuration, func() {
 		if err := h.r.onIdleTimeout(ctx); err != nil {
-			h.r.logger.Errorf("error while handling idle timeout: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "idle timeout handling failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentSession.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	})
 }
@@ -619,18 +828,53 @@ func (h requestorDispatchHandler) HandleStopIdleTimeout(ctx context.Context, p i
 		h.r.idleTimeoutTimer = nil
 	}
 	h.r.idleTimeoutDeadline = time.Time{}
-
 	if p.ResetCount {
 		h.r.idleTimeoutCount = 0
 	}
 }
+
 func (h requestorDispatchHandler) HandleTextToSpeechText(ctx context.Context, p internal_type.TextToSpeechTextPacket) {
 	if p.ContextID != h.r.GetID() {
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: p.ContextID,
+						Role:      observability.MessageRoleAssistant,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "text to speech abaonded due to stale context",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentTTS.String(),
+					"packet":    "text",
+					"error":     "stale context, current context is " + h.r.GetID(),
+				},
+			},
+		})
 		return
 	}
 	if h.r.textToSpeechTransformer != nil && h.r.GetMode().Audio() {
 		if err := h.r.textToSpeechTransformer.Transform(ctx, p); err != nil {
-			h.r.logger.Errorf("tts text: failed to send chunk: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.MessageScope{
+							MessageID: p.ContextID,
+							Role:      observability.MessageRoleAssistant,
+						},
+					},
+					Level:   observability.LevelError,
+					Message: "text to speech transform failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentTTS.String(),
+						"packet":    "text",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 	h.r.Notify(ctx, &protos.ConversationAssistantMessage{
@@ -645,7 +889,24 @@ func (h requestorDispatchHandler) HandleTextToSpeechDone(ctx context.Context, p 
 
 	if h.r.textToSpeechTransformer != nil && h.r.GetMode().Audio() {
 		if err := h.r.textToSpeechTransformer.Transform(ctx, p); err != nil {
-			h.r.logger.Errorf("tts done: failed to send final: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.MessageScope{
+							MessageID: p.ContextID,
+							Role:      observability.MessageRoleAssistant,
+						},
+					},
+					Level:   observability.LevelError,
+					Message: "text to speech transform failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentTTS.String(),
+						"packet":    "done",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 	h.r.Notify(ctx, &protos.ConversationAssistantMessage{
@@ -684,7 +945,7 @@ func (h requestorDispatchHandler) HandleTextToSpeechAudio(ctx context.Context, p
 		Message:   &protos.ConversationAssistantMessage_Audio{Audio: p.AudioChunk},
 		Completed: false,
 	}); err != nil {
-		h.r.logger.Tracef(ctx, "error while outputting chunk to the user: %w", err)
+		return
 	}
 }
 func (h requestorDispatchHandler) HandleTextToSpeechEnd(ctx context.Context, p internal_type.TextToSpeechEndPacket) {
@@ -713,7 +974,7 @@ func (h requestorDispatchHandler) HandleTextToSpeechEnd(ctx context.Context, p i
 		Id:        p.ContextID,
 		Completed: true,
 	}); err != nil {
-		h.r.logger.Tracef(ctx, "error while outputting chunk to the user: %w", err)
+		return
 	}
 }
 func (h requestorDispatchHandler) HandleLLMToolCall(ctx context.Context, p internal_type.LLMToolCallPacket) {
@@ -767,7 +1028,25 @@ func (h requestorDispatchHandler) HandleLLMToolCall(ctx context.Context, p inter
 	if h.r.assistantExecutor != nil {
 		utils.Go(ctx, func() {
 			if err := h.r.assistantExecutor.Execute(ctx, h.r, p); err != nil {
-				h.r.logger.Errorf("assistant executor error: %v", err)
+				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+					ContextID: p.ContextID,
+					Record: observability.RecordLog{
+						CommonRecord: observability.CommonRecord{
+							Scope: observability.MessageScope{
+								MessageID: p.ContextID,
+								Role:      observability.MessageRoleAssistant,
+							},
+						},
+						Level:   observability.LevelError,
+						Message: "tool call execution failed",
+						Attributes: observability.Attributes{
+							"component": observability.ComponentTool.String(),
+							"tool_id":   p.ToolID,
+							"name":      p.Name,
+							"error":     err.Error(),
+						},
+					},
+				})
 			}
 		})
 	}
@@ -786,7 +1065,7 @@ func (h requestorDispatchHandler) HandleLLMToolResult(ctx context.Context, p int
 			internal_type.ObservabilityEventRecordPacket{
 				ContextID: h.r.GetID(),
 				Record: observability.NewConversationEventRecord(observability.SessionDisconnectRequested, observability.Attributes{
-					observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
+					"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
 				}),
 			},
 			internal_type.ObservabilityMetadataRecordPacket{
@@ -807,7 +1086,7 @@ func (h requestorDispatchHandler) HandleLLMToolResult(ctx context.Context, p int
 				internal_type.ObservabilityEventRecordPacket{
 					ContextID: h.r.GetID(),
 					Record: observability.NewConversationEventRecord(observability.SessionDisconnectRequested, observability.Attributes{
-						observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
+						"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
 					}),
 				},
 				internal_type.ObservabilityMetadataRecordPacket{
@@ -840,7 +1119,25 @@ func (h requestorDispatchHandler) HandleLLMToolResult(ctx context.Context, p int
 	if h.r.assistantExecutor != nil {
 		utils.Go(ctx, func() {
 			if err := h.r.assistantExecutor.Execute(ctx, h.r, p); err != nil {
-				h.r.logger.Errorf("tool result processing failed: %v", err)
+				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+					ContextID: p.ContextID,
+					Record: observability.RecordLog{
+						CommonRecord: observability.CommonRecord{
+							Scope: observability.MessageScope{
+								MessageID: p.ContextID,
+								Role:      observability.MessageRoleAssistant,
+							},
+						},
+						Level:   observability.LevelError,
+						Message: "tool result processing failed",
+						Attributes: observability.Attributes{
+							"component": observability.ComponentTool.String(),
+							"tool_id":   p.ToolID,
+							"name":      p.Name,
+							"error":     err.Error(),
+						},
+					},
+				})
 			}
 		})
 	}
@@ -848,52 +1145,175 @@ func (h requestorDispatchHandler) HandleLLMToolResult(ctx context.Context, p int
 func (h requestorDispatchHandler) HandleRecordUserAudio(ctx context.Context, p internal_type.RecordUserAudioPacket) {
 	if h.r.conversationRecordingExecutor != nil {
 		if err := h.r.conversationRecordingExecutor.Execute(ctx, p); err != nil {
-			h.r.logger.Errorf("recorder error: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "user audio recording failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentRecording.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 }
 func (h requestorDispatchHandler) HandleRecordAssistantAudio(ctx context.Context, p internal_type.RecordAssistantAudioPacket) {
 	if h.r.conversationRecordingExecutor != nil {
 		if err := h.r.conversationRecordingExecutor.Execute(ctx, p); err != nil {
-			h.r.logger.Errorf("recorder error: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "assistant audio recording failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentRecording.String(),
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 }
 func (h requestorDispatchHandler) HandleConversationRecordingCompleted(ctx context.Context, p internal_type.ConversationRecordingCompletedPacket) {
 	if err := h.r.CreateConversationRecording(ctx, p.Audio.UserAudio, p.Audio.AssistantAudio, p.Audio.MixedAudio); err != nil {
-		h.r.logger.Tracef(ctx, "failed to create conversation recording record: %+v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.ConversationScope{},
+				},
+				Level:   observability.LevelError,
+				Message: "conversation recording persistence failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentRecording.String(),
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
 }
 func (h requestorDispatchHandler) HandleMessageCreate(ctx context.Context, p internal_type.MessageCreatePacket) {
 	if err := h.r.onAddMessage(ctx, p); err != nil {
-		h.r.logger.Errorf("Error in onAddMessage: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.ConversationScope{},
+				},
+				Level:   observability.LevelError,
+				Message: "message persistence failed",
+				Attributes: observability.Attributes{
+					"component":  observability.ComponentSTT.String(),
+					"message_id": p.ContextID,
+					"role":       p.MessageRole,
+					"error":      err.Error(),
+				},
+			},
+		})
 	}
 }
 
 func (h requestorDispatchHandler) HandleObservabilityRecordPacket(ctx context.Context, p internal_type.ObservabilityRecordPacket) {
 	if h.r.observabilityRecorder != nil {
 		if err := h.r.observabilityRecorder.Record(ctx, p.GetRecord()); err != nil {
-			h.r.logger.Tracef(ctx, "observability: failed to record packet: %v", err)
+			h.r.logger.Error("observability record failed to persist", "error", err, "record", p.GetRecord())
 		}
+
 	}
 }
 
 func (h requestorDispatchHandler) HandleToolLogCreate(ctx context.Context, p internal_type.ToolLogCreatePacket) {
 	if !validator.NotBlank(p.ToolID) {
-		h.r.logger.Errorf("tool logging with empty id ignore")
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: p.ContextID,
+						Role:      observability.MessageRoleAssistant,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "tool log create skipped",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentTool.String(),
+					"reason":    "empty_tool_id",
+					"name":      p.Name,
+				},
+			},
+		})
 		return
 	}
 	if err := h.r.CreateToolLog(ctx, p.ContextID, p.ToolID, p.Name, type_enums.RECORD_IN_PROGRESS, p.Request); err != nil {
-		h.r.logger.Errorf("error logging tool call start: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: p.ContextID,
+						Role:      observability.MessageRoleAssistant,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "tool log create failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentTool.String(),
+					"tool_id":   p.ToolID,
+					"name":      p.Name,
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
 }
 func (h requestorDispatchHandler) HandleToolLogUpdate(ctx context.Context, p internal_type.ToolLogUpdatePacket) {
 	if !validator.NotBlank(p.ToolID) {
-		h.r.logger.Errorf("tool logging with empty id ignore")
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: p.ContextID,
+						Role:      observability.MessageRoleAssistant,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "tool log update skipped",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentTool.String(),
+					"reason":    "empty_tool_id",
+				},
+			},
+		})
 		return
 	}
 	if err := h.r.UpdateToolLog(ctx, p.ToolID, type_enums.RECORD_COMPLETE, p.Response); err != nil {
-		h.r.logger.Errorf("error logging tool call result: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: p.ContextID,
+						Role:      observability.MessageRoleAssistant,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "tool log update failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentTool.String(),
+					"tool_id":   p.ToolID,
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
 }
 func (h requestorDispatchHandler) HandleHTTPLogCreate(ctx context.Context, p internal_type.HTTPLogCreatePacket) {
@@ -913,14 +1333,29 @@ func (h requestorDispatchHandler) HandleHTTPLogCreate(ctx context.Context, p int
 		p.RequestPayload,
 		p.ResponsePayload,
 	); err != nil {
-		h.r.logger.Errorf("error logging http execution: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.ConversationScope{},
+				},
+				Level:   observability.LevelError,
+				Message: "http log persistence failed",
+				Attributes: observability.Attributes{
+					"component":     observability.ComponentWebhook.String(),
+					"source":        p.Source,
+					"source_ref_id": fmt.Sprintf("%d", p.SourceRefID),
+					"source_event":  p.SourceEvent,
+					"error":         err.Error(),
+				},
+			},
+		})
 	}
 }
 
 func (h requestorDispatchHandler) HandleInitializeAssistant(ctx context.Context, p internal_type.InitializeAssistantPacket) {
 	assistant, err := h.r.GetAssistant(ctx, h.r.Auth(), p.Config.Assistant.AssistantId, p.Config.Assistant.Version)
 	if err != nil {
-		h.r.logger.Errorf("failed to retrieve assistant configuration: %+v", err)
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
 			Stage:     internal_type.InitializationStageAssistant,
@@ -935,7 +1370,6 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 	if conversationID := vl.Config.GetAssistantConversationId(); conversationID > 0 {
 		err := h.r.ResumeConversation(ctx, h.r.assistant, vl.Config)
 		if err != nil {
-			h.r.logger.Errorf("failed to resume conversation: %+v", err)
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: vl.ContextID,
 				Stage:     internal_type.InitializationStageConversation,
@@ -955,7 +1389,6 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 	} else {
 		err := h.r.BeginConversation(ctx, h.r.assistant, type_enums.DIRECTION_INBOUND, vl.Config)
 		if err != nil {
-			h.r.logger.Errorf("failed to begin conversation: %+v", err)
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: vl.ContextID,
 				Stage:     internal_type.InitializationStageConversation,
@@ -979,7 +1412,6 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Context, p internal_type.InitializeSessionRuntimePacket) {
 	recordingExecutor, err := internal_audio_recorder.GetConversationRecordingExecutor(p.ContextID, h.r.OnPacket)
 	if err != nil {
-		h.r.logger.Tracef(ctx, "failed to initialize audio recorder: %+v", err)
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
 			Stage:     internal_type.InitializationStageRecording,
@@ -1064,15 +1496,8 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		},
 	)
 
-	if v := h.r.extractClientInformation(ctx); v != nil {
-		h.r.OnPacket(ctx, internal_type.ObservabilityMetadataRecordPacket{
-			ContextID: p.ContextID,
-			Record:    observability.NewConversationMetadataRecord(v),
-		})
-	}
 }
 func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Context, p internal_type.InitializeAuthenticationPacket) {
-	// authentication is optional, if not configured, skip authentication and return success immediately
 	if h.r.authenticationExecutor == nil {
 		h.r.OnPacket(ctx, internal_type.SessionAuthenticationSucceededPacket{
 			ContextID:      p.ContextID,
@@ -1097,11 +1522,26 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 	// for authentication if something is wrong
 	args, err := h.r.authenticationExecutor.Arguments()
 	if err != nil {
-		h.r.OnPacket(ctx, internal_type.SessionAuthenticationSucceededPacket{
-			ContextID:      p.ContextID,
-			Authenticated:  false,
-			Initialization: p.Config,
-		})
+		h.r.OnPacket(ctx,
+			internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "authentication arguments failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentSession.String(),
+						"error":     err.Error(),
+					},
+				},
+			},
+			internal_type.SessionAuthenticationSucceededPacket{
+				ContextID:      p.ContextID,
+				Authenticated:  false,
+				Initialization: p.Config,
+			})
 		return
 	}
 	h.r.OnPacket(ctx,
@@ -1118,7 +1558,20 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 }
 func (h requestorDispatchHandler) HandleExecuteSessionAuthentication(ctx context.Context, p internal_type.ExecuteSessionAuthenticationPacket) {
 	if err := h.r.authenticationExecutor.Execute(ctx, p); err != nil {
-		h.r.logger.Errorf("authentication executor execute failed: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.ConversationScope{},
+				},
+				Level:   observability.LevelError,
+				Message: "authentication execution failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentSession.String(),
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
 }
 func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx context.Context, p internal_type.SessionAuthenticationSucceededPacket) {
@@ -1210,7 +1663,6 @@ func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Conte
 	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
 	credentialId, err := options.GetUint64("rapida.credential_id")
 	if err != nil {
-		h.r.logger.Errorf("unable to find credential from options %+v", err)
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
 			Stage:     internal_type.InitializationStageSpeechToText,
@@ -1220,7 +1672,6 @@ func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Conte
 	}
 	credential, err := h.r.VaultCaller().GetCredential(ctx, h.r.Auth(), credentialId)
 	if err != nil {
-		h.r.logger.Errorf("Api call to find credential failed %+v", err)
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
 			Stage:     internal_type.InitializationStageSpeechToText,
@@ -1236,7 +1687,6 @@ func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Conte
 		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
 		options)
 	if err != nil {
-		h.r.logger.Errorf("unable to create input audio transformer with error %v", err)
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
 			Stage:     internal_type.InitializationStageSpeechToText,
@@ -1245,7 +1695,6 @@ func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Conte
 		return
 	}
 	if err := atransformer.Initialize(); err != nil {
-		h.r.logger.Errorf("unable to initialize transformer %v", err)
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
 			Stage:     internal_type.InitializationStageSpeechToText,
@@ -1272,7 +1721,6 @@ func (h requestorDispatchHandler) HandleInitializeDenoise(ctx context.Context, p
 		h.r.OnPacket,
 		options)
 	if err != nil {
-		h.r.logger.Errorf("error while initializing denoiser %+v", err)
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
 			Stage:     internal_type.InitializationStageDenoise,
@@ -1318,7 +1766,6 @@ func (h requestorDispatchHandler) HandleInitializeTextToSpeech(ctx context.Conte
 		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
 		speakerOpts)
 	if err != nil {
-		h.r.logger.Errorf("tts: unable to create transformer %v", err)
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
 			Stage:     internal_type.InitializationStageTextToSpeech,
@@ -1353,7 +1800,6 @@ func (h requestorDispatchHandler) HandleInitializeVoiceActivityDetection(ctx con
 		options := utils.MergeMaps(h.r.options, cfg.GetOptions())
 		vad, err := internal_vad.GetVAD(ctx, h.r.logger, h.r.OnPacket, options)
 		if err != nil {
-			h.r.logger.Errorf("error while initializing vad %+v", err)
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,
 				Stage:     internal_type.InitializationStageVoiceActivity,
@@ -1393,7 +1839,20 @@ func (h requestorDispatchHandler) HandleInitializeEndOfSpeech(ctx context.Contex
 func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, p internal_type.InitializeBehaviorPacket) {
 	behavior, err := h.r.GetBehavior()
 	if err != nil {
-		h.r.logger.Errorf("error while fetching deployment behavior: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.ConversationScope{},
+				},
+				Level:   observability.LevelError,
+				Message: "behavior initialization failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentSession.String(),
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
 	h.r.initializeGreeting(ctx, behavior)
 	h.r.initializeIdleTimeout(ctx, behavior)
@@ -1475,7 +1934,6 @@ func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context,
 		)
 	default:
 		err := fmt.Errorf("unsupported mode switch request: %s", p.StreamMode.String())
-		h.r.logger.Warnf(err.Error())
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID:  p.ContextID,
 			StreamMode: p.StreamMode,
@@ -1503,7 +1961,6 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeSpeechToText(ctx con
 	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
 	credentialId, err := options.GetUint64("rapida.credential_id")
 	if err != nil {
-		h.r.logger.Errorf("unable to find credential from options %+v", err)
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID,
 			Type:      internal_type.ModeSwitchErrorTypeInitializeSpeechToText,
@@ -1513,7 +1970,6 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeSpeechToText(ctx con
 	}
 	credential, err := h.r.VaultCaller().GetCredential(ctx, h.r.Auth(), credentialId)
 	if err != nil {
-		h.r.logger.Errorf("Api call to find credential failed %+v", err)
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID,
 			Type:      internal_type.ModeSwitchErrorTypeInitializeSpeechToText,
@@ -1529,7 +1985,6 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeSpeechToText(ctx con
 		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
 		options)
 	if err != nil {
-		h.r.logger.Errorf("unable to create input audio transformer with error %v", err)
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID,
 			Type:      internal_type.ModeSwitchErrorTypeInitializeSpeechToText,
@@ -1538,7 +1993,6 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeSpeechToText(ctx con
 		return
 	}
 	if err := atransformer.Initialize(); err != nil {
-		h.r.logger.Errorf("unable to initialize transformer %v", err)
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID,
 			Type:      internal_type.ModeSwitchErrorTypeInitializeSpeechToText,
@@ -1582,7 +2036,6 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeTextToSpeech(ctx con
 		func(pkt ...internal_type.Packet) error { return h.r.OnPacket(ctx, pkt...) },
 		speakerOpts)
 	if err != nil {
-		h.r.logger.Errorf("tts: unable to create transformer %v", err)
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID, StreamMode: p.StreamMode,
 			Type: internal_type.ModeSwitchErrorTypeInitializeTextToSpeech, Error: err,
@@ -1684,7 +2137,21 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeEndOfSpeech(ctx cont
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeSpeechToText(ctx context.Context, p internal_type.ModeSwitchFinalizeSpeechToTextPacket) {
 	if h.r.speechToTextTransformer != nil {
 		if err := h.r.speechToTextTransformer.Close(ctx); err != nil {
-			h.r.logger.Warnf("mode-switch finalize speech-to-text: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "mode switch finalize failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentSTT.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 		h.r.speechToTextTransformer = nil
 	}
@@ -1693,7 +2160,21 @@ func (h requestorDispatchHandler) HandleModeSwitchFinalizeSpeechToText(ctx conte
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeTextToSpeech(ctx context.Context, p internal_type.ModeSwitchFinalizeTextToSpeechPacket) {
 	if h.r.textToSpeechTransformer != nil {
 		if err := h.r.textToSpeechTransformer.Close(ctx); err != nil {
-			h.r.logger.Warnf("mode-switch finalize text-to-speech: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "mode switch finalize failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentTTS.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 		h.r.textToSpeechTransformer = nil
 	}
@@ -1702,7 +2183,21 @@ func (h requestorDispatchHandler) HandleModeSwitchFinalizeTextToSpeech(ctx conte
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeVoiceActivityDetection(ctx context.Context, p internal_type.ModeSwitchFinalizeVoiceActivityDetectionPacket) {
 	if h.r.vadExecutor != nil {
 		if err := h.r.vadExecutor.Close(ctx); err != nil {
-			h.r.logger.Warnf("mode-switch finalize voice activity detection: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "mode switch finalize failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentVAD.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 		h.r.vadExecutor = nil
 	}
@@ -1711,7 +2206,21 @@ func (h requestorDispatchHandler) HandleModeSwitchFinalizeVoiceActivityDetection
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeEndOfSpeech(ctx context.Context, p internal_type.ModeSwitchFinalizeEndOfSpeechPacket) {
 	if h.r.endOfSpeechExecutor != nil {
 		if err := h.r.endOfSpeechExecutor.Close(ctx); err != nil {
-			h.r.logger.Warnf("cancel end of speech with error %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "mode switch finalize failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentEOS.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 		h.r.endOfSpeechExecutor = nil
 	}
@@ -1720,7 +2229,21 @@ func (h requestorDispatchHandler) HandleModeSwitchFinalizeEndOfSpeech(ctx contex
 func (h requestorDispatchHandler) HandleModeSwitchFinalizeDenoise(ctx context.Context, p internal_type.ModeSwitchFinalizeDenoisePacket) {
 	if h.r.denoiserExecutor != nil {
 		if err := h.r.denoiserExecutor.Close(ctx); err != nil {
-			h.r.logger.Warnf("mode-switch finalize denoiser: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "mode switch finalize failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentDenoise.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 		h.r.denoiserExecutor = nil
 	}
@@ -1739,7 +2262,6 @@ func (h requestorDispatchHandler) HandleModeSwitchCompleted(ctx context.Context,
 		}
 	default:
 		err := fmt.Errorf("mode switch completed with unsupported mode: %s", p.StreamMode.String())
-		h.r.logger.Warnf(err.Error())
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID:  p.ContextID,
 			StreamMode: p.StreamMode,
@@ -1764,9 +2286,7 @@ func (h requestorDispatchHandler) HandleModeSwitchCompleted(ctx context.Context,
 }
 
 func (h requestorDispatchHandler) HandleInitializationCompleted(ctx context.Context, p internal_type.InitializationCompletedPacket) {
-	if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventInitializationCompleted); err != nil {
-		h.r.logger.Tracef(ctx, "session lifecycle init-completed transition ignored: %v", err)
-	}
+	_ = h.r.sessionLifecycle.Transition(adapter_lifecycle.EventInitializationCompleted)
 	h.r.OnNotifyAssistantConfiguration(ctx, p.Config, h.r.assistantConversation)
 	h.r.OnPacket(ctx, internal_type.InitializeInboundDispatcherPacket{ContextID: p.ContextID})
 
@@ -1777,8 +2297,8 @@ func (h requestorDispatchHandler) HandleInitializationCompleted(ctx context.Cont
 	h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
 		ContextID: p.ContextID,
 		Record: observability.NewConversationEventRecord(observability.SessionInitialized, observability.Attributes{
-			"event":          event.Get(),
-			observe.DataMode: h.r.GetMode().String(),
+			"event": event.Get(),
+			"mode":  h.r.GetMode().String(),
 		}),
 	}, internal_type.ExecuteWebhookPacket{
 		ContextID: p.ContextID,
@@ -1835,7 +2355,21 @@ func (h requestorDispatchHandler) HandleFinalizeBehavior(ctx context.Context, p 
 func (h requestorDispatchHandler) HandleFinalizeEndOfSpeech(ctx context.Context, p internal_type.FinalizeEndOfSpeechPacket) {
 	if h.r.endOfSpeechExecutor != nil {
 		if err := h.r.endOfSpeechExecutor.Close(ctx); err != nil {
-			h.r.logger.Tracef(ctx, "failed to close end of speech: %+v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "end of speech close failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentEOS.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 		h.r.endOfSpeechExecutor = nil
 	}
@@ -1845,7 +2379,21 @@ func (h requestorDispatchHandler) HandleFinalizeEndOfSpeech(ctx context.Context,
 func (h requestorDispatchHandler) HandleFinalizeVoiceActivityDetection(ctx context.Context, p internal_type.FinalizeVoiceActivityDetectionPacket) {
 	if h.r.vadExecutor != nil {
 		if err := h.r.vadExecutor.Close(ctx); err != nil {
-			h.r.logger.Tracef(ctx, "failed to close voice activity detection: %+v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "voice activity detection close failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentVAD.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 		h.r.vadExecutor = nil
 	}
@@ -1855,7 +2403,21 @@ func (h requestorDispatchHandler) HandleFinalizeVoiceActivityDetection(ctx conte
 func (h requestorDispatchHandler) HandleFinalizeTextToSpeech(ctx context.Context, p internal_type.FinalizeTextToSpeechPacket) {
 	if h.r.textToSpeechTransformer != nil {
 		if err := h.r.textToSpeechTransformer.Close(ctx); err != nil {
-			h.r.logger.Errorf("cancel all output transformer with error %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "text to speech close failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentTTS.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 		h.r.textToSpeechTransformer = nil
 	}
@@ -1865,7 +2427,21 @@ func (h requestorDispatchHandler) HandleFinalizeTextToSpeech(ctx context.Context
 func (h requestorDispatchHandler) HandleFinalizeSpeechToText(ctx context.Context, p internal_type.FinalizeSpeechToTextPacket) {
 	if h.r.speechToTextTransformer != nil {
 		if err := h.r.speechToTextTransformer.Close(ctx); err != nil {
-			h.r.logger.Warnf("mode-switch finalize speech-to-text: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "speech to text close failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentSTT.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 		h.r.speechToTextTransformer = nil
 	}
@@ -1894,7 +2470,21 @@ func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Conte
 	if h.r.conversationRecordingExecutor != nil {
 		utils.Go(ctx, func() {
 			if err := h.r.conversationRecordingExecutor.Close(ctx); err != nil {
-				h.r.logger.Tracef(ctx, "failed to persist audio recording: %+v", err)
+				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+					ContextID: p.ContextID,
+					Record: observability.RecordLog{
+						CommonRecord: observability.CommonRecord{
+							Scope: observability.ConversationScope{},
+						},
+						Level:   observability.LevelError,
+						Message: "audio recording persistence failed",
+						Attributes: observability.Attributes{
+							"component": observability.ComponentRecording.String(),
+							"operation": "finalize",
+							"error":     err.Error(),
+						},
+					},
+				})
 				return
 			}
 		})
@@ -1914,28 +2504,61 @@ func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Conte
 
 }
 func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context, p internal_type.FinalizeConversationPacket) {
-	// if h.r.observer != nil {
-	// 	h.r.observer.EventCollectors().Collect(ctx, observe.EventRecord{
-	// 		ConversationID: h.r.observer.Meta().AssistantConversationID,
-	// 		MessageID:      h.r.GetID(),
-	// 		Name:           observe.ComponentSession,
-	// 		Data:           map[string]string{observe.DataType: observe.EventDisconnected, observe.DataMessages: fmt.Sprintf("%d", len(h.r.GetHistories()))},
-	// 		Time:           time.Now(),
-	// 	})
-	// }
 	for _, analysis := range h.r.assistantAnalyseExecutors {
 		if err := analysis.Close(ctx); err != nil {
-			h.r.logger.Errorf("close analysis executor: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "analysis executor close failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentConversation.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 	for _, webhook := range h.r.assistantWebhookExecutors {
 		if err := webhook.Close(ctx); err != nil {
-			h.r.logger.Errorf("close webhook executor: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "webhook executor close failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentWebhook.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 	if h.r.authenticationExecutor != nil {
 		if err := h.r.authenticationExecutor.Close(ctx); err != nil {
-			h.r.logger.Errorf("close authentication executor: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "authentication executor close failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentSession.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizeAssistantPacket{ContextID: p.ContextID})
@@ -1943,21 +2566,31 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 func (h requestorDispatchHandler) HandleFinalizeAssistant(ctx context.Context, p internal_type.FinalizeAssistantPacket) {
 	if h.r.assistantExecutor != nil {
 		if err := h.r.assistantExecutor.Close(ctx); err != nil {
-			h.r.logger.Errorf("failed to close assistant executor: %v", err)
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Record: observability.RecordLog{
+					CommonRecord: observability.CommonRecord{
+						Scope: observability.ConversationScope{},
+					},
+					Level:   observability.LevelError,
+					Message: "assistant executor close failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentLLM.String(),
+						"operation": "finalize",
+						"error":     err.Error(),
+					},
+				},
+			})
 		}
 	}
 	if h.r.observabilityRecorder != nil {
-		if err := h.r.observabilityRecorder.Close(ctx); err != nil {
-			h.r.logger.Errorf("failed to close observability recorder: %v", err)
-		}
+		_ = h.r.observabilityRecorder.Close(ctx)
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizationCompletedPacket{ContextID: p.ContextID})
 }
 
 func (h requestorDispatchHandler) HandleFinalizationCompleted(ctx context.Context, p internal_type.FinalizationCompletedPacket) {
-	if err := h.r.sessionLifecycle.Transition(adapter_lifecycle.EventDisconnectCompleted); err != nil {
-		h.r.logger.Tracef(ctx, "session lifecycle disconnect-completed transition ignored: %v", err)
-	}
+	_ = h.r.sessionLifecycle.Transition(adapter_lifecycle.EventDisconnectCompleted)
 	h.r.cancelSession()
 }
 
@@ -1971,12 +2604,40 @@ func (h requestorDispatchHandler) HandleExecuteAnalysis(ctx context.Context, p i
 		if h.r.IsConditionAllowed(initializedAnalysis.Options(), "analysis.condition") {
 			arguments, err := initializedAnalysis.Arguments()
 			if err != nil {
-				h.r.logger.Warnw("failed to get analysis arguments", "name", initializedAnalysis.Name(), "error", err)
+				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+					ContextID: p.ContextID,
+					Record: observability.RecordLog{
+						CommonRecord: observability.CommonRecord{
+							Scope: observability.ConversationScope{},
+						},
+						Level:   observability.LevelError,
+						Message: "analysis arguments failed",
+						Attributes: observability.Attributes{
+							"component": observability.ComponentConversation.String(),
+							"name":      initializedAnalysis.Name(),
+							"error":     err.Error(),
+						},
+					},
+				})
 				continue
 			}
 			p.Arguments = registry.Apply(arguments, source, variable.ResolveContext{Event: utils.ConversationCompleted.Get()})
 			if err := initializedAnalysis.Execute(ctx, p); err != nil {
-				h.r.logger.Warnw("analysis execution failed", "name", initializedAnalysis.Name(), "error", err)
+				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+					ContextID: p.ContextID,
+					Record: observability.RecordLog{
+						CommonRecord: observability.CommonRecord{
+							Scope: observability.ConversationScope{},
+						},
+						Level:   observability.LevelError,
+						Message: "analysis execution failed",
+						Attributes: observability.Attributes{
+							"component": observability.ComponentConversation.String(),
+							"name":      initializedAnalysis.Name(),
+							"error":     err.Error(),
+						},
+					},
+				})
 			}
 		}
 
@@ -1993,12 +2654,42 @@ func (h requestorDispatchHandler) HandleExecuteWebhook(ctx context.Context, p in
 		if h.r.IsConditionAllowed(initializedWebhook.Options(), "webhook.condition") {
 			arguments, err := initializedWebhook.Arguments()
 			if err != nil {
-				h.r.logger.Warnw("failed to get webhook arguments", "webhookID", initializedWebhook.Name(), "error", err)
+				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+					ContextID: p.ContextID,
+					Record: observability.RecordLog{
+						CommonRecord: observability.CommonRecord{
+							Scope: observability.ConversationScope{},
+						},
+						Level:   observability.LevelError,
+						Message: "webhook arguments failed",
+						Attributes: observability.Attributes{
+							"component":  observability.ComponentWebhook.String(),
+							"webhook_id": initializedWebhook.Name(),
+							"event":      p.Event.Get(),
+							"error":      err.Error(),
+						},
+					},
+				})
 				continue
 			}
 			p.Arguments = registry.Apply(arguments, source, variable.ResolveContext{Event: p.Event.Get()})
 			if err := initializedWebhook.Execute(ctx, p); err != nil {
-				h.r.logger.Warnw("webhook execution failed", "webhookID", initializedWebhook.Name(), "error", err)
+				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+					ContextID: p.ContextID,
+					Record: observability.RecordLog{
+						CommonRecord: observability.CommonRecord{
+							Scope: observability.ConversationScope{},
+						},
+						Level:   observability.LevelError,
+						Message: "webhook execution failed",
+						Attributes: observability.Attributes{
+							"component":  observability.ComponentWebhook.String(),
+							"webhook_id": initializedWebhook.Name(),
+							"event":      p.Event.Get(),
+							"error":      err.Error(),
+						},
+					},
+				})
 			}
 		}
 	}
@@ -2009,7 +2700,23 @@ func (h requestorDispatchHandler) callInputNormalizer(ctx context.Context, vl in
 		return errors.New("input inputNormalizer not configured")
 	}
 	if err := h.r.inputNormalizer.Normalize(ctx, vl); err != nil {
-		h.r.logger.Errorf("input inputNormalizer error: %v", err)
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: vl.ContextID,
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.MessageScope{
+						MessageID: vl.ContextID,
+						Role:      observability.MessageRoleUser,
+					},
+				},
+				Level:   observability.LevelError,
+				Message: "input normalization failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentSTT.String(),
+					"error":     err.Error(),
+				},
+			},
+		})
 		return err
 	}
 	return nil
@@ -2042,45 +2749,21 @@ func (r *genericRequestor) OnNotifyAssistantConfiguration(ctx context.Context, c
 		conversationConfigurationObj.Metadata = anyMetaMap
 	}
 	if err := r.Notify(ctx, conversationConfigurationObj); err != nil {
-		r.logger.Errorf("failed to send configuration notification: %v", err)
+		r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: r.GetID(),
+			Record: observability.RecordLog{
+				CommonRecord: observability.CommonRecord{
+					Scope: observability.ConversationScope{},
+				},
+				Level:   observability.LevelError,
+				Message: "configuration notification failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentSession.String(),
+					"error":     err.Error(),
+				},
+			},
+		})
 	}
-}
-
-func (r *genericRequestor) extractClientInformation(ctx context.Context) []*protos.Metadata {
-	var metadata []*protos.Metadata
-	clientInfo := pkg_types.GetClientInfoFromGrpcContext(ctx)
-	if clientInfo == nil {
-		return nil
-	}
-
-	if clientInfo.Timezone != "" {
-		metadata = append(metadata, &protos.Metadata{Key: "client.timezone", Value: clientInfo.Timezone})
-	}
-	if clientInfo.Platform != "" {
-		metadata = append(metadata, &protos.Metadata{Key: "client.platform", Value: clientInfo.Platform})
-	}
-	if clientInfo.Language != "" {
-		metadata = append(metadata, &protos.Metadata{Key: "client.language", Value: clientInfo.Language})
-	}
-	if clientInfo.UserAgent != "" {
-		metadata = append(metadata, &protos.Metadata{Key: "client.user_agent", Value: clientInfo.UserAgent})
-	}
-	if clientInfo.Referrer != "" {
-		metadata = append(metadata, &protos.Metadata{Key: "client.referrer", Value: clientInfo.Referrer})
-	}
-	if clientInfo.ConnectionType != "" {
-		metadata = append(metadata, &protos.Metadata{Key: "client.connection_type", Value: clientInfo.ConnectionType})
-	}
-	if clientInfo.Latitude != 0 || clientInfo.Longitude != 0 {
-		metadata = append(metadata,
-			&protos.Metadata{Key: "client.latitude", Value: fmt.Sprintf("%f", clientInfo.Latitude)},
-			&protos.Metadata{Key: "client.longitude", Value: fmt.Sprintf("%f", clientInfo.Longitude)},
-		)
-	}
-	if len(metadata) == 0 {
-		return nil
-	}
-	return metadata
 }
 
 func (r *genericRequestor) IsConditionAllowed(opts utils.Option, key string) bool {
@@ -2090,7 +2773,6 @@ func (r *genericRequestor) IsConditionAllowed(opts utils.Option, key string) boo
 	}
 	parsed, parseErr := internal_condition.Parse(raw)
 	if parseErr != nil {
-		r.logger.Warnf("invalid %s: %v", key, parseErr)
 		return false
 	}
 	allowed, evalErr := parsed.Run(
@@ -2099,7 +2781,6 @@ func (r *genericRequestor) IsConditionAllowed(opts utils.Option, key string) boo
 		internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeDirection, Value: r.Conversation().Direction.String()},
 	)
 	if evalErr != nil {
-		r.logger.Warnf("condition eval failed for %s: %v", key, evalErr)
 		return false
 	}
 	return allowed

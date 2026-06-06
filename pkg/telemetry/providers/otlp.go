@@ -136,7 +136,7 @@ func (e *OTLPExporter) Close(ctx context.Context) error {
 		if ferr := e.provider.ForceFlush(ctx); ferr != nil {
 			err = ferr
 		}
-		if serr := e.provider.Close(ctx); serr != nil && err == nil {
+		if serr := e.provider.Shutdown(ctx); serr != nil && err == nil {
 			err = serr
 		}
 	})

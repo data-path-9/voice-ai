@@ -13,6 +13,7 @@ import (
 
 	internal_agent_embeddings "github.com/rapidaai/api/assistant-api/internal/agent/embedding"
 	internal_knowledge_gorm "github.com/rapidaai/api/assistant-api/internal/entity/knowledges"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/connectors"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -31,18 +32,21 @@ const (
 
 func (kr *genericRequestor) RetrieveToolKnowledge(ctx context.Context, knowledge *internal_knowledge_gorm.Knowledge, messageId string, query string, filter map[string]interface{}, kc *internal_type.KnowledgeRetrieveOption) ([]internal_type.KnowledgeContextResult, error) {
 	start := time.Now()
+	if messageId == "" {
+		messageId = kr.GetID()
+	}
 
 	knowledgeIDStr := fmt.Sprintf("%d", knowledge.Id)
-	kr.OnPacket(ctx, internal_type.ConversationEventPacket{
-		Name: "knowledge",
-		Data: map[string]string{
+	kr.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
+		ContextID: messageId,
+		Record: observability.NewMessageRecord(messageId, observability.ComponentTool, observability.ToolCallStarted, observability.MessageRoleAssistant, observability.Attributes{
+			"name":             "knowledge",
 			"knowledge_id":     knowledgeIDStr,
-			"type":             "retrieving",
+			"operation":        "retrieving",
 			"method":           kc.RetrievalMethod,
 			"top_k":            fmt.Sprintf("%d", kc.TopK),
 			"query_char_count": fmt.Sprintf("%d", len(query)),
-		},
-		Time: time.Now(),
+		}),
 	})
 
 	result, err := kr.retrieve(ctx, knowledge, query, filter, kc)
@@ -50,13 +54,14 @@ func (kr *genericRequestor) RetrieveToolKnowledge(ctx context.Context, knowledge
 	latencyMs := time.Since(start).Milliseconds()
 	if err != nil {
 		kr.OnPacket(ctx,
-			internal_type.ConversationEventPacket{
-				Name: "knowledge",
-				Data: map[string]string{
+			internal_type.ObservabilityEventRecordPacket{
+				ContextID: messageId,
+				Record: observability.NewMessageRecord(messageId, observability.ComponentTool, observability.ToolCallFailed, observability.MessageRoleAssistant, observability.Attributes{
+					"name":         "knowledge",
 					"knowledge_id": knowledgeIDStr,
-					"type":         err.Error(),
-				},
-				Time: time.Now(),
+					"operation":    "retrieval",
+					"error":        err.Error(),
+				}),
 			})
 	} else {
 		topScore := 0.0
@@ -64,22 +69,23 @@ func (kr *genericRequestor) RetrieveToolKnowledge(ctx context.Context, knowledge
 			topScore = result[0].Score
 		}
 		kr.OnPacket(ctx,
-			internal_type.ConversationEventPacket{
-				Name: "knowledge",
-				Data: map[string]string{
+			internal_type.ObservabilityEventRecordPacket{
+				ContextID: messageId,
+				Record: observability.NewMessageRecord(messageId, observability.ComponentTool, observability.ToolCallCompleted, observability.MessageRoleAssistant, observability.Attributes{
+					"name":         "knowledge",
 					"knowledge_id": knowledgeIDStr,
-					"type":         "completed",
+					"operation":    "retrieval",
 					"method":       kc.RetrievalMethod,
 					"result_count": fmt.Sprintf("%d", len(result)),
 					"top_score":    fmt.Sprintf("%.4f", topScore),
-				},
-				Time: time.Now(),
+				}),
 			},
-			internal_type.AssistantMessageMetricPacket{
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				ContextID: messageId,
+				Record: observability.NewMessageMetricRecord(messageId, observability.MessageRoleAssistant, []*protos.Metric{{
 					Name:  "knowledge_latency_ms",
 					Value: fmt.Sprintf("%d", latencyMs),
-				}},
+				}}),
 			},
 		)
 	}
@@ -147,7 +153,6 @@ func (kr *genericRequestor) retrieve(ctx context.Context, knowledge *internal_kn
 		}
 		embeddings, err := kr.queryEmbedder.TextQueryEmbedding(ctx, kr.Auth(), query, embeddingOpts)
 		if err != nil {
-			kr.logger.Errorf("Unable to get query embedding from integration for query %s error %v", query, err)
 			return results, err
 		}
 		matchedContents, err := kr.vectordb.HybridSearch(ctx,
@@ -160,7 +165,6 @@ func (kr *genericRequestor) retrieve(ctx context.Context, knowledge *internal_kn
 				connectors.WithSource([]string{"text", "document_id", "metadata"}),
 				connectors.WithTopK(topK)))
 		if err != nil {
-			kr.logger.Errorf("Unable to get result from the vector dataset for given %s error %v", query, err)
 			return results, err
 		}
 		for _, x := range matchedContents {
@@ -188,7 +192,6 @@ func (kr *genericRequestor) retrieve(ctx context.Context, knowledge *internal_kn
 				},
 			})
 		if err != nil {
-			kr.logger.Errorf("Unable to get query embedding from integration for query %s error %v", query, err)
 			return results, err
 		}
 
@@ -202,7 +205,6 @@ func (kr *genericRequestor) retrieve(ctx context.Context, knowledge *internal_kn
 				connectors.WithMinScore(minScore), connectors.WithTopK(topK)),
 		)
 		if err != nil {
-			kr.logger.Errorf("Unable to get result from the vector dataset for given %s error %v", query, err)
 			return results, err
 		}
 
@@ -229,8 +231,7 @@ func (kr *genericRequestor) retrieve(ctx context.Context, knowledge *internal_kn
 				connectors.WithMinScore(minScore),
 				connectors.WithTopK(topK)))
 		if err != nil {
-			kr.logger.Errorf("Unable to get result from the vector dataset for given %s error %v", query, err)
-			return results, nil
+			return results, err
 		}
 		for _, x := range matchedContents {
 			source := x["_source"].(map[string]interface{})
@@ -245,7 +246,6 @@ func (kr *genericRequestor) retrieve(ctx context.Context, knowledge *internal_kn
 		return results, nil
 
 	default:
-		kr.logger.Errorf("retrieve method is unexpected")
 		return results, fmt.Errorf("retrieve method is unexpected")
 	}
 }

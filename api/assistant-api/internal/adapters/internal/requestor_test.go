@@ -87,22 +87,6 @@ package adapter_internal
 // 	assert.True(t, strings.Contains(fmt.Sprintf("%T", r.observer.MetricCollectors()), "noopMetricCollector"))
 // }
 
-// func sessionEventRecord(eventType string) observe.EventRecord {
-// 	return observe.EventRecord{Name: "session", Data: map[string]string{"type": eventType}}
-// }
-
-// func conversationMetricRecord(conversationID string) observe.ConversationMetricRecord {
-// 	return observe.ConversationMetricRecord{
-// 		ConversationID: conversationID,
-// 		Metrics: []*protos.Metric{
-// 			{
-// 				Name:  type_enums.CONVERSATION_STATUS.String(),
-// 				Value: type_enums.CONVERSATION_IN_PROGRESS.String(),
-// 			},
-// 		},
-// 	}
-// }
-
 // func TestInitializeCollectors_UnknownProvider_SkipsToNoopCollectors(t *testing.T) {
 // 	r := requestorForTelemetryTest(t, []*internal_telemetry_entity.AssistantTelemetryProvider{
 // 		{

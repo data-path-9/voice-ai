@@ -18,9 +18,7 @@ const (
 	ComponentConversation ComponentName = "conversation"
 	ComponentTurn         ComponentName = "turn"
 	ComponentSession      ComponentName = "session"
-	ComponentPipeline     ComponentName = "pipeline"
 	ComponentAudio        ComponentName = "audio"
-	ComponentTranscript   ComponentName = "transcript"
 	ComponentSTT          ComponentName = "stt"
 	ComponentTTS          ComponentName = "tts"
 	ComponentLLM          ComponentName = "llm"
@@ -144,12 +142,6 @@ const (
 	AudioResampled     EventName = "audio.resampled"
 	AudioCodecChanged  EventName = "audio.codec_changed"
 	AudioError         EventName = "audio.error"
-)
-
-const (
-	TranscriptPartial EventName = "transcript.partial"
-	TranscriptFinal   EventName = "transcript.final"
-	TranscriptError   EventName = "transcript.error"
 )
 
 const (
@@ -356,11 +348,6 @@ var eventsByComponent = map[ComponentName][]EventName{
 		AudioResampled,
 		AudioCodecChanged,
 		AudioError,
-	},
-	ComponentTranscript: {
-		TranscriptPartial,
-		TranscriptFinal,
-		TranscriptError,
 	},
 	ComponentSTT: {
 		STTConnected,
