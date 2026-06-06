@@ -339,26 +339,33 @@ func (h requestorDispatchHandler) HandleTurnChange(ctx context.Context, p intern
 		}
 	}
 
-	h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
+	h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
 		ContextID: p.ContextID,
-		Name:      "turn",
-		Data: map[string]string{
-			"type":           "change",
-			"old_context_id": p.PreviousContextID,
-			"new_context_id": p.ContextID,
-			"reason":         p.Reason,
-			"source":         p.Source,
+		Record: observability.RecordEvent{
+			CommonRecord: observability.CommonRecord{
+				Scope:      observability.ConversationScope{},
+				OccurredAt: p.Time,
+			},
+			Component: observability.ComponentTurn,
+			Event:     observability.TurnChange,
+			Attributes: observability.Attributes{
+				"old_context_id": p.PreviousContextID,
+				"new_context_id": p.ContextID,
+				"reason":         p.Reason,
+				"source":         p.Source,
+			},
 		},
-		Time: p.Time,
 	})
 }
 func (h requestorDispatchHandler) HandleLLMResponseDelta(ctx context.Context, p internal_type.LLMResponseDeltaPacket) {
 	if p.ContextID != h.r.GetID() {
-		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
+		h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
 			ContextID: p.ContextID,
-			Name:      "llm",
-			Data:      map[string]string{"type": "discarded", "reason": "stale_context", "current_context": h.r.GetID(), "text": p.Text},
-			Time:      time.Now(),
+			Record: observability.NewMessageRecord(p.ContextID, observability.ComponentLLM, observability.LLMDiscarded, observability.MessageRoleAssistant, observability.Attributes{
+				"reason":          "stale_context",
+				"current_context": h.r.GetID(),
+				"text":            p.Text,
+			}),
 		})
 		return
 	}
@@ -373,11 +380,14 @@ func (h requestorDispatchHandler) HandleLLMResponseDelta(ctx context.Context, p 
 }
 func (h requestorDispatchHandler) HandleLLMResponseDone(ctx context.Context, p internal_type.LLMResponseDonePacket) {
 	if p.ContextID != h.r.GetID() {
-		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
+		h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
 			ContextID: p.ContextID,
-			Name:      "llm",
-			Data:      map[string]string{"type": "discarded", "reason": "stale_context", "packet": "done", "current_context": h.r.GetID(), "text": p.Text},
-			Time:      time.Now(),
+			Record: observability.NewMessageRecord(p.ContextID, observability.ComponentLLM, observability.LLMDiscarded, observability.MessageRoleAssistant, observability.Attributes{
+				"reason":          "stale_context",
+				"packet":          "done",
+				"current_context": h.r.GetID(),
+				"text":            p.Text,
+			}),
 		})
 		return
 	}
@@ -392,9 +402,13 @@ func (h requestorDispatchHandler) HandleLLMResponseDone(ctx context.Context, p i
 	}
 	h.r.OnPacket(ctx,
 		internal_type.MessageCreatePacket{ContextID: p.ContextID, MessageRole: "assistant", Text: p.Text},
-		internal_type.AssistantMessageMetricPacket{
+		internal_type.ObservabilityMetricRecordPacket{
 			ContextID: p.ContextID,
-			Metrics:   []*protos.Metric{{Name: "assistant_turn", Value: type_enums.CONVERSATION_COMPLETE.String(), Description: "LLM response completed"}},
+			Record: observability.NewMessageMetricRecord(
+				p.ContextID,
+				observability.MessageRoleAssistant,
+				[]*protos.Metric{{Name: "assistant_turn", Value: type_enums.CONVERSATION_COMPLETE.String(), Description: "LLM response completed"}},
+			),
 		},
 	)
 	if h.r.outputNormalizer != nil {
@@ -411,59 +425,71 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 		}
 		h.r.OnPacket(ctx,
 			internal_type.InitializeOutboundDispatcherPacket{ContextID: p.ContextId()},
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: p.ContextId(),
-				Name:      "session",
-				Data:      map[string]string{"type": "error", "message": p.ErrMessage()},
-				Time:      time.Now(),
+				Record: observability.NewConversationEventRecord(observability.SessionConnectFailed, observability.Attributes{
+					"message": p.ErrMessage(),
+				}),
 			},
 		)
 
 	case internal_type.LLMErrorPacket:
 		h.r.OnPacket(ctx,
-			internal_type.UserMessageMetricPacket{
+			internal_type.ObservabilityMetricRecordPacket{
 				ContextID: p.ContextId(),
-				Metrics: []*protos.Metric{{
-					Name:        "llm_error",
-					Value:       p.ErrMessage(),
-					Description: "An error occurred during LLM processing"}},
+				Record: observability.NewMessageMetricRecord(
+					p.ContextId(),
+					observability.MessageRoleAssistant,
+					[]*protos.Metric{{
+						Name:        "llm_error",
+						Value:       p.ErrMessage(),
+						Description: "An error occurred during LLM processing"}},
+				),
 			},
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: p.ContextId(),
-				Name:      "llm",
-				Data:      map[string]string{"type": "error", "message": p.ErrMessage()},
-				Time:      time.Now(),
+				Record: observability.NewMessageRecord(p.ContextId(), observability.ComponentLLM, observability.LLMError, observability.MessageRoleAssistant, observability.Attributes{
+					"message": p.ErrMessage(),
+				}),
 			})
 		h.r.Transition(LLMGenerated)
 	case internal_type.SpeechToTextErrorPacket:
 		h.r.OnPacket(ctx,
-			internal_type.UserMessageMetricPacket{
+			internal_type.ObservabilityMetricRecordPacket{
 				ContextID: p.ContextId(),
-				Metrics: []*protos.Metric{{
-					Name:        "stt_error",
-					Value:       p.ErrMessage(),
-					Description: "An error occurred during STT processing"}},
+				Record: observability.NewMessageMetricRecord(
+					p.ContextId(),
+					observability.MessageRoleUser,
+					[]*protos.Metric{{
+						Name:        "stt_error",
+						Value:       p.ErrMessage(),
+						Description: "An error occurred during STT processing"}},
+				),
 			},
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: p.ContextId(),
-				Name:      "stt",
-				Data:      map[string]string{"type": "error", "message": p.ErrMessage()},
-				Time:      time.Now(),
+				Record: observability.NewMessageRecord(p.ContextId(), observability.ComponentSTT, observability.STTError, observability.MessageRoleUser, observability.Attributes{
+					"message": p.ErrMessage(),
+				}),
 			})
 	case internal_type.TextToSpeechErrorPacket:
 		h.r.OnPacket(ctx,
-			internal_type.UserMessageMetricPacket{
+			internal_type.ObservabilityMetricRecordPacket{
 				ContextID: p.ContextId(),
-				Metrics: []*protos.Metric{{
-					Name:        "tts_error",
-					Value:       p.ErrMessage(),
-					Description: "An error occurred during TTS processing"}},
+				Record: observability.NewMessageMetricRecord(
+					p.ContextId(),
+					observability.MessageRoleAssistant,
+					[]*protos.Metric{{
+						Name:        "tts_error",
+						Value:       p.ErrMessage(),
+						Description: "An error occurred during TTS processing"}},
+				),
 			},
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: p.ContextId(),
-				Name:      "tts",
-				Data:      map[string]string{"type": "error", "message": p.ErrMessage()},
-				Time:      time.Now(),
+				Record: observability.NewMessageRecord(p.ContextId(), observability.ComponentTTS, observability.TTSError, observability.MessageRoleAssistant, observability.Attributes{
+					"message": p.ErrMessage(),
+				}),
 			})
 	case internal_type.ModeSwitchErrorPacket:
 		if errPkt.IsRecoverable() {
@@ -475,16 +501,13 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 				h.r.logger.Tracef(ctx, "session lifecycle switch-failed(fatal) transition ignored: %v", err)
 			}
 		}
-		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
+		h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
 			ContextID: p.ContextId(),
-			Name:      observe.ComponentSession,
-			Data: map[string]string{
-				observe.DataType: "mode_switch_failed",
-				"error_type":     string(errPkt.Type),
-				"target_mode":    errPkt.StreamMode.String(),
-				"error":          p.ErrMessage(),
-			},
-			Time: time.Now(),
+			Record: observability.NewConversationEventRecord(observability.SessionModeSwitchFailed, observability.Attributes{
+				"error_type":  string(errPkt.Type),
+				"target_mode": errPkt.StreamMode.String(),
+				"error":       p.ErrMessage(),
+			}),
 		})
 	}
 	if !p.IsRecoverable() {
@@ -497,20 +520,18 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 				ContextID: p.ContextId(),
 				Event:     utils.ConversationFailed,
 			},
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: h.r.GetID(),
-				Name:      observe.ComponentSession,
-				Data: map[string]string{
-					observe.DataType:   observe.EventDisconnectRequested,
-					observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String()},
-				Time: time.Now(),
+				Record: observability.NewConversationEventRecord(observability.SessionDisconnectRequested, observability.Attributes{
+					observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String(),
+				}),
 			},
-			internal_type.ConversationMetadataPacket{
-				ContextID: h.r.Conversation().Id,
-				Metadata: []*protos.Metadata{{
+			internal_type.ObservabilityMetadataRecordPacket{
+				ContextID: h.r.GetID(),
+				Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
 					Key:   "disconnect_reason",
 					Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_ERROR.String(),
-				}},
+				}}),
 			},
 		)
 		h.r.Notify(ctx,
@@ -552,9 +573,13 @@ func (h requestorDispatchHandler) HandleInjectMessage(ctx context.Context, p int
 	if h.r.outputNormalizer != nil {
 		h.r.OnPacket(ctx,
 			internal_type.MessageCreatePacket{ContextID: contextID, MessageRole: "assistant", Text: p.Text},
-			internal_type.AssistantMessageMetricPacket{
+			internal_type.ObservabilityMetricRecordPacket{
 				ContextID: contextID,
-				Metrics:   []*protos.Metric{{Name: "assistant_turn", Value: type_enums.CONVERSATION_COMPLETE.String(), Description: "Injected message completed"}},
+				Record: observability.NewMessageMetricRecord(
+					contextID,
+					observability.MessageRoleAssistant,
+					[]*protos.Metric{{Name: "assistant_turn", Value: type_enums.CONVERSATION_COMPLETE.String(), Description: "Injected message completed"}},
+				),
 			},
 		)
 		h.r.outputNormalizer.Normalize(ctx, internal_type.InjectMessagePacket{ContextID: contextID, Text: p.Text})
@@ -635,15 +660,21 @@ func (h requestorDispatchHandler) HandleTextToSpeechAudio(ctx context.Context, p
 	}
 	if p.ContextID != h.r.GetID() {
 		h.r.OnPacket(ctx,
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: p.ContextID,
-				Name:      "tts",
-				Data:      map[string]string{"type": "discarded", "reason": "stale_context", "packet": "tts_audio", "current_context": h.r.GetID()},
-				Time:      time.Now(),
+				Record: observability.NewMessageRecord(p.ContextID, observability.ComponentTTS, observability.TTSDiscarded, observability.MessageRoleAssistant, observability.Attributes{
+					"reason":          "stale_context",
+					"packet":          "tts_audio",
+					"current_context": h.r.GetID(),
+				}),
 			},
-			internal_type.AssistantMessageMetricPacket{
+			internal_type.ObservabilityMetricRecordPacket{
 				ContextID: p.ContextID,
-				Metrics:   []*protos.Metric{{Name: "discarded_tts_chunk", Value: "true", Description: fmt.Sprintf("tts end packet discarded due to stale contextID %s", h.r.GetID())}},
+				Record: observability.NewMessageMetricRecord(
+					p.ContextID,
+					observability.MessageRoleAssistant,
+					[]*protos.Metric{{Name: "discarded_tts_chunk", Value: "true", Description: fmt.Sprintf("tts end packet discarded due to stale contextID %s", h.r.GetID())}},
+				),
 			})
 		return
 	}
@@ -659,15 +690,21 @@ func (h requestorDispatchHandler) HandleTextToSpeechAudio(ctx context.Context, p
 func (h requestorDispatchHandler) HandleTextToSpeechEnd(ctx context.Context, p internal_type.TextToSpeechEndPacket) {
 	if p.ContextID != h.r.GetID() {
 		h.r.OnPacket(ctx,
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: p.ContextID,
-				Name:      "tts",
-				Data:      map[string]string{"type": "discarded", "reason": "stale_context", "packet": "tts_end", "current_context": h.r.GetID()},
-				Time:      time.Now(),
+				Record: observability.NewMessageRecord(p.ContextID, observability.ComponentTTS, observability.TTSDiscarded, observability.MessageRoleAssistant, observability.Attributes{
+					"reason":          "stale_context",
+					"packet":          "tts_end",
+					"current_context": h.r.GetID(),
+				}),
 			},
-			internal_type.AssistantMessageMetricPacket{
+			internal_type.ObservabilityMetricRecordPacket{
 				ContextID: p.ContextID,
-				Metrics:   []*protos.Metric{{Name: "discarded_tts", Value: "true", Description: fmt.Sprintf("tts end packet discarded due to stale contextID %s", h.r.GetID())}},
+				Record: observability.NewMessageMetricRecord(
+					p.ContextID,
+					observability.MessageRoleAssistant,
+					[]*protos.Metric{{Name: "discarded_tts", Value: "true", Description: fmt.Sprintf("tts end packet discarded due to stale contextID %s", h.r.GetID())}},
+				),
 			})
 		return
 	}
@@ -683,11 +720,13 @@ func (h requestorDispatchHandler) HandleLLMToolCall(ctx context.Context, p inter
 	req, _ := json.Marshal(p)
 	h.r.OnPacket(
 		ctx,
-		internal_type.ConversationEventPacket{
+		internal_type.ObservabilityEventRecordPacket{
 			ContextID: p.ContextID,
-			Name:      observe.ComponentTool,
-			Data:      map[string]string{observe.DataType: observe.EventToolCallStarted, "name": p.Name, "id": p.ToolID, "action": p.Action.String()},
-			Time:      time.Now(),
+			Record: observability.NewMessageRecord(p.ContextID, observability.ComponentTool, observability.ToolCallStarted, observability.MessageRoleAssistant, observability.Attributes{
+				"name":   p.Name,
+				"id":     p.ToolID,
+				"action": p.Action.String(),
+			}),
 		},
 		internal_type.ToolLogCreatePacket{
 			ContextID: p.ContextID, ToolID: p.ToolID, Name: p.Name, Request: req,
@@ -744,20 +783,18 @@ func (h requestorDispatchHandler) HandleLLMToolResult(ctx context.Context, p int
 	switch p.Action {
 	case protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION:
 		h.r.OnPacket(ctx,
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: h.r.GetID(),
-				Name:      observe.ComponentSession,
-				Data: map[string]string{
-					observe.DataType:   observe.EventDisconnectRequested,
-					observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String()},
-				Time: time.Now(),
+				Record: observability.NewConversationEventRecord(observability.SessionDisconnectRequested, observability.Attributes{
+					observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
+				}),
 			},
-			internal_type.ConversationMetadataPacket{
-				ContextID: h.r.Conversation().Id,
-				Metadata: []*protos.Metadata{{
+			internal_type.ObservabilityMetadataRecordPacket{
+				ContextID: h.r.GetID(),
+				Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
 					Key:   "disconnect_reason",
 					Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
-				}},
+				}}),
 			},
 		)
 		h.r.Notify(ctx, &protos.ConversationDisconnection{
@@ -767,20 +804,18 @@ func (h requestorDispatchHandler) HandleLLMToolResult(ctx context.Context, p int
 	case protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION:
 		if p.Result["next_action"] == "end_call" {
 			h.r.OnPacket(ctx,
-				internal_type.ConversationEventPacket{
+				internal_type.ObservabilityEventRecordPacket{
 					ContextID: h.r.GetID(),
-					Name:      observe.ComponentSession,
-					Data: map[string]string{
-						observe.DataType:   observe.EventDisconnectRequested,
-						observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String()},
-					Time: time.Now(),
+					Record: observability.NewConversationEventRecord(observability.SessionDisconnectRequested, observability.Attributes{
+						observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
+					}),
 				},
-				internal_type.ConversationMetadataPacket{
-					ContextID: h.r.Conversation().Id,
-					Metadata: []*protos.Metadata{{
+				internal_type.ObservabilityMetadataRecordPacket{
+					ContextID: h.r.GetID(),
+					Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
 						Key:   "disconnect_reason",
 						Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_TOOL.String(),
-					}},
+					}}),
 				},
 			)
 			h.r.Notify(ctx, &protos.ConversationDisconnection{
@@ -794,11 +829,12 @@ func (h requestorDispatchHandler) HandleLLMToolResult(ctx context.Context, p int
 		ctx,
 		internal_type.TextToSpeechInterruptPacket{ContextID: p.ContextID},
 		internal_type.StartIdleTimeoutPacket{ContextID: p.ContextID},
-		internal_type.ConversationEventPacket{
+		internal_type.ObservabilityEventRecordPacket{
 			ContextID: p.ContextID,
-			Name:      observe.ComponentTool,
-			Data:      map[string]string{observe.DataType: observe.EventToolCallCompleted, "name": p.Name, "id": p.ToolID},
-			Time:      time.Now(),
+			Record: observability.NewMessageRecord(p.ContextID, observability.ComponentTool, observability.ToolCallCompleted, observability.MessageRoleAssistant, observability.Attributes{
+				"name": p.Name,
+				"id":   p.ToolID,
+			}),
 		},
 	)
 	if h.r.assistantExecutor != nil {
@@ -907,15 +943,13 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 			})
 			return
 		}
-		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
-			Name: "session",
-			Data: map[string]string{
-				"type":          "resumed",
+		h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
+			ContextID: vl.ContextID,
+			Record: observability.NewConversationEventRecord(observability.ConversationResume, observability.Attributes{
 				"source":        fmt.Sprintf("%v", h.r.source),
 				"identifier":    h.r.identifier(vl.Config),
 				"message_count": fmt.Sprintf("%d", len(h.r.GetHistories())),
-			},
-			Time: time.Now(),
+			}),
 		})
 
 	} else {
@@ -929,15 +963,13 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 			})
 			return
 		}
-		h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
-			Name: observe.ComponentSession,
-			Data: map[string]string{
-				observe.DataType: observe.EventConnected,
-				"source":         fmt.Sprintf("%v", h.r.source),
-				"is_new":         "true",
-				"identifier":     h.r.identifier(vl.Config),
-			},
-			Time: time.Now(),
+		h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
+			ContextID: vl.ContextID,
+			Record: observability.NewConversationEventRecord(observability.SessionConnected, observability.Attributes{
+				"source":     fmt.Sprintf("%v", h.r.source),
+				"is_new":     "true",
+				"identifier": h.r.identifier(vl.Config),
+			}),
 		})
 	}
 	h.r.OnPacket(ctx,
@@ -956,10 +988,9 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		return
 	}
 	h.r.conversationRecordingExecutor = recordingExecutor
-	h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
-		Name: observe.ComponentRecording,
-		Data: map[string]string{observe.DataType: observe.EventRecordingStarted},
-		Time: time.Now(),
+	h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
+		ContextID: p.ContextID,
+		Record:    observability.NewConversationEventRecord(observability.RecordingStarted, nil),
 	})
 	for _, analysis := range h.r.assistant.AssistantAnalyses {
 		exec, err := internal_analysis.NewExecutor(h.r.logger, ctx, analysis, h.r, h.r)
@@ -1019,13 +1050,13 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 	}
 
 	h.r.OnPacket(ctx,
-		internal_type.ConversationMetricPacket{
-			ContextID: h.r.Conversation().Id,
-			Metrics: []*protos.Metric{{
+		internal_type.ObservabilityMetricRecordPacket{
+			ContextID: p.ContextID,
+			Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 				Name:        type_enums.CONVERSATION_STATUS.String(),
 				Value:       type_enums.CONVERSATION_IN_PROGRESS.String(),
 				Description: "Conversation is currently in progress",
-			}},
+			}}),
 		},
 		internal_type.InitializeAuthenticationPacket{
 			ContextID: p.ContextID,
@@ -1034,9 +1065,9 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 	)
 
 	if v := h.r.extractClientInformation(ctx); v != nil {
-		h.r.OnPacket(ctx, internal_type.ConversationMetadataPacket{
-			ContextID: h.r.Conversation().Id,
-			Metadata:  v,
+		h.r.OnPacket(ctx, internal_type.ObservabilityMetadataRecordPacket{
+			ContextID: p.ContextID,
+			Record:    observability.NewConversationMetadataRecord(v),
 		})
 	}
 }
@@ -1079,11 +1110,9 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 			Arguments:      registry.Apply(args, source, variable.ResolveContext{}),
 			Initialization: p.Config,
 		},
-		internal_type.ConversationEventPacket{
+		internal_type.ObservabilityEventRecordPacket{
 			ContextID: p.ContextID,
-			Name:      observe.ComponentSession,
-			Data:      map[string]string{"type": "authentication_started"},
-			Time:      time.Now(),
+			Record:    observability.NewConversationEventRecord(observability.SessionAuthenticationStarted, nil),
 		},
 	)
 }
@@ -1745,15 +1774,12 @@ func (h requestorDispatchHandler) HandleInitializationCompleted(ctx context.Cont
 	if p.Config.GetAssistantConversationId() == 0 {
 		event = utils.ConversationBegin
 	}
-	h.r.OnPacket(ctx, internal_type.ConversationEventPacket{
+	h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
 		ContextID: p.ContextID,
-		Name:      observe.ComponentSession,
-		Data: map[string]string{
-			observe.DataType: observe.EventInitialized,
+		Record: observability.NewConversationEventRecord(observability.SessionInitialized, observability.Attributes{
 			"event":          event.Get(),
 			observe.DataMode: h.r.GetMode().String(),
-		},
-		Time: time.Now(),
+		}),
 	}, internal_type.ExecuteWebhookPacket{
 		ContextID: p.ContextID,
 		Event:     event,

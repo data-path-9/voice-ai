@@ -104,6 +104,7 @@ const (
 	TurnUserSpeechFinal          EventName = "turn.user_speech_final"
 	TurnAssistantResponseStarted EventName = "turn.assistant_response_started"
 	TurnAssistantResponseFinal   EventName = "turn.assistant_response_final"
+	TurnChange                   EventName = "turn.change"
 	TurnInterrupted              EventName = "turn.interrupted"
 	TurnOverlappingSpeech        EventName = "turn.overlapping_speech"
 	TurnUserTurnExceeded         EventName = "turn.user_turn_exceeded"
@@ -112,23 +113,25 @@ const (
 )
 
 const (
-	SessionConnected            EventName = "session.connected"
-	SessionInitializing         EventName = "session.initializing"
-	SessionInitialized          EventName = "session.initialized"
-	SessionConnectFailed        EventName = "session.connect_failed"
-	SessionDisconnected         EventName = "session.disconnected"
-	SessionDisconnectRequested  EventName = "session.disconnect_requested"
-	SessionCleanup              EventName = "session.cleanup"
-	SessionModeSwitch           EventName = "session.mode_switch"
-	SessionSessionResolved      EventName = "session.session_resolved"
-	SessionSessionResolveFailed EventName = "session.session_resolve_failed"
-	SessionStreamerCreated      EventName = "session.streamer_created"
-	SessionStreamerFailed       EventName = "session.streamer_failed"
-	SessionTalkerCreated        EventName = "session.talker_created"
-	SessionTalkerFailed         EventName = "session.talker_failed"
-	SessionTalkStarted          EventName = "session.talk_started"
-	SessionHooksBegin           EventName = "session.hooks_begin"
-	SessionHooksEnd             EventName = "session.hooks_end"
+	SessionConnected             EventName = "session.connected"
+	SessionInitializing          EventName = "session.initializing"
+	SessionInitialized           EventName = "session.initialized"
+	SessionConnectFailed         EventName = "session.connect_failed"
+	SessionDisconnected          EventName = "session.disconnected"
+	SessionDisconnectRequested   EventName = "session.disconnect_requested"
+	SessionCleanup               EventName = "session.cleanup"
+	SessionModeSwitch            EventName = "session.mode_switch"
+	SessionModeSwitchFailed      EventName = "session.mode_switch_failed"
+	SessionAuthenticationStarted EventName = "session.authentication_started"
+	SessionSessionResolved       EventName = "session.session_resolved"
+	SessionSessionResolveFailed  EventName = "session.session_resolve_failed"
+	SessionStreamerCreated       EventName = "session.streamer_created"
+	SessionStreamerFailed        EventName = "session.streamer_failed"
+	SessionTalkerCreated         EventName = "session.talker_created"
+	SessionTalkerFailed          EventName = "session.talker_failed"
+	SessionTalkStarted           EventName = "session.talk_started"
+	SessionHooksBegin            EventName = "session.hooks_begin"
+	SessionHooksEnd              EventName = "session.hooks_end"
 )
 
 const (
@@ -169,6 +172,7 @@ const (
 	TTSFirstAudio EventName = "tts.first_audio"
 	TTSAudio      EventName = "tts.audio"
 	TTSCompleted  EventName = "tts.completed"
+	TTSDiscarded  EventName = "tts.discarded"
 	TTSError      EventName = "tts.error"
 )
 
@@ -177,6 +181,7 @@ const (
 	LLMFirstToken EventName = "llm.first_token"
 	LLMToken      EventName = "llm.token"
 	LLMCompleted  EventName = "llm.completed"
+	LLMDiscarded  EventName = "llm.discarded"
 	LLMError      EventName = "llm.error"
 )
 
@@ -313,6 +318,7 @@ var eventsByComponent = map[ComponentName][]EventName{
 		TurnUserSpeechFinal,
 		TurnAssistantResponseStarted,
 		TurnAssistantResponseFinal,
+		TurnChange,
 		TurnInterrupted,
 		TurnOverlappingSpeech,
 		TurnUserTurnExceeded,
@@ -328,6 +334,8 @@ var eventsByComponent = map[ComponentName][]EventName{
 		SessionDisconnectRequested,
 		SessionCleanup,
 		SessionModeSwitch,
+		SessionModeSwitchFailed,
+		SessionAuthenticationStarted,
 		SessionSessionResolved,
 		SessionSessionResolveFailed,
 		SessionStreamerCreated,
@@ -373,6 +381,7 @@ var eventsByComponent = map[ComponentName][]EventName{
 		TTSFirstAudio,
 		TTSAudio,
 		TTSCompleted,
+		TTSDiscarded,
 		TTSError,
 	},
 	ComponentLLM: {
@@ -380,6 +389,7 @@ var eventsByComponent = map[ComponentName][]EventName{
 		LLMFirstToken,
 		LLMToken,
 		LLMCompleted,
+		LLMDiscarded,
 		LLMError,
 	},
 	ComponentVAD: {
