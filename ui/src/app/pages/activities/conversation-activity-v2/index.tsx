@@ -14,7 +14,13 @@ import {
   Tag,
   Loading,
 } from '@carbon/react';
-import { Activity, Filter, Renew, WarningAlt } from '@carbon/icons-react';
+import {
+  Activity,
+  Close,
+  Filter,
+  Renew,
+  WarningAlt,
+} from '@carbon/icons-react';
 import {
   ConnectionConfig,
   Criteria,
@@ -51,15 +57,190 @@ import {
   telemetryRecordToTimelineDocument,
 } from './utils';
 
-const getMetricSummary = (document: TimelineDocument) =>
+type MetricValue = {
+  description?: string;
+  name?: string;
+  value?: number | string;
+};
+
+const getMetricValues = (document: TimelineDocument): MetricValue[] =>
   (
-    document.data?.metrics as
-      | Array<{
-          description?: string;
-          value?: string;
-        }>
-      | undefined
-  )?.[0];
+    (document.data?.metrics as MetricValue[] | undefined)?.filter(Boolean) || [
+      {
+        description: document.data?.description as string | undefined,
+        name: document.name,
+      },
+    ]
+  ).filter(metric => metric.name || metric.value || metric.description);
+
+const getMetricSummary = (document: TimelineDocument) =>
+  getMetricValues(document)[0];
+
+const getRelatedRecords = (
+  document: TimelineDocument,
+  records: TimelineDocument[],
+) => {
+  const relatedRecords = records.filter(
+    record => record.kind === document.kind,
+  );
+  return relatedRecords.length > 0 ? relatedRecords : [document];
+};
+
+const getLeftPanelTitle = (document: TimelineDocument) => {
+  if (document.kind === 'log') return 'Logs';
+  if (document.kind === 'metric') return 'Metrics';
+  return 'Timeline';
+};
+
+const getRecordCountLabel = (document: TimelineDocument, count: number) => {
+  if (document.kind === 'log') {
+    return `${count} ${count === 1 ? 'log' : 'logs'}`;
+  }
+  if (document.kind === 'metric') {
+    return `${count} ${count === 1 ? 'metric' : 'metrics'}`;
+  }
+  return `${count} ${count === 1 ? 'event' : 'events'}`;
+};
+
+const LogRecordList = ({
+  records,
+  selectedDocumentId,
+  onSelectDocument,
+}: {
+  records: TimelineDocument[];
+  selectedDocumentId?: string;
+  onSelectDocument: (document: TimelineDocument) => void;
+}) => (
+  <div className="min-h-0 flex-1 overflow-auto border-t border-gray-200 dark:border-gray-800">
+    {records.map(record => (
+      <button
+        key={record.id}
+        type="button"
+        className={[
+          'w-full border-t border-gray-100 bg-white px-4 py-3 text-left first:border-t-0 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900',
+          record.id === selectedDocumentId
+            ? 'outline outline-2 -outline-offset-2 outline-[var(--cds-border-interactive)]'
+            : '',
+        ].join(' ')}
+        onClick={() => onSelectDocument(record)}
+      >
+        <div className="mb-2 flex min-w-0 items-center gap-3 font-mono text-xs text-gray-500">
+          <span
+            className={
+              record.level.toLowerCase() === 'error'
+                ? 'text-red-600 dark:text-red-400'
+                : ''
+            }
+          >
+            {record.level.toLowerCase()}
+          </span>
+          <span className="truncate">{getDocumentComponent(record)}</span>
+          <span className="ml-auto whitespace-nowrap">
+            {formatTime(record.occurredAt)}
+          </span>
+        </div>
+        <p className="truncate font-mono text-sm text-gray-900 dark:text-gray-100">
+          [{record.level.toLowerCase()}] {record.title || record.name}
+        </p>
+      </button>
+    ))}
+  </div>
+);
+
+const MetricRecordList = ({
+  records,
+  selectedDocumentId,
+  onSelectDocument,
+}: {
+  records: TimelineDocument[];
+  selectedDocumentId?: string;
+  onSelectDocument: (document: TimelineDocument) => void;
+}) => (
+  <div className="min-h-0 flex-1 overflow-auto border-t border-gray-200 dark:border-gray-800">
+    {records.map(record => (
+      <button
+        key={record.id}
+        type="button"
+        className={[
+          'w-full border-t border-gray-100 bg-white px-4 py-3 text-left first:border-t-0 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900',
+          record.id === selectedDocumentId
+            ? 'outline outline-2 -outline-offset-2 outline-[var(--cds-border-interactive)]'
+            : '',
+        ].join(' ')}
+        onClick={() => onSelectDocument(record)}
+      >
+        <div className="mb-2 flex min-w-0 items-center gap-2">
+          <Tag type="cool-gray">{getDocumentComponent(record)}</Tag>
+          <span className="ml-auto whitespace-nowrap font-mono text-xs text-gray-500">
+            {formatTime(record.occurredAt)}
+          </span>
+        </div>
+        <div className="space-y-1">
+          {getMetricValues(record).map((metric, index) => (
+            <p
+              key={`${record.id}-${metric.name || index}`}
+              className="truncate font-mono text-sm text-gray-900 dark:text-gray-100"
+            >
+              [{metric.name || record.name}] {metric.value ?? '-'}
+              {metric.description && (
+                <span className="text-gray-500"> {metric.description}</span>
+              )}
+            </p>
+          ))}
+        </div>
+      </button>
+    ))}
+  </div>
+);
+
+const InspectorPrimaryPanel = ({
+  document,
+  records,
+  selectedDocumentId,
+  onSelectDocument,
+}: {
+  document: TimelineDocument;
+  records: TimelineDocument[];
+  selectedDocumentId?: string;
+  onSelectDocument: (document: TimelineDocument) => void;
+}) => {
+  const relatedRecords = getRelatedRecords(document, records);
+  const groups = groupTimelineItems(relatedRecords);
+
+  return (
+    <div className="flex min-w-0 min-h-0 flex-col border-r border-gray-200 dark:border-gray-800">
+      <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-800 dark:bg-gray-900">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+            {getLeftPanelTitle(document)}
+          </p>
+        </div>
+        <Tag type="cool-gray">
+          {getRecordCountLabel(document, relatedRecords.length)}
+        </Tag>
+      </div>
+      {document.kind === 'log' ? (
+        <LogRecordList
+          records={relatedRecords}
+          selectedDocumentId={selectedDocumentId}
+          onSelectDocument={onSelectDocument}
+        />
+      ) : document.kind === 'metric' ? (
+        <MetricRecordList
+          records={relatedRecords}
+          selectedDocumentId={selectedDocumentId}
+          onSelectDocument={onSelectDocument}
+        />
+      ) : (
+        <ConversationWaterfall
+          groups={groups}
+          selectedDocumentId={selectedDocumentId}
+          onSelectDocument={onSelectDocument}
+        />
+      )}
+    </div>
+  );
+};
 
 const TelemetryStreamTable = ({
   selectedDocumentId,
@@ -139,87 +320,131 @@ const TelemetryStreamTable = ({
   </ScrollableTableSection>
 );
 
-const DetailPanel = ({ document }: { document: TimelineDocument | null }) => {
-  if (!document) {
-    return (
-      <div className="flex h-full items-center justify-center border-l border-gray-200 bg-gray-50 px-6 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950">
-        Select a trace record to inspect attributes and payload.
-      </div>
-    );
-  }
-
-  return (
-    <aside className="flex h-full min-w-[360px] max-w-[420px] flex-col border-l border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
-      <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
-        <div className="mb-2 flex items-center gap-2">
-          <Tag type={document.outcome === 'failure' ? 'red' : 'green'}>
-            {document.outcome || 'unknown'}
-          </Tag>
-          <Tag type="cool-gray">{document.kind}</Tag>
-          <Tag type="purple">{document.scope}</Tag>
-        </div>
-        <h2 className="text-base font-medium text-gray-900 dark:text-gray-100">
-          {document.title || document.name}
-        </h2>
-        <p className="mt-1 break-all font-mono text-xs text-gray-500">
-          {document.id}
-        </p>
-      </div>
-      <div className="space-y-4 overflow-auto p-4">
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="text-xs uppercase text-gray-500">Occurred</p>
-            <p className="font-mono text-xs">
-              {formatTime(document.occurredAt)}
+const TraceInspectorPanel = ({
+  document,
+  records,
+  recordCount,
+  selectedContextId,
+  selectedDocumentId,
+  onSelectDocument,
+  onClose,
+}: {
+  document: TimelineDocument | null;
+  records: TimelineDocument[];
+  recordCount: number;
+  selectedContextId: string;
+  selectedDocumentId?: string;
+  onSelectDocument: (document: TimelineDocument) => void;
+  onClose: () => void;
+}) => (
+  <div
+    className={[
+      'absolute inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white shadow-2xl transition-transform duration-200 ease-out dark:border-gray-800 dark:bg-gray-950',
+      document ? 'translate-y-0' : 'pointer-events-none translate-y-full',
+    ].join(' ')}
+    aria-hidden={!document}
+  >
+    {document && (
+      <section className="relative flex max-h-[62vh] min-h-[360px] flex-col">
+        <Button
+          hasIconOnly
+          kind="ghost"
+          size="lg"
+          renderIcon={Close}
+          iconDescription="Close"
+          tooltipPosition="left"
+          className="!absolute !right-0 !top-0 !z-10 !h-12 !min-h-12 !w-12 !min-w-12 !p-0 border-l border-gray-200 dark:border-gray-800"
+          onClick={onClose}
+        />
+        <div className="border-b border-gray-200 px-4 py-3 pr-14 dark:border-gray-800">
+          <div className="min-w-0">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Tag type={document.outcome === 'failure' ? 'red' : 'green'}>
+                {document.outcome || 'unknown'}
+              </Tag>
+              <Tag type="cool-gray">{document.kind}</Tag>
+              <Tag type="purple">{document.scope}</Tag>
+            </div>
+            <h2 className="truncate text-base font-medium text-gray-900 dark:text-gray-100">
+              {document.title || document.name}
+            </h2>
+            <p className="mt-1 font-mono text-xs text-gray-500">
+              contextId:{selectedContextId || '-'} · {recordCount} records
             </p>
           </div>
-          <div>
-            <p className="text-xs uppercase text-gray-500">Duration</p>
-            <p className="font-mono text-xs">
-              {formatDurationMs(document.durationMs)}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs uppercase text-gray-500">Category</p>
-            <p className="font-mono text-xs">{document.category || '-'}</p>
-          </div>
-          <div>
-            <p className="text-xs uppercase text-gray-500">Context</p>
-            <p className="break-all font-mono text-xs">
-              {document.contextId || '-'}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs uppercase text-gray-500">Message</p>
-            <p className="break-all font-mono text-xs">
-              {document.messageId || '-'}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs uppercase text-gray-500">Role</p>
-            <p className="font-mono text-xs">{document.messageRole || '-'}</p>
+        </div>
+        <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1.3fr)_minmax(420px,0.7fr)]">
+          <InspectorPrimaryPanel
+            document={document}
+            records={records}
+            selectedDocumentId={selectedDocumentId}
+            onSelectDocument={onSelectDocument}
+          />
+          <div className="min-h-0 overflow-auto p-4">
+            <div className="mb-4 grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-xs uppercase text-gray-500">Occurred</p>
+                <p className="font-mono text-xs">
+                  {formatTime(document.occurredAt)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-gray-500">Duration</p>
+                <p className="font-mono text-xs">
+                  {formatDurationMs(document.durationMs)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-gray-500">Category</p>
+                <p className="font-mono text-xs">{document.category || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-gray-500">Role</p>
+                <p className="font-mono text-xs">
+                  {document.messageRole || '-'}
+                </p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-xs uppercase text-gray-500">Record ID</p>
+                <p className="break-all font-mono text-xs">{document.id}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-gray-500">Context</p>
+                <p className="break-all font-mono text-xs">
+                  {document.contextId || '-'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-gray-500">Message</p>
+                <p className="break-all font-mono text-xs">
+                  {document.messageId || '-'}
+                </p>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div className="min-w-0">
+                <p className="mb-2 text-xs font-medium uppercase text-gray-500">
+                  Attributes
+                </p>
+                <CodeSnippet type="multi" feedback="Copied">
+                  {JSON.stringify(document.attributes || {}, null, 2)}
+                </CodeSnippet>
+              </div>
+              <div className="min-w-0">
+                <p className="mb-2 text-xs font-medium uppercase text-gray-500">
+                  Data
+                </p>
+                <CodeSnippet type="multi" feedback="Copied">
+                  {JSON.stringify(document.data || {}, null, 2)}
+                </CodeSnippet>
+              </div>
+            </div>
           </div>
         </div>
-        <div>
-          <p className="mb-2 text-xs font-medium uppercase text-gray-500">
-            Attributes
-          </p>
-          <CodeSnippet type="multi" feedback="Copied">
-            {JSON.stringify(document.attributes || {}, null, 2)}
-          </CodeSnippet>
-        </div>
-        <div>
-          <p className="mb-2 text-xs font-medium uppercase text-gray-500">
-            Data
-          </p>
-          <CodeSnippet type="multi" feedback="Copied">
-            {JSON.stringify(document.data || {}, null, 2)}
-          </CodeSnippet>
-        </div>
-      </div>
-    </aside>
-  );
-};
+      </section>
+    )}
+  </div>
+);
 
 export const ListingPage = () => {
   const { token, authId, projectId } = useCurrentCredential();
@@ -503,10 +728,6 @@ export const ListingPage = () => {
       ),
     [filteredDocuments, selectedContextId],
   );
-  const selectedGroups = useMemo(
-    () => groupTimelineItems(selectedTimelineDocuments),
-    [selectedTimelineDocuments],
-  );
 
   useEffect(() => {
     const currentContextExists = filteredDocuments.some(
@@ -517,7 +738,7 @@ export const ListingPage = () => {
 
     const nextDocument = filteredDocuments[0] || null;
     setSelectedContextId(nextDocument?.contextId || '');
-    setSelectedDocument(nextDocument);
+    setSelectedDocument(null);
   }, [filteredDocuments, selectedContextId]);
 
   const resetExplorerFilters = () => {
@@ -549,10 +770,10 @@ export const ListingPage = () => {
   };
 
   return (
-    <div className="relative flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       <Helmet title="Trace" />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <TableToolbar>
           <TableToolbarContent>
             <TableToolbarSearch
@@ -647,32 +868,6 @@ export const ListingPage = () => {
                 onSelectRecord={selectRecord}
               />
 
-              {selectedGroups.length > 0 && (
-                <section className="flex min-h-[280px] max-h-[380px] border-t border-gray-200 dark:border-gray-800">
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-800 dark:bg-gray-900">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                          Timeline
-                        </p>
-                        <p className="font-mono text-xs text-gray-500">
-                          contextId:{selectedContextId}
-                        </p>
-                      </div>
-                      <Tag type="cool-gray">
-                        {selectedTimelineDocuments.length} records
-                      </Tag>
-                    </div>
-                    <ConversationWaterfall
-                      groups={selectedGroups}
-                      selectedDocumentId={selectedDocument?.id}
-                      onSelectDocument={setSelectedDocument}
-                    />
-                  </div>
-                  <DetailPanel document={selectedDocument} />
-                </section>
-              )}
-
               <Pagination
                 className="shrink-0 border-t border-gray-200 dark:border-gray-800"
                 totalItems={totalItem}
@@ -691,6 +886,15 @@ export const ListingPage = () => {
             </div>
           )}
         </div>
+        <TraceInspectorPanel
+          document={selectedDocument}
+          records={selectedTimelineDocuments}
+          recordCount={selectedTimelineDocuments.length}
+          selectedContextId={selectedContextId}
+          selectedDocumentId={selectedDocument?.id}
+          onSelectDocument={setSelectedDocument}
+          onClose={() => setSelectedDocument(null)}
+        />
       </div>
     </div>
   );

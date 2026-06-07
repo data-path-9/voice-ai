@@ -21,17 +21,11 @@ const getOutcomeTagType = (outcome: string): 'green' | 'red' | 'gray' => {
   return 'gray';
 };
 
-const RowBar: FC<{ item: TimelineItem; selected: boolean }> = ({
-  item,
-  selected,
-}) => (
+const RowBar: FC<{ item: TimelineItem }> = ({ item }) => (
   <div className="relative h-8 min-w-[420px]">
     <div className="absolute left-0 right-0 top-1/2 h-px bg-gray-200 dark:bg-gray-800" />
     <div
-      className={[
-        'absolute top-[7px] h-[18px] border border-white/80 shadow-sm',
-        selected ? 'ring-2 ring-blue-500 ring-offset-1' : '',
-      ].join(' ')}
+      className="absolute top-[7px] h-[18px] border border-white/80 shadow-sm"
       style={{
         left: `${item.offsetPct}%`,
         width: `${Math.min(item.widthPct, 100 - item.offsetPct)}%`,
@@ -50,10 +44,10 @@ const ComponentRow: FC<{
   <button
     type="button"
     className={[
-      'grid min-w-[880px] grid-cols-[360px_120px_120px_minmax(420px,1fr)] border-t border-gray-100 text-left dark:border-gray-800',
+      'grid min-w-[880px] grid-cols-[360px_120px_120px_minmax(420px,1fr)] border-t border-gray-100 bg-white text-left hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900',
       selected
-        ? 'bg-blue-50 dark:bg-blue-950/20'
-        : 'bg-white hover:bg-gray-50 dark:bg-gray-950 dark:hover:bg-gray-900',
+        ? 'outline outline-2 -outline-offset-2 outline-[var(--cds-border-interactive)]'
+        : '',
     ].join(' ')}
     onClick={() => onSelectDocument(item)}
   >
@@ -69,17 +63,15 @@ const ComponentRow: FC<{
       </div>
     </div>
     <div className="flex items-center px-3 py-2">
-      <Tag size="sm" type="cool-gray">
-        {getDocumentComponent(item)}
-      </Tag>
+      <Tag type="cool-gray">{getDocumentComponent(item)}</Tag>
     </div>
     <div className="flex items-center px-3 py-2">
-      <Tag size="sm" type={getOutcomeTagType(item.outcome)}>
+      <Tag type={getOutcomeTagType(item.outcome)}>
         {item.outcome || 'unknown'}
       </Tag>
     </div>
     <div className="px-3 py-2">
-      <RowBar item={item} selected={selected} />
+      <RowBar item={item} />
     </div>
   </button>
 );
