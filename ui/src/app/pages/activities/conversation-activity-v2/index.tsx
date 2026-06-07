@@ -33,12 +33,14 @@ import { Helmet } from '@/app/components/helmet';
 import { EmptyState } from '@/app/components/carbon/empty-state';
 import { Pagination } from '@/app/components/carbon/pagination';
 import { ScrollableTableSection } from '@/app/components/sections/table-section';
+import { CopyButton } from '@/app/components/carbon/button/copy-button';
 import { connectionConfig } from '@/configs';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import { ConversationWaterfall } from './components/conversation-waterfall';
 import { ExplorerFilter } from './components/explorer-filter';
 import {
   ALL_EVENT_OPTION,
+  FilterOption,
   KIND_OPTIONS,
   LEVEL_OPTIONS,
   METRIC_NAME_OPTIONS,
@@ -61,6 +63,38 @@ type MetricValue = {
   description?: string;
   name?: string;
   value?: number | string;
+};
+
+type TraceFilterState = {
+  assistantIdInput: string;
+  conversationIdInput: string;
+  dateRange: [Date, Date] | null;
+  messageIdInput: string;
+  metricNameInput: string;
+  searchText: string;
+  selectedComponents: string[];
+  selectedEvent: FilterOption;
+  selectedKind: FilterOption;
+  selectedLevel: FilterOption;
+  selectedRole: FilterOption;
+  selectedScope: FilterOption;
+  traceIdInput: string;
+};
+
+const DEFAULT_TRACE_FILTERS: TraceFilterState = {
+  assistantIdInput: '',
+  conversationIdInput: '',
+  dateRange: null,
+  messageIdInput: '',
+  metricNameInput: METRIC_NAME_OPTIONS[0].id,
+  searchText: '',
+  selectedComponents: [],
+  selectedEvent: ALL_EVENT_OPTION,
+  selectedKind: KIND_OPTIONS[0],
+  selectedLevel: LEVEL_OPTIONS[0],
+  selectedRole: ROLE_OPTIONS[0],
+  selectedScope: SCOPE_OPTIONS[0],
+  traceIdInput: '',
 };
 
 const getMetricValues = (document: TimelineDocument): MetricValue[] =>
@@ -252,10 +286,11 @@ const TelemetryStreamTable = ({
   onSelectRecord: (document: TimelineDocument) => void;
 }) => (
   <ScrollableTableSection>
-    <Table className="min-w-[900px]">
+    <Table className="min-w-[1040px]">
       <TableHead>
         <TableRow>
           <TableHeader>ID</TableHeader>
+          <TableHeader>traceID</TableHeader>
           <TableHeader>Kind</TableHeader>
           <TableHeader>Scope</TableHeader>
           <TableHeader>Summary</TableHeader>
@@ -280,6 +315,23 @@ const TelemetryStreamTable = ({
           >
             <TableCell className="max-w-[220px] truncate font-mono text-sm text-blue-600">
               {document.id}
+            </TableCell>
+            <TableCell className="max-w-[260px]">
+              <div className="flex min-w-0 items-center gap-1">
+                <span className="truncate font-mono text-[13px]">
+                  {document.traceId || '-'}
+                </span>
+                {document.traceId && (
+                  <span
+                    className="shrink-0"
+                    onClick={event => event.stopPropagation()}
+                  >
+                    <CopyButton className="h-6 w-6">
+                      {document.traceId}
+                    </CopyButton>
+                  </span>
+                )}
+              </div>
             </TableCell>
             <TableCell>
               <Tag type="cool-gray">{document.kind}</Tag>
@@ -408,6 +460,19 @@ const TraceInspectorPanel = ({
                 <p className="text-xs uppercase text-gray-500">Record ID</p>
                 <p className="break-all font-mono text-xs">{document.id}</p>
               </div>
+              <div className="col-span-2">
+                <p className="text-xs uppercase text-gray-500">traceID</p>
+                <div className="flex min-w-0 items-center gap-1">
+                  <p className="break-all font-mono text-xs">
+                    {document.traceId || '-'}
+                  </p>
+                  {document.traceId && (
+                    <CopyButton className="h-6 w-6 shrink-0">
+                      {document.traceId}
+                    </CopyButton>
+                  )}
+                </div>
+              </div>
               <div>
                 <p className="text-xs uppercase text-gray-500">Context</p>
                 <p className="break-all font-mono text-xs">
@@ -448,20 +513,46 @@ const TraceInspectorPanel = ({
 
 export const ListingPage = () => {
   const { token, authId, projectId } = useCurrentCredential();
-  const [searchText, setSearchText] = useState('');
-  const [selectedKind, setSelectedKind] = useState(KIND_OPTIONS[0]);
-  const [selectedLevel, setSelectedLevel] = useState(LEVEL_OPTIONS[0]);
-  const [selectedScope, setSelectedScope] = useState(SCOPE_OPTIONS[0]);
-  const [selectedRole, setSelectedRole] = useState(ROLE_OPTIONS[0]);
-  const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
-  const [selectedEvent, setSelectedEvent] = useState(ALL_EVENT_OPTION);
-  const [metricNameInput, setMetricNameInput] = useState(
-    METRIC_NAME_OPTIONS[0].id,
+  const [searchText, setSearchText] = useState(
+    DEFAULT_TRACE_FILTERS.searchText,
   );
-  const [assistantIdInput, setAssistantIdInput] = useState('');
-  const [conversationIdInput, setConversationIdInput] = useState('');
-  const [messageIdInput, setMessageIdInput] = useState('');
-  const [dateRange, setDateRange] = useState<[Date, Date] | null>(null);
+  const [selectedKind, setSelectedKind] = useState(
+    DEFAULT_TRACE_FILTERS.selectedKind,
+  );
+  const [selectedLevel, setSelectedLevel] = useState(
+    DEFAULT_TRACE_FILTERS.selectedLevel,
+  );
+  const [selectedScope, setSelectedScope] = useState(
+    DEFAULT_TRACE_FILTERS.selectedScope,
+  );
+  const [selectedRole, setSelectedRole] = useState(
+    DEFAULT_TRACE_FILTERS.selectedRole,
+  );
+  const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState(
+    DEFAULT_TRACE_FILTERS.selectedEvent,
+  );
+  const [metricNameInput, setMetricNameInput] = useState(
+    DEFAULT_TRACE_FILTERS.metricNameInput,
+  );
+  const [assistantIdInput, setAssistantIdInput] = useState(
+    DEFAULT_TRACE_FILTERS.assistantIdInput,
+  );
+  const [conversationIdInput, setConversationIdInput] = useState(
+    DEFAULT_TRACE_FILTERS.conversationIdInput,
+  );
+  const [messageIdInput, setMessageIdInput] = useState(
+    DEFAULT_TRACE_FILTERS.messageIdInput,
+  );
+  const [traceIdInput, setTraceIdInput] = useState(
+    DEFAULT_TRACE_FILTERS.traceIdInput,
+  );
+  const [dateRange, setDateRange] = useState<[Date, Date] | null>(
+    DEFAULT_TRACE_FILTERS.dateRange,
+  );
+  const [appliedFilters, setAppliedFilters] = useState<TraceFilterState>(
+    DEFAULT_TRACE_FILTERS,
+  );
   const [documents, setDocuments] = useState<TimelineDocument[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
@@ -481,6 +572,39 @@ export const ListingPage = () => {
     [selectedComponentId],
   );
 
+  const currentFilters = useMemo<TraceFilterState>(
+    () => ({
+      assistantIdInput,
+      conversationIdInput,
+      dateRange,
+      messageIdInput,
+      metricNameInput,
+      searchText,
+      selectedComponents,
+      selectedEvent,
+      selectedKind,
+      selectedLevel,
+      selectedRole,
+      selectedScope,
+      traceIdInput,
+    }),
+    [
+      assistantIdInput,
+      conversationIdInput,
+      dateRange,
+      messageIdInput,
+      metricNameInput,
+      searchText,
+      selectedComponents,
+      selectedEvent,
+      selectedKind,
+      selectedLevel,
+      selectedRole,
+      selectedScope,
+      traceIdInput,
+    ],
+  );
+
   const requestCriteria = useMemo(() => {
     const next: Criteria[] = [];
     const addCriteria = (key: string, value: string, logic = '=') => {
@@ -492,82 +616,66 @@ export const ListingPage = () => {
       next.push(criteria);
     };
 
-    addCriteria('search', searchText.trim(), 'match');
-    if (selectedKind.id !== KIND_OPTIONS[0].id) {
-      addCriteria('kind', selectedKind.id);
+    addCriteria('search', appliedFilters.searchText.trim(), 'match');
+    addCriteria('traceId', appliedFilters.traceIdInput.trim());
+    if (appliedFilters.selectedKind.id !== KIND_OPTIONS[0].id) {
+      addCriteria('kind', appliedFilters.selectedKind.id);
     }
-    if (selectedKind.id === 'log' && selectedLevel.id !== LEVEL_OPTIONS[0].id) {
-      addCriteria('level', selectedLevel.id);
+    if (
+      appliedFilters.selectedKind.id === 'log' &&
+      appliedFilters.selectedLevel.id !== LEVEL_OPTIONS[0].id
+    ) {
+      addCriteria('level', appliedFilters.selectedLevel.id);
     }
-    if (selectedKind.id === 'event') {
-      if (selectedEvent.id !== ALL_EVENT_OPTION.id) {
-        addCriteria('event', selectedEvent.id);
+    if (appliedFilters.selectedKind.id === 'event') {
+      if (appliedFilters.selectedEvent.id !== ALL_EVENT_OPTION.id) {
+        addCriteria('event', appliedFilters.selectedEvent.id);
       }
-      if (selectedComponents.length > 0) {
-        addCriteria('component', selectedComponents[0]);
+      if (appliedFilters.selectedComponents.length > 0) {
+        addCriteria('component', appliedFilters.selectedComponents[0]);
       }
     }
     if (
-      selectedKind.id === 'metric' &&
-      metricNameInput &&
-      metricNameInput !== METRIC_NAME_OPTIONS[0].id
+      appliedFilters.selectedKind.id === 'metric' &&
+      appliedFilters.metricNameInput &&
+      appliedFilters.metricNameInput !== METRIC_NAME_OPTIONS[0].id
     ) {
-      addCriteria('name', metricNameInput.trim());
+      addCriteria('name', appliedFilters.metricNameInput.trim());
     }
-    if (selectedScope.id !== SCOPE_OPTIONS[0].id) {
-      addCriteria('scope', selectedScope.id);
+    if (appliedFilters.selectedScope.id !== SCOPE_OPTIONS[0].id) {
+      addCriteria('scope', appliedFilters.selectedScope.id);
     }
-    if (selectedScope.id !== SCOPE_OPTIONS[0].id) {
-      addCriteria('assistantId', assistantIdInput.trim());
+    if (appliedFilters.selectedScope.id !== SCOPE_OPTIONS[0].id) {
+      addCriteria('assistantId', appliedFilters.assistantIdInput.trim());
     }
-    if (selectedScope.id === 'conversation' || selectedScope.id === 'message') {
-      addCriteria('assistantConversationId', conversationIdInput.trim());
+    if (
+      appliedFilters.selectedScope.id === 'conversation' ||
+      appliedFilters.selectedScope.id === 'message'
+    ) {
+      addCriteria(
+        'assistantConversationId',
+        appliedFilters.conversationIdInput.trim(),
+      );
     }
-    if (selectedScope.id === 'message') {
-      addCriteria('messageId', messageIdInput.trim());
-      if (selectedRole.id !== ROLE_OPTIONS[0].id) {
-        addCriteria('messageRole', selectedRole.id);
+    if (appliedFilters.selectedScope.id === 'message') {
+      addCriteria('messageId', appliedFilters.messageIdInput.trim());
+      if (appliedFilters.selectedRole.id !== ROLE_OPTIONS[0].id) {
+        addCriteria('messageRole', appliedFilters.selectedRole.id);
       }
     }
-    if (dateRange) {
-      addCriteria('occurredAtFrom', dateRange[0].toISOString(), '>=');
-      const endDate = new Date(dateRange[1]);
+    if (appliedFilters.dateRange) {
+      addCriteria(
+        'occurredAtFrom',
+        appliedFilters.dateRange[0].toISOString(),
+        '>=',
+      );
+      const endDate = new Date(appliedFilters.dateRange[1]);
       endDate.setHours(23, 59, 59, 999);
       addCriteria('occurredAtTo', endDate.toISOString(), '<=');
     }
 
     return next;
-  }, [
-    assistantIdInput,
-    conversationIdInput,
-    dateRange,
-    metricNameInput,
-    messageIdInput,
-    searchText,
-    selectedComponents,
-    selectedEvent,
-    selectedKind,
-    selectedLevel,
-    selectedRole,
-    selectedScope,
-  ]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [
-    assistantIdInput,
-    conversationIdInput,
-    dateRange,
-    metricNameInput,
-    messageIdInput,
-    searchText,
-    selectedComponents,
-    selectedEvent,
-    selectedKind,
-    selectedLevel,
-    selectedRole,
-    selectedScope,
-  ]);
+  }, [appliedFilters]);
 
   useEffect(() => {
     if (selectedKind.id !== 'log') setSelectedLevel(LEVEL_OPTIONS[0]);
@@ -660,65 +768,57 @@ export const ListingPage = () => {
       documents.filter(document => {
         const occurredMs = new Date(document.occurredAt).getTime();
         const matchesDate =
-          !dateRange ||
-          (occurredMs >= dateRange[0].getTime() &&
-            occurredMs <= dateRange[1].getTime() + 24 * 60 * 60 * 1000);
+          !appliedFilters.dateRange ||
+          (occurredMs >= appliedFilters.dateRange[0].getTime() &&
+            occurredMs <=
+              appliedFilters.dateRange[1].getTime() + 24 * 60 * 60 * 1000);
 
         return (
-          matchesTimelineSearch(document, searchText) &&
+          matchesTimelineSearch(document, appliedFilters.searchText) &&
           matchesDate &&
-          (selectedKind.id === KIND_OPTIONS[0].id ||
-            document.kind === selectedKind.id) &&
-          (selectedKind.id !== 'log' ||
-            selectedLevel.id === LEVEL_OPTIONS[0].id ||
-            document.level === selectedLevel.id) &&
-          (selectedKind.id !== 'event' ||
-            selectedComponents.length === 0 ||
-            selectedComponents.includes(getDocumentComponent(document))) &&
-          (selectedKind.id !== 'event' ||
-            selectedEvent.id === ALL_EVENT_OPTION.id ||
-            document.name === selectedEvent.id) &&
-          (selectedKind.id !== 'metric' ||
-            !metricNameInput ||
-            metricNameInput === METRIC_NAME_OPTIONS[0].id ||
+          (!appliedFilters.traceIdInput.trim() ||
+            document.traceId === appliedFilters.traceIdInput.trim()) &&
+          (appliedFilters.selectedKind.id === KIND_OPTIONS[0].id ||
+            document.kind === appliedFilters.selectedKind.id) &&
+          (appliedFilters.selectedKind.id !== 'log' ||
+            appliedFilters.selectedLevel.id === LEVEL_OPTIONS[0].id ||
+            document.level === appliedFilters.selectedLevel.id) &&
+          (appliedFilters.selectedKind.id !== 'event' ||
+            appliedFilters.selectedComponents.length === 0 ||
+            appliedFilters.selectedComponents.includes(
+              getDocumentComponent(document),
+            )) &&
+          (appliedFilters.selectedKind.id !== 'event' ||
+            appliedFilters.selectedEvent.id === ALL_EVENT_OPTION.id ||
+            document.name === appliedFilters.selectedEvent.id) &&
+          (appliedFilters.selectedKind.id !== 'metric' ||
+            !appliedFilters.metricNameInput ||
+            appliedFilters.metricNameInput === METRIC_NAME_OPTIONS[0].id ||
             (document.data?.metrics as Array<{ name: string }> | undefined)
               ?.map(metric => metric.name)
-              .includes(metricNameInput) ||
-            document.name === metricNameInput) &&
-          (selectedScope.id === SCOPE_OPTIONS[0].id ||
-            document.scope === selectedScope.id) &&
-          (selectedScope.id === SCOPE_OPTIONS[0].id ||
-            !assistantIdInput.trim() ||
-            String(document.assistantId) === assistantIdInput.trim()) &&
-          (selectedScope.id !== 'conversation' ||
-            !conversationIdInput.trim() ||
+              .includes(appliedFilters.metricNameInput) ||
+            document.name === appliedFilters.metricNameInput) &&
+          (appliedFilters.selectedScope.id === SCOPE_OPTIONS[0].id ||
+            document.scope === appliedFilters.selectedScope.id) &&
+          (appliedFilters.selectedScope.id === SCOPE_OPTIONS[0].id ||
+            !appliedFilters.assistantIdInput.trim() ||
+            String(document.assistantId) ===
+              appliedFilters.assistantIdInput.trim()) &&
+          (appliedFilters.selectedScope.id !== 'conversation' ||
+            !appliedFilters.conversationIdInput.trim() ||
             String(document.assistantConversationId) ===
-              conversationIdInput.trim()) &&
-          (selectedScope.id !== 'message' ||
-            ((!conversationIdInput.trim() ||
+              appliedFilters.conversationIdInput.trim()) &&
+          (appliedFilters.selectedScope.id !== 'message' ||
+            ((!appliedFilters.conversationIdInput.trim() ||
               String(document.assistantConversationId) ===
-                conversationIdInput.trim()) &&
-              (!messageIdInput.trim() ||
-                document.messageId === messageIdInput.trim()) &&
-              (selectedRole.id === ROLE_OPTIONS[0].id ||
-                document.messageRole === selectedRole.id)))
+                appliedFilters.conversationIdInput.trim()) &&
+              (!appliedFilters.messageIdInput.trim() ||
+                document.messageId === appliedFilters.messageIdInput.trim()) &&
+              (appliedFilters.selectedRole.id === ROLE_OPTIONS[0].id ||
+                document.messageRole === appliedFilters.selectedRole.id)))
         );
       }),
-    [
-      assistantIdInput,
-      conversationIdInput,
-      dateRange,
-      documents,
-      metricNameInput,
-      messageIdInput,
-      searchText,
-      selectedComponents,
-      selectedEvent,
-      selectedKind,
-      selectedLevel,
-      selectedRole,
-      selectedScope,
-    ],
+    [appliedFilters, documents],
   );
 
   const selectedTimelineDocuments = useMemo(
@@ -742,17 +842,19 @@ export const ListingPage = () => {
   }, [filteredDocuments, selectedContextId]);
 
   const resetExplorerFilters = () => {
-    setSelectedKind(KIND_OPTIONS[0]);
-    setSelectedLevel(LEVEL_OPTIONS[0]);
-    setSelectedScope(SCOPE_OPTIONS[0]);
-    setSelectedRole(ROLE_OPTIONS[0]);
+    setSearchText(DEFAULT_TRACE_FILTERS.searchText);
+    setSelectedKind(DEFAULT_TRACE_FILTERS.selectedKind);
+    setSelectedLevel(DEFAULT_TRACE_FILTERS.selectedLevel);
+    setSelectedScope(DEFAULT_TRACE_FILTERS.selectedScope);
+    setSelectedRole(DEFAULT_TRACE_FILTERS.selectedRole);
     setSelectedComponents([]);
-    setSelectedEvent(ALL_EVENT_OPTION);
-    setMetricNameInput(METRIC_NAME_OPTIONS[0].id);
-    setAssistantIdInput('');
-    setConversationIdInput('');
-    setMessageIdInput('');
-    setDateRange(null);
+    setSelectedEvent(DEFAULT_TRACE_FILTERS.selectedEvent);
+    setMetricNameInput(DEFAULT_TRACE_FILTERS.metricNameInput);
+    setAssistantIdInput(DEFAULT_TRACE_FILTERS.assistantIdInput);
+    setConversationIdInput(DEFAULT_TRACE_FILTERS.conversationIdInput);
+    setMessageIdInput(DEFAULT_TRACE_FILTERS.messageIdInput);
+    setTraceIdInput(DEFAULT_TRACE_FILTERS.traceIdInput);
+    setDateRange(DEFAULT_TRACE_FILTERS.dateRange);
   };
 
   useEffect(() => {
@@ -825,6 +927,7 @@ export const ListingPage = () => {
             selectedEvent={selectedEvent}
             selectedKind={selectedKind}
             selectedScope={selectedScope}
+            traceId={traceIdInput}
             onAssistantIdChange={setAssistantIdInput}
             onComponentChange={componentId =>
               setSelectedComponents(componentId === 'all' ? [] : [componentId])
@@ -837,12 +940,15 @@ export const ListingPage = () => {
             onMessageIdChange={setMessageIdInput}
             onMetricNameChange={setMetricNameInput}
             onApply={() => {
+              setAppliedFilters(currentFilters);
+              setPage(1);
               setRefreshKey(key => key + 1);
               setIsFilterOpen(false);
             }}
             onReset={resetExplorerFilters}
             onRoleChange={setSelectedRole}
             onScopeChange={setSelectedScope}
+            onTraceIdChange={setTraceIdInput}
           />
         </div>
 
@@ -853,7 +959,9 @@ export const ListingPage = () => {
             </div>
           ) : filteredDocuments.length === 0 ? (
             <EmptyState
-              icon={searchText || errorText ? WarningAlt : Activity}
+              icon={
+                appliedFilters.searchText || errorText ? WarningAlt : Activity
+              }
               title="No traces found"
               subtitle={
                 errorText ||

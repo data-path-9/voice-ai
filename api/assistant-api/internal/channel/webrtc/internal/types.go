@@ -15,6 +15,7 @@ import (
 
 	pionwebrtc "github.com/pion/webrtc/v4"
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/protos"
 )
 
@@ -377,6 +378,7 @@ type PeerEvent struct {
 
 // SessionState owns WebRTC lifecycle flags shared across goroutines.
 type SessionState struct {
+	Scope                             observability.Scope
 	closeStarted                      atomic.Bool
 	peerConnected                     atomic.Bool
 	mediaState                        atomic.Int32
@@ -391,6 +393,10 @@ type SessionState struct {
 	mediaRestartAttempts              atomic.Uint64
 	deferredICERestartMu              sync.Mutex
 	deferredICERestart                WebRTCDeferredICERestart
+}
+
+func (s *SessionState) ChangeScope(scope observability.Scope) {
+	s.Scope = scope
 }
 
 func (s *SessionState) BeginClose() bool {

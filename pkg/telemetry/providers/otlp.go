@@ -77,6 +77,9 @@ func (e *OTLPExporter) Export(ctx context.Context, scope telemetry.Scope, rec te
 			attribute.Int64("rapida.organization.id", int64(scope.OrganizationID)),
 			attribute.String("rapida.scope", scope.Name),
 		}
+		for k, v := range typed.Context {
+			attrs = append(attrs, attribute.String("rapida.context."+k, v))
+		}
 		for k, v := range scope.ScopeAttributes {
 			attrs = append(attrs, attribute.String("rapida.scope."+k, v))
 		}
@@ -100,6 +103,9 @@ func (e *OTLPExporter) Export(ctx context.Context, scope telemetry.Scope, rec te
 			attribute.Int64("rapida.project.id", int64(scope.ProjectID)),
 			attribute.Int64("rapida.organization.id", int64(scope.OrganizationID)),
 			attribute.String("rapida.scope", scope.Name),
+		}
+		for k, v := range typed.Context {
+			attrs = append(attrs, attribute.String("rapida.context."+k, v))
 		}
 		for k, v := range scope.ScopeAttributes {
 			attrs = append(attrs, attribute.String("rapida.scope."+k, v))
@@ -125,6 +131,9 @@ func (e *OTLPExporter) Export(ctx context.Context, scope telemetry.Scope, rec te
 			attribute.Int64("rapida.project.id", int64(scope.ProjectID)),
 			attribute.Int64("rapida.organization.id", int64(scope.OrganizationID)),
 			attribute.String("rapida.scope", scope.Name),
+		}
+		for k, v := range typed.Context {
+			attrs = append(attrs, attribute.String("rapida.context."+k, v))
 		}
 		for k, v := range scope.ScopeAttributes {
 			attrs = append(attrs, attribute.String("rapida.scope."+k, v))

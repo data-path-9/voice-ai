@@ -33,6 +33,7 @@ type ExplorerFilterProps = {
   selectedEvent: FilterOption;
   selectedKind: FilterOption;
   selectedScope: FilterOption;
+  traceId: string;
   onAssistantIdChange: (value: string) => void;
   onComponentChange: (componentId: string) => void;
   onConversationIdChange: (value: string) => void;
@@ -46,6 +47,7 @@ type ExplorerFilterProps = {
   onReset: () => void;
   onRoleChange: (role: FilterOption) => void;
   onScopeChange: (scope: FilterOption) => void;
+  onTraceIdChange: (value: string) => void;
 };
 
 export const ExplorerFilter = ({
@@ -61,6 +63,7 @@ export const ExplorerFilter = ({
   selectedEvent,
   selectedKind,
   selectedScope,
+  traceId,
   onAssistantIdChange,
   onComponentChange,
   onConversationIdChange,
@@ -74,6 +77,7 @@ export const ExplorerFilter = ({
   onReset,
   onRoleChange,
   onScopeChange,
+  onTraceIdChange,
 }: ExplorerFilterProps) => {
   const selectedMetricName =
     metricName && metricName !== 'all'
@@ -105,6 +109,14 @@ export const ExplorerFilter = ({
             onChange={({ selectedItem }) =>
               onKindChange(selectedItem || KIND_OPTIONS[0])
             }
+          />
+          <TextInput
+            id="trace-explorer-trace-id"
+            labelText="traceID"
+            placeholder="trace id"
+            size="md"
+            value={traceId}
+            onChange={event => onTraceIdChange(event.target.value)}
           />
 
           {selectedKind.id === 'log' && (

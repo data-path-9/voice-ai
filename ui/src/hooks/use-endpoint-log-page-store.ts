@@ -149,6 +149,7 @@ export const useEndpointLogPage = create<EndpointLogType>((set, get) => ({
 
   columns: [
     { name: 'ID', key: 'id', visible: true },
+    { name: 'traceID', key: 'trace_id', visible: true },
     { name: 'Version', key: 'version', visible: true },
     { name: 'Source', key: 'source', visible: true },
     { name: 'Status', key: 'status', visible: true },

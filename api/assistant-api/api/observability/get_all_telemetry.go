@@ -82,6 +82,8 @@ func (api *observabilityGrpcApi) GetAllTelemetry(
 			filter = append(filter, map[string]interface{}{"term": map[string]interface{}{"scopeAttributes.messageId": value}})
 		case "messageRole":
 			filter = append(filter, map[string]interface{}{"term": map[string]interface{}{"scopeAttributes.messageRole": value}})
+		case "traceId":
+			filter = append(filter, map[string]interface{}{"term": map[string]interface{}{"context.traceId": value}})
 		case "occurredAtFrom", "from", "start":
 			timeRange["gte"] = value
 		case "occurredAtTo", "to", "end":
@@ -94,7 +96,7 @@ func (api *observabilityGrpcApi) GetAllTelemetry(
 				},
 			})
 		default:
-			if strings.HasPrefix(key, "attributes.") || strings.HasPrefix(key, "scopeAttributes.") {
+			if strings.HasPrefix(key, "attributes.") || strings.HasPrefix(key, "scopeAttributes.") || strings.HasPrefix(key, "context.") {
 				filter = append(filter, map[string]interface{}{"term": map[string]interface{}{key: value}})
 			}
 		}
@@ -198,6 +200,7 @@ func (api *observabilityGrpcApi) GetAllTelemetry(
 						Scope:           strVal(src["scope"]),
 						ScopeAttributes: mapVal(src["scopeAttributes"]),
 						Attributes:      mapVal(src["attributes"]),
+						Context:         mapVal(src["context"]),
 						OccurredAt:      timestampVal(src["occurredAt"]),
 					},
 				},
@@ -215,6 +218,7 @@ func (api *observabilityGrpcApi) GetAllTelemetry(
 						Scope:           strVal(src["scope"]),
 						ScopeAttributes: mapVal(src["scopeAttributes"]),
 						Attributes:      mapVal(src["attributes"]),
+						Context:         mapVal(src["context"]),
 						OccurredAt:      timestampVal(src["occurredAt"]),
 					},
 				},
@@ -233,6 +237,7 @@ func (api *observabilityGrpcApi) GetAllTelemetry(
 						Scope:           strVal(src["scope"]),
 						ScopeAttributes: mapVal(src["scopeAttributes"]),
 						Attributes:      mapVal(src["attributes"]),
+						Context:         mapVal(src["context"]),
 						OccurredAt:      timestampVal(src["occurredAt"]),
 					},
 				},

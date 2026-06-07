@@ -89,7 +89,7 @@ func TestCollector_PushesEventDocumentToOpenSearchBulk(t *testing.T) {
 		},
 		ConversationID: 4,
 	}
-	err = collector.Collect(context.Background(), scope, observability.RecordEvent{
+	err = collector.Collect(context.Background(), scope, observability.Context{}, observability.RecordEvent{
 		ID:         "evt-1",
 		Component:  observability.ComponentCall,
 		Event:      observability.CallRinging,
@@ -137,7 +137,7 @@ func TestCollector_UsesCustomIndexPrefix(t *testing.T) {
 	err = collector.Collect(context.Background(), observability.ConversationScope{
 		AssistantScope: observability.AssistantScope{AssistantID: 3},
 		ConversationID: 4,
-	}, observability.RecordMetric{
+	}, observability.Context{}, observability.RecordMetric{
 		ID:         "metric-1",
 		OccurredAt: now,
 	})
@@ -156,7 +156,7 @@ func TestCollector_ReturnsBulkError(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	err = collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 3}, observability.RecordLog{
+	err = collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 3}, observability.Context{}, observability.RecordLog{
 		Message: "hello",
 	})
 	if !errors.Is(err, bulkErr) {

@@ -70,7 +70,7 @@ func (c *Collector) Key() string {
 	return "webhook:" + strings.Join(ids, ",")
 }
 
-func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ observability.Context, record observability.Record) error {
 	webhookRecord, ok := record.(observability.RecordWebhook)
 	if !ok {
 		return nil

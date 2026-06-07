@@ -20,6 +20,7 @@ type Scope struct {
 
 type LogRecord struct {
 	ID         string
+	Context    map[string]string
 	Level      string
 	Message    string
 	Attributes map[string]string
@@ -30,6 +31,7 @@ func (LogRecord) isTelemetryRecord() {}
 
 type EventRecord struct {
 	ID         string
+	Context    map[string]string
 	Event      string
 	Component  string
 	Attributes map[string]string
@@ -40,6 +42,7 @@ func (EventRecord) isTelemetryRecord() {}
 
 type MetricRecord struct {
 	ID          string
+	Context     map[string]string
 	Name        string
 	Value       string
 	Description string

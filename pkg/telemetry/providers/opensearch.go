@@ -96,6 +96,7 @@ func (e *OpenSearchExporter) metricIndex(occurredAt time.Time) string {
 type opensearchEventDoc struct {
 	ID              string            `json:"id,omitempty"`
 	Kind            string            `json:"kind"`
+	Context         map[string]string `json:"context"`
 	Event           string            `json:"event"`
 	Component       string            `json:"component,omitempty"`
 	ProjectID       uint64            `json:"projectId"`
@@ -109,6 +110,7 @@ type opensearchEventDoc struct {
 type opensearchLogDoc struct {
 	ID              string            `json:"id,omitempty"`
 	Kind            string            `json:"kind"`
+	Context         map[string]string `json:"context"`
 	Level           string            `json:"level"`
 	Message         string            `json:"message"`
 	ProjectID       uint64            `json:"projectId"`
@@ -122,6 +124,7 @@ type opensearchLogDoc struct {
 type opensearchMetricDoc struct {
 	ID              string            `json:"id,omitempty"`
 	Kind            string            `json:"kind"`
+	Context         map[string]string `json:"context"`
 	Name            string            `json:"name"`
 	Value           string            `json:"value"`
 	Description     string            `json:"description,omitempty"`
@@ -147,6 +150,7 @@ func (e *OpenSearchExporter) Export(ctx context.Context, scope telemetry.Scope, 
 		doc := opensearchLogDoc{
 			ID:              id,
 			Kind:            "log",
+			Context:         typed.Context,
 			Level:           typed.Level,
 			Message:         typed.Message,
 			ProjectID:       scope.ProjectID,
@@ -169,6 +173,7 @@ func (e *OpenSearchExporter) Export(ctx context.Context, scope telemetry.Scope, 
 		doc := opensearchEventDoc{
 			ID:              id,
 			Kind:            "event",
+			Context:         typed.Context,
 			Event:           typed.Event,
 			Component:       typed.Component,
 			ProjectID:       scope.ProjectID,
@@ -191,6 +196,7 @@ func (e *OpenSearchExporter) Export(ctx context.Context, scope telemetry.Scope, 
 		doc := opensearchMetricDoc{
 			ID:              id,
 			Kind:            "metric",
+			Context:         typed.Context,
 			Name:            typed.Name,
 			Value:           typed.Value,
 			Description:     typed.Description,

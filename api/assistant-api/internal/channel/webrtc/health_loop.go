@@ -12,9 +12,8 @@ import (
 
 	internal_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
-	"github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/protos"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (s *webrtcStreamer) runOutputHealthReporter() {
@@ -64,30 +63,27 @@ func (s *webrtcStreamer) runOutputHealthReporter() {
 		}
 
 		if snap.Ticks != prev.Ticks {
-			s.Input(&protos.ConversationEvent{
-				Name: observe.ComponentWebRTC,
-				Data: map[string]string{
-					webrtc_internal.DataType:                        webrtc_internal.EventOutputPacerHealth,
-					webrtc_internal.DataSessionID:                   s.sessionID,
-					webrtc_internal.DataTicks:                       fmt.Sprintf("%d", snap.Ticks),
-					webrtc_internal.DataLateTicks:                   fmt.Sprintf("%d", snap.LateTicks),
-					webrtc_internal.DataActiveTicks:                 fmt.Sprintf("%d", snap.ActiveTicks),
-					webrtc_internal.DataIdleTicks:                   fmt.Sprintf("%d", snap.IdleTicks),
-					webrtc_internal.DataSendErrors:                  fmt.Sprintf("%d", snap.SendErrors),
-					webrtc_internal.DataIdleRatio:                   fmt.Sprintf("%.4f", snap.IdleRatio),
-					webrtc_internal.DataPendingAudioFrames:          fmt.Sprintf("%d", outputAudioFrames),
-					webrtc_internal.DataPendingAudioOldestAgeMs:     fmt.Sprintf("%d", outputAudioOldestAgeMs),
-					webrtc_internal.DataLastAssistantFrameSentMsAgo: fmt.Sprintf("%d", lastAssistantFrameSentMsAgo),
-					webrtc_internal.DataTotalDroppedFrames:          fmt.Sprintf("%d", s.sessionState.OutputAudioDroppedFrames()),
-					webrtc_internal.DataQualityState:                mediaHealthState.QualityState(healthReportedAt),
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordMetric{
+				Metrics: []*protos.Metric{
+					{Name: "webrtc_output_ticks", Value: fmt.Sprintf("%d", snap.Ticks), Description: "WebRTC output pacer ticks"},
+					{Name: "webrtc_output_late_ticks", Value: fmt.Sprintf("%d", snap.LateTicks), Description: "WebRTC output pacer late ticks"},
+					{Name: "webrtc_output_active_ticks", Value: fmt.Sprintf("%d", snap.ActiveTicks), Description: "WebRTC output pacer active ticks"},
+					{Name: "webrtc_output_idle_ticks", Value: fmt.Sprintf("%d", snap.IdleTicks), Description: "WebRTC output pacer idle ticks"},
+					{Name: "webrtc_output_send_errors", Value: fmt.Sprintf("%d", snap.SendErrors), Description: "WebRTC output send errors"},
+					{Name: "webrtc_output_idle_ratio", Value: fmt.Sprintf("%.4f", snap.IdleRatio), Description: "WebRTC output pacer idle ratio"},
+					{Name: "webrtc_output_pending_audio_frames", Value: fmt.Sprintf("%d", outputAudioFrames), Description: "WebRTC output pending audio frames"},
+					{Name: "webrtc_output_pending_audio_oldest_age_ms", Value: fmt.Sprintf("%d", outputAudioOldestAgeMs), Description: "WebRTC output oldest queued audio age"},
+					{Name: "webrtc_last_assistant_frame_sent_ms_ago", Value: fmt.Sprintf("%d", lastAssistantFrameSentMsAgo), Description: "WebRTC last assistant frame sent age"},
+					{Name: "webrtc_output_total_dropped_frames", Value: fmt.Sprintf("%d", s.sessionState.OutputAudioDroppedFrames()), Description: "WebRTC output total dropped frames"},
 				},
-				Time: timestamppb.Now(),
 			})
 
 			if snap.SendErrors > prev.SendErrors {
-				s.Input(&protos.ConversationEvent{
-					Name: observe.ComponentWebRTC,
-					Data: map[string]string{
+				_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "WebRTC output send error",
+					Attributes: observability.Attributes{
+						"component":                         observability.ComponentWebRTC.String(),
 						webrtc_internal.DataType:            webrtc_internal.EventOutputSendError,
 						webrtc_internal.DataSessionID:       s.sessionID,
 						webrtc_internal.DataSendErrorsDelta: fmt.Sprintf("%d", snap.SendErrors-prev.SendErrors),
@@ -98,7 +94,6 @@ func (s *webrtcStreamer) runOutputHealthReporter() {
 						webrtc_internal.DataIdleTicks:       fmt.Sprintf("%d", snap.IdleTicks),
 						webrtc_internal.DataIdleRatio:       fmt.Sprintf("%.4f", snap.IdleRatio),
 					},
-					Time: timestamppb.Now(),
 				})
 			}
 			prev = snap
@@ -125,10 +120,21 @@ func (s *webrtcStreamer) runOutputHealthReporter() {
 			if mediaHealthState.LastReceiverReportRoundTripTimeUsable {
 				qualityData[webrtc_internal.DataRoundTripTimeMs] = fmt.Sprintf("%d", mediaHealthState.LastReceiverReportRoundTripTimeMs)
 			}
-			s.Input(&protos.ConversationEvent{
-				Name: observe.ComponentWebRTC,
-				Data: qualityData,
-				Time: timestamppb.Now(),
+			qualityData["component"] = observability.ComponentWebRTC.String()
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordMetric{
+				Metrics: []*protos.Metric{
+					{Name: "webrtc_receiver_reports", Value: fmt.Sprintf("%d", mediaHealthState.ReceiverReports), Description: "WebRTC receiver reports"},
+					{Name: "webrtc_packet_loss_fraction", Value: fmt.Sprintf("%d", mediaHealthState.LastReceiverReportFractionLost), Description: "WebRTC packet loss fraction"},
+					{Name: "webrtc_packet_loss_percent", Value: fmt.Sprintf("%.4f", mediaHealthState.LastReceiverReportPacketLossPercent), Description: "WebRTC packet loss percent"},
+					{Name: "webrtc_packet_loss_total", Value: fmt.Sprintf("%d", mediaHealthState.LastReceiverReportTotalLost), Description: "WebRTC packet loss total"},
+					{Name: "webrtc_jitter_ms", Value: fmt.Sprintf("%.4f", mediaHealthState.LastReceiverReportJitterMs), Description: "WebRTC jitter"},
+					{Name: "webrtc_last_feedback_ms_ago", Value: fmt.Sprintf("%d", lastFeedbackMsAgo), Description: "WebRTC last feedback age"},
+				},
+			})
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+				Component:  observability.ComponentWebRTC,
+				Event:      observability.EventName("webrtc.peer_quality"),
+				Attributes: observability.Attributes(qualityData),
 			})
 			previousReceiverReports = mediaHealthState.ReceiverReports
 		}
@@ -173,9 +179,11 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 		missingRemoteAudioTrackMediaSessionID, shouldRestartMissingRemoteAudioTrack := s.shouldRestartConnectedNoRemoteAudioTrack(mediaHealthState, watchdogCheckedAt)
 		if shouldRestartMissingRemoteAudioTrack &&
 			(lastConnectedNoUserAudioEventAt.IsZero() || watchdogCheckedAt.Sub(lastConnectedNoUserAudioEventAt) >= webrtc_internal.HealthWatchdogEventCooldown) {
-			s.Input(&protos.ConversationEvent{
-				Name: observe.ComponentWebRTC,
-				Data: map[string]string{
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "WebRTC connected without user audio",
+				Attributes: observability.Attributes{
+					"component":                            observability.ComponentWebRTC.String(),
 					webrtc_internal.DataType:               webrtc_internal.EventConnectedNoUserAudio,
 					webrtc_internal.DataSessionID:          s.sessionID,
 					webrtc_internal.DataConnectedMs:        fmt.Sprintf("%d", watchdogCheckedAt.Sub(mediaHealthState.PeerConnectedAt).Milliseconds()),
@@ -186,7 +194,6 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 					webrtc_internal.DataOpusDecodeFailures: fmt.Sprintf("%d", mediaHealthState.UserAudioOpusDecodeFailures),
 					webrtc_internal.DataQualityState:       qualityState,
 				},
-				Time: timestamppb.Now(),
 			})
 			lastConnectedNoUserAudioEventAt = watchdogCheckedAt
 			s.queueMediaSessionRestart(missingRemoteAudioTrackMediaSessionID, webrtc_internal.ReasonConnectedNoUserAudio, watchdogCheckedAt)
@@ -197,9 +204,11 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 			(mediaHealthState.LastAssistantFrameSentAt.IsZero() || mediaHealthState.LastAssistantFrameSentAt.Before(outputAudioOldestQueuedAt)) &&
 			watchdogCheckedAt.Sub(outputAudioOldestQueuedAt) >= webrtc_internal.AssistantQueuedNoSendThreshold &&
 			(lastAssistantAudioQueuedNotSentEventAt.IsZero() || watchdogCheckedAt.Sub(lastAssistantAudioQueuedNotSentEventAt) >= webrtc_internal.HealthWatchdogEventCooldown) {
-			s.Input(&protos.ConversationEvent{
-				Name: observe.ComponentWebRTC,
-				Data: map[string]string{
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "WebRTC assistant audio queued but not sent",
+				Attributes: observability.Attributes{
+					"component":                                 observability.ComponentWebRTC.String(),
 					webrtc_internal.DataType:                    webrtc_internal.EventAssistantAudioQueuedNotSent,
 					webrtc_internal.DataSessionID:               s.sessionID,
 					webrtc_internal.DataPendingAudioFrames:      fmt.Sprintf("%d", outputAudioFrames),
@@ -207,7 +216,6 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 					webrtc_internal.DataThresholdMs:             fmt.Sprintf("%d", webrtc_internal.AssistantQueuedNoSendThreshold.Milliseconds()),
 					webrtc_internal.DataQualityState:            qualityState,
 				},
-				Time: timestamppb.Now(),
 			})
 			lastAssistantAudioQueuedNotSentEventAt = watchdogCheckedAt
 		}
@@ -222,9 +230,11 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 				lastFeedbackAvailable = true
 				lastFeedbackMsAgo = watchdogCheckedAt.Sub(mediaHealthState.LastReceiverReportAt).Milliseconds()
 			}
-			s.Input(&protos.ConversationEvent{
-				Name: observe.ComponentWebRTC,
-				Data: map[string]string{
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "WebRTC RTCP feedback missing",
+				Attributes: observability.Attributes{
+					"component":                                     observability.ComponentWebRTC.String(),
 					webrtc_internal.DataType:                        webrtc_internal.EventRTCPFeedbackMissing,
 					webrtc_internal.DataSessionID:                   s.sessionID,
 					webrtc_internal.DataLastAssistantFrameSentMsAgo: fmt.Sprintf("%d", watchdogCheckedAt.Sub(mediaHealthState.LastAssistantFrameSentAt).Milliseconds()),
@@ -234,7 +244,6 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 					webrtc_internal.DataReceiverReports:             fmt.Sprintf("%d", mediaHealthState.ReceiverReports),
 					webrtc_internal.DataQualityState:                qualityState,
 				},
-				Time: timestamppb.Now(),
 			})
 			lastRTCPFeedbackMissingEventAt = watchdogCheckedAt
 		}
@@ -242,9 +251,11 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 		if mediaHealthState.ConsecutiveAssistantFrameWriteFailures >= webrtc_internal.RepeatedWriteFailuresThreshold &&
 			!mediaHealthState.LastAssistantFrameWriteFailureAt.IsZero() &&
 			(lastRepeatedWriteFailuresEventAt.IsZero() || watchdogCheckedAt.Sub(lastRepeatedWriteFailuresEventAt) >= webrtc_internal.HealthWatchdogEventCooldown) {
-			s.Input(&protos.ConversationEvent{
-				Name: observe.ComponentWebRTC,
-				Data: map[string]string{
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "WebRTC repeated assistant frame write failures",
+				Attributes: observability.Attributes{
+					"component":                                  observability.ComponentWebRTC.String(),
 					webrtc_internal.DataType:                     webrtc_internal.EventRepeatedWriteFailures,
 					webrtc_internal.DataSessionID:                s.sessionID,
 					webrtc_internal.DataConsecutiveWriteFailures: fmt.Sprintf("%d", mediaHealthState.ConsecutiveAssistantFrameWriteFailures),
@@ -253,7 +264,6 @@ func (s *webrtcStreamer) runHealthWatchdog() {
 					webrtc_internal.DataFailureThreshold:         fmt.Sprintf("%d", webrtc_internal.RepeatedWriteFailuresThreshold),
 					webrtc_internal.DataQualityState:             qualityState,
 				},
-				Time: timestamppb.Now(),
 			})
 			lastRepeatedWriteFailuresEventAt = watchdogCheckedAt
 		}

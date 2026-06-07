@@ -24,14 +24,14 @@ func NewLoggingExporter(logger commons.Logger, _ LoggingConfig) *LoggingExporter
 func (e *LoggingExporter) Export(_ context.Context, scope telemetry.Scope, rec telemetry.Record) error {
 	switch typed := rec.(type) {
 	case telemetry.LogRecord:
-		e.logger.Infof("[telemetry/log] scope=%s scopeAttributes=%v message=%s level=%s attributes=%v",
-			scope.Name, scope.ScopeAttributes, typed.Message, typed.Level, typed.Attributes)
+		e.logger.Infof("[telemetry/log] scope=%s scopeAttributes=%v context=%v message=%s level=%s attributes=%v",
+			scope.Name, scope.ScopeAttributes, typed.Context, typed.Message, typed.Level, typed.Attributes)
 	case telemetry.EventRecord:
-		e.logger.Infof("[telemetry/event] scope=%s scopeAttributes=%v event=%s component=%s attributes=%v",
-			scope.Name, scope.ScopeAttributes, typed.Event, typed.Component, typed.Attributes)
+		e.logger.Infof("[telemetry/event] scope=%s scopeAttributes=%v context=%v event=%s component=%s attributes=%v",
+			scope.Name, scope.ScopeAttributes, typed.Context, typed.Event, typed.Component, typed.Attributes)
 	case telemetry.MetricRecord:
-		e.logger.Infof("[telemetry/metric] scope=%s scopeAttributes=%v name=%s value=%s",
-			scope.Name, scope.ScopeAttributes, typed.Name, typed.Value)
+		e.logger.Infof("[telemetry/metric] scope=%s scopeAttributes=%v context=%v name=%s value=%s",
+			scope.Name, scope.ScopeAttributes, typed.Context, typed.Name, typed.Value)
 	}
 	return nil
 }

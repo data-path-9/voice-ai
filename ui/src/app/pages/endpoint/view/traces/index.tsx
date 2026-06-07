@@ -12,6 +12,7 @@ import { useEndpointLogPage } from '@/hooks/use-endpoint-log-page-store';
 import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
 import { Pagination } from '@/app/components/carbon/pagination';
 import { IconOnlyButton } from '@/app/components/carbon/button';
+import { CopyButton } from '@/app/components/carbon/button/copy-button';
 import { DateFilter } from '@/app/components/carbon/date-filter';
 import { EmptyState } from '@/app/components/carbon/empty-state';
 import { Renew, View, Activity } from '@carbon/icons-react';
@@ -30,6 +31,64 @@ import {
   DefinitionTooltip,
   Tag,
 } from '@carbon/react';
+
+type TraceMetadataRecord = {
+  getKey?: () => string;
+  getName?: () => string;
+  getValue: () => string;
+};
+
+const TRACE_ID_KEYS = new Set([
+  'traceId',
+  'traceID',
+  'trace_id',
+  'context.traceId',
+]);
+
+const getTraceIdFromJson = (value: string): string => {
+  if (!value.trim()) return '';
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object') return '';
+
+    const context =
+      'context' in parsed &&
+      parsed.context &&
+      typeof parsed.context === 'object'
+        ? parsed.context
+        : parsed;
+
+    return (
+      String(
+        context.traceId || context.traceID || context.trace_id || '',
+      ).trim() || ''
+    );
+  } catch {
+    return '';
+  }
+};
+
+const getTraceIdFromRecords = (records: TraceMetadataRecord[]): string => {
+  for (const record of records) {
+    const key = record.getKey?.() || record.getName?.() || '';
+    const value = record.getValue();
+    if (TRACE_ID_KEYS.has(key) && value) return value;
+    if (key === 'context') {
+      const traceId = getTraceIdFromJson(value);
+      if (traceId) return traceId;
+    }
+  }
+
+  return '';
+};
+
+const getEndpointTraceId = (row: EndpointLog): string =>
+  getTraceIdFromRecords([
+    ...row.getMetadataList(),
+    ...row.getOptionsList(),
+    ...row.getArgumentsList(),
+  ]);
 
 export const EndpointTraces: FC<{ currentEndpoint: Endpoint }> = props => {
   const { loading, showLoader, hideLoader } = useRapidaStore();
@@ -50,7 +109,6 @@ export const EndpointTraces: FC<{ currentEndpoint: Endpoint }> = props => {
     pageSize,
     setPageSize,
     visibleColumn,
-    setColumns,
   } = useEndpointLogPage();
 
   const onDateSelect = (to: Date, from: Date) => {
@@ -132,71 +190,95 @@ export const EndpointTraces: FC<{ currentEndpoint: Endpoint }> = props => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {endpointLogs.map((row, idx) => (
-                <TableRow key={idx}>
-                  {visibleColumn('id') && (
-                    <TableCell className="font-mono text-[13px]">{row.getId()}</TableCell>
-                  )}
-                  {visibleColumn('version') && (
-                    <TableCell className="text-sm">
-                      <Tag size="md" type="cool-gray">
-                        <span className="font-mono text-[13px] leading-none">vrsn_{row.getEndpointprovidermodelid()}</span>
-                      </Tag>
-                    </TableCell>
-                  )}
-                  {visibleColumn('source') && (
-                    <TableCell className="text-sm">
-                      <SourceIndicator source={row.getSource()} />
-                    </TableCell>
-                  )}
-                  {visibleColumn('status') && (
-                    <TableCell className="text-sm">
-                      <CarbonStatusIndicator state={row.getStatus()} />
-                    </TableCell>
-                  )}
-                  {visibleColumn('action') && (
-                    <TableCell className="text-sm">
-                      <IconOnlyButton
-                        kind="ghost"
-                        size="md"
-                        renderIcon={View}
-                        iconDescription="View detail"
-                        onClick={() => {
-                          setCurrentTrace(row);
-                          setShowTraceModal(true);
-                        }}
-                      />
-                    </TableCell>
-                  )}
-                  {visibleColumn('timetaken') && (
-                    <TableCell className="font-mono text-[13px] tabular-nums">
-                      {Number(row.getTimetaken()) / 1000000}ms
-                    </TableCell>
-                  )}
-                  {visibleColumn('total_token') && (
-                    <TableCell className="text-sm tabular-nums">
-                      {getTotalTokenMetric(row.getMetricsList())}
-                    </TableCell>
-                  )}
-                  {visibleColumn('time_taken') && (
-                    <TableCell className="font-mono text-[13px] tabular-nums">
-                      {getTimeTakenMetric(row.getMetricsList()) / 1000000}ms
-                    </TableCell>
-                  )}
-                  {visibleColumn('created_date') && (
-                    <TableCell className="text-[13px] whitespace-nowrap">
-                      {row.getCreateddate() && (
-                        <DefinitionTooltip
-                          definition={toDate(row.getCreateddate()!).toUTCString()}
-                          openOnHover
-                        >
-                          {toDate(row.getCreateddate()!).toLocaleString()}
-                        </DefinitionTooltip>
-                      )}
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
+              {endpointLogs.map((row, idx) => {
+                const traceId = getEndpointTraceId(row);
+
+                return (
+                  <TableRow key={idx}>
+                    {visibleColumn('id') && (
+                      <TableCell className="font-mono text-[13px]">
+                        {row.getId()}
+                      </TableCell>
+                    )}
+                    {visibleColumn('trace_id') && (
+                      <TableCell className="max-w-[260px]">
+                        <div className="flex min-w-0 items-center gap-1">
+                          <span className="truncate font-mono text-[13px]">
+                            {traceId || '-'}
+                          </span>
+                          {traceId && (
+                            <CopyButton className="h-6 w-6 shrink-0">
+                              {traceId}
+                            </CopyButton>
+                          )}
+                        </div>
+                      </TableCell>
+                    )}
+                    {visibleColumn('version') && (
+                      <TableCell className="text-sm">
+                        <Tag size="md" type="cool-gray">
+                          <span className="font-mono text-[13px] leading-none">
+                            vrsn_{row.getEndpointprovidermodelid()}
+                          </span>
+                        </Tag>
+                      </TableCell>
+                    )}
+                    {visibleColumn('source') && (
+                      <TableCell className="text-sm">
+                        <SourceIndicator source={row.getSource()} />
+                      </TableCell>
+                    )}
+                    {visibleColumn('status') && (
+                      <TableCell className="text-sm">
+                        <CarbonStatusIndicator state={row.getStatus()} />
+                      </TableCell>
+                    )}
+                    {visibleColumn('action') && (
+                      <TableCell className="text-sm">
+                        <IconOnlyButton
+                          kind="ghost"
+                          size="md"
+                          renderIcon={View}
+                          iconDescription="View detail"
+                          onClick={() => {
+                            setCurrentTrace(row);
+                            setShowTraceModal(true);
+                          }}
+                        />
+                      </TableCell>
+                    )}
+                    {visibleColumn('timetaken') && (
+                      <TableCell className="font-mono text-[13px] tabular-nums">
+                        {Number(row.getTimetaken()) / 1000000}ms
+                      </TableCell>
+                    )}
+                    {visibleColumn('total_token') && (
+                      <TableCell className="text-sm tabular-nums">
+                        {getTotalTokenMetric(row.getMetricsList())}
+                      </TableCell>
+                    )}
+                    {visibleColumn('time_taken') && (
+                      <TableCell className="font-mono text-[13px] tabular-nums">
+                        {getTimeTakenMetric(row.getMetricsList()) / 1000000}ms
+                      </TableCell>
+                    )}
+                    {visibleColumn('created_date') && (
+                      <TableCell className="text-[13px] whitespace-nowrap">
+                        {row.getCreateddate() && (
+                          <DefinitionTooltip
+                            definition={toDate(
+                              row.getCreateddate()!,
+                            ).toUTCString()}
+                            openOnHover
+                          >
+                            {toDate(row.getCreateddate()!).toLocaleString()}
+                          </DefinitionTooltip>
+                        )}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>

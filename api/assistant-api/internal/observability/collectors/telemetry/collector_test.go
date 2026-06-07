@@ -73,7 +73,7 @@ func TestCollector_ExportsEventsAndMetrics(t *testing.T) {
 		ConversationID: 20,
 	}
 
-	err = collector.Collect(context.Background(), scope, observability.RecordEvent{
+	err = collector.Collect(context.Background(), scope, observability.Context{TraceID: "trace-1"}, observability.RecordEvent{
 		Component:  observability.ComponentCall,
 		Event:      observability.CallRinging,
 		Attributes: observability.Attributes{"status": "ringing"},
@@ -83,7 +83,7 @@ func TestCollector_ExportsEventsAndMetrics(t *testing.T) {
 		t.Fatalf("CollectEvent returned error: %v", err)
 	}
 
-	err = collector.Collect(context.Background(), scope, observability.RecordMetric{
+	err = collector.Collect(context.Background(), scope, observability.Context{TraceID: "trace-1"}, observability.RecordMetric{
 		Metrics: []*protos.Metric{{
 			Name:        observability.MetricConversationDuration,
 			Value:       "1000",
@@ -105,6 +105,9 @@ func TestCollector_ExportsEventsAndMetrics(t *testing.T) {
 	if event.Component != observability.ComponentCall.String() {
 		t.Fatalf("unexpected event component: %+v", event)
 	}
+	if event.Context["traceId"] != "trace-1" {
+		t.Fatalf("unexpected event trace id: %s", event.Context["traceId"])
+	}
 	if len(exporter.scopes) < 2 {
 		t.Fatalf("expected exported scopes, got %d", len(exporter.scopes))
 	}
@@ -125,7 +128,8 @@ func TestCollector_ExportsEventsAndMetrics(t *testing.T) {
 	metricScope := exporter.scopes[1]
 	if metricScope.ScopeAttributes["assistantConversationId"] != "20" ||
 		metric.Name != observability.MetricConversationDuration ||
-		metric.Value != "1000" {
+		metric.Value != "1000" ||
+		metric.Context["traceId"] != "trace-1" {
 		t.Fatalf("unexpected metric record: scope=%+v metric=%+v", metricScope, metric)
 	}
 }
@@ -145,7 +149,7 @@ func TestCollector_ExportsMessageMetrics(t *testing.T) {
 		MessageID: "user-ctx-1",
 		Role:      observability.MessageRoleUser,
 	}
-	err = collector.Collect(context.Background(), scope, observability.RecordMetric{
+	err = collector.Collect(context.Background(), scope, observability.Context{}, observability.RecordMetric{
 		Metrics: []*protos.Metric{{
 			Name:  observability.MetricUserTurn,
 			Value: "complete",
@@ -173,7 +177,7 @@ func TestCollector_ReturnsExporterErrors(t *testing.T) {
 	err = collector.Collect(context.Background(), observability.ConversationScope{
 		AssistantScope: observability.AssistantScope{AssistantID: 10},
 		ConversationID: 20,
-	}, observability.RecordEvent{
+	}, observability.Context{}, observability.RecordEvent{
 		Event: observability.CallRinging,
 	})
 	if !errors.Is(err, exportErr) {

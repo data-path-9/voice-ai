@@ -13,11 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/protos"
 )
 
 type recordingCollector struct {
 	key        string
+	contexts   []Context
 	scopes     []Scope
 	logs       []RecordLog
 	events     []RecordEvent
@@ -34,7 +36,8 @@ func (c *recordingCollector) Key() string {
 	return c.key
 }
 
-func (c *recordingCollector) Collect(_ context.Context, scope Scope, record Record) error {
+func (c *recordingCollector) Collect(_ context.Context, scope Scope, observationContext Context, record Record) error {
+	c.contexts = append(c.contexts, observationContext)
 	c.scopes = append(c.scopes, scope)
 	switch typed := record.(type) {
 	case RecordLog:
@@ -68,7 +71,7 @@ func (c *blockingCollector) Key() string {
 	return ""
 }
 
-func (c *blockingCollector) Collect(context.Context, Scope, Record) error {
+func (c *blockingCollector) Collect(context.Context, Scope, Context, Record) error {
 	c.once.Do(func() { close(c.started) })
 	<-c.release
 	return nil
@@ -89,6 +92,7 @@ func TestRecorder_RecordMetric_FansOutAndInjectsGlobalScope(t *testing.T) {
 	second := &recordingCollector{key: "second"}
 	recorder := New(
 		WithGlobalScope(GlobalScope{OrganizationID: 7, ProjectID: 8}),
+		WithContext(context.WithValue(context.Background(), types.REQUEST_ID_KEY, "trace-1")),
 		WithClock(func() time.Time { return now }),
 		WithCollectors(first, second),
 	)
@@ -115,11 +119,58 @@ func TestRecorder_RecordMetric_FansOutAndInjectsGlobalScope(t *testing.T) {
 	if got.ID != "metric-1" {
 		t.Fatalf("unexpected id: %s", got.ID)
 	}
+	if first.contexts[0].TraceID != "trace-1" {
+		t.Fatalf("unexpected trace id: %s", first.contexts[0].TraceID)
+	}
 	if !got.OccurredAt.Equal(now) {
 		t.Fatalf("unexpected occurred_at: %s", got.OccurredAt)
 	}
 	if observabilityGlobal := first.scopes[0].GlobalScopeValue(); observabilityGlobal.OrganizationID != 7 || observabilityGlobal.ProjectID != 8 {
 		t.Fatalf("unexpected global scope: %+v", observabilityGlobal)
+	}
+}
+
+func TestRecorder_RecordUsesRequestIDFromRecordContext(t *testing.T) {
+	collector := &recordingCollector{key: "collector"}
+	recorder := New(
+		WithGlobalScope(GlobalScope{OrganizationID: 7, ProjectID: 8}),
+		WithCollector(collector),
+	)
+
+	err := recorder.Record(
+		context.WithValue(context.Background(), types.REQUEST_ID_KEY, "record-trace"),
+		ProjectScope{},
+		RecordLog{Message: "hello"},
+	)
+	if err != nil {
+		t.Fatalf("Record returned error: %v", err)
+	}
+	if err := recorder.Close(context.Background()); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	if collector.contexts[0].TraceID != "record-trace" {
+		t.Fatalf("unexpected trace id: %s", collector.contexts[0].TraceID)
+	}
+}
+
+func TestRecorder_RecordFallsBackToGeneratedTraceID(t *testing.T) {
+	collector := &recordingCollector{key: "collector"}
+	recorder := New(
+		WithGlobalScope(GlobalScope{OrganizationID: 7, ProjectID: 8}),
+		WithCollector(collector),
+	)
+
+	err := recorder.Record(context.Background(), ProjectScope{}, RecordLog{Message: "hello"})
+	if err != nil {
+		t.Fatalf("Record returned error: %v", err)
+	}
+	if err := recorder.Close(context.Background()); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	if collector.contexts[0].TraceID == "" {
+		t.Fatal("expected generated trace id")
 	}
 }
 

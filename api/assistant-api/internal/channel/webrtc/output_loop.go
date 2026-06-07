@@ -11,9 +11,8 @@ import (
 
 	internal_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
-	"github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/protos"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // runOutputWriter routes assistant audio to the pacer and non-audio messages to gRPC.
@@ -26,16 +25,22 @@ func (s *webrtcStreamer) runOutputWriter() {
 		case <-s.flushAudioCh:
 			clearedFrames := s.clearOutputAudio()
 			if clearedFrames > 0 {
-				s.Input(&protos.ConversationEvent{
-					Name: observe.ComponentWebRTC,
-					Data: map[string]string{
+				_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+					Level:   observability.LevelDebug,
+					Message: "WebRTC output queue cleared",
+					Attributes: observability.Attributes{
+						"component":                              observability.ComponentWebRTC.String(),
 						webrtc_internal.DataType:                 webrtc_internal.EventOutputQueueCleared,
 						webrtc_internal.DataSessionID:            s.sessionID,
 						webrtc_internal.DataReason:               webrtc_internal.OutputQueueClearReasonFlush,
 						webrtc_internal.DataClearedFrames:        fmt.Sprintf("%d", clearedFrames),
 						webrtc_internal.DataRemainingQueueFrames: fmt.Sprintf("%d", webrtc_internal.OutputAudioQueueEmptySize),
 					},
-					Time: timestamppb.Now(),
+				})
+				_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordMetric{
+					Metrics: []*protos.Metric{
+						{Name: "webrtc_output_cleared_frames", Value: fmt.Sprintf("%d", clearedFrames), Description: "WebRTC output queue cleared frames"},
+					},
 				})
 			}
 

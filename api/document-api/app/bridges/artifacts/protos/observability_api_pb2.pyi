@@ -33,7 +33,7 @@ class GetAllTelemetryRequest(_message.Message):
     def __init__(self, paginate: _Optional[_Union[_common_pb2.Paginate, _Mapping]] = ..., criterias: _Optional[_Iterable[_Union[_common_pb2.Criteria, _Mapping]]] = ..., order: _Optional[_Union[_common_pb2.Ordering, _Mapping]] = ...) -> None: ...
 
 class ObservabilityLogRecord(_message.Message):
-    __slots__ = ("id", "kind", "level", "message", "projectId", "organizationId", "scope", "scopeAttributes", "attributes", "occurredAt")
+    __slots__ = ("id", "kind", "level", "message", "projectId", "organizationId", "scope", "scopeAttributes", "attributes", "occurredAt", "context")
     class ScopeAttributesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -42,6 +42,13 @@ class ObservabilityLogRecord(_message.Message):
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     class AttributesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    class ContextEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
@@ -58,6 +65,7 @@ class ObservabilityLogRecord(_message.Message):
     SCOPEATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     OCCURREDAT_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
     id: str
     kind: ObservabilityRecordKind
     level: str
@@ -68,10 +76,11 @@ class ObservabilityLogRecord(_message.Message):
     scopeAttributes: _containers.ScalarMap[str, str]
     attributes: _containers.ScalarMap[str, str]
     occurredAt: _timestamp_pb2.Timestamp
-    def __init__(self, id: _Optional[str] = ..., kind: _Optional[_Union[ObservabilityRecordKind, str]] = ..., level: _Optional[str] = ..., message: _Optional[str] = ..., projectId: _Optional[int] = ..., organizationId: _Optional[int] = ..., scope: _Optional[str] = ..., scopeAttributes: _Optional[_Mapping[str, str]] = ..., attributes: _Optional[_Mapping[str, str]] = ..., occurredAt: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    context: _containers.ScalarMap[str, str]
+    def __init__(self, id: _Optional[str] = ..., kind: _Optional[_Union[ObservabilityRecordKind, str]] = ..., level: _Optional[str] = ..., message: _Optional[str] = ..., projectId: _Optional[int] = ..., organizationId: _Optional[int] = ..., scope: _Optional[str] = ..., scopeAttributes: _Optional[_Mapping[str, str]] = ..., attributes: _Optional[_Mapping[str, str]] = ..., occurredAt: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., context: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ObservabilityEventRecord(_message.Message):
-    __slots__ = ("id", "kind", "event", "component", "projectId", "organizationId", "scope", "scopeAttributes", "attributes", "occurredAt")
+    __slots__ = ("id", "kind", "event", "component", "projectId", "organizationId", "scope", "scopeAttributes", "attributes", "occurredAt", "context")
     class ScopeAttributesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -80,6 +89,13 @@ class ObservabilityEventRecord(_message.Message):
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     class AttributesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    class ContextEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
@@ -96,6 +112,7 @@ class ObservabilityEventRecord(_message.Message):
     SCOPEATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     OCCURREDAT_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
     id: str
     kind: ObservabilityRecordKind
     event: str
@@ -106,10 +123,11 @@ class ObservabilityEventRecord(_message.Message):
     scopeAttributes: _containers.ScalarMap[str, str]
     attributes: _containers.ScalarMap[str, str]
     occurredAt: _timestamp_pb2.Timestamp
-    def __init__(self, id: _Optional[str] = ..., kind: _Optional[_Union[ObservabilityRecordKind, str]] = ..., event: _Optional[str] = ..., component: _Optional[str] = ..., projectId: _Optional[int] = ..., organizationId: _Optional[int] = ..., scope: _Optional[str] = ..., scopeAttributes: _Optional[_Mapping[str, str]] = ..., attributes: _Optional[_Mapping[str, str]] = ..., occurredAt: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    context: _containers.ScalarMap[str, str]
+    def __init__(self, id: _Optional[str] = ..., kind: _Optional[_Union[ObservabilityRecordKind, str]] = ..., event: _Optional[str] = ..., component: _Optional[str] = ..., projectId: _Optional[int] = ..., organizationId: _Optional[int] = ..., scope: _Optional[str] = ..., scopeAttributes: _Optional[_Mapping[str, str]] = ..., attributes: _Optional[_Mapping[str, str]] = ..., occurredAt: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., context: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ObservabilityMetricRecord(_message.Message):
-    __slots__ = ("id", "kind", "name", "value", "description", "projectId", "organizationId", "scope", "scopeAttributes", "attributes", "occurredAt")
+    __slots__ = ("id", "kind", "name", "value", "description", "projectId", "organizationId", "scope", "scopeAttributes", "attributes", "occurredAt", "context")
     class ScopeAttributesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -118,6 +136,13 @@ class ObservabilityMetricRecord(_message.Message):
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     class AttributesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    class ContextEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
@@ -135,6 +160,7 @@ class ObservabilityMetricRecord(_message.Message):
     SCOPEATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     OCCURREDAT_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
     id: str
     kind: ObservabilityRecordKind
     name: str
@@ -146,7 +172,8 @@ class ObservabilityMetricRecord(_message.Message):
     scopeAttributes: _containers.ScalarMap[str, str]
     attributes: _containers.ScalarMap[str, str]
     occurredAt: _timestamp_pb2.Timestamp
-    def __init__(self, id: _Optional[str] = ..., kind: _Optional[_Union[ObservabilityRecordKind, str]] = ..., name: _Optional[str] = ..., value: _Optional[str] = ..., description: _Optional[str] = ..., projectId: _Optional[int] = ..., organizationId: _Optional[int] = ..., scope: _Optional[str] = ..., scopeAttributes: _Optional[_Mapping[str, str]] = ..., attributes: _Optional[_Mapping[str, str]] = ..., occurredAt: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    context: _containers.ScalarMap[str, str]
+    def __init__(self, id: _Optional[str] = ..., kind: _Optional[_Union[ObservabilityRecordKind, str]] = ..., name: _Optional[str] = ..., value: _Optional[str] = ..., description: _Optional[str] = ..., projectId: _Optional[int] = ..., organizationId: _Optional[int] = ..., scope: _Optional[str] = ..., scopeAttributes: _Optional[_Mapping[str, str]] = ..., attributes: _Optional[_Mapping[str, str]] = ..., occurredAt: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., context: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ObservabilityRecord(_message.Message):
     __slots__ = ("log", "event", "metric")

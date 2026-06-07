@@ -58,11 +58,11 @@ func (c *Collector) Key() string {
 	return c.key
 }
 
-func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, observationContext observability.Context, record observability.Record) error {
 	if !validator.NonNil(c.exporter) {
 		return nil
 	}
-	telemetryScope := toTelemetryScope(scope)
+
 	switch typed := record.(type) {
 	case observability.RecordLog:
 		occurredAt := typed.OccurredAt
@@ -73,8 +73,9 @@ func (c *Collector) Collect(ctx context.Context, scope observability.Scope, reco
 		for key, value := range typed.Attributes {
 			attributes[key] = value
 		}
-		return c.exporter.Export(ctx, telemetryScope, telemetry.LogRecord{
+		return c.exporter.Export(ctx, c.toTelemetryScope(scope), telemetry.LogRecord{
 			ID:         typed.ID,
+			Context:    map[string]string{"traceId": observationContext.TraceID},
 			Level:      string(typed.Level),
 			Message:    typed.Message,
 			Attributes: attributes,
@@ -89,8 +90,9 @@ func (c *Collector) Collect(ctx context.Context, scope observability.Scope, reco
 		for key, value := range typed.Attributes {
 			attributes[key] = value
 		}
-		return c.exporter.Export(ctx, telemetryScope, telemetry.EventRecord{
+		return c.exporter.Export(ctx, c.toTelemetryScope(scope), telemetry.EventRecord{
 			ID:         typed.ID,
+			Context:    map[string]string{"traceId": observationContext.TraceID},
 			Event:      typed.Event.String(),
 			Component:  typed.Component.String(),
 			Attributes: attributes,
@@ -109,8 +111,9 @@ func (c *Collector) Collect(ctx context.Context, scope observability.Scope, reco
 			if metric == nil {
 				continue
 			}
-			if err := c.exporter.Export(ctx, telemetryScope, telemetry.MetricRecord{
+			if err := c.exporter.Export(ctx, c.toTelemetryScope(scope), telemetry.MetricRecord{
 				ID:          typed.ID,
+				Context:     map[string]string{"traceId": observationContext.TraceID},
 				Name:        metric.GetName(),
 				Value:       metric.GetValue(),
 				Description: metric.GetDescription(),
@@ -125,7 +128,7 @@ func (c *Collector) Collect(ctx context.Context, scope observability.Scope, reco
 	}
 }
 
-func toTelemetryScope(scope observability.Scope) telemetry.Scope {
+func (c *Collector) toTelemetryScope(scope observability.Scope) telemetry.Scope {
 	global := scope.GlobalScopeValue()
 	scopeAttributes := map[string]string{}
 	switch typed := scope.(type) {

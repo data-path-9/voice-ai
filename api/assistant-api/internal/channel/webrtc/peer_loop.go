@@ -12,9 +12,8 @@ import (
 
 	pionwebrtc "github.com/pion/webrtc/v4"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
-	"github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/protos"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (s *webrtcStreamer) runPeerEventLoop() {
@@ -59,8 +58,6 @@ func (s *webrtcStreamer) handlePeerState(mediaSessionID uint64, state pionwebrtc
 		return
 	}
 
-	s.Logger.Infow("WebRTC connection state changed", "state", state, "session", s.sessionID)
-
 	s.Mu.Lock()
 	switch state {
 	case pionwebrtc.PeerConnectionStateConnected:
@@ -88,47 +85,74 @@ func (s *webrtcStreamer) handlePeerState(mediaSessionID uint64, state pionwebrtc
 	case pionwebrtc.PeerConnectionStateConnected:
 		s.sessionState.SetPeerConnected(true)
 		s.sessionState.ResetICERestartAttempts()
-		s.Input(&protos.ConversationEvent{
-			Name: observe.ComponentWebRTC,
-			Data: map[string]string{
-				webrtc_internal.DataType:         observe.EventPeerConnected,
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+			Component: observability.ComponentWebRTC,
+			Event:     observability.WebRTCConnected,
+			Attributes: observability.Attributes{
+				"component":                      observability.ComponentWebRTC.String(),
+				webrtc_internal.DataType:         "peer_connected",
 				webrtc_internal.DataSessionID:    s.sessionID,
 				webrtc_internal.DataICELatencyMs: fmt.Sprintf("%d", iceLatencyMs),
 			},
-			Time: timestamppb.Now(),
 		})
 		s.reportSelectedICECandidatePair(peerConnection, peerStateChangedAt)
 		s.signalReady()
 
 	case pionwebrtc.PeerConnectionStateFailed:
 		s.sessionState.SetPeerConnected(false)
-		s.Logger.Warnw("WebRTC peer failed, restarting ICE", "session", s.sessionID)
-		s.Input(&protos.ConversationEvent{
-			Name: observe.ComponentWebRTC,
-			Data: map[string]string{
-				webrtc_internal.DataType:      observe.EventPeerFailed,
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "WebRTC peer failed, restarting ICE",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataType:      "peer_failed",
 				webrtc_internal.DataSessionID: s.sessionID,
 				webrtc_internal.DataReason:    webrtc_internal.ReasonPeerFailed,
 			},
-			Time: timestamppb.Now(),
+		})
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+			Component: observability.ComponentWebRTC,
+			Event:     observability.WebRTCFailed,
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataType:      "peer_failed",
+				webrtc_internal.DataSessionID: s.sessionID,
+				webrtc_internal.DataReason:    webrtc_internal.ReasonPeerFailed,
+			},
 		})
 		s.queueMediaSessionRecovery(mediaSessionID, webrtc_internal.ReasonPeerFailed, peerStateChangedAt)
 
 	case pionwebrtc.PeerConnectionStateDisconnected:
 		s.sessionState.SetPeerConnected(false)
-		s.Logger.Warnw("WebRTC peer disconnected, restarting ICE", "session", s.sessionID)
-		s.Input(&protos.ConversationEvent{
-			Name: observe.ComponentWebRTC,
-			Data: map[string]string{
-				webrtc_internal.DataType:      observe.EventPeerDisconnected,
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelInfo,
+			Message: "WebRTC peer disconnected, restarting ICE",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataType:      "peer_disconnected",
 				webrtc_internal.DataSessionID: s.sessionID,
 			},
-			Time: timestamppb.Now(),
+		})
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+			Component: observability.ComponentWebRTC,
+			Event:     observability.WebRTCDisconnected,
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataType:      "peer_disconnected",
+				webrtc_internal.DataSessionID: s.sessionID,
+			},
 		})
 		s.queueMediaSessionRecovery(mediaSessionID, webrtc_internal.ReasonPeerDisconnected, peerStateChangedAt)
 
 	case pionwebrtc.PeerConnectionStateClosed:
-		s.Logger.Infow("WebRTC peer closed, resetting audio", "session", s.sessionID)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelInfo,
+			Message: "WebRTC peer closed, resetting audio",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+			},
+		})
 		s.stopMediaSessionAndFallbackToText()
 	}
 }
@@ -138,29 +162,31 @@ func (s *webrtcStreamer) handlePeerICEConnectionState(mediaSessionID uint64, sta
 		return
 	}
 
-	s.Logger.Infow("WebRTC ICE connection state changed", "state", state, "session", s.sessionID)
-
 	stateName := state.String()
 	s.Mu.Lock()
 	s.mediaHealthState.RecordICEConnectionState(stateName, iceStateChangedAt)
 	s.Mu.Unlock()
 
 	eventType := webrtc_internal.EventICEConnectionState
+	eventName := observability.EventName("webrtc.ice_connection_state")
 	if state == pionwebrtc.ICEConnectionStateConnected || state == pionwebrtc.ICEConnectionStateCompleted {
-		eventType = observe.EventICEConnected
+		eventType = "ice_connected"
+		eventName = observability.WebRTCICEConnected
 	}
 	if state == pionwebrtc.ICEConnectionStateFailed {
-		eventType = observe.EventICEFailed
+		eventType = "ice_failed"
+		eventName = observability.WebRTCICEFailed
 	}
 
-	s.Input(&protos.ConversationEvent{
-		Name: observe.ComponentWebRTC,
-		Data: map[string]string{
+	_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+		Component: observability.ComponentWebRTC,
+		Event:     eventName,
+		Attributes: observability.Attributes{
+			"component":                            observability.ComponentWebRTC.String(),
 			webrtc_internal.DataType:               eventType,
 			webrtc_internal.DataSessionID:          s.sessionID,
 			webrtc_internal.DataICEConnectionState: stateName,
 		},
-		Time: timestamppb.New(iceStateChangedAt),
 	})
 
 	if state == pionwebrtc.ICEConnectionStateConnected || state == pionwebrtc.ICEConnectionStateCompleted {
@@ -189,9 +215,11 @@ func (s *webrtcStreamer) reportSelectedICECandidatePair(peerConnection *pionwebr
 		return
 	}
 
-	s.Input(&protos.ConversationEvent{
-		Name: observe.ComponentWebRTC,
-		Data: map[string]string{
+	_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+		Component: observability.ComponentWebRTC,
+		Event:     observability.EventName("webrtc.selected_ice_candidate_pair"),
+		Attributes: observability.Attributes{
+			"component":                                     observability.ComponentWebRTC.String(),
 			webrtc_internal.DataType:                        webrtc_internal.EventSelectedICECandidatePair,
 			webrtc_internal.DataSessionID:                   s.sessionID,
 			webrtc_internal.DataCandidatePairID:             pair.ID,
@@ -203,7 +231,12 @@ func (s *webrtcStreamer) reportSelectedICECandidatePair(peerConnection *pionwebr
 			webrtc_internal.DataAvailableOutgoingBitrateBps: fmt.Sprintf("%d", pair.AvailableOutgoingBitrateBps),
 			webrtc_internal.DataQualityState:                qualityState,
 		},
-		Time: timestamppb.New(selectedAt),
+	})
+	_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordMetric{
+		Metrics: []*protos.Metric{
+			{Name: "webrtc_candidate_pair_rtt_ms", Value: fmt.Sprintf("%d", pair.CurrentRoundTripTimeMs), Description: "WebRTC selected ICE candidate pair RTT"},
+			{Name: "webrtc_available_outgoing_bitrate_bps", Value: fmt.Sprintf("%d", pair.AvailableOutgoingBitrateBps), Description: "WebRTC selected ICE candidate pair available outgoing bitrate"},
+		},
 	})
 }
 
@@ -254,7 +287,16 @@ func (s *webrtcStreamer) handleClientSignal(signaling *protos.ClientSignaling) {
 	switch msg := signaling.GetMessage().(type) {
 	case *protos.ClientSignaling_Sdp:
 		if signalingSessionID != "" && signaling.GetSessionId() != signalingSessionID {
-			s.Logger.Warnw("Received SDP for stale WebRTC signaling session, ignoring", "session", s.sessionID)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Received SDP for stale WebRTC signaling session, ignoring",
+				Attributes: observability.Attributes{
+					"component":                   observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID: s.sessionID,
+					"signaling_session_id":        signaling.GetSessionId(),
+					"current_signaling_session":   signalingSessionID,
+				},
+			})
 			return
 		}
 		if msg.Sdp.GetType() == protos.WebRTCSDP_ANSWER {
@@ -267,7 +309,16 @@ func (s *webrtcStreamer) handleClientSignal(signaling *protos.ClientSignaling) {
 
 	case *protos.ClientSignaling_IceCandidate:
 		if signalingSessionID != "" && signaling.GetSessionId() != signalingSessionID {
-			s.Logger.Warnw("Received ICE candidate for stale WebRTC signaling session, ignoring", "session", s.sessionID)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Received ICE candidate for stale WebRTC signaling session, ignoring",
+				Attributes: observability.Attributes{
+					"component":                   observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID: s.sessionID,
+					"signaling_session_id":        signaling.GetSessionId(),
+					"current_signaling_session":   signalingSessionID,
+				},
+			})
 			return
 		}
 		ice := msg.IceCandidate
@@ -300,6 +351,14 @@ func (s *webrtcStreamer) handleClientSignal(signaling *protos.ClientSignaling) {
 
 func (s *webrtcStreamer) addRemoteICECandidate(peerConnection *pionwebrtc.PeerConnection, candidate pionwebrtc.ICECandidateInit) {
 	if err := peerConnection.AddICECandidate(candidate); err != nil {
-		s.Logger.Warnw("Failed to add ICE candidate (non-fatal)", "error", err)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Failed to add ICE candidate",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+				"error":                       err.Error(),
+			},
+		})
 	}
 }

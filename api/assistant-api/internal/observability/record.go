@@ -54,6 +54,10 @@ func (a Attributes) Clone() Attributes {
 	return cloned
 }
 
+type Context struct {
+	TraceID string
+}
+
 type GlobalScope struct {
 	OrganizationID uint64
 	ProjectID      uint64

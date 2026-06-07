@@ -49,7 +49,7 @@ func (c *Collector) Key() string {
 	return "conversationdb"
 }
 
-func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ observability.Context, record observability.Record) error {
 	switch typed := record.(type) {
 	case observability.RecordMetric:
 		return c.collectMetrics(ctx, scope, typed)

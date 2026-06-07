@@ -107,7 +107,7 @@ func TestCollectMetric_RequiresValidConversationScope(t *testing.T) {
 		AssistantScope: observability.AssistantScope{
 			AssistantID: 10,
 		},
-	}, observability.RecordMetric{
+	}, observability.Context{}, observability.RecordMetric{
 		Metrics: []*protos.Metric{{Name: observability.MetricConversationDuration, Value: "1000"}},
 	})
 	if !errors.Is(err, ErrScopeRequired) {
@@ -117,7 +117,7 @@ func TestCollectMetric_RequiresValidConversationScope(t *testing.T) {
 
 func TestCollectMetric_EmptyMetricsAreNoop(t *testing.T) {
 	collector := New(Config{ConversationService: &conversationServiceStub{}})
-	if err := collector.Collect(context.Background(), observability.ConversationScope{}, observability.RecordMetric{}); err != nil {
+	if err := collector.Collect(context.Background(), observability.ConversationScope{}, observability.Context{}, observability.RecordMetric{}); err != nil {
 		t.Fatalf("empty metrics should be noop, got %v", err)
 	}
 }
@@ -131,7 +131,7 @@ func TestCollectMetric_ForwardsConversationScopedRecords(t *testing.T) {
 		ConversationID: 20,
 	}
 
-	err := collector.Collect(contextWithAuth(context.Background(), auth), scope, observability.RecordMetric{
+	err := collector.Collect(contextWithAuth(context.Background(), auth), scope, observability.Context{}, observability.RecordMetric{
 		Metrics: []*protos.Metric{{
 			Name:        observability.MetricConversationDuration,
 			Value:       "1000",
@@ -162,7 +162,7 @@ func TestCollectMetadata_ForwardsMessageScopedRecords(t *testing.T) {
 		Role:      observability.MessageRoleUser,
 	}
 
-	err := collector.Collect(contextWithAuth(context.Background(), auth), scope, observability.RecordMetadata{
+	err := collector.Collect(contextWithAuth(context.Background(), auth), scope, observability.Context{}, observability.RecordMetadata{
 		Metadata: []*protos.Metadata{{
 			Key:   observability.MetadataLanguage,
 			Value: "en",
@@ -179,7 +179,7 @@ func TestCollectMetadata_ForwardsMessageScopedRecords(t *testing.T) {
 func TestCollectMetadata_AssistantScopeUnsupported(t *testing.T) {
 	collector := New(Config{ConversationService: &conversationServiceStub{}})
 	auth := testAuth()
-	err := collector.Collect(contextWithAuth(context.Background(), auth), observability.AssistantScope{AssistantID: 10}, observability.RecordMetadata{
+	err := collector.Collect(contextWithAuth(context.Background(), auth), observability.AssistantScope{AssistantID: 10}, observability.Context{}, observability.RecordMetadata{
 		Metadata: []*protos.Metadata{{Key: observability.MetadataLanguage, Value: "en"}},
 	})
 	if !errors.Is(err, ErrScopeUnsupported) {

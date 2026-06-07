@@ -64,7 +64,7 @@ func (c *Collector) Key() string {
 	return "timeline:" + indexPrefix
 }
 
-func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ observability.Context, record observability.Record) error {
 	if !validator.NonNil(c) || !validator.NonNil(c.opensearch) {
 		return nil
 	}

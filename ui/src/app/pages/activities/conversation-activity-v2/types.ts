@@ -13,6 +13,7 @@ export type TimelineDocument = {
   assistantConversationId: number | string;
   messageId?: string;
   messageRole?: string;
+  traceId?: string;
   contextId: string;
   occurredAt: string;
   receivedAt: string;

@@ -14,7 +14,7 @@ import (
 
 type Collector interface {
 	Key() string
-	Collect(ctx context.Context, scope Scope, record Record) error
+	Collect(ctx context.Context, scope Scope, observationContext Context, record Record) error
 	Close(ctx context.Context) error
 }
 
@@ -24,7 +24,7 @@ func (NoopCollector) Key() string {
 	return "noop"
 }
 
-func (NoopCollector) Collect(context.Context, Scope, Record) error {
+func (NoopCollector) Collect(context.Context, Scope, Context, Record) error {
 	return nil
 }
 
@@ -70,7 +70,7 @@ func (c *Collectors) AddCollectors(collectors ...Collector) {
 	}
 }
 
-func (c *Collectors) Collect(ctx context.Context, scope Scope, record Record) error {
+func (c *Collectors) Collect(ctx context.Context, scope Scope, observationContext Context, record Record) error {
 	c.mu.RLock()
 	collectors := append([]Collector(nil), c.collectors...)
 	c.mu.RUnlock()
@@ -79,7 +79,7 @@ func (c *Collectors) Collect(ctx context.Context, scope Scope, record Record) er
 		if collector == nil {
 			continue
 		}
-		if err := collector.Collect(ctx, scope, record); err != nil {
+		if err := collector.Collect(ctx, scope, observationContext, record); err != nil {
 			errs = append(errs, err)
 		}
 	}

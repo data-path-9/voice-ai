@@ -13,15 +13,21 @@ import (
 
 	pionwebrtc "github.com/pion/webrtc/v4"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
-	"github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/protos"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (s *webrtcStreamer) watchCallerContext(callerCtx context.Context) {
 	select {
 	case <-callerCtx.Done():
-		s.Logger.Infow("Caller context cancelled, closing streamer gracefully", "session", s.sessionID)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelInfo,
+			Message: "Caller context cancelled, closing WebRTC streamer gracefully",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+			},
+		})
 		if disc := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); disc != nil {
 			s.Input(disc)
 		}
@@ -62,7 +68,16 @@ func (s *webrtcStreamer) queueMediaSessionRecovery(mediaSessionID uint64, reason
 	case s.mediaLifecycleCh <- event:
 	case <-s.Ctx.Done():
 	default:
-		s.Logger.Warnw("WebRTC media lifecycle queue full, dropping recovery request", "session", s.sessionID, "reason", reason)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "WebRTC media lifecycle queue full, dropping recovery request",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+				webrtc_internal.DataReason:         reason,
+			},
+		})
 	}
 }
 
@@ -82,7 +97,16 @@ func (s *webrtcStreamer) queueMediaSessionRestart(mediaSessionID uint64, reason 
 	case s.mediaLifecycleCh <- event:
 	case <-s.Ctx.Done():
 	default:
-		s.Logger.Warnw("WebRTC media lifecycle queue full, dropping restart request", "session", s.sessionID, "reason", reason)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "WebRTC media lifecycle queue full, dropping restart request",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+				webrtc_internal.DataReason:         reason,
+			},
+		})
 	}
 }
 
@@ -117,9 +141,11 @@ func (s *webrtcStreamer) runMediaSessionDeadlines(mediaSessionID uint64) {
 				continue
 			}
 
-			s.Input(&protos.ConversationEvent{
-				Name: observe.ComponentWebRTC,
-				Data: map[string]string{
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "WebRTC handshake deadline exceeded",
+				Attributes: observability.Attributes{
+					"component":                    observability.ComponentWebRTC.String(),
 					webrtc_internal.DataType:       webrtc_internal.EventHandshakeDeadlineExceeded,
 					webrtc_internal.DataSessionID:  s.sessionID,
 					webrtc_internal.DataReason:     reason,
@@ -127,7 +153,6 @@ func (s *webrtcStreamer) runMediaSessionDeadlines(mediaSessionID uint64) {
 					webrtc_internal.DataDeadlineMs: fmt.Sprintf("%d", deadline.Milliseconds()),
 					webrtc_internal.DataElapsedMs:  fmt.Sprintf("%d", elapsed.Milliseconds()),
 				},
-				Time: timestamppb.New(deadlineCheckedAt),
 			})
 			s.queueMediaSessionRestart(mediaSessionID, reason, deadlineCheckedAt)
 			return
@@ -150,16 +175,17 @@ func (s *webrtcStreamer) restartICEOrMediaSessionFallback(mediaSessionID uint64,
 		return
 	}
 
-	s.Input(&protos.ConversationEvent{
-		Name: observe.ComponentWebRTC,
-		Data: map[string]string{
+	_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+		Component: observability.ComponentWebRTC,
+		Event:     observability.WebRTCReconnecting,
+		Attributes: observability.Attributes{
+			"component":                        observability.ComponentWebRTC.String(),
 			webrtc_internal.DataType:           webrtc_internal.EventICERestarting,
 			webrtc_internal.DataSessionID:      s.sessionID,
 			webrtc_internal.DataReason:         reason,
 			webrtc_internal.DataRestartAttempt: fmt.Sprintf("%d", iceRestartAttempt),
 			webrtc_internal.DataRestartLimit:   fmt.Sprintf("%d", webrtc_internal.ICERestartAttemptLimit),
 		},
-		Time: timestamppb.New(restartedAt),
 	})
 
 	s.clearBufferedOutputAudio()
@@ -183,21 +209,30 @@ func (s *webrtcStreamer) restartMediaSessionOrFallbackToText(mediaSessionID uint
 
 	restartAttempt, ok := s.sessionState.TryBeginMediaRestart(webrtc_internal.MediaRestartAttemptLimit)
 	if !ok {
-		s.Logger.Warnw("WebRTC media restart limit reached, falling back to text mode", "session", s.sessionID, "reason", reason)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "WebRTC media restart limit reached, falling back to text mode",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+				webrtc_internal.DataReason:    reason,
+			},
+		})
 		s.stopMediaSessionAndFallbackToText()
 		return
 	}
 
-	s.Input(&protos.ConversationEvent{
-		Name: observe.ComponentWebRTC,
-		Data: map[string]string{
+	_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+		Component: observability.ComponentWebRTC,
+		Event:     observability.WebRTCReconnecting,
+		Attributes: observability.Attributes{
+			"component":                        observability.ComponentWebRTC.String(),
 			webrtc_internal.DataType:           webrtc_internal.EventMediaSessionRestarting,
 			webrtc_internal.DataSessionID:      s.sessionID,
 			webrtc_internal.DataReason:         reason,
 			webrtc_internal.DataRestartAttempt: fmt.Sprintf("%d", restartAttempt),
 			webrtc_internal.DataRestartLimit:   fmt.Sprintf("%d", webrtc_internal.MediaRestartAttemptLimit),
 		},
-		Time: timestamppb.New(restartedAt),
 	})
 
 	s.clearBufferedOutputAudio()
@@ -207,7 +242,16 @@ func (s *webrtcStreamer) restartMediaSessionOrFallbackToText(mediaSessionID uint
 	}
 
 	if err := s.startMediaSession(); err != nil {
-		s.Logger.Errorw("Failed to restart WebRTC media session, falling back to text mode", "error", err, "session", s.sessionID, "reason", reason)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to restart WebRTC media session, falling back to text mode",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+				webrtc_internal.DataReason:    reason,
+				"error":                       err.Error(),
+			},
+		})
 		s.stopMediaSessionAndFallbackToText()
 	}
 }

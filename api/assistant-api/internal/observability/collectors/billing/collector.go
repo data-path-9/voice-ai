@@ -43,7 +43,7 @@ func (c *Collector) Key() string {
 	return "billing"
 }
 
-func (c *Collector) Collect(ctx context.Context, scope observability.Scope, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ observability.Context, record observability.Record) error {
 	usage, ok := record.(observability.RecordUsage)
 	if !ok {
 		return nil

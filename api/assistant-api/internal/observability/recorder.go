@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/validator"
@@ -28,6 +29,7 @@ type recorderOptions struct {
 	logger      commons.Logger
 	auth        types.SimplePrinciple
 	globalScope GlobalScope
+	context     Context
 	clock       func() time.Time
 	buffer      int
 	collectors  []Collector
@@ -71,6 +73,16 @@ func WithScope(scope GlobalScope) Option {
 	return WithGlobalScope(scope)
 }
 
+func WithContext(ctx context.Context) Option {
+	return newOption(func(recorderOptions *recorderOptions) {
+		if traceID, ok := ctx.Value(types.REQUEST_ID_KEY).(string); ok {
+			recorderOptions.context.TraceID = traceID
+			return
+		}
+		recorderOptions.context.TraceID = uuid.New().String()
+	})
+}
+
 func WithClock(clock func() time.Time) Option {
 	return newOption(func(recorderOptions *recorderOptions) {
 		recorderOptions.clock = clock
@@ -97,6 +109,7 @@ type recorder struct {
 	logger      commons.Logger
 	auth        types.SimplePrinciple
 	globalScope GlobalScope
+	context     Context
 	clock       func() time.Time
 	fanout      *Collectors
 	queue       chan observation
@@ -108,8 +121,9 @@ type recorder struct {
 }
 
 type observation struct {
-	scope  Scope
-	record Record
+	scope   Scope
+	context Context
+	record  Record
 }
 
 const defaultBufferSize = 1024
@@ -149,6 +163,7 @@ func New(options ...Option) Recorder {
 		logger:      resolvedOptions.logger,
 		auth:        resolvedOptions.auth,
 		globalScope: globalScope,
+		context:     resolvedOptions.context,
 		clock:       clock,
 		fanout:      NewCollectors(resolvedOptions.collectors...),
 		queue:       make(chan observation, buffer),
@@ -159,12 +174,19 @@ func New(options ...Option) Recorder {
 }
 
 func (r *recorder) Record(ctx context.Context, scope Scope, record Record) error {
-	normalized, err := r.normalize(scope, record)
+	item, err := r.normalize(scope, record)
 	if err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	item.context = r.context
+	if traceID, ok := ctx.Value(types.REQUEST_ID_KEY).(string); ok && traceID != "" {
+		item.context.TraceID = traceID
+	}
+	if item.context.TraceID == "" {
+		item.context.TraceID = uuid.New().String()
 	}
 
 	r.mu.RLock()
@@ -173,7 +195,7 @@ func (r *recorder) Record(ctx context.Context, scope Scope, record Record) error
 		return ErrRecorderClosed
 	}
 	select {
-	case r.queue <- normalized:
+	case r.queue <- item:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -197,10 +219,14 @@ func (r *recorder) normalize(scope Scope, record Record) (observation, error) {
 		return observation{}, errors.New("observability: record is nil")
 	}
 	now := r.clock()
-	normalizedScope, err := normalizeScope(scope, r.globalScope)
-	if err != nil {
+	if !validator.NonNil(scope) {
+		return observation{}, errors.New("observability: scope is required")
+	}
+	scope = scope.WithGlobal(r.globalScope)
+	if err := ValidateScope(scope); err != nil {
 		return observation{}, err
 	}
+
 	switch typed := record.(type) {
 	case RecordLog:
 		if !validator.NotBlank(typed.Message) {
@@ -217,7 +243,7 @@ func (r *recorder) normalize(scope Scope, record Record) (observation, error) {
 			typed.OccurredAt = now
 		}
 		typed.Attributes = typed.Attributes.Clone()
-		return observation{scope: normalizedScope, record: typed}, nil
+		return observation{scope: scope, record: typed}, nil
 	case RecordEvent:
 		if !validator.NotBlank(typed.Event.String()) {
 			return observation{}, errors.New("observability: event is required")
@@ -232,7 +258,7 @@ func (r *recorder) normalize(scope Scope, record Record) (observation, error) {
 			typed.OccurredAt = now
 		}
 		typed.Attributes = typed.Attributes.Clone()
-		return observation{scope: normalizedScope, record: typed}, nil
+		return observation{scope: scope, record: typed}, nil
 	case RecordMetric:
 		if len(typed.Metrics) == 0 {
 			return observation{}, errors.New("observability: at least one metric is required")
@@ -245,7 +271,7 @@ func (r *recorder) normalize(scope Scope, record Record) (observation, error) {
 		if typed.OccurredAt.IsZero() {
 			typed.OccurredAt = now
 		}
-		return observation{scope: normalizedScope, record: typed}, nil
+		return observation{scope: scope, record: typed}, nil
 	case RecordMetadata:
 		if len(typed.Metadata) == 0 {
 			return observation{}, errors.New("observability: at least one metadata entry is required")
@@ -258,7 +284,7 @@ func (r *recorder) normalize(scope Scope, record Record) (observation, error) {
 		if typed.OccurredAt.IsZero() {
 			typed.OccurredAt = now
 		}
-		return observation{scope: normalizedScope, record: typed}, nil
+		return observation{scope: scope, record: typed}, nil
 	case RecordUsage:
 		if typed.Duration <= 0 {
 			return observation{}, errors.New("observability: usage duration must be greater than zero")
@@ -267,7 +293,7 @@ func (r *recorder) normalize(scope Scope, record Record) (observation, error) {
 			typed.OccurredAt = now
 		}
 		typed.Attributes = typed.Attributes.Clone()
-		return observation{scope: normalizedScope, record: typed}, nil
+		return observation{scope: scope, record: typed}, nil
 	case RecordWebhook:
 		if !validator.NotBlank(typed.Event.String()) {
 			return observation{}, errors.New("observability: webhook event is required")
@@ -278,21 +304,10 @@ func (r *recorder) normalize(scope Scope, record Record) (observation, error) {
 		if typed.OccurredAt.IsZero() {
 			typed.OccurredAt = now
 		}
-		return observation{scope: normalizedScope, record: typed}, nil
+		return observation{scope: scope, record: typed}, nil
 	default:
 		return observation{}, fmt.Errorf("observability: unsupported record type %T", record)
 	}
-}
-
-func normalizeScope(scope Scope, global GlobalScope) (Scope, error) {
-	if !validator.NonNil(scope) {
-		return nil, errors.New("observability: scope is required")
-	}
-	scope = scope.WithGlobal(global)
-	if err := ValidateScope(scope); err != nil {
-		return nil, err
-	}
-	return scope, nil
 }
 
 func (r *recorder) run() {
@@ -302,7 +317,7 @@ func (r *recorder) run() {
 		if validator.NonNil(r.auth) {
 			ctx = context.WithValue(ctx, types.CTX_, r.auth)
 		}
-		err := r.fanout.Collect(ctx, item.scope, item.record)
+		err := r.fanout.Collect(ctx, item.scope, item.context, item.record)
 		if err != nil {
 			r.addError(err)
 		}

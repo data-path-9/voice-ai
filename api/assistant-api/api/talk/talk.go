@@ -271,6 +271,7 @@ func (cApi *ConversationGrpcApi) WebTalk(stream assistant_api.WebRTC_WebTalkServ
 	}
 	observabilityRecorder := observability.New(observability.WithLogger(cApi.logger),
 		observability.WithAuth(auth),
+		observability.WithContext(stream.Context()),
 		observability.WithCollectors(collectors.NewWithEnv(stream.Context(), cApi.logger, cApi.cfg)...))
 	defer func() {
 		if err := observabilityRecorder.Close(context.Background()); err != nil {

@@ -21,7 +21,7 @@ func TestCollectors_CollectMetric_FansOutAndJoinsErrors(t *testing.T) {
 	err := fanout.Collect(context.Background(), ConversationScope{
 		AssistantScope: AssistantScope{AssistantID: 1},
 		ConversationID: 2,
-	}, RecordMetric{})
+	}, Context{}, RecordMetric{})
 	if !errors.Is(err, collectorErr) {
 		t.Fatalf("expected collector error, got %v", err)
 	}
@@ -48,7 +48,7 @@ func TestNoopCollector(t *testing.T) {
 	if err := collector.Collect(context.Background(), ConversationScope{
 		AssistantScope: AssistantScope{AssistantID: 1},
 		ConversationID: 2,
-	}, RecordEvent{}); err != nil {
+	}, Context{}, RecordEvent{}); err != nil {
 		t.Fatalf("Collect returned error: %v", err)
 	}
 	if err := collector.Close(context.Background()); err != nil {

@@ -123,6 +123,26 @@ const getScopeAttributes = (
     | ObservabilityMetricRecord,
 ): Record<string, string> => mapToObject(record.getScopeattributesMap());
 
+const getContext = (
+  record:
+    | ObservabilityLogRecord
+    | ObservabilityEventRecord
+    | ObservabilityMetricRecord,
+): Record<string, string> => mapToObject(record.getContextMap());
+
+const getTraceId = (
+  context: Record<string, string>,
+  attributes: Record<string, string>,
+): string =>
+  firstPresent(
+    context.traceId,
+    context.traceID,
+    context.trace_id,
+    attributes.traceId,
+    attributes.traceID,
+    attributes.trace_id,
+  );
+
 const getScopeContext = (scopeAttributes: Record<string, string>) => ({
   assistantConversationId: firstPresent(
     scopeAttributes.assistantConversationId,
@@ -153,6 +173,7 @@ const buildBaseDocument = ({
   scope,
   messageId,
   messageRole,
+  traceId,
   contextId,
   occurredAt,
   attributes,
@@ -172,6 +193,7 @@ const buildBaseDocument = ({
   scope: string;
   messageId: string;
   messageRole: string;
+  traceId: string;
   contextId: string;
   occurredAt: string;
   attributes: Record<string, string>;
@@ -192,6 +214,7 @@ const buildBaseDocument = ({
   scope: scope || 'unknown',
   messageId: messageId || undefined,
   messageRole: messageRole || undefined,
+  traceId: traceId || undefined,
   contextId:
     contextId ||
     messageId ||
@@ -208,6 +231,7 @@ const eventToTimelineDocument = (
   index: number,
 ): TimelineDocument => {
   const attributes = mapToObject(event.getAttributesMap());
+  const context = getContext(event);
   const scopeAttributes = getScopeAttributes(event);
   const scopeContext = getScopeContext(scopeAttributes);
   const name = event.getEvent() || 'event';
@@ -226,10 +250,11 @@ const eventToTimelineDocument = (
     scope: event.getScope(),
     messageId: scopeContext.messageId,
     messageRole: scopeContext.messageRole,
+    traceId: getTraceId(context, attributes),
     contextId: scopeContext.contextId,
     occurredAt: timestampToIso(event.getOccurredat()),
     attributes,
-    data: { scopeAttributes },
+    data: { context, scopeAttributes },
     durationMs: getDurationFromAttributes(attributes),
   });
 };
@@ -239,6 +264,7 @@ const metricToTimelineDocument = (
   index: number,
 ): TimelineDocument => {
   const attributes = mapToObject(metric.getAttributesMap());
+  const context = getContext(metric);
   const scopeAttributes = getScopeAttributes(metric);
   const scopeContext = getScopeContext(scopeAttributes);
   const name = metric.getName() || attributes.name || 'metric';
@@ -263,10 +289,16 @@ const metricToTimelineDocument = (
     scope: metric.getScope(),
     messageId: scopeContext.messageId,
     messageRole: scopeContext.messageRole,
+    traceId: getTraceId(context, attributes),
     contextId: scopeContext.contextId,
     occurredAt: timestampToIso(metric.getOccurredat()),
     attributes,
-    data: { description: metric.getDescription(), metrics, scopeAttributes },
+    data: {
+      context,
+      description: metric.getDescription(),
+      metrics,
+      scopeAttributes,
+    },
     durationMs:
       getDurationFromMetric(metric) || getDurationFromAttributes(attributes),
   });
@@ -277,6 +309,7 @@ const logToTimelineDocument = (
   index: number,
 ): TimelineDocument => {
   const attributes = mapToObject(log.getAttributesMap());
+  const context = getContext(log);
   const scopeAttributes = getScopeAttributes(log);
   const scopeContext = getScopeContext(scopeAttributes);
   const message = log.getMessage() || 'Log record';
@@ -294,10 +327,11 @@ const logToTimelineDocument = (
     scope: log.getScope(),
     messageId: scopeContext.messageId,
     messageRole: scopeContext.messageRole,
+    traceId: getTraceId(context, attributes),
     contextId: scopeContext.contextId,
     occurredAt: timestampToIso(log.getOccurredat()),
     attributes,
-    data: { message, scopeAttributes },
+    data: { context, message, scopeAttributes },
     durationMs: getDurationFromAttributes(attributes),
   });
 };
@@ -512,6 +546,7 @@ export const matchesTimelineSearch = (
     doc.title,
     doc.messageId,
     doc.messageRole,
+    doc.traceId,
     doc.contextId,
     JSON.stringify(doc.attributes || {}),
     JSON.stringify(doc.data || {}),

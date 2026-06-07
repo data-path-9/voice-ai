@@ -34,7 +34,7 @@ func TestCollector_ForwardsUsageRecord(t *testing.T) {
 		AssistantScope: observability.AssistantScope{AssistantID: 10},
 		ConversationID: 20,
 	}
-	err := collector.Collect(context.Background(), scope, observability.RecordUsage{
+	err := collector.Collect(context.Background(), scope, observability.Context{}, observability.RecordUsage{
 		ID:         "usage-1",
 		Component:  observability.ComponentUsage,
 		Provider:   "deepgram",
@@ -65,7 +65,7 @@ func TestCollector_ReturnsPublisherError(t *testing.T) {
 	publishErr := errors.New("publish failed")
 	collector := New(&usagePublisherStub{err: publishErr})
 
-	err := collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 10}, observability.RecordUsage{})
+	err := collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 10}, observability.Context{}, observability.RecordUsage{})
 	if !errors.Is(err, publishErr) {
 		t.Fatalf("expected publish error, got %v", err)
 	}
