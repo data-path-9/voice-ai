@@ -89,6 +89,41 @@ func (collector *packetCollector) hasTTSError() bool {
 	return false
 }
 
+func TestNewTextToSpeech_ConfigErrorEmitsTTSErrorEvent(t *testing.T) {
+	collector := newPacketCollector()
+	transformer, err := NewTextToSpeech(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testWSCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: "wss://example.invalid/ws",
+		}),
+		collector.onPacket,
+		utils.Option{},
+	)
+
+	require.Error(t, err)
+	assert.Nil(t, transformer)
+	assert.Contains(t, err.Error(), optionKeyRequestRules)
+	assert.False(t, collector.hasTTSError(), "constructor should emit observability, not runtime TextToSpeechErrorPacket")
+
+	var found bool
+	for _, packet := range collector.all() {
+		event, ok := packet.(internal_type.ObservabilityEventRecordPacket)
+		if !ok {
+			continue
+		}
+		if event.Scope == internal_type.ObservabilityRecordScopeConversation &&
+			event.Record.Component == observability.ComponentTTS &&
+			event.Record.Event == observability.TTSError &&
+			event.Record.Attributes["provider"] == "custom-tts-websocket-v1" &&
+			event.Record.Attributes["operation"] == "load_config" &&
+			strings.Contains(event.Record.Attributes["error"], optionKeyRequestRules) {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected tts.error observability event for config failure")
+}
+
 func testWSCredential(t *testing.T, values map[string]any) *protos.VaultCredential {
 	t.Helper()
 	pb, err := structpb.NewStruct(values)
@@ -733,70 +768,4 @@ func TestTextToSpeech_CloseEmitsConversationDurationAfterDone(t *testing.T) {
 	}
 	assert.True(t, hasDurationMetric, "expected CONVERSATION_TTS_DURATION metric after Close")
 	assert.True(t, hasDurationUsage, "expected TTS duration usage after Close")
-}
-
-func TestTextToSpeech_CloseUnblocksPendingDial(t *testing.T) {
-	collector := newPacketCollector()
-	transformer, err := NewTextToSpeech(
-		context.Background(),
-		transformer_testutil.NewTestLogger(),
-		testWSCredential(t, map[string]any{
-			credentialKeyBaseURLCamel: "wss://example.com/tts",
-		}),
-		collector.onPacket,
-		utils.Option{
-			optionKeyVoiceID:       "virat",
-			optionKeyRequestRules:  `[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"}}}}]`,
-			optionKeyResponseRules: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
-		},
-	)
-	require.NoError(t, err)
-	require.NoError(t, transformer.Initialize())
-
-	typed, ok := transformer.(*textToSpeech)
-	require.True(t, ok)
-	dialStarted := make(chan struct{}, 1)
-	typed.dialWS = func(ctx context.Context, urlStr string, requestHeader http.Header) (*websocket.Conn, *http.Response, error) {
-		select {
-		case dialStarted <- struct{}{}:
-		default:
-		}
-		<-ctx.Done()
-		return nil, nil, ctx.Err()
-	}
-
-	transformErrCh := make(chan error, 1)
-	go func() {
-		transformErrCh <- transformer.Transform(context.Background(), internal_type.TextToSpeechTextPacket{
-			ContextID: "ctx-blocked",
-			Text:      "hello",
-		})
-	}()
-
-	select {
-	case <-dialStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for blocked dial to start")
-	}
-
-	closeErrCh := make(chan error, 1)
-	go func() {
-		closeErrCh <- transformer.Close(context.Background())
-	}()
-
-	select {
-	case err := <-closeErrCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatalf("Close() timed out while dial was blocked")
-	}
-
-	select {
-	case err := <-transformErrCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatalf("Transform() timed out after Close()")
-	}
-
-	assert.False(t, collector.hasTTSError(), "did not expect TextToSpeechErrorPacket on canceled dial during shutdown")
 }

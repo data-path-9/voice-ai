@@ -29,6 +29,7 @@ import {
   Ordering,
   Paginate,
 } from '@rapidaai/react';
+import toast from 'react-hot-toast/headless';
 import { Helmet } from '@/app/components/helmet';
 import { EmptyState } from '@/app/components/carbon/empty-state';
 import { Pagination } from '@/app/components/carbon/pagination';
@@ -95,6 +96,14 @@ const DEFAULT_TRACE_FILTERS: TraceFilterState = {
   selectedRole: ROLE_OPTIONS[0],
   selectedScope: SCOPE_OPTIONS[0],
   traceIdInput: '',
+};
+
+const TRACE_LOAD_ERROR_MESSAGE = 'Unable to load trace records.';
+
+const getTelemetryErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error.trim()) return error;
+  return TRACE_LOAD_ERROR_MESSAGE;
 };
 
 const getMetricValues = (document: TimelineDocument): MetricValue[] =>
@@ -555,7 +564,6 @@ export const ListingPage = () => {
   );
   const [documents, setDocuments] = useState<TimelineDocument[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [errorText, setErrorText] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [totalItem, setTotalItem] = useState(0);
@@ -711,7 +719,6 @@ export const ListingPage = () => {
 
     const fetchTelemetry = async () => {
       setIsLoading(true);
-      setErrorText('');
 
       const request = new GetAllTelemetryRequest();
       const paginate = new Paginate();
@@ -737,6 +744,13 @@ export const ListingPage = () => {
         );
         if (!active) return;
 
+        if (!response.getSuccess()) {
+          const message =
+            response.getError()?.getHumanmessage() || TRACE_LOAD_ERROR_MESSAGE;
+          toast.error(message);
+          return;
+        }
+
         const nextDocuments = response
           .getDataList()
           .map(telemetryRecordToTimelineDocument)
@@ -746,11 +760,10 @@ export const ListingPage = () => {
         setTotalItem(
           response.getPaginated()?.getTotalitem() || nextDocuments.length,
         );
-      } catch {
+      } catch (error) {
         if (!active) return;
-        setDocuments([]);
-        setTotalItem(0);
-        setErrorText('Unable to load trace records.');
+        const message = getTelemetryErrorMessage(error);
+        toast.error(message);
       } finally {
         if (active) setIsLoading(false);
       }
@@ -959,14 +972,9 @@ export const ListingPage = () => {
             </div>
           ) : filteredDocuments.length === 0 ? (
             <EmptyState
-              icon={
-                appliedFilters.searchText || errorText ? WarningAlt : Activity
-              }
+              icon={appliedFilters.searchText ? WarningAlt : Activity}
               title="No traces found"
-              subtitle={
-                errorText ||
-                'Adjust search, scope, component, event, or date filters.'
-              }
+              subtitle="Adjust search, scope, component, event, or date filters."
             />
           ) : (
             <div className="flex min-w-0 flex-1 flex-col">

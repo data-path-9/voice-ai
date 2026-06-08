@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"io"
 	"net/http"
 	"strings"
@@ -21,6 +20,7 @@ import (
 
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -34,7 +34,6 @@ type speechToText struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	dialWS func(ctx context.Context, urlStr string, requestHeader http.Header) (*websocket.Conn, *http.Response, error)
 
 	logger   commons.Logger
 	onPacket func(pkt ...internal_type.Packet) error
@@ -69,6 +68,22 @@ func NewSpeechToText(
 ) (internal_type.SpeechToTextTransformer, error) {
 	config, err := NewConfig(credential, opts)
 	if err != nil {
+		if packetErr := onPacket(internal_type.ObservabilityEventRecordPacket{
+			Scope: internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.RecordEvent{
+				Component: observability.ComponentSTT,
+				Event:     observability.STTError,
+				Attributes: observability.Attributes{
+					"provider":   "custom-stt-websocket-v1",
+					"operation":  "load_config",
+					"error":      err.Error(),
+					"error_type": fmt.Sprintf("%T", err),
+				},
+				OccurredAt: time.Now(),
+			},
+		}); packetErr != nil {
+			logger.Errorf("custom-stt websocket_v1: onPacket failed: %v", packetErr)
+		}
 		return nil, err
 	}
 	resampler, err := internal_audio_resampler.GetResampler(logger)
@@ -81,7 +96,6 @@ func NewSpeechToText(
 		engine:            config.newEngine(),
 		ctx:               transformerContext,
 		cancel:            cancel,
-		dialWS:            websocket.DefaultDialer.DialContext,
 		logger:            logger,
 		onPacket:          onPacket,
 		resampler:         resampler,
@@ -288,11 +302,7 @@ func (transformer *speechToText) getOrOpenConnection() (*websocket.Conn, error) 
 		headers.Set(key, value)
 	}
 
-	dialWS := transformer.dialWS
-	if dialWS == nil {
-		dialWS = websocket.DefaultDialer.DialContext
-	}
-	conn, response, err := dialWS(transformer.ctx, connectionURL, headers)
+	conn, response, err := websocket.DefaultDialer.DialContext(transformer.ctx, connectionURL, headers)
 	if response != nil && response.Body != nil {
 		_ = response.Body.Close()
 	}
