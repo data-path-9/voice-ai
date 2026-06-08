@@ -9,7 +9,6 @@ import (
 	"context"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
@@ -54,6 +53,18 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 		AssistantScope: observability.AssistantScope{AssistantID: cc.AssistantID},
 		ConversationID: cc.ConversationID,
 	}
+	_ = observer.Record(c, scope, observability.RecordLog{
+		Level:   observability.LevelInfo,
+		Message: "telephony provider callback received",
+		Attributes: observability.Attributes{
+			"provider":     cc.Provider,
+			"status_event": statusInfo.Event,
+			"context_id":   cc.ContextID,
+			"direction":    cc.Direction,
+			"channel_uuid": statusInfo.ChannelUUID,
+			"raw_payload":  statusInfo.RawPayload,
+		},
+	})
 	_ = observer.Record(c, scope, observability.RecordEvent{
 		Event: observability.CallStatus,
 		Attributes: observability.Attributes{
@@ -84,7 +95,7 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 	if len(metrics) > 0 {
 		_ = observer.Record(c, scope, observability.RecordMetric{Metrics: metrics})
 	}
-	if strings.EqualFold(statusInfo.Event, "completed") && statusInfo.Error == nil {
+	if statusInfo.Completed {
 		if err := cApi.callContextStore.UpdateField(c, cc.ContextID, "status", callcontext.StatusCompleted); err != nil {
 			cApi.logger.Warnf("failed to mark call context %s completed: %v", cc.ContextID, err)
 		}
@@ -124,6 +135,18 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 			AssistantScope: observability.AssistantScope{AssistantID: cc.AssistantID},
 			ConversationID: cc.ConversationID,
 		}
+		_ = observer.Record(c, scope, observability.RecordLog{
+			Level:   observability.LevelInfo,
+			Message: "telephony provider callback received",
+			Attributes: observability.Attributes{
+				"provider":     cc.Provider,
+				"status_event": statusInfo.Event,
+				"context_id":   contextID,
+				"direction":    cc.Direction,
+				"channel_uuid": statusInfo.ChannelUUID,
+				"raw_payload":  statusInfo.RawPayload,
+			},
+		})
 		_ = observer.Record(c, scope, observability.RecordEvent{
 			Event: observability.CallStatus,
 			Attributes: observability.Attributes{
@@ -154,7 +177,7 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 		if len(metrics) > 0 {
 			_ = observer.Record(c, scope, observability.RecordMetric{Metrics: metrics})
 		}
-		if strings.EqualFold(statusInfo.Event, "completed") && statusInfo.Error == nil {
+		if statusInfo.Completed {
 			if err := cApi.callContextStore.UpdateField(c, cc.ContextID, "status", callcontext.StatusCompleted); err != nil {
 				cApi.logger.Warnf("failed to mark call context %s completed: %v", cc.ContextID, err)
 			}

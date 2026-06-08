@@ -14,7 +14,7 @@ import (
 )
 
 func TestNewStatusCallback_MissingStatusReturnsTypedError(t *testing.T) {
-	callback, err := NewStatusCallback(utils.Option{"CallSid": "CA123"})
+	callback, err := NewStatusCallback(utils.Option{"CallSid": "CA123"}, "")
 	if err == nil {
 		t.Fatal("expected missing status error")
 	}

@@ -14,7 +14,7 @@ import (
 )
 
 func TestNewStatusCallback_MissingStatusUsesTypedError(t *testing.T) {
-	callback, err := NewStatusCallback(utils.Option{"CallSid": "call-id"})
+	callback, err := NewStatusCallback(utils.Option{"CallSid": "call-id"}, "")
 
 	if callback != nil {
 		t.Fatalf("callback=%+v want nil", callback)

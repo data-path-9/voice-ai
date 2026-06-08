@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/openapi"
 	pkg_errors "github.com/rapidaai/pkg/errors"
 	"github.com/rapidaai/pkg/preset"
@@ -111,7 +112,7 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 		opts = *ir.Options
 	}
 
-	observer := cApi.Observability(c, auth)
+	observer := cApi.Observability(c, auth, observability.WithGracePeriod())
 	defer func() {
 		if err := observer.Close(context.Background()); err != nil {
 			cApi.logger.Errorf("failed to close outbound observability recorder: %v", err)

@@ -90,7 +90,7 @@ func TestRecorder_RecordMetric_FansOutAndInjectsGlobalScope(t *testing.T) {
 	now := time.Date(2026, 6, 5, 9, 0, 0, 0, time.UTC)
 	first := &recordingCollector{key: "first"}
 	second := &recordingCollector{key: "second"}
-	recorder := New(WithCloseGracePeriod(0),
+	recorder := New(
 		WithGlobalScope(GlobalScope{OrganizationID: 7, ProjectID: 8}),
 		WithContext(context.WithValue(context.Background(), types.REQUEST_ID_KEY, "trace-1")),
 		WithClock(func() time.Time { return now }),
@@ -132,7 +132,7 @@ func TestRecorder_RecordMetric_FansOutAndInjectsGlobalScope(t *testing.T) {
 
 func TestRecorder_RecordUsesRequestIDFromRecordContext(t *testing.T) {
 	collector := &recordingCollector{key: "collector"}
-	recorder := New(WithCloseGracePeriod(0),
+	recorder := New(
 		WithGlobalScope(GlobalScope{OrganizationID: 7, ProjectID: 8}),
 		WithCollector(collector),
 	)
@@ -156,7 +156,7 @@ func TestRecorder_RecordUsesRequestIDFromRecordContext(t *testing.T) {
 
 func TestRecorder_RecordUsesCanceledContextValues(t *testing.T) {
 	collector := &recordingCollector{key: "collector"}
-	recorder := New(WithCloseGracePeriod(0),
+	recorder := New(
 		WithGlobalScope(GlobalScope{OrganizationID: 7, ProjectID: 8}),
 		WithCollector(collector),
 	)
@@ -181,7 +181,7 @@ func TestRecorder_RecordUsesCanceledContextValues(t *testing.T) {
 
 func TestRecorder_RecordFallsBackToGeneratedTraceID(t *testing.T) {
 	collector := &recordingCollector{key: "collector"}
-	recorder := New(WithCloseGracePeriod(0),
+	recorder := New(
 		WithGlobalScope(GlobalScope{OrganizationID: 7, ProjectID: 8}),
 		WithCollector(collector),
 	)
@@ -202,7 +202,7 @@ func TestRecorder_RecordFallsBackToGeneratedTraceID(t *testing.T) {
 func TestRecorder_RecordLog_ProjectScope(t *testing.T) {
 	now := time.Date(2026, 6, 7, 9, 0, 0, 0, time.UTC)
 	collector := &recordingCollector{key: "collector"}
-	recorder := New(WithCloseGracePeriod(0),
+	recorder := New(
 		WithGlobalScope(GlobalScope{OrganizationID: 7, ProjectID: 8}),
 		WithClock(func() time.Time { return now }),
 		WithCollector(collector),
@@ -244,7 +244,7 @@ func TestRecorder_RecordLog_ProjectScope(t *testing.T) {
 
 func TestRecorder_RecordEvent_UsesExplicitMessageScope(t *testing.T) {
 	collector := &recordingCollector{key: "collector"}
-	recorder := New(WithCloseGracePeriod(0), WithCollector(collector))
+	recorder := New(WithCollector(collector))
 	scope := MessageScope{
 		ConversationScope: ConversationScope{
 			AssistantScope: AssistantScope{AssistantID: 10},
@@ -282,7 +282,7 @@ func TestRecorder_RecordEvent_UsesExplicitMessageScope(t *testing.T) {
 }
 
 func TestRecorder_RecordRequiresScope(t *testing.T) {
-	recorder := New(WithCloseGracePeriod(0), WithCollector(&recordingCollector{key: "collector"}))
+	recorder := New(WithCollector(&recordingCollector{key: "collector"}))
 	defer recorder.Close(context.Background())
 
 	err := recorder.Record(context.Background(), nil, NewMessageEventRecord(
@@ -299,7 +299,7 @@ func TestRecorder_RecordRequiresScope(t *testing.T) {
 func TestRecorder_RecordWebhook_FansOut(t *testing.T) {
 	first := &recordingCollector{key: "first"}
 	second := &recordingCollector{key: "second"}
-	recorder := New(WithCloseGracePeriod(0), WithCollectors(first, second))
+	recorder := New(WithCollectors(first, second))
 
 	err := recorder.Record(context.Background(), AssistantScope{AssistantID: 10}, RecordWebhook{
 		ID:      "wh-1",
@@ -319,7 +319,7 @@ func TestRecorder_RecordWebhook_FansOut(t *testing.T) {
 
 func TestRecorder_RecordUsage_AllowsMessageScope(t *testing.T) {
 	collector := &recordingCollector{key: "collector"}
-	recorder := New(WithCloseGracePeriod(0), WithCollector(collector))
+	recorder := New(WithCollector(collector))
 	defer recorder.Close(context.Background())
 
 	err := recorder.Record(context.Background(), MessageScope{
@@ -346,7 +346,7 @@ func TestRecorder_RecordUsage_AllowsMessageScope(t *testing.T) {
 
 func TestRecorder_RecordVariadicRecords_AllCollected(t *testing.T) {
 	collector := &recordingCollector{key: "collector"}
-	recorder := New(WithCloseGracePeriod(0), WithCollector(collector))
+	recorder := New(WithCollector(collector))
 	scope := ConversationScope{
 		AssistantScope: AssistantScope{AssistantID: 10},
 		ConversationID: 20,
@@ -384,7 +384,12 @@ func TestRecorder_RecordVariadicRecords_AllCollected(t *testing.T) {
 
 func TestRecorder_CloseGraceAcceptsLateRecords(t *testing.T) {
 	collector := &recordingCollector{key: "collector"}
-	recorder := New(WithCloseGracePeriod(50*time.Millisecond), WithCollector(collector))
+	observabilityRecorder := New(WithGracePeriod(), WithCollector(collector))
+	concreteRecorder, ok := observabilityRecorder.(*recorder)
+	if !ok {
+		t.Fatalf("unexpected recorder type: %T", observabilityRecorder)
+	}
+	concreteRecorder.closeGracePeriod = 50 * time.Millisecond
 	scope := ConversationScope{
 		AssistantScope: AssistantScope{AssistantID: 10},
 		ConversationID: 20,
@@ -392,11 +397,11 @@ func TestRecorder_CloseGraceAcceptsLateRecords(t *testing.T) {
 	closeDone := make(chan error, 1)
 
 	go func() {
-		closeDone <- recorder.Close(context.Background())
+		closeDone <- observabilityRecorder.Close(context.Background())
 	}()
 	time.Sleep(10 * time.Millisecond)
 
-	if err := recorder.Record(context.Background(), scope, RecordEvent{
+	if err := observabilityRecorder.Record(context.Background(), scope, RecordEvent{
 		Component: ComponentConversation,
 		Event:     ConversationCleanup,
 	}); err != nil {
@@ -409,11 +414,40 @@ func TestRecorder_CloseGraceAcceptsLateRecords(t *testing.T) {
 	if len(collector.events) != 1 {
 		t.Fatalf("expected late event to be collected, got %d", len(collector.events))
 	}
-	if err := recorder.Record(context.Background(), scope, RecordEvent{
+	if err := observabilityRecorder.Record(context.Background(), scope, RecordEvent{
 		Component: ComponentConversation,
 		Event:     ConversationCompleted,
 	}); !errors.Is(err, ErrRecorderClosed) {
 		t.Fatalf("expected ErrRecorderClosed after close, got %v", err)
+	}
+}
+
+func TestRecorder_DefaultGracePeriodIsZero(t *testing.T) {
+	observabilityRecorder := New()
+	concreteRecorder, ok := observabilityRecorder.(*recorder)
+	if !ok {
+		t.Fatalf("unexpected recorder type: %T", observabilityRecorder)
+	}
+	if concreteRecorder.closeGracePeriod != 0 {
+		t.Fatalf("unexpected default grace period: %s", concreteRecorder.closeGracePeriod)
+	}
+	if err := concreteRecorder.Close(context.Background()); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+}
+
+func TestRecorder_WithGracePeriodUsesConfiguredGracePeriod(t *testing.T) {
+	observabilityRecorder := New(WithGracePeriod())
+	concreteRecorder, ok := observabilityRecorder.(*recorder)
+	if !ok {
+		t.Fatalf("unexpected recorder type: %T", observabilityRecorder)
+	}
+	if concreteRecorder.closeGracePeriod != recorderCloseGracePeriod {
+		t.Fatalf("unexpected grace period: %s", concreteRecorder.closeGracePeriod)
+	}
+	concreteRecorder.closeGracePeriod = 0
+	if err := concreteRecorder.Close(context.Background()); err != nil {
+		t.Fatalf("Close returned error: %v", err)
 	}
 }
 
@@ -422,7 +456,7 @@ func TestRecorder_Record_ReturnsBufferFull(t *testing.T) {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	recorder := New(WithCloseGracePeriod(0), WithBuffer(1), WithCollector(blocked))
+	recorder := New(WithBuffer(1), WithCollector(blocked))
 	scope := ConversationScope{
 		AssistantScope: AssistantScope{AssistantID: 10},
 		ConversationID: 20,
@@ -453,7 +487,7 @@ func TestRecorder_Record_ReturnsBufferFull(t *testing.T) {
 func TestRecorder_Close_JoinsCollectorErrors(t *testing.T) {
 	collectErr := errors.New("collect failed")
 	closeErr := errors.New("close failed")
-	recorder := New(WithCloseGracePeriod(0), WithCollector(&recordingCollector{
+	recorder := New(WithCollector(&recordingCollector{
 		key:        "collector",
 		collectErr: collectErr,
 		closeErr:   closeErr,
@@ -480,7 +514,7 @@ func TestRecorder_AddCollectors_DeduplicatesByKey(t *testing.T) {
 	first := &recordingCollector{key: "telemetry"}
 	duplicate := &recordingCollector{key: "telemetry"}
 	second := &recordingCollector{key: "timeline"}
-	recorder := New(WithCloseGracePeriod(0), WithCollector(first))
+	recorder := New(WithCollector(first))
 
 	if err := recorder.AddCollectors(duplicate, second); err != nil {
 		t.Fatalf("AddCollectors returned error: %v", err)
@@ -507,7 +541,7 @@ func TestRecorder_AddCollectors_DeduplicatesByKey(t *testing.T) {
 }
 
 func TestRecorder_AddCollectors_ReturnsClosedError(t *testing.T) {
-	recorder := New(WithCloseGracePeriod(0))
+	recorder := New()
 	if err := recorder.Close(context.Background()); err != nil {
 		t.Fatalf("Close returned error: %v", err)
 	}

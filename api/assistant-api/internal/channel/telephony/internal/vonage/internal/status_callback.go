@@ -23,10 +23,11 @@ type StatusCallback struct {
 	SIPCode        string
 	Reason         string
 	DisconnectedBy string
+	RawPayload     string
 	Payload        map[string]interface{}
 }
 
-func NewStatusCallback(payload map[string]interface{}) (*StatusCallback, error) {
+func NewStatusCallback(payload map[string]interface{}, rawCallbackPayload string) (*StatusCallback, error) {
 	options := utils.Option(payload)
 	status, _ := options.GetString("status")
 	if !validator.NotBlank(status) {
@@ -54,19 +55,23 @@ func NewStatusCallback(payload map[string]interface{}) (*StatusCallback, error) 
 		SIPCode:        sipCode,
 		Reason:         reason,
 		DisconnectedBy: disconnectedBy,
+		RawPayload:     rawCallbackPayload,
 		Payload:        payload,
 	}, nil
 }
 
 func (s *StatusCallback) StatusInfo() *internal_type.StatusInfo {
+	callbackFailed := s.Failed()
 	statusInfo := &internal_type.StatusInfo{
 		Event:       s.Status,
 		ChannelUUID: s.ChannelUUID,
+		Completed:   strings.EqualFold(s.Status, "completed") && !callbackFailed,
 		Duration:    s.Duration,
 		Price:       s.Price,
+		RawPayload:  s.RawPayload,
 		Payload:     s.Payload,
 	}
-	if s.Failed() {
+	if callbackFailed {
 		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: s.FailureReason()}
 	}
 	return statusInfo

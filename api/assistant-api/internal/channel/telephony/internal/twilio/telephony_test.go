@@ -299,9 +299,11 @@ func TestStatusCallback(t *testing.T) {
 				require.NotNil(t, info)
 				assert.Equal(t, "completed", info.Event)
 				assert.Equal(t, "CAf64ab88f90f35581dcb16e60f875ea4a", info.ChannelUUID)
+				assert.True(t, info.Completed)
 				require.NotNil(t, info.Duration)
 				assert.Equal(t, 14*time.Second, *info.Duration)
 				assert.Equal(t, "-0.02000", info.Price)
+				assert.NotEmpty(t, info.RawPayload)
 				assert.Nil(t, info.Error)
 			},
 		},
@@ -314,6 +316,7 @@ func TestStatusCallback(t *testing.T) {
 			checkStatus: func(t *testing.T, info *internal_type.StatusInfo) {
 				require.NotNil(t, info)
 				assert.Equal(t, "busy", info.Event)
+				assert.False(t, info.Completed)
 				require.NotNil(t, info.Error)
 				assert.Equal(t, "failed", info.Error.Error)
 				assert.Equal(t, "busy", info.Error.Reason)
@@ -330,6 +333,7 @@ func TestStatusCallback(t *testing.T) {
 			checkStatus: func(t *testing.T, info *internal_type.StatusInfo) {
 				require.NotNil(t, info)
 				assert.Equal(t, "completed", info.Event)
+				assert.False(t, info.Completed)
 				require.NotNil(t, info.Error)
 				assert.Equal(t, "failed", info.Error.Error)
 				assert.Equal(t, "HTTP retrieval failure", info.Error.Reason)
@@ -380,6 +384,7 @@ func TestCatchAllStatusCallback(t *testing.T) {
 		require.NotNil(t, statusInfo)
 		assert.Equal(t, "no-answer", statusInfo.Event)
 		assert.Equal(t, "CAf64ab88f90f35581dcb16e60f875ea4a", statusInfo.ChannelUUID)
+		assert.NotEmpty(t, statusInfo.RawPayload)
 		require.NotNil(t, statusInfo.Error)
 		assert.Equal(t, "no-answer", statusInfo.Error.Reason)
 	})

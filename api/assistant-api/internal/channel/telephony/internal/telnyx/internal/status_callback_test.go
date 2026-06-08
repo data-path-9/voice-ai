@@ -12,7 +12,7 @@ import (
 )
 
 func TestNewStatusCallback_MissingDataUsesTypedError(t *testing.T) {
-	callback, err := NewStatusCallback(map[string]interface{}{"event": "call.hangup"})
+	callback, err := NewStatusCallback(map[string]interface{}{"event": "call.hangup"}, "")
 
 	if callback != nil {
 		t.Fatalf("callback=%+v want nil", callback)
@@ -23,7 +23,7 @@ func TestNewStatusCallback_MissingDataUsesTypedError(t *testing.T) {
 }
 
 func TestNewStatusCallback_MissingEventTypeUsesTypedError(t *testing.T) {
-	callback, err := NewStatusCallback(map[string]interface{}{"data": map[string]interface{}{"id": "call-id"}})
+	callback, err := NewStatusCallback(map[string]interface{}{"data": map[string]interface{}{"id": "call-id"}}, "")
 
 	if callback != nil {
 		t.Fatalf("callback=%+v want nil", callback)

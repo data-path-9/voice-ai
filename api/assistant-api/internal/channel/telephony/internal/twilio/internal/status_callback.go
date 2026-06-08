@@ -22,10 +22,11 @@ type StatusCallback struct {
 	ErrorCode    string
 	ErrorMessage string
 	StreamError  string
+	RawPayload   string
 	Payload      utils.Option
 }
 
-func NewStatusCallback(eventDetails utils.Option) (*StatusCallback, error) {
+func NewStatusCallback(eventDetails utils.Option, rawCallbackPayload string) (*StatusCallback, error) {
 	event, _ := eventDetails.GetString("CallStatus")
 	streamEvent, _ := eventDetails.GetString("StreamEvent")
 	if validator.NotBlank(streamEvent) {
@@ -58,19 +59,23 @@ func NewStatusCallback(eventDetails utils.Option) (*StatusCallback, error) {
 		ErrorCode:    errorCode,
 		ErrorMessage: errorMessage,
 		StreamError:  streamError,
+		RawPayload:   rawCallbackPayload,
 		Payload:      eventDetails,
 	}, nil
 }
 
 func (s *StatusCallback) StatusInfo() *internal_type.StatusInfo {
+	callbackFailed := s.Failed()
 	statusInfo := &internal_type.StatusInfo{
 		Event:       s.Event,
 		ChannelUUID: s.ChannelUUID,
+		Completed:   strings.EqualFold(s.Event, "completed") && !callbackFailed,
 		Duration:    s.Duration,
 		Price:       s.Price,
+		RawPayload:  s.RawPayload,
 		Payload:     s.Payload,
 	}
-	if s.Failed() {
+	if callbackFailed {
 		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: s.FailureReason()}
 	}
 	return statusInfo

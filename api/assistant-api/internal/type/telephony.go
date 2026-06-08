@@ -31,6 +31,9 @@ type StatusInfo struct {
 	// Error is set when the provider callback represents a failed terminal state.
 	Error *StatusError
 
+	// Completed is set by the provider parser when the callback represents a successful terminal state.
+	Completed bool
+
 	// Duration is the provider-reported call duration, when present.
 	// A pointer keeps explicit zero-duration callbacks distinguishable from
 	// callbacks that did not include a duration.
@@ -38,6 +41,9 @@ type StatusInfo struct {
 
 	// Price is the provider-reported call price, when present.
 	Price string
+
+	// RawPayload is the provider callback payload before parsing.
+	RawPayload string
 
 	// Payload is the raw event payload from the provider (parsed body, form data, etc.).
 	Payload interface{}

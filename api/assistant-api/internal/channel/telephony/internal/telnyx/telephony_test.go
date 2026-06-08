@@ -141,6 +141,7 @@ func TestStatusCallback(t *testing.T) {
 		payload     map[string]interface{}
 		expectErr   bool
 		expectEvent string
+		expectDone  bool
 	}{
 		{
 			name: "valid call.answered event",
@@ -155,6 +156,7 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.answered",
+			expectDone:  false,
 		},
 		{
 			name: "valid call.hangup failure event",
@@ -171,6 +173,7 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.hangup",
+			expectDone:  false,
 		},
 		{
 			name: "valid call.hangup event",
@@ -182,6 +185,7 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.hangup",
+			expectDone:  true,
 		},
 		{
 			name: "missing data field",
@@ -224,6 +228,12 @@ func TestStatusCallback(t *testing.T) {
 
 			if statusInfo.Event != tt.expectEvent {
 				t.Errorf("expected event %s, got %s", tt.expectEvent, statusInfo.Event)
+			}
+			if statusInfo.Completed != tt.expectDone {
+				t.Errorf("expected completed %t, got %t", tt.expectDone, statusInfo.Completed)
+			}
+			if statusInfo.RawPayload == "" {
+				t.Error("expected raw payload, got empty")
 			}
 			if tt.name == "valid call.answered event" && statusInfo.ChannelUUID != "call-control-123" {
 				t.Errorf("expected call-control-123, got %s", statusInfo.ChannelUUID)

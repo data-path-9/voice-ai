@@ -54,19 +54,21 @@ type ConversationGrpcApi struct {
 	ConversationApi
 }
 
-func (cApi *ConversationApi) Observability(ctx context.Context, auth types.SimplePrinciple) observability.Recorder {
+func (cApi *ConversationApi) Observability(ctx context.Context, auth types.SimplePrinciple, options ...observability.Option) observability.Recorder {
 	otelCollectors := make([]observability.Collector, 0)
 	otelCollectors = append(otelCollectors, observability_collector_conversationdb.New(observability_collector_conversationdb.Config{
 		Logger:              cApi.logger,
 		ConversationService: cApi.assistantConversationService,
 	}))
 	otelCollectors = append(otelCollectors, collectors.NewWithEnv(ctx, cApi.logger, cApi.cfg)...)
-	return observability.New(
+	recorderOptions := []observability.Option{
 		observability.WithLogger(cApi.logger),
 		observability.WithAuth(auth),
 		observability.WithContext(ctx),
 		observability.WithCollectors(otelCollectors...),
-	)
+	}
+	recorderOptions = append(recorderOptions, options...)
+	return observability.New(recorderOptions...)
 }
 
 // newConversationApiCore builds the shared ConversationApi. All three public
@@ -180,7 +182,11 @@ func (cApi *ConversationGrpcApi) AssistantTalk(stream assistant_api.TalkService_
 		cApi.logger.Errorf("unable to resolve the source from the context")
 		return errors.New("illegal source")
 	}
-	observabilityRecorder := cApi.Observability(stream.Context(), auth)
+	observabilityRecorder := cApi.Observability(
+		stream.Context(),
+		auth,
+		observability.WithGracePeriod(),
+	)
 	defer observabilityRecorder.Close(context.Background())
 
 	streamer, err := internal_grpc.New(
@@ -225,7 +231,11 @@ func (cApi *ConversationGrpcApi) WebTalk(stream assistant_api.WebRTC_WebTalkServ
 		cApi.logger.Errorf("unable to resolve the source from the context")
 		return errors.New("illegal source")
 	}
-	observabilityRecorder := cApi.Observability(stream.Context(), auth)
+	observabilityRecorder := cApi.Observability(
+		stream.Context(),
+		auth,
+		observability.WithGracePeriod(),
+	)
 	defer observabilityRecorder.Close(context.Background())
 
 	streamer, err := internal_webrtc.New(

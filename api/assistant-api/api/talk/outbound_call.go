@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	pkg_errors "github.com/rapidaai/pkg/errors"
 	"github.com/rapidaai/pkg/preset"
 	"github.com/rapidaai/pkg/types"
@@ -101,7 +102,7 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 		}, errors.New(pkg_errors.CreatePhoneCallInvalidOptions.Error)
 	}
 
-	observer := cApi.Observability(ctx, auth)
+	observer := cApi.Observability(ctx, auth, observability.WithGracePeriod())
 	defer observer.Close(context.Background())
 
 	// Pipeline handles the full outbound flow
@@ -233,7 +234,7 @@ func (cApi *ConversationGrpcApi) CreateBulkPhoneCall(ctx context.Context, ir *pr
 			}, errors.New(pkg_errors.CreateBulkPhoneCallInvalidOptions.Error)
 		}
 
-		observer := cApi.Observability(ctx, auth)
+		observer := cApi.Observability(ctx, auth, observability.WithGracePeriod())
 
 		result := cApi.channelPipeline.Run(ctx, channel_pipeline.OutboundRequestedPipeline{
 			ID:          fmt.Sprintf("%d", phoneCall.GetAssistant().GetAssistantId()),

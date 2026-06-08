@@ -13,7 +13,7 @@ import (
 )
 
 func TestNewStatusCallback_MissingStatusUsesTypedError(t *testing.T) {
-	callback, err := NewStatusCallback(map[string]interface{}{"uuid": "call-id"})
+	callback, err := NewStatusCallback(map[string]interface{}{"uuid": "call-id"}, "")
 
 	if callback != nil {
 		t.Fatalf("callback=%+v want nil", callback)

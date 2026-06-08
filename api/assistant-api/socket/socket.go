@@ -137,6 +137,7 @@ func (m *audioSocketEngine) handleConnection(ctx context.Context, conn net.Conn)
 		observability.WithAuth(callContext.ToAuth()),
 		observability.WithContext(ctx),
 		observability.WithCollectors(otelCollectors...),
+		observability.WithGracePeriod(),
 	)
 	defer observer.Close(context.Background())
 

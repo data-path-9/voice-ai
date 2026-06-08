@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/openapi"
 	pkg_errors "github.com/rapidaai/pkg/errors"
 	"github.com/rapidaai/pkg/preset"
@@ -67,7 +68,7 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 	}
 
 	conversations := make([]openapi.AssistantConversation, 0, len(*ir.PhoneCalls))
-	observer := cApi.Observability(c, auth)
+	observer := cApi.Observability(c, auth, observability.WithGracePeriod())
 	defer observer.Close(context.Background())
 	for _, phoneCall := range *ir.PhoneCalls {
 		if !validator.NonNil(phoneCall.ToNumber) || !validator.NotBlank(*phoneCall.ToNumber) {

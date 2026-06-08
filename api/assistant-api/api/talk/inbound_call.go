@@ -17,6 +17,7 @@ import (
 	internal_adapter "github.com/rapidaai/api/assistant-api/internal/adapters"
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
 	channel_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
 )
@@ -41,7 +42,7 @@ func (cApi *ConversationApi) CallReciever(c *gin.Context) {
 		return
 	}
 
-	observer := cApi.Observability(c, iAuth)
+	observer := cApi.Observability(c, iAuth, observability.WithGracePeriod())
 	defer observer.Close(context.Background())
 
 	// Pipeline handles: create conversation, answer provider, emit events
@@ -85,7 +86,7 @@ func (cApi *ConversationApi) CallTalkerByContext(c *gin.Context) {
 		cApi.logger.Errorf("failed to resolve call context %s: %v", contextID, err)
 		return
 	}
-	observer := cApi.Observability(c, callContext.ToAuth())
+	observer := cApi.Observability(c, callContext.ToAuth(), observability.WithGracePeriod())
 	defer observer.Close(context.Background())
 
 	streamer, err := channel_telephony.Telephony(callContext.Provider).NewStreamer(

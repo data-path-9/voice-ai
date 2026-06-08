@@ -96,11 +96,9 @@ func WithBuffer(buffer int) Option {
 	})
 }
 
-func WithCloseGracePeriod(closeGracePeriod time.Duration) Option {
+func WithGracePeriod() Option {
 	return newOption(func(recorderOptions *recorderOptions) {
-		if closeGracePeriod < 0 {
-			closeGracePeriod = 0
-		}
+		closeGracePeriod := recorderCloseGracePeriod
 		recorderOptions.closeGracePeriod = &closeGracePeriod
 	})
 }
@@ -140,7 +138,9 @@ type observation struct {
 
 const defaultBufferSize = 1024
 
-const DefaultCloseGracePeriod = 10 * time.Second
+const defaultCloseGracePeriod time.Duration = 0
+
+const recorderCloseGracePeriod = 5 * time.Second
 
 var (
 	ErrRecorderClosed = errors.New("observability: recorder is closed")
@@ -173,7 +173,7 @@ func New(options ...Option) Recorder {
 	if buffer <= 0 {
 		buffer = defaultBufferSize
 	}
-	closeGracePeriod := DefaultCloseGracePeriod
+	closeGracePeriod := defaultCloseGracePeriod
 	if resolvedOptions.closeGracePeriod != nil {
 		closeGracePeriod = *resolvedOptions.closeGracePeriod
 	}
