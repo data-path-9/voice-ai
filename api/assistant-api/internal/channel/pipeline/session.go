@@ -14,10 +14,7 @@ import (
 	obs "github.com/rapidaai/api/assistant-api/internal/observe"
 )
 
-// runSession handles the full session lifecycle for AudioSocket, WebSocket, and
-// telephony channels. Follows the same standard as SIP media.go:
-//
-//	resolve → streamer → talker → observer → call_started → Talk() → call_ended + metric + shutdown
+// runSession handles telephony media setup and keeps the Talk lifecycle synchronous.
 func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline) *PipelineResult {
 	startTime := time.Now()
 	d.logger.Infow("Pipeline: SessionConnected", "call_id", v.ID)
@@ -27,64 +24,34 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 		contextID = v.ID
 	}
 
-	// --- Resolve session ---
-	if d.onResolveSession == nil {
-		return &PipelineResult{Error: ErrCallbackNotConfigured}
-	}
-	cc, vc, err := d.onResolveSession(ctx, v.ContextID)
-	if err != nil {
-		d.logger.Errorw("Pipeline: session resolution failed", "call_id", v.ID, "error", err)
-		return &PipelineResult{Error: err}
-	}
+	auth := v.CallContext.ToAuth()
 
-	// --- Create streamer ---
-	if d.onCreateStreamer == nil {
-		return &PipelineResult{Error: ErrCallbackNotConfigured}
+	var projectID, organizationID uint64
+	if currentProjectID := auth.GetCurrentProjectId(); currentProjectID != nil {
+		projectID = *currentProjectID
 	}
-	streamer, err := d.onCreateStreamer(ctx, cc, vc, v.WebSocket, v.Conn, v.Reader, v.Writer)
-	if err != nil {
-		d.logger.Errorw("Pipeline: streamer creation failed", "call_id", v.ID, "error", err)
-		return &PipelineResult{Error: err}
+	if currentOrganizationID := auth.GetCurrentOrganizationId(); currentOrganizationID != nil {
+		organizationID = *currentOrganizationID
 	}
+	observer := obs.NewConversationObserver(&obs.ConversationObserverConfig{
+		Logger:         d.logger,
+		Auth:           auth,
+		AssistantID:    v.CallContext.AssistantID,
+		ConversationID: v.CallContext.ConversationID,
+		ProjectID:      projectID,
+		OrganizationID: organizationID,
+	})
+	observer.EmitMetadata(ctx, obs.ClientMetadata(
+		v.CallContext.CallerNumber, v.CallContext.FromNumber, v.CallContext.Direction, v.CallContext.Provider,
+		v.CallContext.ChannelUUID, contextID, "", "", // codec/sampleRate set by streamer
+	))
+	observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
+		obs.DataContextID: contextID,
+		obs.DataType:      obs.EventCallStarted,
+		obs.DataProvider:  v.CallContext.Provider,
+		obs.DataDirection: v.CallContext.Direction,
+	})
 
-	// --- Create talker ---
-	if d.onCreateTalker == nil {
-		return &PipelineResult{Error: ErrCallbackNotConfigured}
-	}
-	talker, err := d.onCreateTalker(ctx, streamer)
-	if err != nil {
-		d.logger.Errorw("Pipeline: talker creation failed", "call_id", v.ID, "error", err)
-		return &PipelineResult{Error: err}
-	}
-
-	auth := cc.ToAuth()
-
-	// --- Create observer ---
-	var observer *obs.ConversationObserver
-	if d.onCreateObserver != nil {
-		observer = d.onCreateObserver(ctx, contextID, auth, cc.AssistantID, cc.ConversationID)
-	}
-
-	if observer != nil {
-		clientPhone := cc.CallerNumber
-		assistantPhone := cc.FromNumber
-		if cc.Direction == "outbound" {
-			clientPhone = cc.CallerNumber
-			assistantPhone = cc.FromNumber
-		}
-		observer.EmitMetadata(ctx, obs.ClientMetadata(
-			clientPhone, assistantPhone, cc.Direction, cc.Provider,
-			cc.ChannelUUID, contextID, "", "", // codec/sampleRate set by streamer
-		))
-		observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
-			obs.DataContextID: contextID,
-			obs.DataType:      obs.EventCallStarted,
-			obs.DataProvider:  cc.Provider,
-			obs.DataDirection: cc.Direction,
-		})
-	}
-
-	// --- Run Talk with panic recovery ---
 	reason := "talk_completed"
 	status := "COMPLETED"
 
@@ -97,32 +64,23 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 			}
 		}()
 
-		if d.onRunTalk == nil {
-			reason = "callback_not_configured"
-			status = "FAILED"
-			return
-		}
-		if err := d.onRunTalk(ctx, talker, auth); err != nil {
+		err := v.Talker.Talk(ctx, auth)
+		if err != nil {
 			reason = fmt.Sprintf("talk_error: %v", err)
 			status = "FAILED"
 		}
 	}()
 
-	// --- Cleanup: observer, complete ---
-	if observer != nil {
-		observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
-			obs.DataType:      obs.EventCallEnded,
-			obs.DataProvider:  cc.Provider,
-			obs.DataDirection: cc.Direction,
-			obs.DataReason:    reason,
-		})
-		observer.EmitMetric(ctx, obs.CallStatusMetric(status, reason))
-		observer.Shutdown(ctx)
-	}
+	observer.EmitEvent(ctx, obs.ComponentTelephony, map[string]string{
+		obs.DataType:      obs.EventCallEnded,
+		obs.DataProvider:  v.CallContext.Provider,
+		obs.DataDirection: v.CallContext.Direction,
+		obs.DataReason:    reason,
+	})
+	observer.EmitMetric(ctx, obs.CallStatusMetric(status, reason))
+	observer.Shutdown(ctx)
 
-	if d.onCompleteSession != nil {
-		d.onCompleteSession(ctx, contextID)
-	}
+	d.logger.Debugf("session completed: contextId=%s", contextID)
 
 	d.logger.Infow("Pipeline: CallEnded",
 		"call_id", v.ID,

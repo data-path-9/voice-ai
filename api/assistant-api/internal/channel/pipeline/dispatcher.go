@@ -7,20 +7,12 @@
 package channel_pipeline
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"net"
 
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
-	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
-	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
-	observe "github.com/rapidaai/api/assistant-api/internal/observe"
-	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+	channel_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
+	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	"github.com/rapidaai/pkg/commons"
-	"github.com/rapidaai/pkg/types"
-	"github.com/rapidaai/protos"
 )
 
 const (
@@ -62,98 +54,67 @@ type Dispatcher struct {
 	mediaCh   chan callEnvelope
 	controlCh chan callEnvelope
 
-	onReceiveCall             OnReceiveCallFunc
-	onLoadAssistant           OnLoadAssistantFunc
-	onCreateConversation      OnCreateConversationFunc
-	onSaveCallContext         OnSaveCallContextFunc
-	onAnswerProvider          OnAnswerProviderFunc
-	onDispatchOutbound        OnDispatchOutboundFunc
-	onApplyConversationExtras OnApplyConversationExtrasFunc
-	onResolveSession          OnResolveSessionFunc
-	onCreateStreamer          OnCreateStreamerFunc
-	onCreateTalker            OnCreateTalkerFunc
-	onRunTalk                 OnRunTalkFunc
-	onCreateObserver          OnCreateObserverFunc
-	onCompleteSession         OnCompleteSessionFunc
+	inboundDispatcher   *channel_telephony.InboundDispatcher
+	outboundDispatcher  *channel_telephony.OutboundDispatcher
+	conversationService internal_services.AssistantConversationService
+	assistantService    internal_services.AssistantService
 }
 
-// OnReceiveCallFunc parses the provider webhook and returns CallInfo.
-type OnReceiveCallFunc func(ctx context.Context, provider string, ginCtx *gin.Context) (*internal_type.CallInfo, error)
-
-// OnLoadAssistantFunc loads the assistant from DB.
-type OnLoadAssistantFunc func(ctx context.Context, auth types.SimplePrinciple, assistantID uint64) (*internal_assistant_entity.Assistant, error)
-
-// OnCreateConversationFunc creates a conversation and returns conversationID.
-type OnCreateConversationFunc func(ctx context.Context, auth types.SimplePrinciple, callerNumber string, assistantID, assistantProviderID uint64, direction string) (conversationID uint64, err error)
-
-// OnSaveCallContextFunc saves the call context to Postgres and returns contextID.
-type OnSaveCallContextFunc func(ctx context.Context, auth types.SimplePrinciple, assistant *internal_assistant_entity.Assistant, conversationID uint64, callInfo *internal_type.CallInfo, provider string) (contextID string, err error)
-
-// OnAnswerProviderFunc instructs the provider to answer the call.
-type OnAnswerProviderFunc func(ctx context.Context, ginCtx *gin.Context, auth types.SimplePrinciple, provider string, assistantID uint64, callerNumber string, conversationID uint64) error
-
-// OnDispatchOutboundFunc dispatches the outbound call (claim, vault, dial).
-type OnDispatchOutboundFunc func(ctx context.Context, contextID string) error
-
-// OnApplyConversationExtrasFunc applies options/arguments/metadata to a conversation.
-type OnApplyConversationExtrasFunc func(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, opts, args, metadata map[string]interface{}) error
-
-// OnResolveSessionFunc resolves a call context and vault credential from a contextID.
-type OnResolveSessionFunc func(ctx context.Context, contextID string) (*callcontext.CallContext, *protos.VaultCredential, error)
-
-// OnCreateStreamerFunc creates a provider-specific streamer.
-type OnCreateStreamerFunc func(ctx context.Context, cc *callcontext.CallContext, vc *protos.VaultCredential, ws *websocket.Conn, conn net.Conn, reader *bufio.Reader, writer *bufio.Writer) (internal_type.Streamer, error)
-
-// OnCreateTalkerFunc creates a talker (genericRequestor).
-type OnCreateTalkerFunc func(ctx context.Context, streamer internal_type.Streamer) (internal_type.Talking, error)
-
-// OnRunTalkFunc runs talker.Talk (blocking for call duration).
-type OnRunTalkFunc func(ctx context.Context, talker internal_type.Talking, auth types.SimplePrinciple) error
-
-// OnCreateObserverFunc creates a ConversationObserver.
-type OnCreateObserverFunc func(ctx context.Context, callID string, auth types.SimplePrinciple, assistantID, conversationID uint64) *observe.ConversationObserver
-
-// OnCompleteSessionFunc marks a call context as completed.
-type OnCompleteSessionFunc func(ctx context.Context, contextID string)
-
-// DispatcherConfig holds dependencies for creating a channel dispatcher.
-type DispatcherConfig struct {
-	Logger                    commons.Logger
-	OnReceiveCall             OnReceiveCallFunc
-	OnLoadAssistant           OnLoadAssistantFunc
-	OnCreateConversation      OnCreateConversationFunc
-	OnSaveCallContext         OnSaveCallContextFunc
-	OnAnswerProvider          OnAnswerProviderFunc
-	OnDispatchOutbound        OnDispatchOutboundFunc
-	OnApplyConversationExtras OnApplyConversationExtrasFunc
-	OnResolveSession          OnResolveSessionFunc
-	OnCreateStreamer          OnCreateStreamerFunc
-	OnCreateTalker            OnCreateTalkerFunc
-	OnRunTalk                 OnRunTalkFunc
-	OnCreateObserver          OnCreateObserverFunc
-	OnCompleteSession         OnCompleteSessionFunc
+// DispatcherOptions holds dependencies for creating a channel dispatcher.
+type DispatcherOptions struct {
+	logger              commons.Logger
+	inboundDispatcher   *channel_telephony.InboundDispatcher
+	outboundDispatcher  *channel_telephony.OutboundDispatcher
+	conversationService internal_services.AssistantConversationService
+	assistantService    internal_services.AssistantService
 }
 
-func NewDispatcher(cfg *DispatcherConfig) *Dispatcher {
+type FuncOption func(*DispatcherOptions)
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *DispatcherOptions) {
+		options.logger = logger
+	}
+}
+
+func WithInboundDispatcher(dispatcher *channel_telephony.InboundDispatcher) FuncOption {
+	return func(options *DispatcherOptions) {
+		options.inboundDispatcher = dispatcher
+	}
+}
+
+func WithOutboundDispatcher(dispatcher *channel_telephony.OutboundDispatcher) FuncOption {
+	return func(options *DispatcherOptions) {
+		options.outboundDispatcher = dispatcher
+	}
+}
+
+func WithConversationService(conversationService internal_services.AssistantConversationService) FuncOption {
+	return func(options *DispatcherOptions) {
+		options.conversationService = conversationService
+	}
+}
+
+func WithAssistantService(assistantService internal_services.AssistantService) FuncOption {
+	return func(options *DispatcherOptions) {
+		options.assistantService = assistantService
+	}
+}
+
+func NewDispatcher(opts ...FuncOption) *Dispatcher {
+	var cfg DispatcherOptions
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	return &Dispatcher{
-		logger:                    cfg.Logger,
-		onReceiveCall:             cfg.OnReceiveCall,
-		onLoadAssistant:           cfg.OnLoadAssistant,
-		onCreateConversation:      cfg.OnCreateConversation,
-		onSaveCallContext:         cfg.OnSaveCallContext,
-		onAnswerProvider:          cfg.OnAnswerProvider,
-		onDispatchOutbound:        cfg.OnDispatchOutbound,
-		onApplyConversationExtras: cfg.OnApplyConversationExtras,
-		onResolveSession:          cfg.OnResolveSession,
-		onCreateStreamer:          cfg.OnCreateStreamer,
-		onCreateTalker:            cfg.OnCreateTalker,
-		onRunTalk:                 cfg.OnRunTalk,
-		onCreateObserver:          cfg.OnCreateObserver,
-		onCompleteSession:         cfg.OnCompleteSession,
-		signalCh:                  make(chan callEnvelope, signalChSize),
-		setupCh:                   make(chan callEnvelope, setupChSize),
-		mediaCh:                   make(chan callEnvelope, mediaChSize),
-		controlCh:                 make(chan callEnvelope, controlChSize),
+		logger:              cfg.logger,
+		inboundDispatcher:   cfg.inboundDispatcher,
+		outboundDispatcher:  cfg.outboundDispatcher,
+		conversationService: cfg.conversationService,
+		signalCh:            make(chan callEnvelope, signalChSize),
+		setupCh:             make(chan callEnvelope, setupChSize),
+		mediaCh:             make(chan callEnvelope, mediaChSize),
+		controlCh:           make(chan callEnvelope, controlChSize),
 	}
 }
 

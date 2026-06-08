@@ -20,10 +20,62 @@ import (
 	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
-	type_enums "github.com/rapidaai/pkg/types/enums"
-	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
+
+type InboundDispatcherOptions struct {
+	Config              *config.AssistantConfig
+	Logger              commons.Logger
+	Store               callcontext.Store
+	VaultClient         web_client.VaultClient
+	AssistantService    internal_services.AssistantService
+	ConversationService internal_services.AssistantConversationService
+	TelephonyOption     TelephonyOption
+}
+
+type InboundDispatcherFuncOption func(*InboundDispatcherOptions)
+
+func WithConfig(cfg *config.AssistantConfig) InboundDispatcherFuncOption {
+	return func(options *InboundDispatcherOptions) {
+		options.Config = cfg
+	}
+}
+
+func WithLogger(logger commons.Logger) InboundDispatcherFuncOption {
+	return func(options *InboundDispatcherOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithStore(store callcontext.Store) InboundDispatcherFuncOption {
+	return func(options *InboundDispatcherOptions) {
+		options.Store = store
+	}
+}
+
+func WithVaultClient(vaultClient web_client.VaultClient) InboundDispatcherFuncOption {
+	return func(options *InboundDispatcherOptions) {
+		options.VaultClient = vaultClient
+	}
+}
+
+func WithAssistantService(assistantService internal_services.AssistantService) InboundDispatcherFuncOption {
+	return func(options *InboundDispatcherOptions) {
+		options.AssistantService = assistantService
+	}
+}
+
+func WithConversationService(conversationService internal_services.AssistantConversationService) InboundDispatcherFuncOption {
+	return func(options *InboundDispatcherOptions) {
+		options.ConversationService = conversationService
+	}
+}
+
+func WithTelephonyOption(telephonyOpt TelephonyOption) InboundDispatcherFuncOption {
+	return func(options *InboundDispatcherOptions) {
+		options.TelephonyOption = telephonyOpt
+	}
+}
 
 // InboundDispatcher handles inbound call processing across all telephony
 // channels (SIP, Asterisk, Twilio, Exotel, Vonage). It encapsulates the
@@ -37,30 +89,22 @@ type InboundDispatcher struct {
 	assistantService    internal_services.AssistantService
 	conversationService internal_services.AssistantConversationService
 	telephonyOpt        TelephonyOption
-
-	createConversation CreateConversationFunc
 }
 
-// CreateConversationFunc creates a conversation and returns its ID.
-type CreateConversationFunc func(ctx context.Context, auth types.SimplePrinciple, callerNumber string, assistantID, assistantProviderID uint64, direction type_enums.ConversationDirection, source utils.RapidaSource) (conversationID uint64, err error)
-
 // NewInboundDispatcher creates a new inbound call dispatcher.
-func NewInboundDispatcher(deps TelephonyDispatcherDeps) *InboundDispatcher {
+func NewInboundDispatcher(opts ...InboundDispatcherFuncOption) *InboundDispatcher {
+	var options InboundDispatcherOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
 	return &InboundDispatcher{
-		cfg:                 deps.Cfg,
-		store:               deps.Store,
-		logger:              deps.Logger,
-		vaultClient:         deps.VaultClient,
-		assistantService:    deps.AssistantService,
-		conversationService: deps.ConversationService,
-		telephonyOpt:        deps.TelephonyOpt,
-		createConversation: func(ctx context.Context, auth types.SimplePrinciple, callerNumber string, assistantID, assistantProviderID uint64, direction type_enums.ConversationDirection, source utils.RapidaSource) (uint64, error) {
-			conv, err := deps.ConversationService.CreateConversation(ctx, auth, callerNumber, assistantID, assistantProviderID, direction, source)
-			if err != nil {
-				return 0, err
-			}
-			return conv.Id, nil
-		},
+		cfg:                 options.Config,
+		store:               options.Store,
+		logger:              options.Logger,
+		vaultClient:         options.VaultClient,
+		assistantService:    options.AssistantService,
+		conversationService: options.ConversationService,
+		telephonyOpt:        options.TelephonyOption,
 	}
 }
 
@@ -108,14 +152,6 @@ func (d *InboundDispatcher) ResolveCallSessionByContext(ctx context.Context, con
 	return cc, vaultCred, nil
 }
 
-// CompleteCallSession marks a call context as claimed (call ended).
-// Called when the call/session ends (talker exits).
-func (d *InboundDispatcher) CompleteCallSession(ctx context.Context, contextID string) {
-	if _, err := d.store.Claim(ctx, contextID); err != nil {
-		d.logger.Warnf("failed to claim call context %s: %v", contextID, err)
-	}
-}
-
 // ReceiveCall parses the provider webhook and returns CallInfo.
 func (d *InboundDispatcher) ReceiveCall(c *gin.Context, provider string) (*internal_type.CallInfo, error) {
 	tel, err := GetTelephony(Telephony(provider), d.cfg, d.logger, d.telephonyOpt)
@@ -123,20 +159,6 @@ func (d *InboundDispatcher) ReceiveCall(c *gin.Context, provider string) (*inter
 		return nil, fmt.Errorf("telephony provider %s not connected: %w", provider, err)
 	}
 	return tel.ReceiveCall(c)
-}
-
-// LoadAssistant loads the assistant entity with phone deployment.
-func (d *InboundDispatcher) LoadAssistant(ctx context.Context, auth types.SimplePrinciple, assistantID uint64) (*internal_assistant_entity.Assistant, error) {
-	return d.assistantService.Get(ctx, auth, assistantID, utils.GetVersionDefinition("latest"), &internal_services.GetAssistantOption{InjectPhoneDeployment: true})
-}
-
-// CreateConversation creates a conversation and returns its ID.
-func (d *InboundDispatcher) CreateConversation(ctx context.Context, auth types.SimplePrinciple, callerNumber string, assistantID, assistantProviderID uint64, direction string) (uint64, error) {
-	dir := type_enums.DIRECTION_INBOUND
-	if direction == "outbound" {
-		dir = type_enums.DIRECTION_OUTBOUND
-	}
-	return d.createConversation(ctx, auth, callerNumber, assistantID, assistantProviderID, dir, utils.PhoneCall)
 }
 
 // SaveCallContext stores the call context in Postgres and returns the contextID.

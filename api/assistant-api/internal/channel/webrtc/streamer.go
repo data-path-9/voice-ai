@@ -83,7 +83,7 @@ type webrtcStreamer struct {
 	observer observability.Recorder
 }
 
-type Config struct {
+type StreamerOptions struct {
 	Context      context.Context
 	Logger       commons.Logger
 	GRPCStream   grpc.BidiStreamingServer[protos.WebTalkRequest, protos.WebTalkResponse]
@@ -91,10 +91,46 @@ type Config struct {
 	Observer     observability.Recorder
 }
 
-func New(config Config) (internal_type.Streamer, error) {
-	resampler, err := internal_audio_resampler.GetResampler(config.Logger)
+type FuncOption func(*StreamerOptions)
+
+func WithContext(ctx context.Context) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Context = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithServer(server grpc.BidiStreamingServer[protos.WebTalkRequest, protos.WebTalkResponse]) FuncOption {
+	return func(options *StreamerOptions) {
+		options.GRPCStream = server
+	}
+}
+
+func WithServerConfig(serverConfig *assistant_config.WebRTCConfig) FuncOption {
+	return func(options *StreamerOptions) {
+		options.ServerConfig = serverConfig
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.Streamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	resampler, err := internal_audio_resampler.GetResampler(options.Logger)
 	if err != nil {
-		_ = config.Observer.Record(config.Context, observability.ProjectScope{}, observability.RecordLog{
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordLog{
 			Level:   observability.LevelError,
 			Message: "WebRTC streamer initialization failed",
 			Attributes: observability.Attributes{
@@ -103,7 +139,7 @@ func New(config Config) (internal_type.Streamer, error) {
 				"error":     err.Error(),
 			},
 		})
-		_ = config.Observer.Record(config.Context, observability.ProjectScope{}, observability.RecordEvent{
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordEvent{
 			Component: observability.ComponentWebRTC,
 			Event:     observability.WebRTCFailed,
 			Attributes: observability.Attributes{
@@ -117,7 +153,7 @@ func New(config Config) (internal_type.Streamer, error) {
 
 	opusCodec, err := webrtc_internal.NewOpusCodec()
 	if err != nil {
-		_ = config.Observer.Record(config.Context, observability.ProjectScope{}, observability.RecordLog{
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordLog{
 			Level:   observability.LevelError,
 			Message: "WebRTC streamer initialization failed",
 			Attributes: observability.Attributes{
@@ -126,7 +162,7 @@ func New(config Config) (internal_type.Streamer, error) {
 				"error":     err.Error(),
 			},
 		})
-		_ = config.Observer.Record(config.Context, observability.ProjectScope{}, observability.RecordEvent{
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordEvent{
 			Component: observability.ComponentWebRTC,
 			Event:     observability.WebRTCFailed,
 			Attributes: observability.Attributes{
@@ -139,10 +175,10 @@ func New(config Config) (internal_type.Streamer, error) {
 	}
 
 	peerConfig := webrtc_internal.DefaultConfig()
-	if config.ServerConfig != nil {
-		if len(config.ServerConfig.ICEServers) > 0 {
-			iceServers := make([]webrtc_internal.ICEServer, 0, len(config.ServerConfig.ICEServers))
-			for _, server := range config.ServerConfig.ICEServers {
+	if options.ServerConfig != nil {
+		if len(options.ServerConfig.ICEServers) > 0 {
+			iceServers := make([]webrtc_internal.ICEServer, 0, len(options.ServerConfig.ICEServers))
+			for _, server := range options.ServerConfig.ICEServers {
 				if len(server.URLs) == 0 {
 					continue
 				}
@@ -167,31 +203,31 @@ func New(config Config) (internal_type.Streamer, error) {
 			}
 		}
 
-		switch strings.ToLower(strings.TrimSpace(config.ServerConfig.ICETransportPolicy)) {
+		switch strings.ToLower(strings.TrimSpace(options.ServerConfig.ICETransportPolicy)) {
 		case "", webrtc_internal.ICETransportPolicyAll:
 			peerConfig.ICETransportPolicy = webrtc_internal.ICETransportPolicyAll
 		case webrtc_internal.ICETransportPolicyRelay:
 			peerConfig.ICETransportPolicy = webrtc_internal.ICETransportPolicyRelay
 		default:
-			_ = config.Observer.Record(config.Context, observability.ProjectScope{}, observability.RecordLog{
+			_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordLog{
 				Level:   observability.LevelDebug,
 				Message: "Invalid WebRTC ICE transport policy, using all",
 				Attributes: observability.Attributes{
 					"component": observability.ComponentWebRTC.String(),
-					"policy":    config.ServerConfig.ICETransportPolicy,
+					"policy":    options.ServerConfig.ICETransportPolicy,
 				},
 			})
 			peerConfig.ICETransportPolicy = webrtc_internal.ICETransportPolicyAll
 		}
 	}
 	ambientMixer, err := internal_ambient.NewLoopMixer(internal_ambient.MixerSpec{
-		Logger:            config.Logger,
+		Logger:            options.Logger,
 		Resampler:         resampler,
 		TargetAudioConfig: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
 		FrameBytes:        webrtc_internal.WebRTCOutputPCM16kFrameBytes,
 	})
 	if err != nil {
-		_ = config.Observer.Record(config.Context, observability.ProjectScope{}, observability.RecordLog{
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordLog{
 			Level:   observability.LevelError,
 			Message: "WebRTC streamer initialization failed",
 			Attributes: observability.Attributes{
@@ -200,7 +236,7 @@ func New(config Config) (internal_type.Streamer, error) {
 				"error":     err.Error(),
 			},
 		})
-		_ = config.Observer.Record(config.Context, observability.ProjectScope{}, observability.RecordEvent{
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordEvent{
 			Component: observability.ComponentWebRTC,
 			Event:     observability.WebRTCFailed,
 			Attributes: observability.Attributes{
@@ -213,13 +249,13 @@ func New(config Config) (internal_type.Streamer, error) {
 	}
 	s := &webrtcStreamer{
 		BaseStreamer: channel_base.NewBaseStreamerWithChannelCapacity(
-			config.Logger,
+			options.Logger,
 			webrtc_internal.InputChannelSize,
 			webrtc_internal.OutputChannelSize,
 		),
 		peerConfig:        peerConfig,
-		serverConfig:      config.ServerConfig,
-		grpcStream:        config.GRPCStream,
+		serverConfig:      options.ServerConfig,
+		grpcStream:        options.GRPCStream,
 		sessionID:         uuid.New().String(),
 		resampler:         resampler,
 		opusCodec:         opusCodec,
@@ -231,10 +267,10 @@ func New(config Config) (internal_type.Streamer, error) {
 		outputHealth:      internal_output.NewHealthStats(),
 		audioBufferState:  newWebRTCAudioBufferState(),
 		flushAudioCh:      make(chan struct{}, 1),
-		observer:          config.Observer,
+		observer:          options.Observer,
 		ambientMixer:      ambientMixer,
 	}
-	_ = config.Observer.Record(config.Context, s.sessionState.Scope, observability.RecordEvent{
+	_ = options.Observer.Record(options.Context, s.sessionState.Scope, observability.RecordEvent{
 		Component: observability.ComponentWebRTC,
 		Event:     observability.WebRTCConnecting,
 		Attributes: observability.Attributes{
@@ -250,8 +286,12 @@ func New(config Config) (internal_type.Streamer, error) {
 	go s.runAudioPacer()
 	go s.runOutputHealthReporter()
 	go s.runHealthWatchdog()
-	go s.watchCallerContext(config.Context)
+	go s.watchCallerContext(options.Context)
 	return s, nil
+}
+
+func (s *webrtcStreamer) Observer() observability.Recorder {
+	return s.observer
 }
 
 func (s *webrtcStreamer) stopMediaSession() {

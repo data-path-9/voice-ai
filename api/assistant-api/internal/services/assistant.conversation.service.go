@@ -220,7 +220,7 @@ type AssistantConversationService interface {
 
 	// all about conversation
 
-	ApplyConversationArgument(
+	CreateOrUpdateConversationArgument(
 		ctx context.Context,
 		auth types.SimplePrinciple,
 		assistantId uint64,
@@ -228,7 +228,7 @@ type AssistantConversationService interface {
 		arguments map[string]interface{},
 	) ([]*internal_conversation_entity.AssistantConversationArgument, error)
 
-	ApplyConversationOption(ctx context.Context,
+	CreateOrUpdateConversationOption(ctx context.Context,
 		auth types.SimplePrinciple,
 		assistantId uint64,
 		assistantConversationId uint64,
@@ -240,7 +240,7 @@ type AssistantConversationService interface {
 		auth types.SimplePrinciple,
 		assistantId uint64,
 		assistantConversationId uint64,
-		metrics []*types.Metric,
+		metrics []*protos.Metric,
 	) ([]*internal_conversation_entity.AssistantConversationMetric, error)
 
 	CreateOrUpdateConversationMetadata(
@@ -248,7 +248,7 @@ type AssistantConversationService interface {
 		auth types.SimplePrinciple,
 		assistantId uint64,
 		assistantConversationId uint64,
-		metadata []*types.Metadata,
+		metadata []*protos.Metadata,
 	) ([]*internal_conversation_entity.AssistantConversationMetadata, error)
 
 	CreateConversationRecording(

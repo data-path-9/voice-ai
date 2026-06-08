@@ -20,7 +20,7 @@ func newTestSIPStreamer(t *testing.T) *Streamer {
 	require.NoError(t, err)
 
 	return &Streamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, &callcontext.CallContext{}, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, &callcontext.CallContext{}, nil, nil),
 	}
 }
 

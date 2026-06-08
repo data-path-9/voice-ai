@@ -18,11 +18,11 @@ import (
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
 	internal_vonage "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage/internal"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	protos "github.com/rapidaai/protos"
 	"github.com/vonage/vonage-go-sdk"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type vonageWebsocketStreamer struct {
@@ -33,36 +33,70 @@ type vonageWebsocketStreamer struct {
 	closed       atomic.Bool
 }
 
-// NewVonageWebsocketStreamer creates a Vonage WebSocket streamer.
 // Vonage sends linear16 16kHz — same as the internal Rapida format, so no
 // resampling is needed (nil source audio config defaults to linear16 16kHz).
-func NewVonageWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential) (internal_type.Streamer, error) {
-	audioProcessor, err := internal_vonage.NewAudioProcessor(logger)
+type StreamerOptions struct {
+	Logger          commons.Logger
+	Connection      *websocket.Conn
+	CallContext     *callcontext.CallContext
+	VaultCredential *protos.VaultCredential
+	Observer        observability.Recorder
+}
+
+type FuncOption func(*StreamerOptions)
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithConnection(connection *websocket.Conn) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Connection = connection
+	}
+}
+
+func WithCallContext(callContext *callcontext.CallContext) FuncOption {
+	return func(options *StreamerOptions) {
+		options.CallContext = callContext
+	}
+}
+
+func WithVaultCredential(vaultCredential *protos.VaultCredential) FuncOption {
+	return func(options *StreamerOptions) {
+		options.VaultCredential = vaultCredential
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.Streamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	audioProcessor, err := internal_vonage.NewAudioProcessor(options.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", internal_vonage.ErrAudioProcessorInitFailed, err)
 	}
 	vng := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, vaultCred,
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			options.Logger, options.CallContext, options.VaultCredential, options.Observer,
 		),
-		connection: connection,
+		connection: options.Connection,
 	}
 	vng.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:           vng.Ctx,
-		Logger:            logger,
+		Logger:            options.Logger,
 		MediaEngine:       audioProcessor,
 		SendProviderClear: vng.sendProviderClear,
 		StreamSink:        vng.Input,
 		OutputSink:        vng.sendOutputFrame,
-		EventSink: func(event *protos.ConversationEvent) {
-			if event != nil {
-				if event.Data == nil {
-					event.Data = map[string]string{}
-				}
-				event.Data["provider"] = internal_vonage.Provider
-			}
-			vng.Input(event)
-		},
 	})
 	go vng.runWebSocketReader()
 	return vng, nil
@@ -77,6 +111,36 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
 			vng.stopAudioProcessing()
+			_ = vng.Record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Vonage websocket reader closed",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_vonage.Provider,
+					"conversation_uuid": vng.GetConversationUuid(),
+					"error":             err.Error(),
+				},
+			}, observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallEnded,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_vonage.Provider,
+					"conversation_uuid": vng.GetConversationUuid(),
+					"reason":            "websocket_closed",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "websocket_closed"},
+					{Key: observability.MetadataDisconnectReason, Value: "websocket_closed"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "websocket_closed",
+					Description: "Vonage websocket reader closed",
+				}},
+			})
 			if msg := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				vng.Input(msg)
 			}
@@ -87,7 +151,22 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 		case websocket.TextMessage:
 			var textEvent internal_vonage.VonageWebSocketEvent
 			if err := json.Unmarshal(message, &textEvent); err != nil {
-				vng.Logger.Error("Failed to unmarshal text event", "error", err.Error())
+				_ = vng.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to unmarshal Vonage text event",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_vonage.Provider,
+						"conversation_uuid": vng.GetConversationUuid(),
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallFailed,
+						Value:       "1",
+						Description: "Failed to unmarshal Vonage text event",
+					}},
+				})
 				continue
 			}
 			switch textEvent.Event {
@@ -96,30 +175,101 @@ func (vng *vonageWebsocketStreamer) runWebSocketReader() {
 					vng.mediaSession.Start()
 				}
 				vng.Input(vng.CreateConnectionRequest())
-				vng.Input(&protos.ConversationEvent{
-					Name: "channel",
-					Data: map[string]string{"type": internal_vonage.ChannelEventConnected, "provider": internal_vonage.Provider},
-					Time: timestamppb.Now(),
+				_ = vng.Record(observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallSessionConnected,
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_vonage.Provider,
+						"provider_event":    string(internal_vonage.EventTypeWebSocketConnected),
+						"conversation_uuid": vng.GetConversationUuid(),
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataClientChannel, Value: internal_vonage.Provider},
+						{Key: observability.MetadataClientProviderCallID, Value: vng.GetConversationUuid()},
+						{Key: observability.MetadataClientCodec, Value: "linear16"},
+						{Key: observability.MetadataClientSampleRate, Value: "16000"},
+						{Key: observability.MetadataCallStatus, Value: "connected"},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "connected",
+						Description: "Vonage websocket connected",
+					}},
 				})
 			case internal_vonage.EventTypeStop:
+				_ = vng.Record(observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallHangup,
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_vonage.Provider,
+						"provider_event":    string(internal_vonage.EventTypeStop),
+						"conversation_uuid": vng.GetConversationUuid(),
+						"reason":            "provider_stop",
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "provider_stop"},
+						{Key: observability.MetadataDisconnectReason, Value: "provider_stop"},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "provider_stop",
+						Description: "Vonage websocket stopped by provider",
+					}},
+				})
 				if msg := vng.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 					vng.Input(msg)
 				}
 				vng.Cancel()
 				return
 			default:
-				vng.Logger.Debugf("Unhandled event type: %s", textEvent.Event)
+				_ = vng.Record(observability.RecordLog{
+					Level:   observability.LevelDebug,
+					Message: "Unhandled Vonage event",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_vonage.Provider,
+						"provider_event":    string(textEvent.Event),
+						"conversation_uuid": vng.GetConversationUuid(),
+					},
+				})
 			}
 		case websocket.BinaryMessage:
 			if err := vng.handleMediaEvent(message); err != nil {
-				vng.Logger.Errorw("Failed to process Vonage media frame",
-					"error", err,
-					"conversation_uuid", vng.GetConversationUuid(),
-					"payload_bytes", len(message),
-				)
+				_ = vng.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to process Vonage media frame",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_vonage.Provider,
+						"conversation_uuid": vng.GetConversationUuid(),
+						"payload_bytes":     fmt.Sprintf("%d", len(message)),
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallFailed,
+						Value:       "1",
+						Description: "Vonage media frame processing failed",
+					}},
+				})
 			}
 		default:
-			vng.Logger.Warn("Unhandled message type", "type", messageType)
+			_ = vng.Record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Unhandled Vonage websocket message type",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_vonage.Provider,
+					"conversation_uuid": vng.GetConversationUuid(),
+					"message_type":      fmt.Sprintf("%d", messageType),
+				},
+			})
 		}
 	}
 }
@@ -156,19 +306,66 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 		if conversationUUID != "" {
 			vonageClientAuth, err := vonageAuth(vng.VaultCredential())
 			if err != nil {
-				vng.Logger.Errorw("Failed to create Vonage client for server-side disconnect",
-					"error", err,
-					"conversation_uuid", conversationUUID,
-					"disconnection_type", data.GetType().String(),
-				)
+				_ = vng.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to create Vonage client for server-side disconnect",
+					Attributes: observability.Attributes{
+						"component":          observability.ComponentCall.String(),
+						"provider":           internal_vonage.Provider,
+						"conversation_uuid":  conversationUUID,
+						"disconnection_type": data.GetType().String(),
+						"error":              err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallFailed,
+						Value:       "1",
+						Description: "Failed to create Vonage client for server-side disconnect",
+					}},
+				})
 			} else {
 				vonageVoiceClient := vonage.NewVoiceClient(vonageClientAuth)
 				if _, _, err := vonageVoiceClient.Hangup(conversationUUID); err != nil {
-					vng.Logger.Errorw("Failed to end Vonage call on server-side disconnect",
-						"error", err,
-						"conversation_uuid", conversationUUID,
-						"disconnection_type", data.GetType().String(),
-					)
+					_ = vng.Record(observability.RecordLog{
+						Level:   observability.LevelError,
+						Message: "Failed to end Vonage call on server-side disconnect",
+						Attributes: observability.Attributes{
+							"component":          observability.ComponentCall.String(),
+							"provider":           internal_vonage.Provider,
+							"conversation_uuid":  conversationUUID,
+							"disconnection_type": data.GetType().String(),
+							"error":              err.Error(),
+						},
+					}, observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallFailed,
+							Value:       "1",
+							Description: "Failed to end Vonage call on server-side disconnect",
+						}},
+					})
+				} else {
+					_ = vng.Record(observability.RecordEvent{
+						Component: observability.ComponentCall,
+						Event:     observability.CallHangup,
+						Attributes: observability.Attributes{
+							"component":          observability.ComponentCall.String(),
+							"provider":           internal_vonage.Provider,
+							"conversation_uuid":  conversationUUID,
+							"disconnection_type": data.GetType().String(),
+							"reason":             "server_side_disconnect",
+						},
+					}, observability.RecordMetadata{
+						Metadata: []*protos.Metadata{
+							{Key: observability.MetadataCallStatus, Value: "completed"},
+							{Key: observability.MetadataDisconnectReason, Value: "server_side_disconnect"},
+						},
+					}, observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallStatus,
+							Value:       "completed",
+							Description: "Vonage call ended by server-side disconnect",
+						}},
+					})
 				}
 			}
 		}
@@ -181,11 +378,66 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 			if vng.GetConversationUuid() != "" {
 				cAuth, err := vonageAuth(vng.VaultCredential())
 				if err != nil {
-					vng.Logger.Errorf("Error creating Vonage client:", err)
+					_ = vng.Record(observability.RecordLog{
+						Level:   observability.LevelError,
+						Message: "Failed to create Vonage client for end conversation",
+						Attributes: observability.Attributes{
+							"component":         observability.ComponentCall.String(),
+							"provider":          internal_vonage.Provider,
+							"conversation_uuid": vng.GetConversationUuid(),
+							"tool_action":       data.GetAction().String(),
+							"error":             err.Error(),
+						},
+					}, observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallFailed,
+							Value:       "1",
+							Description: "Failed to create Vonage client for end conversation",
+						}},
+					})
 					result = map[string]string{"status": "failed", "reason": fmt.Sprintf("vonage client error: %v", err)}
 				} else if _, _, err := vonage.NewVoiceClient(cAuth).Hangup(vng.GetConversationUuid()); err != nil {
-					vng.Logger.Errorf("Error ending Vonage call:", err)
+					_ = vng.Record(observability.RecordLog{
+						Level:   observability.LevelError,
+						Message: "Failed to end Vonage call",
+						Attributes: observability.Attributes{
+							"component":         observability.ComponentCall.String(),
+							"provider":          internal_vonage.Provider,
+							"conversation_uuid": vng.GetConversationUuid(),
+							"tool_action":       data.GetAction().String(),
+							"error":             err.Error(),
+						},
+					}, observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallFailed,
+							Value:       "1",
+							Description: "Failed to end Vonage call",
+						}},
+					})
 					result = map[string]string{"status": "failed", "reason": fmt.Sprintf("hangup failed: %v", err)}
+				} else {
+					_ = vng.Record(observability.RecordEvent{
+						Component: observability.ComponentCall,
+						Event:     observability.CallHangup,
+						Attributes: observability.Attributes{
+							"component":         observability.ComponentCall.String(),
+							"provider":          internal_vonage.Provider,
+							"conversation_uuid": vng.GetConversationUuid(),
+							"tool_action":       data.GetAction().String(),
+							"reason":            "tool_end_conversation",
+						},
+					}, observability.RecordMetadata{
+						Metadata: []*protos.Metadata{
+							{Key: observability.MetadataCallStatus, Value: "completed"},
+							{Key: observability.MetadataDisconnectReason, Value: "tool_end_conversation"},
+						},
+					}, observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallStatus,
+							Value:       "completed",
+							Description: "Vonage call ended by tool action",
+						}},
+					})
 				}
 			}
 			vng.Input(&protos.ConversationToolCallResult{
@@ -203,7 +455,28 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 			// support post_transfer_action=end_call only. resume_ai would
 			// require a B2BUA bridge (separate outbound call + WebSocket
 			// reconnect on hangup) which Vonage does not natively support.
-			vng.Logger.Warnw("Vonage call transfer not yet implemented", "transfer_to", data.GetArgs()["transfer_to"])
+			_ = vng.Record(observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Vonage call transfer is not supported",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_vonage.Provider,
+					"conversation_uuid": vng.GetConversationUuid(),
+					"tool_action":       data.GetAction().String(),
+					"transfer_to":       data.GetArgs()["transfer_to"],
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "transfer_failed"},
+					{Key: observability.MetadataFailureReason, Value: "transfer not supported for Vonage"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallFailed,
+					Value:       "1",
+					Description: "Vonage call transfer is not supported",
+				}},
+			})
 			vng.Input(&protos.ConversationToolCallResult{
 				Id:     data.GetId(),
 				ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
@@ -211,7 +484,16 @@ func (vng *vonageWebsocketStreamer) Send(response internal_type.Stream) error {
 			})
 		}
 	default:
-		vng.Logger.Warnw("Vonage Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
+		_ = vng.Record(observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Vonage Send unknown message type",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_vonage.Provider,
+				"conversation_uuid": vng.GetConversationUuid(),
+				"type":              fmt.Sprintf("%T", response),
+			},
+		})
 	}
 	return nil
 }
@@ -258,12 +540,48 @@ func (vng *vonageWebsocketStreamer) sendOutputFrame(frame internal_telephony_med
 	if vng.connection == nil {
 		return nil
 	}
-	return vng.connection.WriteMessage(websocket.BinaryMessage, frame.ProviderAudio)
+	if err := vng.connection.WriteMessage(websocket.BinaryMessage, frame.ProviderAudio); err != nil {
+		_ = vng.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to send audio frame to Vonage",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_vonage.Provider,
+				"conversation_uuid": vng.GetConversationUuid(),
+				"payload_bytes":     fmt.Sprintf("%d", len(frame.ProviderAudio)),
+				"error":             err.Error(),
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallFailed,
+				Value:       "1",
+				Description: "Failed to send audio frame to Vonage",
+			}},
+		})
+		return err
+	}
+	return nil
 }
 
 func (vng *vonageWebsocketStreamer) sendProviderClear() error {
 	message, err := json.Marshal(internal_vonage.VonageClearMessage{Action: internal_vonage.ClearAction})
 	if err != nil {
+		_ = vng.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to marshal Vonage clear message",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_vonage.Provider,
+				"conversation_uuid": vng.GetConversationUuid(),
+				"error":             err.Error(),
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallFailed,
+				Value:       "1",
+				Description: "Failed to marshal Vonage clear message",
+			}},
+		})
 		return err
 	}
 	vng.writeMu.Lock()
@@ -271,7 +589,20 @@ func (vng *vonageWebsocketStreamer) sendProviderClear() error {
 	if vng.connection == nil {
 		return nil
 	}
-	return vng.connection.WriteMessage(websocket.TextMessage, message)
+	if err := vng.connection.WriteMessage(websocket.TextMessage, message); err != nil {
+		_ = vng.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to send clear message to Vonage",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_vonage.Provider,
+				"conversation_uuid": vng.GetConversationUuid(),
+				"error":             err.Error(),
+			},
+		})
+		return err
+	}
+	return nil
 }
 
 func (vng *vonageWebsocketStreamer) stopAudioProcessing() {

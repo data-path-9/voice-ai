@@ -20,7 +20,7 @@ import (
 )
 
 type Recorder interface {
-	Record(ctx context.Context, scope Scope, record Record) error
+	Record(ctx context.Context, scope Scope, record ...Record) error
 	AddCollectors(collectors ...Collector) error
 	Close(ctx context.Context) error
 }
@@ -173,35 +173,38 @@ func New(options ...Option) Recorder {
 	return r
 }
 
-func (r *recorder) Record(ctx context.Context, scope Scope, record Record) error {
-	item, err := r.normalize(scope, record)
-	if err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	item.context = r.context
-	if traceID, ok := ctx.Value(types.REQUEST_ID_KEY).(string); ok && traceID != "" {
-		item.context.TraceID = traceID
-	}
-	if item.context.TraceID == "" {
-		item.context.TraceID = uuid.New().String()
-	}
+func (r *recorder) Record(ctx context.Context, scope Scope, records ...Record) error {
+	for _, record := range records {
+		item, err := r.normalize(scope, record)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		item.context = r.context
+		if traceID, ok := ctx.Value(types.REQUEST_ID_KEY).(string); ok && traceID != "" {
+			item.context.TraceID = traceID
+		}
+		if item.context.TraceID == "" {
+			item.context.TraceID = uuid.New().String()
+		}
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if r.closed {
-		return ErrRecorderClosed
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		if r.closed {
+			return ErrRecorderClosed
+		}
+		select {
+		case r.queue <- item:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return ErrBufferFull
+		}
 	}
-	select {
-	case r.queue <- item:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return ErrBufferFull
-	}
+	return nil
 }
 
 func (r *recorder) AddCollectors(collectors ...Collector) error {

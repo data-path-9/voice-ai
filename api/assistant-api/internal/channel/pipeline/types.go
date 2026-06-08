@@ -7,25 +7,21 @@
 package channel_pipeline
 
 import (
-	"bufio"
-	"errors"
-	"net"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/types"
+	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
-)
-
-var (
-	ErrCallbackNotConfigured = errors.New("pipeline callback not configured")
 )
 
 type Pipeline interface {
 	CallID() string
+	Validate() bool
 }
 
 type CallReceivedPipeline struct {
@@ -34,9 +30,18 @@ type CallReceivedPipeline struct {
 	Auth        types.SimplePrinciple
 	AssistantID uint64
 	GinContext  *gin.Context
+	Observer    observability.Recorder
 }
 
 func (p CallReceivedPipeline) CallID() string { return p.ID }
+func (p CallReceivedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.Provider) &&
+		validator.NonNil(p.Auth) &&
+		validator.AllNonZero(p.AssistantID) &&
+		validator.NonNil(p.GinContext) &&
+		validator.NonNil(p.Observer)
+}
 
 type WebhookParsedPipeline struct {
 	ID          string
@@ -48,6 +53,14 @@ type WebhookParsedPipeline struct {
 }
 
 func (p WebhookParsedPipeline) CallID() string { return p.ID }
+func (p WebhookParsedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.Provider) &&
+		validator.NonNil(p.Auth) &&
+		validator.AllNonZero(p.AssistantID) &&
+		validator.NonNil(p.CallInfo) &&
+		validator.NonNil(p.GinContext)
+}
 
 type AssistantResolvedPipeline struct {
 	ID          string
@@ -60,6 +73,15 @@ type AssistantResolvedPipeline struct {
 }
 
 func (p AssistantResolvedPipeline) CallID() string { return p.ID }
+func (p AssistantResolvedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.Provider) &&
+		validator.NonNil(p.Auth) &&
+		validator.AllNonZero(p.AssistantID) &&
+		validator.NonNil(p.Assistant) &&
+		validator.NonNil(p.CallInfo) &&
+		validator.NonNil(p.GinContext)
+}
 
 type ConversationCreatedPipeline struct {
 	ID             string
@@ -74,6 +96,16 @@ type ConversationCreatedPipeline struct {
 }
 
 func (p ConversationCreatedPipeline) CallID() string { return p.ID }
+func (p ConversationCreatedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.Provider) &&
+		validator.NonNil(p.Auth) &&
+		validator.AllNonZero(p.AssistantID, p.ConversationID) &&
+		validator.NotBlank(p.ContextID) &&
+		validator.NonNil(p.Assistant) &&
+		validator.NonNil(p.CallInfo) &&
+		validator.NonNil(p.GinContext)
+}
 
 type ProviderAnsweringPipeline struct {
 	ID             string
@@ -87,6 +119,15 @@ type ProviderAnsweringPipeline struct {
 }
 
 func (p ProviderAnsweringPipeline) CallID() string { return p.ID }
+func (p ProviderAnsweringPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.Provider) &&
+		validator.NonNil(p.Auth) &&
+		validator.AllNonZero(p.AssistantID, p.ConversationID) &&
+		validator.NotBlank(p.ContextID) &&
+		validator.NotBlank(p.CallerNumber) &&
+		validator.NonNil(p.GinContext)
+}
 
 type ProviderAnsweredPipeline struct {
 	ID        string
@@ -94,17 +135,25 @@ type ProviderAnsweredPipeline struct {
 }
 
 func (p ProviderAnsweredPipeline) CallID() string { return p.ID }
+func (p ProviderAnsweredPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.ContextID)
+}
 
 type SessionConnectedPipeline struct {
-	ID        string
-	ContextID string
-	WebSocket *websocket.Conn
-	Conn      net.Conn
-	Reader    *bufio.Reader
-	Writer    *bufio.Writer
+	ID          string
+	ContextID   string
+	CallContext *callcontext.CallContext
+	Talker      internal_type.Talking
 }
 
 func (p SessionConnectedPipeline) CallID() string { return p.ID }
+func (p SessionConnectedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.ContextID) &&
+		validator.NonNil(p.CallContext) &&
+		validator.NonNil(p.Talker)
+}
 
 type SessionInitializedPipeline struct {
 	ID   string
@@ -112,12 +161,19 @@ type SessionInitializedPipeline struct {
 }
 
 func (p SessionInitializedPipeline) CallID() string { return p.ID }
+func (p SessionInitializedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NonNil(p.Auth)
+}
 
 type CallActivePipeline struct {
 	ID string
 }
 
 func (p CallActivePipeline) CallID() string { return p.ID }
+func (p CallActivePipeline) Validate() bool {
+	return validator.NotBlank(p.ID)
+}
 
 type ModeSwitchPipeline struct {
 	ID   string
@@ -126,6 +182,11 @@ type ModeSwitchPipeline struct {
 }
 
 func (p ModeSwitchPipeline) CallID() string { return p.ID }
+func (p ModeSwitchPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.From) &&
+		validator.NotBlank(p.To)
+}
 
 type DisconnectRequestedPipeline struct {
 	ID     string
@@ -133,6 +194,10 @@ type DisconnectRequestedPipeline struct {
 }
 
 func (p DisconnectRequestedPipeline) CallID() string { return p.ID }
+func (p DisconnectRequestedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.Reason)
+}
 
 type CallCompletedPipeline struct {
 	ID       string
@@ -142,6 +207,11 @@ type CallCompletedPipeline struct {
 }
 
 func (p CallCompletedPipeline) CallID() string { return p.ID }
+func (p CallCompletedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		p.Duration > 0 &&
+		validator.NotBlank(p.Reason)
+}
 
 type CallFailedPipeline struct {
 	ID    string
@@ -150,6 +220,11 @@ type CallFailedPipeline struct {
 }
 
 func (p CallFailedPipeline) CallID() string { return p.ID }
+func (p CallFailedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.Stage) &&
+		validator.NonNil(p.Error)
+}
 
 type OutboundRequestedPipeline struct {
 	ID          string
@@ -161,9 +236,17 @@ type OutboundRequestedPipeline struct {
 	Metadata    map[string]interface{}
 	Args        map[string]interface{}
 	Options     map[string]interface{}
+	Observer    observability.Recorder
 }
 
 func (p OutboundRequestedPipeline) CallID() string { return p.ID }
+func (p OutboundRequestedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NonNil(p.Auth) &&
+		validator.AllNonZero(p.AssistantID) &&
+		validator.NotBlank(p.ToPhone) &&
+		validator.NonNil(p.Observer)
+}
 
 type OutboundDialedPipeline struct {
 	ID       string
@@ -171,6 +254,10 @@ type OutboundDialedPipeline struct {
 }
 
 func (p OutboundDialedPipeline) CallID() string { return p.ID }
+func (p OutboundDialedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NonNil(p.CallInfo)
+}
 
 type EventEmittedPipeline struct {
 	ID    string
@@ -179,6 +266,11 @@ type EventEmittedPipeline struct {
 }
 
 func (p EventEmittedPipeline) CallID() string { return p.ID }
+func (p EventEmittedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotBlank(p.Event) &&
+		validator.NonNil(p.Data)
+}
 
 type MetricEmittedPipeline struct {
 	ID      string
@@ -186,3 +278,7 @@ type MetricEmittedPipeline struct {
 }
 
 func (p MetricEmittedPipeline) CallID() string { return p.ID }
+func (p MetricEmittedPipeline) Validate() bool {
+	return validator.NotBlank(p.ID) &&
+		validator.NotEmpty(p.Metrics)
+}

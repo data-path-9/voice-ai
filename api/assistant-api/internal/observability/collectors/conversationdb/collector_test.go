@@ -25,12 +25,12 @@ type conversationServiceStub struct {
 	metricAuth           types.SimplePrinciple
 	metricAssistantID    uint64
 	metricConversationID uint64
-	metrics              []*types.Metric
+	metrics              []*protos.Metric
 
 	metadataAuth           types.SimplePrinciple
 	metadataAssistantID    uint64
 	metadataConversationID uint64
-	metadata               []*types.Metadata
+	metadata               []*protos.Metadata
 
 	messageMetricAuth           types.SimplePrinciple
 	messageMetricConversationID uint64
@@ -48,7 +48,7 @@ func (s *conversationServiceStub) CreateOrUpdateConversationMetrics(
 	auth types.SimplePrinciple,
 	assistantID uint64,
 	conversationID uint64,
-	metrics []*types.Metric,
+	metrics []*protos.Metric,
 ) ([]*internal_conversation_entity.AssistantConversationMetric, error) {
 	s.metricAuth = auth
 	s.metricAssistantID = assistantID
@@ -62,7 +62,7 @@ func (s *conversationServiceStub) CreateOrUpdateConversationMetadata(
 	auth types.SimplePrinciple,
 	assistantID uint64,
 	conversationID uint64,
-	metadata []*types.Metadata,
+	metadata []*protos.Metadata,
 ) ([]*internal_conversation_entity.AssistantConversationMetadata, error) {
 	s.metadataAuth = auth
 	s.metadataAssistantID = assistantID
@@ -188,19 +188,19 @@ func TestCollectMetadata_AssistantScopeUnsupported(t *testing.T) {
 }
 
 func TestConversionToServiceTypes(t *testing.T) {
-	metrics := toServiceMetrics([]*protos.Metric{{
+	metrics := []*protos.Metric{{
 		Name:        observability.MetricConversationDuration,
 		Value:       "1000",
 		Description: "duration",
-	}})
+	}}
 	if len(metrics) != 1 || metrics[0].Name != observability.MetricConversationDuration || metrics[0].Description != "duration" {
 		t.Fatalf("unexpected service metrics: %+v", metrics)
 	}
 
-	metadata := toServiceMetadata([]*protos.Metadata{{
+	metadata := []*protos.Metadata{{
 		Key:   observability.MetadataDisconnectReason,
 		Value: "normal_clearing",
-	}})
+	}}
 	if len(metadata) != 1 || metadata[0].Key != observability.MetadataDisconnectReason || metadata[0].Value != "normal_clearing" {
 		t.Fatalf("unexpected service metadata: %+v", metadata)
 	}

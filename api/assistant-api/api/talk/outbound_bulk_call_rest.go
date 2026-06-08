@@ -6,6 +6,7 @@
 package assistant_talk_api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -66,6 +67,8 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 	}
 
 	conversations := make([]openapi.AssistantConversation, 0, len(*ir.PhoneCalls))
+	observer := cApi.Observability(c, auth)
+	defer observer.Close(context.Background())
 	for _, phoneCall := range *ir.PhoneCalls {
 		if !validator.NonNil(phoneCall.ToNumber) || !validator.NotBlank(*phoneCall.ToNumber) {
 			c.JSON(pkg_errors.CreateBulkPhoneCallMissingToNumber.HTTPStatusCode, openapi.ErrorResponse{
@@ -124,7 +127,6 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 		if validator.NonNil(phoneCall.Options) {
 			opts = *phoneCall.Options
 		}
-
 		result := cApi.channelPipeline.Run(c, channel_pipeline.OutboundRequestedPipeline{
 			ID:          fmt.Sprintf("%d", assistant.GetAssistantId()),
 			Auth:        auth,
@@ -135,7 +137,9 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 			Metadata:    metadata,
 			Args:        args,
 			Options:     opts,
+			Observer:    observer,
 		})
+
 		if result.Error != nil {
 			cApi.logger.Errorf("bulk outbound call failed: %v", result.Error)
 			c.JSON(pkg_errors.CreateBulkPhoneCallInitiateOutbound.HTTPStatusCode, openapi.ErrorResponse{

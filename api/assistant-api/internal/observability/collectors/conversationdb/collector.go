@@ -16,7 +16,6 @@ import (
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/validator"
-	"github.com/rapidaai/protos"
 )
 
 var (
@@ -98,7 +97,7 @@ func (c *Collector) collectMetrics(ctx context.Context, scope observability.Scop
 			auth,
 			scope.AssistantScopeID(),
 			scope.ConversationScopeID(),
-			toServiceMetrics(record.Metrics),
+			record.Metrics,
 		)
 		return err
 	case observability.AssistantScope:
@@ -142,7 +141,7 @@ func (c *Collector) collectMetadata(ctx context.Context, scope observability.Sco
 			auth,
 			scope.AssistantScopeID(),
 			scope.ConversationScopeID(),
-			toServiceMetadata(record.Metadata),
+			record.Metadata,
 		)
 		return err
 	case observability.AssistantScope:
@@ -159,27 +158,6 @@ func authFromContext(ctx context.Context) (types.SimplePrinciple, error) {
 	}
 	return auth, nil
 }
-
-func toServiceMetrics(metrics []*protos.Metric) []*types.Metric {
-	converted := make([]*types.Metric, 0, len(metrics))
-	for _, metric := range metrics {
-		converted = append(converted, &types.Metric{
-			Name:        metric.Name,
-			Value:       metric.Value,
-			Description: metric.Description,
-		})
-	}
-	return converted
-}
-
-func toServiceMetadata(metadata []*protos.Metadata) []*types.Metadata {
-	converted := make([]*types.Metadata, 0, len(metadata))
-	for _, item := range metadata {
-		converted = append(converted, types.NewMetadata(item.Key, item.Value))
-	}
-	return converted
-}
-
 func validateCollector(collector *Collector) error {
 	if !validator.NonNil(collector) || !validator.NonNil(collector.service) {
 		return ErrPostgresRequired

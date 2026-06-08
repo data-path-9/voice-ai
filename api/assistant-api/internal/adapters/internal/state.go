@@ -199,7 +199,12 @@ func (tc *genericRequestor) applyMetadata(mt map[string]interface{}) {
 	utils.Go(context.Background(), func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
-		tc.conversationService.CreateOrUpdateConversationMetadata(dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, types.NewMetadataList(modified))
+
+		var metadataList []*protos.Metadata
+		for key, value := range modified {
+			metadataList = append(metadataList, &protos.Metadata{Key: key, Value: fmt.Sprintf("%d", value)})
+		}
+		tc.conversationService.CreateOrUpdateConversationMetadata(dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, metadataList)
 	})
 }
 
@@ -212,7 +217,7 @@ func (tc *genericRequestor) applyArguments(args map[string]interface{}) {
 	utils.Go(context.Background(), func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
-		if _, err := tc.conversationService.ApplyConversationArgument(
+		if _, err := tc.conversationService.CreateOrUpdateConversationArgument(
 			dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, args,
 		); err != nil {
 			tc.OnPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{
@@ -246,7 +251,7 @@ func (tc *genericRequestor) applyOptions(opts map[string]interface{}) {
 	utils.Go(context.Background(), func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
-		if _, err := tc.conversationService.ApplyConversationOption(
+		if _, err := tc.conversationService.CreateOrUpdateConversationOption(
 			dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, opts,
 		); err != nil {
 			tc.OnPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{

@@ -22,6 +22,7 @@ import (
 	internal_asterisk "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/asterisk/internal"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -46,19 +47,66 @@ type Streamer struct {
 	initialUUID string
 }
 
-// NewStreamer creates a new AudioSocket streamer.
-// initialUUID is the contextId already read from the first UUID frame by the AudioSocket
-// engine -- when set, the streamer emits ConversationInitialization on the first Recv()
-// without waiting for another UUID frame from the wire.
-func NewStreamer(
-	logger commons.Logger,
-	conn net.Conn,
-	reader *bufio.Reader,
-	writer *bufio.Writer,
-	cc *callcontext.CallContext,
-	vaultCred *protos.VaultCredential,
-) (internal_type.Streamer, error) {
-	audioProcessor, err := internal_asterisk.NewAudioProcessor(logger, internal_asterisk.AudioProcessorConfig{
+type StreamerOptions struct {
+	Logger          commons.Logger
+	Connection      net.Conn
+	Reader          *bufio.Reader
+	Writer          *bufio.Writer
+	CallContext     *callcontext.CallContext
+	VaultCredential *protos.VaultCredential
+	Observer        observability.Recorder
+}
+
+type FuncOption func(*StreamerOptions)
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithConnection(connection net.Conn) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Connection = connection
+	}
+}
+
+func WithReader(reader *bufio.Reader) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Reader = reader
+	}
+}
+
+func WithWriter(writer *bufio.Writer) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Writer = writer
+	}
+}
+
+func WithCallContext(callContext *callcontext.CallContext) FuncOption {
+	return func(options *StreamerOptions) {
+		options.CallContext = callContext
+	}
+}
+
+func WithVaultCredential(vaultCredential *protos.VaultCredential) FuncOption {
+	return func(options *StreamerOptions) {
+		options.VaultCredential = vaultCredential
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.Streamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	audioProcessor, err := internal_asterisk.NewAudioProcessor(options.Logger, internal_asterisk.AudioProcessorConfig{
 		AsteriskConfig:   internal_audio.NewLinear8khzMonoAudioConfig(),
 		DownstreamConfig: internal_audio.NewLinear16khzMonoAudioConfig(),
 		SilenceByte:      0x00, // SLIN silence
@@ -68,27 +116,27 @@ func NewStreamer(
 		return nil, err
 	}
 
-	if reader == nil {
-		reader = bufio.NewReader(conn)
+	if options.Reader == nil {
+		options.Reader = bufio.NewReader(options.Connection)
 	}
-	if writer == nil {
-		writer = bufio.NewWriter(conn)
+	if options.Writer == nil {
+		options.Writer = bufio.NewWriter(options.Connection)
 	}
 
 	as := &Streamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, vaultCred,
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			options.Logger, options.CallContext, options.VaultCredential, options.Observer,
 		),
-		conn:           conn,
-		reader:         reader,
-		writer:         writer,
+		conn:           options.Connection,
+		reader:         options.Reader,
+		writer:         options.Writer,
 		audioProcessor: audioProcessor,
-		initialUUID:    cc.ContextID,
+		initialUUID:    options.CallContext.ContextID,
 	}
 	as.ctx, as.cancel = context.WithCancel(as.Ctx)
 	as.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     as.ctx,
-		Logger:      logger,
+		Logger:      options.Logger,
 		MediaEngine: audioProcessor,
 		StreamSink:  as.Input,
 		OutputSink:  as.sendOutputFrame,

@@ -15,11 +15,11 @@ import (
 
 func TestStreamerOption_AppliesSIPStreamerOptions(t *testing.T) {
 	ctx := context.Background()
-	var resolvedOptions streamerOptions
+	var resolvedOptions StreamerOptions
 
-	WithSIPStreamer(ctx, nil, nil).apply(&resolvedOptions)
+	WithSIPStreamer(ctx, nil, nil)(&resolvedOptions)
 
-	if resolvedOptions.ctx != ctx {
+	if resolvedOptions.Context != ctx {
 		t.Fatal("expected streamer options to preserve context")
 	}
 }
@@ -31,17 +31,17 @@ func TestStreamerOption_AppliesAudioSocketStreamerOptions(t *testing.T) {
 
 	reader := bufio.NewReader(clientConn)
 	writer := bufio.NewWriter(clientConn)
-	var resolvedOptions streamerOptions
+	var resolvedOptions StreamerOptions
 
-	WithAudioSocketStreamer(serverConn, reader, writer).apply(&resolvedOptions)
+	WithAudioSocketStreamer(serverConn, reader, writer)(&resolvedOptions)
 
-	if resolvedOptions.audioSocketConn != serverConn {
+	if resolvedOptions.AudioSocketConn != serverConn {
 		t.Fatal("expected streamer options to preserve AudioSocket connection")
 	}
-	if resolvedOptions.audioSocketReader != reader {
+	if resolvedOptions.AudioSocketReader != reader {
 		t.Fatal("expected streamer options to preserve AudioSocket reader")
 	}
-	if resolvedOptions.audioSocketWriter != writer {
+	if resolvedOptions.AudioSocketWriter != writer {
 		t.Fatal("expected streamer options to preserve AudioSocket writer")
 	}
 }

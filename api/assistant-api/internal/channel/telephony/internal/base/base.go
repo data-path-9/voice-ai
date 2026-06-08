@@ -13,6 +13,7 @@ import (
 	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	channel_base "github.com/rapidaai/api/assistant-api/internal/channel/base"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/utils"
@@ -35,18 +36,20 @@ type BaseTelephonyStreamer struct {
 	resampler       internal_type.AudioResampler
 	encoder         *base64.Encoding
 	vaultCredential *protos.VaultCredential
+	observer        observability.Recorder
 
 	// ChannelUUID is the provider-specific call identifier, propagated from
 	// CallContext so concrete streamers can use it for call control.
 	ChannelUUID string
 }
 
-// NewBaseTelephonyStreamer creates a new BaseTelephonyStreamer from call context
+// New creates a new BaseTelephonyStreamer from call context
 // and vault credentials.
-func NewBaseTelephonyStreamer(
+func New(
 	logger commons.Logger,
 	cc *callcontext.CallContext,
 	vaultCred *protos.VaultCredential,
+	observer observability.Recorder,
 ) BaseTelephonyStreamer {
 	resampler, _ := internal_audio_resampler.GetResampler(logger)
 	return BaseTelephonyStreamer{
@@ -55,6 +58,7 @@ func NewBaseTelephonyStreamer(
 		resampler:       resampler,
 		encoder:         base64.StdEncoding,
 		vaultCredential: vaultCred,
+		observer:        observer,
 		ChannelUUID:     cc.ChannelUUID,
 	}
 }
@@ -85,6 +89,20 @@ func (base *BaseTelephonyStreamer) VaultCredential() *protos.VaultCredential {
 // Resampler returns the audio resampler.
 func (base *BaseTelephonyStreamer) Resampler() internal_type.AudioResampler {
 	return base.resampler
+}
+
+func (base *BaseTelephonyStreamer) Observer() observability.Recorder {
+	return base.observer
+}
+
+func (base *BaseTelephonyStreamer) Record(records ...observability.Record) error {
+	if base.observer == nil {
+		return nil
+	}
+	return base.observer.Record(base.Ctx, observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: base.GetAssistantDefinition().AssistantId},
+		ConversationID: base.GetConversationId(),
+	}, records...)
 }
 
 // CreateConnectionRequest builds the initial ConversationInitialization message.

@@ -6,6 +6,7 @@
 package assistant_talk_api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -13,8 +14,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	internal_adapter "github.com/rapidaai/api/assistant-api/internal/adapters"
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
+	channel_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
 	"github.com/rapidaai/pkg/types"
+	"github.com/rapidaai/pkg/utils"
 )
 
 // CallReciever handles incoming calls for the given assistant.
@@ -37,6 +41,9 @@ func (cApi *ConversationApi) CallReciever(c *gin.Context) {
 		return
 	}
 
+	observer := cApi.Observability(c, iAuth)
+	defer observer.Close(context.Background())
+
 	// Pipeline handles: create conversation, answer provider, emit events
 	result := cApi.channelPipeline.Run(c, channel_pipeline.CallReceivedPipeline{
 		ID:          uuid.NewString(),
@@ -44,6 +51,7 @@ func (cApi *ConversationApi) CallReciever(c *gin.Context) {
 		Auth:        iAuth,
 		AssistantID: assistantId,
 		GinContext:  c,
+		Observer:    observer,
 	})
 	if result.Error != nil {
 		cApi.logger.Errorf("failed to handle inbound call: %v", result.Error)
@@ -72,12 +80,36 @@ func (cApi *ConversationApi) CallTalkerByContext(c *gin.Context) {
 		return
 	}
 
-	// Pipeline handles: resolve context, create streamer, create talker,
-	// create observer+hooks, hooks.OnBegin, Talk() (blocks), hooks.OnEnd, cleanup.
+	callContext, vaultCredential, err := cApi.inboundDispatcher.ResolveCallSessionByContext(c, contextID)
+	if err != nil {
+		cApi.logger.Errorf("failed to resolve call context %s: %v", contextID, err)
+		return
+	}
+	observer := cApi.Observability(c, callContext.ToAuth())
+	defer observer.Close(context.Background())
+
+	streamer, err := channel_telephony.Telephony(callContext.Provider).NewStreamer(
+		cApi.logger,
+		callContext,
+		vaultCredential,
+		channel_telephony.WithWebSocketStreamer(ws),
+		channel_telephony.WithObserver(observer),
+	)
+	if err != nil {
+		cApi.logger.Errorf("failed to create streamer for context %s: %v", contextID, err)
+		return
+	}
+	talker, err := internal_adapter.GetTalker(utils.PhoneCall, c, cApi.cfg, cApi.logger, cApi.postgres, cApi.opensearch, cApi.redis, cApi.storage, streamer)
+	if err != nil {
+		cApi.logger.Errorf("failed to create talker for context %s: %v", contextID, err)
+		return
+	}
+
 	result := cApi.channelPipeline.Run(c, channel_pipeline.SessionConnectedPipeline{
-		ID:        contextID,
-		ContextID: contextID,
-		WebSocket: ws,
+		ID:          contextID,
+		ContextID:   contextID,
+		CallContext: callContext,
+		Talker:      talker,
 	})
 	if result != nil && result.Error != nil {
 		cApi.logger.Errorf("talk failed for context %s: %v", contextID, result.Error)

@@ -70,7 +70,12 @@ func TestNewTelnyxWebsocketStreamer_WiresMediaSession(t *testing.T) {
 		Provider:       "telnyx",
 	}
 
-	streamer, err := NewTelnyxWebsocketStreamer(logger, nil, callContext, nil)
+	streamer, err := New(
+		WithLogger(logger),
+		WithConnection(nil),
+		WithCallContext(callContext),
+		WithVaultCredential(nil),
+	)
 	require.NoError(t, err)
 	telnyxStreamer, ok := streamer.(*telnyxWebsocketStreamer)
 	require.True(t, ok, "expected telnyx websocket streamer")
@@ -88,7 +93,7 @@ func TestHandleMediaEvent_EmitsBridgeUserAudio(t *testing.T) {
 	}
 	mediaEngine := &fakeTelnyxMediaEngine{}
 	telnyxStreamer := &telnyxWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	telnyxStreamer.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     telnyxStreamer.Ctx,
@@ -128,7 +133,7 @@ func TestHandleMediaEvent_ReturnsMediaProcessingError(t *testing.T) {
 	}
 	mediaEngine := &fakeTelnyxMediaEngine{processError: errors.New("media process failed")}
 	telnyxStreamer := &telnyxWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	telnyxStreamer.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     telnyxStreamer.Ctx,
@@ -154,7 +159,7 @@ func TestHandleMediaEvent_MissingMediaPayloadDoesNotPanic(t *testing.T) {
 		Provider:       "telnyx",
 	}
 	telnyxStreamer := &telnyxWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 
 	err := telnyxStreamer.handleMediaEvent(internal_telnyx.TelnyxWebSocketEvent{})

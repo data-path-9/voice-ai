@@ -21,106 +21,202 @@ import (
 	internal_telnyx_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx"
 	internal_twilio_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio"
 	internal_vonage_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
 )
 
-type streamerOptions struct {
-	webSocketConn *websocket.Conn
+type StreamerOptions struct {
+	WebSocketConn *websocket.Conn
 
-	audioSocketConn   net.Conn
-	audioSocketReader *bufio.Reader
-	audioSocketWriter *bufio.Writer
+	AudioSocketConn   net.Conn
+	AudioSocketReader *bufio.Reader
+	AudioSocketWriter *bufio.Writer
 
-	ctx          context.Context
-	sipSession   *sip_infra.Session
-	sipLifecycle sip_infra.LifecycleController
+	Context      context.Context
+	SIPSession   *sip_infra.Session
+	SIPLifecycle sip_infra.LifecycleController
+	Observer     observability.Recorder
 }
 
-// StreamerOption configures transport-specific streamer construction.
-type StreamerOption interface {
-	apply(*streamerOptions)
-}
+type StreamerFuncOption func(*StreamerOptions)
 
-type funcStreamerOption struct {
-	applyFunc func(*streamerOptions)
-}
-
-func (option *funcStreamerOption) apply(streamerOptions *streamerOptions) {
-	option.applyFunc(streamerOptions)
-}
-
-func newStreamerOption(applyFunc func(*streamerOptions)) StreamerOption {
-	return &funcStreamerOption{
-		applyFunc: applyFunc,
+// WithWebSocketStreamer configures websocket media transport.
+func WithWebSocketStreamer(conn *websocket.Conn) StreamerFuncOption {
+	return func(streamerOptions *StreamerOptions) {
+		streamerOptions.WebSocketConn = conn
 	}
 }
 
-// WithWebSocketStreamer configures websocket media transport.
-func WithWebSocketStreamer(conn *websocket.Conn) StreamerOption {
-	return newStreamerOption(func(streamerOptions *streamerOptions) {
-		streamerOptions.webSocketConn = conn
-	})
-}
-
 // WithAudioSocketStreamer configures Asterisk AudioSocket media transport.
-func WithAudioSocketStreamer(conn net.Conn, reader *bufio.Reader, writer *bufio.Writer) StreamerOption {
-	return newStreamerOption(func(streamerOptions *streamerOptions) {
-		streamerOptions.audioSocketConn = conn
-		streamerOptions.audioSocketReader = reader
-		streamerOptions.audioSocketWriter = writer
-	})
+func WithAudioSocketStreamer(conn net.Conn, reader *bufio.Reader, writer *bufio.Writer) StreamerFuncOption {
+	return func(streamerOptions *StreamerOptions) {
+		streamerOptions.AudioSocketConn = conn
+		streamerOptions.AudioSocketReader = reader
+		streamerOptions.AudioSocketWriter = writer
+	}
 }
 
 // WithSIPStreamer configures SIP session-owned media transport.
-func WithSIPStreamer(ctx context.Context, session *sip_infra.Session, lifecycle sip_infra.LifecycleController) StreamerOption {
-	return newStreamerOption(func(streamerOptions *streamerOptions) {
-		streamerOptions.ctx = ctx
-		streamerOptions.sipSession = session
-		streamerOptions.sipLifecycle = lifecycle
-	})
+func WithSIPStreamer(ctx context.Context, session *sip_infra.Session, lifecycle sip_infra.LifecycleController) StreamerFuncOption {
+	return func(streamerOptions *StreamerOptions) {
+		streamerOptions.Context = ctx
+		streamerOptions.SIPSession = session
+		streamerOptions.SIPLifecycle = lifecycle
+	}
+}
+
+func WithObserver(observer observability.Recorder) StreamerFuncOption {
+	return func(streamerOptions *StreamerOptions) {
+		streamerOptions.Observer = observer
+	}
 }
 
 func (at Telephony) NewStreamer(
 	logger commons.Logger,
 	callContext *callcontext.CallContext,
 	vaultCredential *protos.VaultCredential,
-	options ...StreamerOption,
+	options ...StreamerFuncOption,
 ) (internal_type.Streamer, error) {
-	var resolvedOptions streamerOptions
+	var resolvedOptions StreamerOptions
 	for _, option := range options {
-		option.apply(&resolvedOptions)
+		option(&resolvedOptions)
 	}
 	switch at {
 	case Twilio:
-		return internal_twilio_telephony.NewTwilioWebsocketStreamer(logger, resolvedOptions.webSocketConn, callContext, vaultCredential)
+		return internal_twilio_telephony.New(
+			internal_twilio_telephony.WithLogger(logger),
+			internal_twilio_telephony.WithConnection(resolvedOptions.WebSocketConn),
+			internal_twilio_telephony.WithCallContext(callContext),
+			internal_twilio_telephony.WithVaultCredential(vaultCredential),
+			internal_twilio_telephony.WithObserver(resolvedOptions.Observer),
+		)
 	case Exotel:
-		return internal_exotel_telephony.NewExotelWebsocketStreamer(logger, resolvedOptions.webSocketConn, callContext, vaultCredential)
+		return internal_exotel_telephony.New(
+			internal_exotel_telephony.WithLogger(logger),
+			internal_exotel_telephony.WithConnection(resolvedOptions.WebSocketConn),
+			internal_exotel_telephony.WithCallContext(callContext),
+			internal_exotel_telephony.WithVaultCredential(vaultCredential),
+			internal_exotel_telephony.WithObserver(resolvedOptions.Observer),
+		)
 	case Vonage:
-		return internal_vonage_telephony.NewVonageWebsocketStreamer(logger, resolvedOptions.webSocketConn, callContext, vaultCredential)
+		return internal_vonage_telephony.New(
+			internal_vonage_telephony.WithLogger(logger),
+			internal_vonage_telephony.WithConnection(resolvedOptions.WebSocketConn),
+			internal_vonage_telephony.WithCallContext(callContext),
+			internal_vonage_telephony.WithVaultCredential(vaultCredential),
+			internal_vonage_telephony.WithObserver(resolvedOptions.Observer),
+		)
 	case Asterisk:
-		if resolvedOptions.audioSocketConn != nil {
-			return internal_asterisk_audiosocket.NewStreamer(logger, resolvedOptions.audioSocketConn, resolvedOptions.audioSocketReader, resolvedOptions.audioSocketWriter, callContext, vaultCredential)
+		if resolvedOptions.AudioSocketConn != nil {
+			return internal_asterisk_audiosocket.New(
+				internal_asterisk_audiosocket.WithLogger(logger),
+				internal_asterisk_audiosocket.WithConnection(resolvedOptions.AudioSocketConn),
+				internal_asterisk_audiosocket.WithReader(resolvedOptions.AudioSocketReader),
+				internal_asterisk_audiosocket.WithWriter(resolvedOptions.AudioSocketWriter),
+				internal_asterisk_audiosocket.WithCallContext(callContext),
+				internal_asterisk_audiosocket.WithVaultCredential(vaultCredential),
+				internal_asterisk_audiosocket.WithObserver(resolvedOptions.Observer),
+			)
 		}
-		return internal_asterisk_websocket.NewAsteriskWebsocketStreamer(logger, resolvedOptions.webSocketConn, callContext, vaultCredential)
+		return internal_asterisk_websocket.New(
+			internal_asterisk_websocket.WithLogger(logger),
+			internal_asterisk_websocket.WithConnection(resolvedOptions.WebSocketConn),
+			internal_asterisk_websocket.WithCallContext(callContext),
+			internal_asterisk_websocket.WithVaultCredential(vaultCredential),
+			internal_asterisk_websocket.WithObserver(resolvedOptions.Observer),
+		)
 	case Telnyx:
-		return internal_telnyx_telephony.NewTelnyxWebsocketStreamer(logger, resolvedOptions.webSocketConn, callContext, vaultCredential)
+		return internal_telnyx_telephony.New(
+			internal_telnyx_telephony.WithLogger(logger),
+			internal_telnyx_telephony.WithConnection(resolvedOptions.WebSocketConn),
+			internal_telnyx_telephony.WithCallContext(callContext),
+			internal_telnyx_telephony.WithVaultCredential(vaultCredential),
+			internal_telnyx_telephony.WithObserver(resolvedOptions.Observer),
+		)
 	case SIP:
-		return NewSIPStreamer(resolvedOptions.ctx, logger, resolvedOptions.sipSession, resolvedOptions.sipLifecycle, callContext, vaultCredential)
+		return New(
+			WithSIPContext(resolvedOptions.Context),
+			WithSIPLogger(logger),
+			WithSIPSession(resolvedOptions.SIPSession),
+			WithSIPLifecycle(resolvedOptions.SIPLifecycle),
+			WithSIPCallContext(callContext),
+			WithSIPVaultCredential(vaultCredential),
+			WithSIPObserver(resolvedOptions.Observer),
+		)
 	default:
 		return nil, fmt.Errorf("streamer not supported for provider %q", at)
 	}
 }
 
-func NewSIPStreamer(
-	ctx context.Context,
-	logger commons.Logger,
-	session *sip_infra.Session,
-	lifecycle sip_infra.LifecycleController,
-	callContext *callcontext.CallContext,
-	vaultCredential *protos.VaultCredential,
-) (internal_type.SIPCallStreamer, error) {
-	return internal_sip_telephony.NewStreamer(ctx, logger, session, lifecycle, callContext, vaultCredential)
+type SIPStreamerOptions struct {
+	Context         context.Context
+	Logger          commons.Logger
+	Session         *sip_infra.Session
+	Lifecycle       sip_infra.LifecycleController
+	CallContext     *callcontext.CallContext
+	VaultCredential *protos.VaultCredential
+	Observer        observability.Recorder
+}
+
+type SIPStreamerFuncOption func(*SIPStreamerOptions)
+
+func WithSIPContext(ctx context.Context) SIPStreamerFuncOption {
+	return func(options *SIPStreamerOptions) {
+		options.Context = ctx
+	}
+}
+
+func WithSIPLogger(logger commons.Logger) SIPStreamerFuncOption {
+	return func(options *SIPStreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithSIPSession(session *sip_infra.Session) SIPStreamerFuncOption {
+	return func(options *SIPStreamerOptions) {
+		options.Session = session
+	}
+}
+
+func WithSIPLifecycle(lifecycle sip_infra.LifecycleController) SIPStreamerFuncOption {
+	return func(options *SIPStreamerOptions) {
+		options.Lifecycle = lifecycle
+	}
+}
+
+func WithSIPCallContext(callContext *callcontext.CallContext) SIPStreamerFuncOption {
+	return func(options *SIPStreamerOptions) {
+		options.CallContext = callContext
+	}
+}
+
+func WithSIPVaultCredential(vaultCredential *protos.VaultCredential) SIPStreamerFuncOption {
+	return func(options *SIPStreamerOptions) {
+		options.VaultCredential = vaultCredential
+	}
+}
+
+func WithSIPObserver(observer observability.Recorder) SIPStreamerFuncOption {
+	return func(options *SIPStreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...SIPStreamerFuncOption) (internal_type.SIPCallStreamer, error) {
+	var options SIPStreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	return internal_sip_telephony.New(
+		internal_sip_telephony.WithContext(options.Context),
+		internal_sip_telephony.WithLogger(options.Logger),
+		internal_sip_telephony.WithSession(options.Session),
+		internal_sip_telephony.WithLifecycle(options.Lifecycle),
+		internal_sip_telephony.WithCallContext(options.CallContext),
+		internal_sip_telephony.WithVaultCredential(options.VaultCredential),
+		internal_sip_telephony.WithObserver(options.Observer),
+	)
 }

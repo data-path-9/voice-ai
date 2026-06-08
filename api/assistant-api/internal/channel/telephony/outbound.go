@@ -14,12 +14,70 @@ import (
 	"github.com/rapidaai/api/assistant-api/config"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
+	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
+	observability_collector_conversationdb "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationdb"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
-	"github.com/rapidaai/pkg/types"
 )
+
+const defaultOutboundConnectTimeout = 2 * time.Minute
+
+type OutboundDispatcherOptions struct {
+	Config              *config.AssistantConfig
+	Logger              commons.Logger
+	Store               callcontext.Store
+	VaultClient         web_client.VaultClient
+	AssistantService    internal_services.AssistantService
+	ConversationService internal_services.AssistantConversationService
+	TelephonyOption     TelephonyOption
+}
+
+type OutboundDispatcherFuncOption func(*OutboundDispatcherOptions)
+
+func WithOutboundConfig(cfg *config.AssistantConfig) OutboundDispatcherFuncOption {
+	return func(options *OutboundDispatcherOptions) {
+		options.Config = cfg
+	}
+}
+
+func WithOutboundLogger(logger commons.Logger) OutboundDispatcherFuncOption {
+	return func(options *OutboundDispatcherOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithOutboundStore(store callcontext.Store) OutboundDispatcherFuncOption {
+	return func(options *OutboundDispatcherOptions) {
+		options.Store = store
+	}
+}
+
+func WithOutboundVaultClient(vaultClient web_client.VaultClient) OutboundDispatcherFuncOption {
+	return func(options *OutboundDispatcherOptions) {
+		options.VaultClient = vaultClient
+	}
+}
+
+func WithOutboundAssistantService(assistantService internal_services.AssistantService) OutboundDispatcherFuncOption {
+	return func(options *OutboundDispatcherOptions) {
+		options.AssistantService = assistantService
+	}
+}
+
+func WithOutboundConversationService(conversationService internal_services.AssistantConversationService) OutboundDispatcherFuncOption {
+	return func(options *OutboundDispatcherOptions) {
+		options.ConversationService = conversationService
+	}
+}
+
+func WithOutboundTelephonyOption(telephonyOpt TelephonyOption) OutboundDispatcherFuncOption {
+	return func(options *OutboundDispatcherOptions) {
+		options.TelephonyOption = telephonyOpt
+	}
+}
 
 type OutboundDispatcher struct {
 	cfg                    *config.AssistantConfig
@@ -32,15 +90,19 @@ type OutboundDispatcher struct {
 	outboundConnectTimeout time.Duration
 }
 
-func NewOutboundDispatcher(deps TelephonyDispatcherDeps) *OutboundDispatcher {
+func NewOutboundDispatcher(opts ...OutboundDispatcherFuncOption) *OutboundDispatcher {
+	var options OutboundDispatcherOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
 	return &OutboundDispatcher{
-		cfg:                    deps.Cfg,
-		store:                  deps.Store,
-		logger:                 deps.Logger,
-		vaultClient:            deps.VaultClient,
-		assistantService:       deps.AssistantService,
-		conversationService:    deps.ConversationService,
-		telephonyOpt:           deps.TelephonyOpt,
+		cfg:                    options.Config,
+		store:                  options.Store,
+		logger:                 options.Logger,
+		vaultClient:            options.VaultClient,
+		assistantService:       options.AssistantService,
+		conversationService:    options.ConversationService,
+		telephonyOpt:           options.TelephonyOption,
 		outboundConnectTimeout: defaultOutboundConnectTimeout,
 	}
 }
@@ -70,8 +132,6 @@ func (d *OutboundDispatcher) Dispatch(ctx context.Context, contextID string) err
 	return nil
 }
 
-const defaultOutboundConnectTimeout = 2 * time.Minute
-
 // monitorCallConnect marks unclaimed outbound calls as no-answer after the provider timeout.
 func (d *OutboundDispatcher) monitorCallConnect(ctx context.Context, contextID string, cc *callcontext.CallContext) {
 	outboundConnectTimeout := d.providerOutboundConnectTimeout(cc.Provider)
@@ -95,12 +155,32 @@ func (d *OutboundDispatcher) monitorCallConnect(ctx context.Context, contextID s
 		"timeout", outboundConnectTimeout)
 
 	d.persistOutboundConnectTimeout(ctx, currentCallContext)
-
 	if d.conversationService != nil {
 		auth := cc.ToAuth()
-		d.conversationService.CreateOrUpdateConversationMetrics(ctx, auth, cc.AssistantID, cc.ConversationID, []*types.Metric{
-			{Name: "status", Value: "FAILED", Description: "no_answer_timeout"},
+		otelCollectors := make([]observability.Collector, 0)
+		otelCollectors = append(otelCollectors, observability_collector_conversationdb.New(observability_collector_conversationdb.Config{
+			Logger:              d.logger,
+			ConversationService: d.conversationService,
+		}))
+		otelCollectors = append(otelCollectors, collectors.NewWithEnv(ctx, d.logger, d.cfg)...)
+		observer := observability.New(
+			observability.WithLogger(d.logger),
+			observability.WithAuth(auth),
+			observability.WithContext(ctx),
+			observability.WithCollectors(otelCollectors...),
+		)
+		_ = observer.Record(ctx, observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: cc.AssistantID},
+			ConversationID: cc.ConversationID,
+		}, observability.RecordMetric{
+			Metrics: observability.CallStatusMetric("FAILED", "no_answer_timeout"),
 		})
+		if err := observer.Close(ctx); err != nil {
+			d.logger.Warnw("Failed to record outbound timeout metric",
+				"contextId", contextID,
+				"provider", cc.Provider,
+				"error", err)
+		}
 	}
 }
 

@@ -101,6 +101,9 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 		}, errors.New(pkg_errors.CreatePhoneCallInvalidOptions.Error)
 	}
 
+	observer := cApi.Observability(ctx, auth)
+	defer observer.Close(context.Background())
+
 	// Pipeline handles the full outbound flow
 	result := cApi.channelPipeline.Run(ctx, channel_pipeline.OutboundRequestedPipeline{
 		ID:          fmt.Sprintf("%d", ir.GetAssistant().GetAssistantId()),
@@ -112,6 +115,7 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 		Metadata:    mtd,
 		Args:        args,
 		Options:     opts,
+		Observer:    observer,
 	})
 
 	if result.Error != nil {
@@ -229,6 +233,8 @@ func (cApi *ConversationGrpcApi) CreateBulkPhoneCall(ctx context.Context, ir *pr
 			}, errors.New(pkg_errors.CreateBulkPhoneCallInvalidOptions.Error)
 		}
 
+		observer := cApi.Observability(ctx, auth)
+
 		result := cApi.channelPipeline.Run(ctx, channel_pipeline.OutboundRequestedPipeline{
 			ID:          fmt.Sprintf("%d", phoneCall.GetAssistant().GetAssistantId()),
 			Auth:        auth,
@@ -239,7 +245,11 @@ func (cApi *ConversationGrpcApi) CreateBulkPhoneCall(ctx context.Context, ir *pr
 			Metadata:    mtd,
 			Args:        args,
 			Options:     opts,
+			Observer:    observer,
 		})
+		if err := observer.Close(context.Background()); err != nil {
+			cApi.logger.Errorf("failed to close bulk outbound observability recorder: %v", err)
+		}
 		if result.Error != nil {
 			cApi.logger.Errorf("bulk outbound call failed: %v", result.Error)
 			return &protos.CreateBulkPhoneCallResponse{

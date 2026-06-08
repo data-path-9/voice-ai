@@ -221,12 +221,12 @@ func TestBuildGRPCResponse_Event(t *testing.T) {
 func TestNew_UsesConfiguredICEServers(t *testing.T) {
 	t.Setenv("TURN_USERNAME", "turn-user")
 	t.Setenv("TURN_CREDENTIAL", "turn-secret")
-	streamer, err := New(Config{
-		Context:    context.Background(),
-		Logger:     newTestLogger(t),
-		GRPCStream: &failingGRPCStream{sendErr: io.EOF},
-		Observer:   newTestObserver(t),
-		ServerConfig: &assistant_config.WebRTCConfig{
+	streamer, err := New(
+		WithContext(context.Background()),
+		WithLogger(newTestLogger(t)),
+		WithServer(&failingGRPCStream{sendErr: io.EOF}),
+		WithObserver(newTestObserver(t)),
+		WithServerConfig(&assistant_config.WebRTCConfig{
 			ICEServers: []assistant_config.WebRTCICEServer{
 				{
 					URLs: []string{"stun:stun.l.google.com:19302"},
@@ -242,8 +242,8 @@ func TestNew_UsesConfiguredICEServers(t *testing.T) {
 				},
 			},
 			ICETransportPolicy: webrtc_internal.ICETransportPolicyRelay,
-		},
-	})
+		}),
+	)
 	require.NoError(t, err)
 	s := streamer.(*webrtcStreamer)
 	t.Cleanup(func() { _ = s.Close() })
@@ -262,13 +262,13 @@ func TestNew_UsesConfiguredICEServers(t *testing.T) {
 
 func TestNew_DefaultsToGoogleSTUN(t *testing.T) {
 	t.Parallel()
-	streamer, err := New(Config{
-		Context:      context.Background(),
-		Logger:       newTestLogger(t),
-		GRPCStream:   &failingGRPCStream{sendErr: io.EOF},
-		Observer:     newTestObserver(t),
-		ServerConfig: &assistant_config.WebRTCConfig{},
-	})
+	streamer, err := New(
+		WithContext(context.Background()),
+		WithLogger(newTestLogger(t)),
+		WithServer(&failingGRPCStream{sendErr: io.EOF}),
+		WithObserver(newTestObserver(t)),
+		WithServerConfig(&assistant_config.WebRTCConfig{}),
+	)
 	require.NoError(t, err)
 	s := streamer.(*webrtcStreamer)
 	t.Cleanup(func() { _ = s.Close() })
@@ -281,15 +281,15 @@ func TestNew_DefaultsToGoogleSTUN(t *testing.T) {
 
 func TestNew_InvalidICETransportPolicyFallsBackToAll(t *testing.T) {
 	t.Parallel()
-	streamer, err := New(Config{
-		Context:    context.Background(),
-		Logger:     newTestLogger(t),
-		GRPCStream: &failingGRPCStream{sendErr: io.EOF},
-		Observer:   newTestObserver(t),
-		ServerConfig: &assistant_config.WebRTCConfig{
+	streamer, err := New(
+		WithContext(context.Background()),
+		WithLogger(newTestLogger(t)),
+		WithServer(&failingGRPCStream{sendErr: io.EOF}),
+		WithObserver(newTestObserver(t)),
+		WithServerConfig(&assistant_config.WebRTCConfig{
 			ICETransportPolicy: "invalid",
-		},
-	})
+		}),
+	)
 	require.NoError(t, err)
 	s := streamer.(*webrtcStreamer)
 	t.Cleanup(func() { _ = s.Close() })
@@ -299,12 +299,12 @@ func TestNew_InvalidICETransportPolicyFallsBackToAll(t *testing.T) {
 
 func TestNew_IgnoresEmptyICEServerEntries(t *testing.T) {
 	t.Setenv("WEBRTC_TURN_URL", "turn:turn.rapida.ai:3478?transport=tcp")
-	streamer, err := New(Config{
-		Context:    context.Background(),
-		Logger:     newTestLogger(t),
-		GRPCStream: &failingGRPCStream{sendErr: io.EOF},
-		Observer:   newTestObserver(t),
-		ServerConfig: &assistant_config.WebRTCConfig{
+	streamer, err := New(
+		WithContext(context.Background()),
+		WithLogger(newTestLogger(t)),
+		WithServer(&failingGRPCStream{sendErr: io.EOF}),
+		WithObserver(newTestObserver(t)),
+		WithServerConfig(&assistant_config.WebRTCConfig{
 			ICEServers: []assistant_config.WebRTCICEServer{
 				{URLs: []string{"", "   "}},
 				{URLs: nil},
@@ -314,8 +314,8 @@ func TestNew_IgnoresEmptyICEServerEntries(t *testing.T) {
 					Credential: "turn-secret",
 				},
 			},
-		},
-	})
+		}),
+	)
 	require.NoError(t, err)
 	s := streamer.(*webrtcStreamer)
 	t.Cleanup(func() { _ = s.Close() })

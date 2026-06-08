@@ -19,6 +19,9 @@ import (
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
+	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
+	observability_collector_conversationdb "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationdb"
 	observe "github.com/rapidaai/api/assistant-api/internal/observe"
 	observe_exporters "github.com/rapidaai/api/assistant-api/internal/observe/exporters"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
@@ -782,6 +785,7 @@ type sipPreparedCallRuntime struct {
 	talker      internal_type.Talking
 	direction   string
 	talkDone    chan error
+	observer    observability.Recorder
 }
 
 func (runtime *sipPreparedCallRuntime) Start(_ context.Context) error {
@@ -817,6 +821,9 @@ func (runtime *sipPreparedCallRuntime) Close(_ context.Context) {
 		runtime.cancelTalk()
 	}
 	_ = runtime.streamer.Close()
+	if runtime.observer != nil {
+		_ = runtime.observer.Close(context.Background())
+	}
 }
 
 func (m *SIPEngine) prepareInboundCallRuntime(ctx context.Context, stage sip_infra.SessionEstablishedPipeline, setup *sip_pipeline.CallSetupResult, _ *observe.ConversationObserver) (sip_pipeline.PreparedCallRuntime, error) {
@@ -884,22 +891,38 @@ func (m *SIPEngine) prepareSIPCallRuntime(ctx context.Context, session *sip_infr
 	} else {
 		vaultCredential = session.GetVaultCredential()
 	}
-	streamer, err := internal_telephony.NewSIPStreamer(
-		talkContext,
-		m.logger,
-		session,
-		m.lifecycleController(),
-		resolvedCallContext,
-		vaultCredential,
+	otelCollectors := make([]observability.Collector, 0)
+	otelCollectors = append(otelCollectors, observability_collector_conversationdb.New(observability_collector_conversationdb.Config{
+		Logger:              m.logger,
+		ConversationService: m.assistantConversationService,
+	}))
+	otelCollectors = append(otelCollectors, collectors.NewWithEnv(talkContext, m.logger, m.cfg)...)
+	observer := observability.New(
+		observability.WithLogger(m.logger),
+		observability.WithAuth(resolvedCallContext.ToAuth()),
+		observability.WithContext(talkContext),
+		observability.WithCollectors(otelCollectors...),
+	)
+
+	streamer, err := internal_telephony.New(
+		internal_telephony.WithSIPContext(talkContext),
+		internal_telephony.WithSIPLogger(m.logger),
+		internal_telephony.WithSIPSession(session),
+		internal_telephony.WithSIPLifecycle(m.lifecycleController()),
+		internal_telephony.WithSIPCallContext(resolvedCallContext),
+		internal_telephony.WithSIPVaultCredential(vaultCredential),
+		internal_telephony.WithSIPObserver(observer),
 	)
 	if err != nil {
 		cancelTalk()
+		_ = observer.Close(context.Background())
 		m.logger.Error("Failed to create SIP streamer", "error", err, "call_id", callID)
 		return nil, fmt.Errorf("streamer_failed: %w", err)
 	}
 	if session.IsEnded() {
 		cancelTalk()
 		_ = streamer.Close()
+		_ = observer.Close(context.Background())
 		return nil, fmt.Errorf("session_ended_after_streamer")
 	}
 
@@ -911,6 +934,7 @@ func (m *SIPEngine) prepareSIPCallRuntime(ctx context.Context, session *sip_infr
 	if err != nil {
 		cancelTalk()
 		_ = streamer.Close()
+		_ = observer.Close(context.Background())
 		m.logger.Error("Failed to create SIP talker", "error", err, "call_id", callID)
 		return nil, fmt.Errorf("talker_failed: %w", err)
 	}
@@ -924,6 +948,7 @@ func (m *SIPEngine) prepareSIPCallRuntime(ctx context.Context, session *sip_infr
 		streamer:    streamer,
 		talker:      talker,
 		direction:   direction,
+		observer:    observer,
 	}, nil
 }
 

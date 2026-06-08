@@ -79,8 +79,8 @@ func newTestExotelStreamer(t *testing.T) *exotelWebsocketStreamer {
 		ChannelUUID:    "test-channel-uuid",
 	}
 	return &exotelWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, nil,
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			logger, cc, nil, nil,
 		),
 		streamID:   "test-stream",
 		connection: nil, // nil so Cancel() skips conn.Close()
@@ -183,7 +183,12 @@ func TestNewExotelWebsocketStreamer_WiresMediaSession(t *testing.T) {
 		Provider:       "exotel",
 	}
 
-	streamer, err := NewExotelWebsocketStreamer(logger, nil, callContext, nil)
+	streamer, err := New(
+		WithLogger(logger),
+		WithConnection(nil),
+		WithCallContext(callContext),
+		WithVaultCredential(nil),
+	)
 	require.NoError(t, err)
 	exotel, ok := streamer.(*exotelWebsocketStreamer)
 	require.True(t, ok, "expected exotel websocket streamer")
@@ -201,7 +206,7 @@ func TestHandleMediaEvent_EmitsBridgeUserAudio(t *testing.T) {
 	}
 	mediaEngine := &fakeExotelMediaEngine{}
 	exotel := &exotelWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	exotel.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     exotel.Ctx,
@@ -241,7 +246,7 @@ func TestHandleMediaEvent_ReturnsMediaProcessingError(t *testing.T) {
 	}
 	mediaEngine := &fakeExotelMediaEngine{processError: errors.New("media process failed")}
 	exotel := &exotelWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	exotel.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     exotel.Ctx,

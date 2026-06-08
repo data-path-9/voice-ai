@@ -6,6 +6,7 @@
 package assistant_talk_api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -110,6 +111,13 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 		opts = *ir.Options
 	}
 
+	observer := cApi.Observability(c, auth)
+	defer func() {
+		if err := observer.Close(context.Background()); err != nil {
+			cApi.logger.Errorf("failed to close outbound observability recorder: %v", err)
+		}
+	}()
+
 	result := cApi.channelPipeline.Run(c, channel_pipeline.OutboundRequestedPipeline{
 		ID:          fmt.Sprintf("%d", assistant.GetAssistantId()),
 		Auth:        auth,
@@ -120,6 +128,7 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 		Metadata:    metadata,
 		Args:        args,
 		Options:     opts,
+		Observer:    observer,
 	})
 	if result.Error != nil {
 		cApi.logger.Errorf("outbound call failed: %v", result.Error)

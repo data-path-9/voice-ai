@@ -272,7 +272,7 @@ func (conversationService *assistantConversationService) CreateOrUpdateConversat
 	auth types.SimplePrinciple,
 	assistantId,
 	assistantConversationId uint64,
-	metadata []*types.Metadata,
+	metadata []*protos.Metadata,
 ) ([]*internal_conversation_entity.AssistantConversationMetadata, error) {
 	start := time.Now()
 	//
@@ -315,7 +315,7 @@ func (conversationService *assistantConversationService) CreateOrUpdateConversat
 	return _metadatas, nil
 }
 
-func (conversationService *assistantConversationService) ApplyConversationOption(ctx context.Context,
+func (conversationService *assistantConversationService) CreateOrUpdateConversationOption(ctx context.Context,
 	auth types.SimplePrinciple,
 	assistantId,
 	assistantConversationId uint64,
@@ -351,16 +351,16 @@ func (conversationService *assistantConversationService) ApplyConversationOption
 			"updated_by", "updated_date"}),
 	}).Create(&options)
 	if tx.Error != nil {
-		conversationService.logger.Benchmark("conversationService.ApplyConversationOptions", time.Since(start))
+		conversationService.logger.Benchmark("conversationService.CreateOrUpdateConversationOptions", time.Since(start))
 		conversationService.logger.Errorf("error while updating conversation argument %v", tx.Error)
 		return nil, tx.Error
 	}
-	conversationService.logger.Benchmark("conversationService.ApplyConversationOptions", time.Since(start))
+	conversationService.logger.Benchmark("conversationService.CreateOrUpdateConversationOptions", time.Since(start))
 	return options, nil
 
 }
 
-func (conversationService *assistantConversationService) ApplyConversationArgument(ctx context.Context,
+func (conversationService *assistantConversationService) CreateOrUpdateConversationArgument(ctx context.Context,
 	auth types.SimplePrinciple,
 	assistantId,
 	assistantConversationId uint64,
@@ -414,7 +414,7 @@ func (conversationService *assistantConversationService) CreateOrUpdateConversat
 	auth types.SimplePrinciple,
 	assistantId,
 	assistantConversationId uint64,
-	metrics []*types.Metric,
+	metrics []*protos.Metric,
 ) ([]*internal_conversation_entity.AssistantConversationMetric, error) {
 	start := time.Now()
 	db := conversationService.postgres.DB(ctx)

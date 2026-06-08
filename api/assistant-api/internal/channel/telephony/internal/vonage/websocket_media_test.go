@@ -69,7 +69,12 @@ func TestNewVonageWebsocketStreamer_WiresMediaSession(t *testing.T) {
 		Provider:       "vonage",
 	}
 
-	streamer, err := NewVonageWebsocketStreamer(logger, nil, callContext, nil)
+	streamer, err := New(
+		WithLogger(logger),
+		WithConnection(nil),
+		WithCallContext(callContext),
+		WithVaultCredential(nil),
+	)
 	require.NoError(t, err)
 	vonageStreamer, ok := streamer.(*vonageWebsocketStreamer)
 	require.True(t, ok, "expected vonage websocket streamer")
@@ -87,7 +92,7 @@ func TestHandleMediaEvent_EmitsBridgeUserAudio(t *testing.T) {
 	}
 	mediaEngine := &fakeVonageMediaEngine{}
 	vonageStreamer := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	vonageStreamer.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     vonageStreamer.Ctx,
@@ -122,7 +127,7 @@ func TestHandleMediaEvent_ReturnsMediaProcessingError(t *testing.T) {
 	}
 	mediaEngine := &fakeVonageMediaEngine{processError: errors.New("media process failed")}
 	vonageStreamer := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	vonageStreamer.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     vonageStreamer.Ctx,

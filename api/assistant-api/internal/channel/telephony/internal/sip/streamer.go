@@ -16,6 +16,7 @@ import (
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_sip "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/sip/internal"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/api/assistant-api/internal/observe"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
@@ -45,30 +46,82 @@ type assistantAudioFrame struct {
 	completed bool
 }
 
-func NewStreamer(ctx context.Context,
-	logger commons.Logger,
-	sipSession *sip_infra.Session,
-	lifecycle sip_infra.LifecycleController,
-	cc *callcontext.CallContext,
-	vaultCred *protos.VaultCredential,
-) (internal_type.SIPCallStreamer, error) {
-	if sipSession == nil {
+type StreamerOptions struct {
+	Context         context.Context
+	Logger          commons.Logger
+	Session         *sip_infra.Session
+	Lifecycle       sip_infra.LifecycleController
+	CallContext     *callcontext.CallContext
+	VaultCredential *protos.VaultCredential
+	Observer        observability.Recorder
+}
+
+type FuncOption func(*StreamerOptions)
+
+func WithContext(ctx context.Context) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Context = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithSession(session *sip_infra.Session) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Session = session
+	}
+}
+
+func WithLifecycle(lifecycle sip_infra.LifecycleController) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Lifecycle = lifecycle
+	}
+}
+
+func WithCallContext(callContext *callcontext.CallContext) FuncOption {
+	return func(options *StreamerOptions) {
+		options.CallContext = callContext
+	}
+}
+
+func WithVaultCredential(vaultCredential *protos.VaultCredential) FuncOption {
+	return func(options *StreamerOptions) {
+		options.VaultCredential = vaultCredential
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.SIPCallStreamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	if options.Session == nil {
 		return nil, fmt.Errorf("SIP session is required; standalone server mode is not supported")
 	}
-	if lifecycle == nil {
+	if options.Lifecycle == nil {
 		return nil, fmt.Errorf("SIP lifecycle controller is required")
 	}
 
 	s := &Streamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, vaultCred,
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			options.Logger, options.CallContext, options.VaultCredential, options.Observer,
 		),
 	}
 
 	// Peer BYE is reported to Talk; MediaPort owns bridge teardown safety.
 	go func() {
 		select {
-		case <-sipSession.ByeReceived():
+		case <-options.Session.ByeReceived():
 			s.Logger.Infow("SIP streamer: user BYE received")
 			s.emitChannelEvent("disconnected", map[string]string{"reason": "bye_received"})
 			if msg := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
@@ -81,9 +134,9 @@ func NewStreamer(ctx context.Context,
 	// Context cancellation is a safety net when Talk cannot drive teardown.
 	go func() {
 		select {
-		case <-sipSession.Context().Done():
+		case <-options.Session.Context().Done():
 			s.Logger.Infow("SIP streamer: session context cancelled, closing")
-		case <-ctx.Done():
+		case <-options.Context.Done():
 			s.Logger.Infow("SIP streamer: caller context cancelled, closing")
 		case <-s.Ctx.Done():
 			return
@@ -94,16 +147,16 @@ func NewStreamer(ctx context.Context,
 		s.Close()
 	}()
 
-	s.session = sipSession
-	s.lifecycle = lifecycle
-	isInbound := sipSession.GetInfo().Direction == sip_infra.CallDirectionInbound
+	s.session = options.Session
+	s.lifecycle = options.Lifecycle
+	isInbound := options.Session.GetInfo().Direction == sip_infra.CallDirectionInbound
 	if !isInbound {
 		s.assistantOutputActive.Store(true)
 	}
 	mediaPort, err := internal_sip.NewMediaPort(internal_sip.MediaPortConfig{
 		Context:    s.Ctx,
-		Logger:     logger,
-		Session:    sipSession,
+		Logger:     options.Logger,
+		Session:    options.Session,
 		Resampler:  s.Resampler(),
 		StreamSink: s.Input,
 	})
@@ -121,8 +174,8 @@ func NewStreamer(ctx context.Context,
 	s.emitChannelEvent("connected", nil)
 
 	localIP, localPort := mediaPort.LocalAddr()
-	logger.Infow("SIP streamer created",
-		"call_id", sipSession.GetCallID(),
+	options.Logger.Infow("SIP streamer created",
+		"call_id", options.Session.GetCallID(),
 		"codec", mediaPort.CodecName(),
 		"rtp_port", localPort,
 		"local_ip", localIP)

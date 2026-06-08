@@ -54,8 +54,8 @@ func newTestStreamer(t *testing.T) (*Streamer, net.Conn) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	as := &Streamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, nil,
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			logger, cc, nil, nil,
 		),
 		conn:           local,
 		reader:         reader,
