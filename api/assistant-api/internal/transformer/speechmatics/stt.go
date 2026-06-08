@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"net/http"
 	"sync"
 	"time"
@@ -115,15 +116,19 @@ func (st *speechmaticsSTT) Initialize() error {
 	st.mu.Lock()
 	ctxID := st.contextId
 	st.mu.Unlock()
-	st.onPacket(internal_type.ConversationEventPacket{
+	st.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: ctxID,
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": st.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": st.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -205,11 +210,16 @@ func (st *speechmaticsSTT) readLoop(conn *websocket.Conn) {
 						Script:    transcript,
 						Interim:   true,
 					},
-					internal_type.ConversationEventPacket{
-						ContextID: ctxId,
-						Name:      "stt",
-						Data:      map[string]string{"type": "interim"},
-						Time:      time.Now(),
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   ctxId,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record: observability.RecordEvent{
+							Component:  observability.ComponentSTT,
+							Event:      observability.STTInterim,
+							Attributes: observability.Attributes{"type": "interim"},
+							OccurredAt: time.Now(),
+						},
 					},
 				)
 			}
@@ -231,15 +241,22 @@ func (st *speechmaticsSTT) readLoop(conn *websocket.Conn) {
 						Script:    transcript,
 						Interim:   false,
 					},
-					internal_type.ConversationEventPacket{
-						ContextID: ctxId,
-						Name:      "stt",
-						Data:      map[string]string{"type": "completed"},
-						Time:      now,
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   ctxId,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record: observability.RecordEvent{
+							Component:  observability.ComponentSTT,
+							Event:      observability.STTCompleted,
+							Attributes: observability.Attributes{"type": "completed"},
+							OccurredAt: now,
+						},
 					},
-					internal_type.UserMessageMetricPacket{
-						ContextID: ctxId,
-						Metrics:   []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+					internal_type.ObservabilityMetricRecordPacket{
+						ContextID:   ctxId,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record:      observability.NewMessageMetricRecord(ctxId, observability.MessageRoleUser, []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}}),
 					},
 				)
 			}
@@ -265,7 +282,7 @@ func (st *speechmaticsSTT) Transform(ctx context.Context, in internal_type.Packe
 		st.contextId = pkt.ContextID
 		st.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextEndPacket:
+	case internal_type.SpeechToTextStartPacket:
 		st.mu.Lock()
 		if st.startedAt.IsZero() {
 			st.startedAt = time.Now()
@@ -273,6 +290,11 @@ func (st *speechmaticsSTT) Transform(ctx context.Context, in internal_type.Packe
 		st.mu.Unlock()
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
+		st.mu.Lock()
+		if st.startedAt.IsZero() {
+			st.startedAt = time.Now()
+		}
+		st.mu.Unlock()
 		st.mu.Lock()
 		conn := st.connection
 		st.mu.Unlock()
@@ -323,23 +345,42 @@ func (st *speechmaticsSTT) Close(ctx context.Context) error {
 	st.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		st.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "stt",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": st.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentSTT,
+					Event:     observability.STTClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": st.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total STT connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentSTT,
+					Provider:  st.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   st.Name(),
+						"metric":     type_enums.CONVERSATION_STT_DURATION.String(),
+					},
+				},
 			},
 		)
 	}

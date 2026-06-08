@@ -221,8 +221,8 @@ func TestSpeechToText_WebsocketFlow_JSONRequestRules(t *testing.T) {
 			}
 		case internal_type.InterruptionDetectedPacket:
 			interruptionPacketCount++
-		case internal_type.UserMessageMetricPacket:
-			for _, metric := range typed.Metrics {
+		case internal_type.ObservabilityMetricRecordPacket:
+			for _, metric := range typed.Record.Metrics {
 				if metric.GetName() == "stt_latency_ms" {
 					hasLatencyMetric = true
 					latencyMetricPacketCount++
@@ -394,8 +394,8 @@ func TestSpeechToText_WebsocketFlow_TextTranscriptFrames(t *testing.T) {
 			if !typed.Interim && typed.Script == "namaste duniya" && typed.Language == "hi" {
 				hasTranscript = true
 			}
-		case internal_type.UserMessageMetricPacket:
-			for _, metric := range typed.Metrics {
+		case internal_type.ObservabilityMetricRecordPacket:
+			for _, metric := range typed.Record.Metrics {
 				if metric.GetName() == "stt_latency_ms" {
 					hasLatency = true
 				}
@@ -407,7 +407,7 @@ func TestSpeechToText_WebsocketFlow_TextTranscriptFrames(t *testing.T) {
 	assert.True(t, hasLatency, "expected final transcript latency metric")
 }
 
-func TestSpeechToText_DoesNotEmitLatencyMetricWithoutInterruption(t *testing.T) {
+func TestSpeechToText_EmitsLatencyMetricFromFirstAudioWithoutStart(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := upgrader.Upgrade(writer, request, nil)
@@ -465,21 +465,21 @@ func TestSpeechToText_DoesNotEmitLatencyMetricWithoutInterruption(t *testing.T) 
 
 	latencyMetricPacketCount := 0
 	for _, packet := range collector.all() {
-		metricPacket, ok := packet.(internal_type.UserMessageMetricPacket)
+		metricPacket, ok := packet.(internal_type.ObservabilityMetricRecordPacket)
 		if !ok {
 			continue
 		}
-		for _, metric := range metricPacket.Metrics {
+		for _, metric := range metricPacket.Record.Metrics {
 			if metric.GetName() == "stt_latency_ms" {
 				latencyMetricPacketCount++
 			}
 		}
 	}
 
-	assert.Equal(t, 0, latencyMetricPacketCount, "did not expect latency metric without interruption start")
+	assert.Equal(t, 1, latencyMetricPacketCount, "expected latency metric from first audio without explicit start")
 }
 
-func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
+func TestSpeechToText_LatencyUsesFirstStartInWindow(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := upgrader.Upgrade(writer, request, nil)
@@ -518,11 +518,11 @@ func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transformer.Initialize())
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-first-interrupt"}))
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-first-interrupt"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextStartPacket{ContextID: "ctx-first-interrupt"}))
 
 	time.Sleep(120 * time.Millisecond)
 
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-first-interrupt"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextStartPacket{ContextID: "ctx-first-interrupt"}))
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
 		ContextID: "ctx-first-interrupt",
 		Audio:     []byte{0x01, 0x02, 0x03, 0x04},
@@ -543,11 +543,11 @@ func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
 	latencyMetricPacketCount := 0
 	latencyMilliseconds := int64(-1)
 	for _, packet := range collector.all() {
-		metricPacket, ok := packet.(internal_type.UserMessageMetricPacket)
+		metricPacket, ok := packet.(internal_type.ObservabilityMetricRecordPacket)
 		if !ok {
 			continue
 		}
-		for _, metric := range metricPacket.Metrics {
+		for _, metric := range metricPacket.Record.Metrics {
 			if metric.GetName() != "stt_latency_ms" {
 				continue
 			}
@@ -557,8 +557,8 @@ func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 1, latencyMetricPacketCount, "expected one latency metric for the interruption window")
-	assert.GreaterOrEqual(t, latencyMilliseconds, int64(100), "expected latency to be measured from the first interrupt in the window")
+	assert.Equal(t, 1, latencyMetricPacketCount, "expected one latency metric for the start window")
+	assert.GreaterOrEqual(t, latencyMilliseconds, int64(100), "expected latency to be measured from the first start in the window")
 }
 
 func TestSpeechToText_CloseUnblocksPendingDial(t *testing.T) {

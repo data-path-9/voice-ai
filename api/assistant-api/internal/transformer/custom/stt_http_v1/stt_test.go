@@ -151,8 +151,8 @@ func TestSpeechToText_HTTPFlow_FlushesBufferedSpeechOnVADEnd(t *testing.T) {
 
 	var hasLatencyMetric bool
 	for _, packet := range collector.all() {
-		if metric, ok := packet.(internal_type.UserMessageMetricPacket); ok {
-			for _, item := range metric.Metrics {
+		if metric, ok := packet.(internal_type.ObservabilityMetricRecordPacket); ok {
+			for _, item := range metric.Record.Metrics {
 				if item.GetName() == "stt_latency_ms" {
 					hasLatencyMetric = true
 				}

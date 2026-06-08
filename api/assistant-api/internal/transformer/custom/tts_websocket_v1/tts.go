@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"io"
 	"net/http"
 	"strings"
@@ -142,23 +143,42 @@ func (transformer *textToSpeech) Close(ctx context.Context) error {
 	}
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		if err := transformer.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: contextID,
-				Name:      "tts",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": transformer.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentTTS,
+					Event:     observability.TTSClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": transformer.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_TTS_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total TTS connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: contextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentTTS,
+					Provider:  transformer.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": contextID,
+						"provider":   transformer.Name(),
+						"metric":     type_enums.CONVERSATION_TTS_DURATION.String(),
+					},
+				},
 			},
 		); err != nil {
 			transformer.logger.Errorf("custom-tts websocket_v1: onPacket failed: %v", err)
@@ -222,14 +242,19 @@ func (transformer *textToSpeech) handleText(contextID, text string) error {
 		return nil
 	}
 
-	if err := transformer.onPacket(internal_type.ConversationEventPacket{
-		ContextID: contextID,
-		Name:      "tts",
-		Data: map[string]string{
-			"type": "speaking",
-			"text": text,
+	if err := transformer.onPacket(internal_type.ObservabilityEventRecordPacket{
+		ContextID:   contextID,
+		Scope:       internal_type.ObservabilityRecordScopeMessage,
+		MessageRole: observability.MessageRoleAssistant,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentTTS,
+			Event:     observability.TTSSpeaking,
+			Attributes: observability.Attributes{
+				"type": "speaking",
+				"text": text,
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	}); err != nil {
 		transformer.logger.Errorf("custom-tts websocket_v1: onPacket failed: %v", err)
 	}
@@ -332,11 +357,16 @@ func (transformer *textToSpeech) handleInterrupt(contextID string) {
 		_ = conn.Close()
 	}
 
-	if err := transformer.onPacket(internal_type.ConversationEventPacket{
-		ContextID: contextID,
-		Name:      "tts",
-		Data:      map[string]string{"type": "interrupted"},
-		Time:      time.Now(),
+	if err := transformer.onPacket(internal_type.ObservabilityEventRecordPacket{
+		ContextID:   contextID,
+		Scope:       internal_type.ObservabilityRecordScopeMessage,
+		MessageRole: observability.MessageRoleAssistant,
+		Record: observability.RecordEvent{
+			Component:  observability.ComponentTTS,
+			Event:      observability.TTSInterrupted,
+			Attributes: observability.Attributes{"type": "interrupted"},
+			OccurredAt: time.Now(),
+		},
 	}); err != nil {
 		transformer.logger.Errorf("custom-tts websocket_v1: onPacket failed: %v", err)
 	}
@@ -399,15 +429,19 @@ func (transformer *textToSpeech) getOrOpenConnection(scope queryScope) (*websock
 
 	go transformer.readLoop(conn, scope.MessageID)
 
-	if err := transformer.onPacket(internal_type.ConversationEventPacket{
+	if err := transformer.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: scope.MessageID,
-		Name:      "tts",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": transformer.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentTTS,
+			Event:     observability.TTSInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": transformer.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	}); err != nil {
 		transformer.logger.Errorf("custom-tts websocket_v1: onPacket failed: %v", err)
 	}
@@ -474,11 +508,16 @@ func (transformer *textToSpeech) readLoop(conn *websocket.Conn, contextID string
 			case readErrorComplete:
 				if err := transformer.onPacket(
 					internal_type.TextToSpeechEndPacket{ContextID: contextID},
-					internal_type.ConversationEventPacket{
-						ContextID: contextID,
-						Name:      "tts",
-						Data:      map[string]string{"type": "completed"},
-						Time:      time.Now(),
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   contextID,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleAssistant,
+						Record: observability.RecordEvent{
+							Component:  observability.ComponentTTS,
+							Event:      observability.TTSCompleted,
+							Attributes: observability.Attributes{"type": "completed"},
+							OccurredAt: time.Now(),
+						},
 					},
 				); err != nil {
 					transformer.logger.Errorf("custom-tts websocket_v1: onPacket failed: %v", err)
@@ -565,11 +604,16 @@ func (transformer *textToSpeech) readLoop(conn *websocket.Conn, contextID string
 			transformer.dropConnection(conn)
 			if err := transformer.onPacket(
 				internal_type.TextToSpeechEndPacket{ContextID: resolvedContextID},
-				internal_type.ConversationEventPacket{
-					ContextID: resolvedContextID,
-					Name:      "tts",
-					Data:      map[string]string{"type": "completed"},
-					Time:      time.Now(),
+				internal_type.ObservabilityEventRecordPacket{
+					ContextID:   resolvedContextID,
+					Scope:       internal_type.ObservabilityRecordScopeMessage,
+					MessageRole: observability.MessageRoleAssistant,
+					Record: observability.RecordEvent{
+						Component:  observability.ComponentTTS,
+						Event:      observability.TTSCompleted,
+						Attributes: observability.Attributes{"type": "completed"},
+						OccurredAt: time.Now(),
+					},
 				},
 			); err != nil {
 				transformer.logger.Errorf("custom-tts websocket_v1: onPacket failed: %v", err)
@@ -636,12 +680,14 @@ func (transformer *textToSpeech) emitFirstAudioMetric(contextID string) {
 		return
 	}
 
-	if err := transformer.onPacket(internal_type.AssistantMessageMetricPacket{
-		ContextID: contextID,
-		Metrics: []*protos.Metric{{
+	if err := transformer.onPacket(internal_type.ObservabilityMetricRecordPacket{
+		ContextID:   contextID,
+		Scope:       internal_type.ObservabilityRecordScopeMessage,
+		MessageRole: observability.MessageRoleAssistant,
+		Record: observability.NewMessageMetricRecord(contextID, observability.MessageRoleAssistant, []*protos.Metric{{
 			Name:  "tts_latency_ms",
 			Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
-		}},
+		}}),
 	}); err != nil {
 		transformer.logger.Errorf("custom-tts websocket_v1: onPacket failed: %v", err)
 	}

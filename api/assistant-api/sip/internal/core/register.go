@@ -532,23 +532,17 @@ func (rc *RegistrationClient) markRenewalFailed(
 
 func (rc *RegistrationClient) notifyRenewed(ctx context.Context, event RegistrationEvent) {
 	observer := rc.registrationObserver()
-	if observer != nil {
-		observer.RegistrationRenewed(ctx, event)
-	}
+	observer.RegistrationRenewed(ctx, event)
 }
 
 func (rc *RegistrationClient) notifyRenewalFailed(ctx context.Context, event RegistrationEvent) {
 	observer := rc.registrationObserver()
-	if observer != nil {
-		observer.RegistrationRenewalFailed(ctx, event)
-	}
+	observer.RegistrationRenewalFailed(ctx, event)
 }
 
 func (rc *RegistrationClient) notifyExpired(ctx context.Context, event RegistrationEvent) {
 	observer := rc.registrationObserver()
-	if observer != nil {
-		observer.RegistrationExpired(ctx, event)
-	}
+	observer.RegistrationExpired(ctx, event)
 }
 
 func (rc *RegistrationClient) notifyUnregisterFailed(ctx context.Context, active *activeRegistration, err error) {
@@ -561,9 +555,7 @@ func (rc *RegistrationClient) notifyUnregisterFailed(ctx context.Context, active
 	event.StatusText = registrationError.StatusText
 
 	observer := rc.registrationObserver()
-	if observer != nil {
-		observer.RegistrationUnregisterFailed(ctx, event)
-	}
+	observer.RegistrationUnregisterFailed(ctx, event)
 }
 
 func (rc *RegistrationClient) registrationObserver() RegistrationObserver {

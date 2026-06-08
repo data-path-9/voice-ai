@@ -111,33 +111,3 @@ type CallFailedPipeline struct {
 }
 
 func (p CallFailedPipeline) CallID() string { return p.ID }
-
-// =============================================================================
-// Control pipeline — metrics, events, recording, DTMF, registration
-// =============================================================================
-
-// EventEmittedPipeline is a generic event for logging and observability.
-type EventEmittedPipeline struct {
-	ID    string
-	Event string
-	Data  map[string]string
-}
-
-func (p EventEmittedPipeline) CallID() string { return p.ID }
-
-// MetricEmittedPipeline carries metrics for a call.
-type MetricEmittedPipeline struct {
-	ID      string
-	Metrics []*protos.Metric
-}
-
-func (p MetricEmittedPipeline) CallID() string { return p.ID }
-
-// DTMFReceivedPipeline is emitted when a DTMF digit is detected via RTP (RFC 4733).
-type DTMFReceivedPipeline struct {
-	ID       string
-	Digit    string
-	Duration int // milliseconds
-}
-
-func (p DTMFReceivedPipeline) CallID() string { return p.ID }

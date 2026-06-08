@@ -126,27 +126,27 @@ const (
 )
 
 const (
-	STTConnected           EventName = "stt.connected"
-	STTStarted             EventName = "stt.started"
-	STTStartOfSpeech       EventName = "stt.start_of_speech"
-	STTInterimTranscript   EventName = "stt.interim_transcript"
-	STTPreflightTranscript EventName = "stt.preflight_transcript"
-	STTPartial             EventName = "stt.partial"
-	STTFinalTranscript     EventName = "stt.final_transcript"
-	STTFinal               EventName = "stt.final"
-	STTRecognitionUsage    EventName = "stt.recognition_usage"
-	STTEndOfSpeech         EventName = "stt.end_of_speech"
-	STTDisconnected        EventName = "stt.disconnected"
-	STTError               EventName = "stt.error"
+	STTConnected     EventName = "stt.connected"
+	STTInitialized   EventName = "stt.initialized"
+	STTInterim       EventName = "stt.interim"
+	STTCompleted     EventName = "stt.completed"
+	STTLowConfidence EventName = "stt.low_confidence"
+	STTClosed        EventName = "stt.closed"
+	STTEvent         EventName = "stt.event"
+	STTError         EventName = "stt.error"
 )
 
 const (
-	TTSStarted    EventName = "tts.started"
-	TTSFirstAudio EventName = "tts.first_audio"
-	TTSAudio      EventName = "tts.audio"
-	TTSCompleted  EventName = "tts.completed"
-	TTSDiscarded  EventName = "tts.discarded"
-	TTSError      EventName = "tts.error"
+	TTSStarted     EventName = "tts.started"
+	TTSInitialized EventName = "tts.initialized"
+	TTSFirstAudio  EventName = "tts.first_audio"
+	TTSAudio       EventName = "tts.audio"
+	TTSSpeaking    EventName = "tts.speaking"
+	TTSCompleted   EventName = "tts.completed"
+	TTSDiscarded   EventName = "tts.discarded"
+	TTSInterrupted EventName = "tts.interrupted"
+	TTSClosed      EventName = "tts.closed"
+	TTSError       EventName = "tts.error"
 )
 
 const (
@@ -321,24 +321,24 @@ var eventsByComponent = map[ComponentName][]EventName{
 	},
 	ComponentSTT: {
 		STTConnected,
-		STTStarted,
-		STTStartOfSpeech,
-		STTInterimTranscript,
-		STTPreflightTranscript,
-		STTPartial,
-		STTFinalTranscript,
-		STTFinal,
-		STTRecognitionUsage,
-		STTEndOfSpeech,
-		STTDisconnected,
+		STTInitialized,
+		STTInterim,
+		STTCompleted,
+		STTLowConfidence,
+		STTClosed,
+		STTEvent,
 		STTError,
 	},
 	ComponentTTS: {
 		TTSStarted,
+		TTSInitialized,
 		TTSFirstAudio,
 		TTSAudio,
+		TTSSpeaking,
 		TTSCompleted,
 		TTSDiscarded,
+		TTSInterrupted,
+		TTSClosed,
 		TTSError,
 	},
 	ComponentLLM: {

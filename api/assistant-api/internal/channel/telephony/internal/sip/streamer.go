@@ -146,7 +146,7 @@ func New(opts ...FuncOption) (internal_type.SIPCallStreamer, error) {
 			}, observability.RecordMetric{
 				Metrics: []*protos.Metric{{
 					Name:        observability.MetricCallStatus,
-					Value:       "COMPLETE",
+					Value:       "completed",
 					Description: "SIP user BYE received",
 				}},
 			})
@@ -222,7 +222,7 @@ func New(opts ...FuncOption) (internal_type.SIPCallStreamer, error) {
 		}, observability.RecordMetric{
 			Metrics: []*protos.Metric{{
 				Name:        observability.MetricCallStatus,
-				Value:       "INPROGRESS",
+				Value:       "answered",
 				Description: "SIP media started",
 			}},
 		})
@@ -244,7 +244,7 @@ func New(opts ...FuncOption) (internal_type.SIPCallStreamer, error) {
 	}, observability.RecordMetric{
 		Metrics: []*protos.Metric{{
 			Name:        observability.MetricCallStatus,
-			Value:       "INPROGRESS",
+			Value:       "answered",
 			Description: "SIP streamer connected",
 		}},
 	})
@@ -317,7 +317,7 @@ func (s *Streamer) Send(response internal_type.Stream) error {
 		}, observability.RecordMetric{
 			Metrics: []*protos.Metric{{
 				Name:        observability.MetricCallStatus,
-				Value:       "COMPLETE",
+				Value:       "completed",
 				Description: "SIP call ended by server-side disconnect",
 			}},
 		})
@@ -343,7 +343,7 @@ func (s *Streamer) Send(response internal_type.Stream) error {
 			}, observability.RecordMetric{
 				Metrics: []*protos.Metric{{
 					Name:        observability.MetricCallStatus,
-					Value:       "COMPLETE",
+					Value:       "completed",
 					Description: "SIP call ended by tool action",
 				}},
 			})
@@ -370,7 +370,7 @@ func (s *Streamer) Send(response internal_type.Stream) error {
 				}, observability.RecordMetric{
 					Metrics: []*protos.Metric{{
 						Name:        observability.MetricCallStatus,
-						Value:       "FAILED",
+						Value:       "failed",
 						Description: "SIP transfer missing target",
 					}},
 				})
@@ -417,7 +417,7 @@ func (s *Streamer) StartAssistantOutput() {
 		}, observability.RecordMetric{
 			Metrics: []*protos.Metric{{
 				Name:        observability.MetricCallStatus,
-				Value:       "INPROGRESS",
+				Value:       "answered",
 				Description: "SIP media started",
 			}},
 		})
@@ -440,7 +440,7 @@ func (s *Streamer) StartAssistantOutput() {
 				}, observability.RecordMetric{
 					Metrics: []*protos.Metric{{
 						Name:        observability.MetricCallStatus,
-						Value:       "FAILED",
+						Value:       "failed",
 						Description: "SIP queued assistant audio delivery failed",
 					}},
 				})
@@ -599,7 +599,7 @@ func (s *Streamer) Close() error {
 	}, observability.RecordMetric{
 		Metrics: []*protos.Metric{{
 			Name:        observability.MetricCallStatus,
-			Value:       "COMPLETE",
+			Value:       "completed",
 			Description: "SIP media stopped",
 		}},
 	})
@@ -617,7 +617,7 @@ func (s *Streamer) Close() error {
 			}, observability.RecordMetric{
 				Metrics: []*protos.Metric{{
 					Name:        observability.MetricCallStatus,
-					Value:       "FAILED",
+					Value:       "failed",
 					Description: "SIP media port close failed",
 				}},
 			})
@@ -702,7 +702,7 @@ func (s *Streamer) endCall(session *sip_infra.Session, reason sip_infra.Lifecycl
 		}, observability.RecordMetric{
 			Metrics: []*protos.Metric{{
 				Name:        observability.MetricCallStatus,
-				Value:       "FAILED",
+				Value:       "failed",
 				Description: "SIP lifecycle end failed",
 			}},
 		})

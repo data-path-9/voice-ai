@@ -9,6 +9,7 @@ package internal_transformer_google
 import (
 	"context"
 	"fmt"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"io"
 	"strings"
 	"sync"
@@ -91,7 +92,7 @@ func (google *googleSpeechToText) Transform(c context.Context, in internal_type.
 		google.contextId = pkt.ContextID
 		google.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextEndPacket:
+	case internal_type.SpeechToTextStartPacket:
 		google.mu.Lock()
 		if google.startedAt.IsZero() {
 			google.startedAt = time.Now()
@@ -99,6 +100,11 @@ func (google *googleSpeechToText) Transform(c context.Context, in internal_type.
 		google.mu.Unlock()
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
+		google.mu.Lock()
+		if google.startedAt.IsZero() {
+			google.startedAt = time.Now()
+		}
+		google.mu.Unlock()
 		google.mu.Lock()
 		strm := google.stream
 		google.mu.Unlock()
@@ -198,16 +204,21 @@ func (g *googleSpeechToText) recvLoop(stream speechpb.Speech_StreamingRecognizeC
 				if v, err := g.mdlOpts.GetFloat64("listen.threshold"); err == nil {
 					if alt.GetConfidence() < float32(v) {
 						g.onPacket(
-							internal_type.ConversationEventPacket{
-								ContextID: ctxID,
-								Name:      "stt",
-								Data: map[string]string{
-									"type":       "low_confidence",
-									"script":     transcript,
-									"confidence": confStr,
-									"threshold":  fmt.Sprintf("%.4f", v),
+							internal_type.ObservabilityEventRecordPacket{
+								ContextID:   ctxID,
+								Scope:       internal_type.ObservabilityRecordScopeMessage,
+								MessageRole: observability.MessageRoleUser,
+								Record: observability.RecordEvent{
+									Component: observability.ComponentSTT,
+									Event:     observability.STTLowConfidence,
+									Attributes: observability.Attributes{
+										"type":       "low_confidence",
+										"script":     transcript,
+										"confidence": confStr,
+										"threshold":  fmt.Sprintf("%.4f", v),
+									},
+									OccurredAt: time.Now(),
 								},
-								Time: time.Now(),
 							},
 						)
 						continue
@@ -230,22 +241,29 @@ func (g *googleSpeechToText) recvLoop(stream speechpb.Speech_StreamingRecognizeC
 						Language:   result.GetLanguageCode(),
 						Interim:    false,
 					},
-					internal_type.ConversationEventPacket{
-						ContextID: ctxID,
-						Name:      "stt",
-						Data: map[string]string{
-							"type":       "completed",
-							"script":     transcript,
-							"confidence": confStr,
-							"language":   result.GetLanguageCode(),
-							"word_count": fmt.Sprintf("%d", len(strings.Fields(transcript))),
-							"char_count": fmt.Sprintf("%d", len(transcript)),
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   ctxID,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record: observability.RecordEvent{
+							Component: observability.ComponentSTT,
+							Event:     observability.STTCompleted,
+							Attributes: observability.Attributes{
+								"type":       "completed",
+								"script":     transcript,
+								"confidence": confStr,
+								"language":   result.GetLanguageCode(),
+								"word_count": fmt.Sprintf("%d", len(strings.Fields(transcript))),
+								"char_count": fmt.Sprintf("%d", len(transcript)),
+							},
+							OccurredAt: now,
 						},
-						Time: now,
 					},
-					internal_type.UserMessageMetricPacket{
-						ContextID: ctxID,
-						Metrics:   []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+					internal_type.ObservabilityMetricRecordPacket{
+						ContextID:   ctxID,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record:      observability.NewMessageMetricRecord(ctxID, observability.MessageRoleUser, []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}}),
 					},
 				)
 			} else {
@@ -258,15 +276,20 @@ func (g *googleSpeechToText) recvLoop(stream speechpb.Speech_StreamingRecognizeC
 						Language:   result.GetLanguageCode(),
 						Interim:    true,
 					},
-					internal_type.ConversationEventPacket{
-						ContextID: ctxID,
-						Name:      "stt",
-						Data: map[string]string{
-							"type":       "interim",
-							"script":     transcript,
-							"confidence": confStr,
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   ctxID,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record: observability.RecordEvent{
+							Component: observability.ComponentSTT,
+							Event:     observability.STTInterim,
+							Attributes: observability.Attributes{
+								"type":       "interim",
+								"script":     transcript,
+								"confidence": confStr,
+							},
+							OccurredAt: time.Now(),
 						},
-						Time: time.Now(),
 					},
 				)
 			}
@@ -283,15 +306,19 @@ func (google *googleSpeechToText) Initialize() error {
 	if err != nil {
 		return err
 	}
-	google.onPacket(internal_type.ConversationEventPacket{
+	google.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: google.contextId,
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": google.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": google.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -352,23 +379,42 @@ func (g *googleSpeechToText) Close(ctx context.Context) error {
 	g.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		g.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "stt",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": g.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentSTT,
+					Event:     observability.STTClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": g.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total STT connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentSTT,
+					Provider:  g.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   g.Name(),
+						"metric":     type_enums.CONVERSATION_STT_DURATION.String(),
+					},
+				},
 			},
 		)
 	}

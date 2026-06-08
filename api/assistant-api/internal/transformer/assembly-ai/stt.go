@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"net/http"
 	"strings"
 	"sync"
@@ -87,15 +88,19 @@ func (aai *assemblyaiSTT) Initialize() error {
 	aai.logger.Debugf("assembly-ai-stt: connection established")
 	go aai.readLoop(connection)
 
-	aai.onPacket(internal_type.ConversationEventPacket{
+	aai.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: aai.contextId,
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": aai.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": aai.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -169,15 +174,20 @@ func (aai *assemblyaiSTT) readLoop(conn *websocket.Conn) {
 						Confidence: totalConfidence / float64(wordCount),
 						Interim:    true,
 					},
-					internal_type.ConversationEventPacket{
-						ContextID: ctxID,
-						Name:      "stt",
-						Data: map[string]string{
-							"type":       "interim",
-							"script":     filteredTranscript,
-							"confidence": confStr,
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   ctxID,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record: observability.RecordEvent{
+							Component: observability.ComponentSTT,
+							Event:     observability.STTInterim,
+							Attributes: observability.Attributes{
+								"type":       "interim",
+								"script":     filteredTranscript,
+								"confidence": confStr,
+							},
+							OccurredAt: time.Now(),
 						},
-						Time: time.Now(),
 					},
 				)
 			} else {
@@ -198,22 +208,29 @@ func (aai *assemblyaiSTT) readLoop(conn *websocket.Conn) {
 						Confidence: totalConfidence / float64(wordCount),
 						Interim:    false,
 					},
-					internal_type.ConversationEventPacket{
-						ContextID: ctxID,
-						Name:      "stt",
-						Data: map[string]string{
-							"type":       "completed",
-							"script":     filteredTranscript,
-							"confidence": confStr,
-							"language":   "en",
-							"word_count": fmt.Sprintf("%d", len(strings.Fields(filteredTranscript))),
-							"char_count": fmt.Sprintf("%d", len(filteredTranscript)),
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   ctxID,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record: observability.RecordEvent{
+							Component: observability.ComponentSTT,
+							Event:     observability.STTCompleted,
+							Attributes: observability.Attributes{
+								"type":       "completed",
+								"script":     filteredTranscript,
+								"confidence": confStr,
+								"language":   "en",
+								"word_count": fmt.Sprintf("%d", len(strings.Fields(filteredTranscript))),
+								"char_count": fmt.Sprintf("%d", len(filteredTranscript)),
+							},
+							OccurredAt: now,
 						},
-						Time: now,
 					},
-					internal_type.UserMessageMetricPacket{
-						ContextID: ctxID,
-						Metrics:   []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+					internal_type.ObservabilityMetricRecordPacket{
+						ContextID:   ctxID,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record:      observability.NewMessageMetricRecord(ctxID, observability.MessageRoleUser, []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}}),
 					},
 				)
 			}
@@ -242,7 +259,7 @@ func (aai *assemblyaiSTT) Transform(ctx context.Context, in internal_type.Packet
 		aai.contextId = pkt.ContextID
 		aai.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextEndPacket:
+	case internal_type.SpeechToTextStartPacket:
 		aai.mu.Lock()
 		if aai.startedAt.IsZero() {
 			aai.startedAt = time.Now()
@@ -250,6 +267,11 @@ func (aai *assemblyaiSTT) Transform(ctx context.Context, in internal_type.Packet
 		aai.mu.Unlock()
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
+		aai.mu.Lock()
+		if aai.startedAt.IsZero() {
+			aai.startedAt = time.Now()
+		}
+		aai.mu.Unlock()
 		aai.mu.Lock()
 		defer aai.mu.Unlock()
 		if aai.connection == nil {
@@ -285,23 +307,42 @@ func (aai *assemblyaiSTT) Close(ctx context.Context) error {
 	aai.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		aai.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "stt",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": aai.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentSTT,
+					Event:     observability.STTClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": aai.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total STT connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentSTT,
+					Provider:  aai.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   aai.Name(),
+						"metric":     type_enums.CONVERSATION_STT_DURATION.String(),
+					},
+				},
 			},
 		)
 	}

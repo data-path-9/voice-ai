@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	transformer_testutil "github.com/rapidaai/api/assistant-api/internal/transformer/internal/testutil"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -457,11 +458,11 @@ func TestTextToSpeech_InterruptRequestRule(t *testing.T) {
 
 	hasInterruptedEvent := false
 	for _, packet := range collector.all() {
-		event, ok := packet.(internal_type.ConversationEventPacket)
+		event, ok := packet.(internal_type.ObservabilityEventRecordPacket)
 		if !ok {
 			continue
 		}
-		if event.ContextID == "ctx-int" && event.Name == "tts" && event.Data["type"] == "interrupted" {
+		if event.ContextID == "ctx-int" && event.Record.Component.String() == "tts" && event.Record.Attributes["type"] == "interrupted" {
 			hasInterruptedEvent = true
 		}
 	}
@@ -558,11 +559,11 @@ func TestTextToSpeech_StaleInterruptDoesNotAffectActiveConnection(t *testing.T) 
 
 	hasStaleInterruptedEvent := false
 	for _, packet := range collector.all() {
-		event, ok := packet.(internal_type.ConversationEventPacket)
+		event, ok := packet.(internal_type.ObservabilityEventRecordPacket)
 		if !ok {
 			continue
 		}
-		if event.ContextID == "ctx-stale" && event.Name == "tts" && event.Data["type"] == "interrupted" {
+		if event.ContextID == "ctx-stale" && event.Record.Component.String() == "tts" && event.Record.Attributes["type"] == "interrupted" {
 			hasStaleInterruptedEvent = true
 		}
 	}
@@ -712,18 +713,26 @@ func TestTextToSpeech_CloseEmitsConversationDurationAfterDone(t *testing.T) {
 	require.NoError(t, transformer.Close(context.Background()))
 
 	hasDurationMetric := false
+	hasDurationUsage := false
 	for _, packet := range collector.all() {
-		metricPacket, ok := packet.(internal_type.ConversationMetricPacket)
-		if !ok {
-			continue
-		}
-		for _, metric := range metricPacket.Metrics {
-			if metric.GetName() == type_enums.CONVERSATION_TTS_DURATION.String() && strings.TrimSpace(metric.GetValue()) != "" {
-				hasDurationMetric = true
+		switch typed := packet.(type) {
+		case internal_type.ObservabilityMetricRecordPacket:
+			for _, metric := range typed.Record.Metrics {
+				if metric.GetName() == type_enums.CONVERSATION_TTS_DURATION.String() && strings.TrimSpace(metric.GetValue()) != "" {
+					hasDurationMetric = true
+				}
+			}
+		case internal_type.ObservabilityUsageRecordPacket:
+			if typed.Record.Component == observability.ComponentTTS &&
+				typed.Record.Provider == "custom-tts-websocket-v1" &&
+				typed.Record.Duration > 0 &&
+				typed.Record.Attributes["metric"] == type_enums.CONVERSATION_TTS_DURATION.String() {
+				hasDurationUsage = true
 			}
 		}
 	}
 	assert.True(t, hasDurationMetric, "expected CONVERSATION_TTS_DURATION metric after Close")
+	assert.True(t, hasDurationUsage, "expected TTS duration usage after Close")
 }
 
 func TestTextToSpeech_CloseUnblocksPendingDial(t *testing.T) {

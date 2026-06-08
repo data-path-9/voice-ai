@@ -1081,60 +1081,6 @@ func (f HTTPLogCreatePacket) ContextId() string { return f.ContextID }
 func (f HTTPLogCreatePacket) IsAsync() bool     { return true }
 
 // =============================================================================
-// Metrics & Metadata
-// =============================================================================
-
-// ConversationMetricPacket carries conversation-level metrics.
-type ConversationMetricPacket struct {
-	ContextID uint64
-	Metrics   []*protos.Metric
-}
-
-func (f ConversationMetricPacket) ContextId() string      { return fmt.Sprintf("%d", f.ContextID) }
-func (f ConversationMetricPacket) ConversationID() uint64 { return f.ContextID }
-
-// ConversationMetadataPacket carries conversation-level metadata.
-type ConversationMetadataPacket struct {
-	ContextID uint64
-	Metadata  []*protos.Metadata
-}
-
-func (f ConversationMetadataPacket) ContextId() string      { return fmt.Sprintf("%d", f.ContextID) }
-func (f ConversationMetadataPacket) ConversationID() uint64 { return f.ContextID }
-
-// UserMessageMetricPacket carries metrics for a user message turn.
-type UserMessageMetricPacket struct {
-	ContextID string
-	Metrics   []*protos.Metric
-}
-
-func (f UserMessageMetricPacket) ContextId() string { return f.ContextID }
-
-// AssistantMessageMetricPacket carries metrics for an assistant message turn.
-type AssistantMessageMetricPacket struct {
-	ContextID string
-	Metrics   []*protos.Metric
-}
-
-func (f AssistantMessageMetricPacket) ContextId() string { return f.ContextID }
-
-// AssistantMessageMetadataPacket carries metadata for an assistant message turn.
-type AssistantMessageMetadataPacket struct {
-	ContextID string
-	Metadata  []*protos.Metadata
-}
-
-func (f AssistantMessageMetadataPacket) ContextId() string { return f.ContextID }
-
-// UserMessageMetadataPacket carries metadata for a user message turn.
-type UserMessageMetadataPacket struct {
-	ContextID string
-	Metadata  []*protos.Metadata
-}
-
-func (f UserMessageMetadataPacket) ContextId() string { return f.ContextID }
-
-// =============================================================================
 // Observability
 // =============================================================================
 
@@ -1267,28 +1213,6 @@ func (p ObservabilityWebhookRecordPacket) GetMessageRole() observability.Message
 func (p ObservabilityWebhookRecordPacket) GetRecord() observability.Record {
 	return p.Record
 }
-
-// ConversationEventPacket carries a named pipeline event for the debugger.
-// Each component emits these alongside its existing packets; they flow through
-// lowCh so they never compete with STT/LLM/TTS audio.
-type ConversationEventPacket struct {
-	// ContextID identifies the interaction turn. May be empty when emitted by
-	// components that don't hold the session context (e.g. STT callbacks);
-	// handleConversationEvent fills it from r.GetID() in that case.
-	ContextID string
-
-	// Name is the component name: "stt", "tts", "llm", "vad", "eos",
-	// "knowledge", "session", "behavior", "denoise", "audio", "tool", etc.
-	Name string
-
-	// Data carries event-specific key/value pairs. Always includes "type".
-	Data map[string]string
-
-	// Time is the wall-clock time the event was raised.
-	Time time.Time
-}
-
-func (f ConversationEventPacket) ContextId() string { return f.ContextID }
 
 // =============================================================================
 // Non-packet Support Types

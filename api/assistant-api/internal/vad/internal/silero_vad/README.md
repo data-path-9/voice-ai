@@ -94,8 +94,8 @@ resampling is a no-op.
    - Identify the latest segment end time.
    - Merge all detected segments into a single speech activity window.
 
-8. Invoke the activity callback with an `InterruptionPacket` and a
-   `ConversationEventPacket` containing the merged start/end times.
+8. Invoke the activity callback with an `InterruptionPacket` and an
+   `ObservabilityEventRecordPacket` containing the merged start/end times.
 
 9. Return `nil` unless an error occurred during processing.
 

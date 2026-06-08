@@ -87,16 +87,6 @@ func (d *Dispatcher) executeTransfer(ctx context.Context, v sip_infra.TransferIn
 			"call_id", v.ID, "target", target,
 			"attempt", attempt, "error", err)
 
-		d.OnPipeline(ctx, sip_infra.EventEmittedPipeline{
-			ID:    v.ID,
-			Event: "transfer_target_failed",
-			Data: map[string]string{
-				"target":  target,
-				"attempt": fmt.Sprintf("%d", attempt),
-				"error":   err.Error(),
-			},
-		})
-
 		// Caller hung up or session ended — stop trying further targets.
 		if v.Session.Context().Err() != nil {
 			break

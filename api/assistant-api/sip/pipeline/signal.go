@@ -76,43 +76,43 @@ func (d *Dispatcher) handleCallFailed(ctx context.Context, v sip_infra.CallFaile
 		setup.OrganizationID = *auth.GetCurrentOrganizationId()
 	}
 
-	if d.onCreateObserver != nil {
-		observer := d.onCreateObserver(ctx, setup, auth)
-		if observer != nil {
-			scope := observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{AssistantID: assistantID},
-				ConversationID: convID,
-			}
-			attributes := observability.Attributes{
-				"provider":  "sip",
-				"reason":    reason,
-				"direction": string(v.Session.GetInfo().Direction),
-				"call_id":   v.ID,
-			}
-			if v.SIPCode > 0 {
-				attributes["sip_code"] = fmt.Sprintf("%d", v.SIPCode)
-			}
-			if v.Error != nil {
-				attributes["error"] = v.Error.Error()
-			}
-			_ = observer.Record(ctx, scope, observability.RecordLog{
-				Level:      observability.LevelError,
-				Message:    "SIP call failed",
-				Attributes: attributes,
-			})
-			_ = observer.Record(ctx, scope, observability.RecordEvent{
-				Component:  observability.ComponentCall,
-				Event:      observability.CallFailed,
-				Attributes: attributes,
-			})
-			_ = observer.Record(ctx, scope, observability.RecordMetric{
-				Metrics: []*protos.Metric{{
-					Name:        observability.MetricCallStatus,
-					Value:       "FAILED",
-					Description: reason,
-				}},
-			})
-			_ = observer.Close(ctx)
-		}
+	observer := d.createObserver(ctx, setup, auth)
+	scope := observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: assistantID},
+		ConversationID: convID,
 	}
+	attributes := observability.Attributes{
+		"provider":  "sip",
+		"reason":    reason,
+		"direction": string(v.Session.GetInfo().Direction),
+		"call_id":   v.ID,
+	}
+	if v.SIPCode > 0 {
+		attributes["sip_code"] = fmt.Sprintf("%d", v.SIPCode)
+	}
+	if v.Error != nil {
+		attributes["error"] = v.Error.Error()
+	}
+	_ = observer.Record(
+		ctx,
+		scope,
+		observability.RecordLog{
+			Level:      observability.LevelError,
+			Message:    "SIP call failed",
+			Attributes: attributes,
+		},
+		observability.RecordEvent{
+			Component:  observability.ComponentCall,
+			Event:      observability.CallFailed,
+			Attributes: attributes,
+		},
+		observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       "failed",
+				Description: reason,
+			}},
+		},
+	)
+	_ = observer.Close(ctx)
 }

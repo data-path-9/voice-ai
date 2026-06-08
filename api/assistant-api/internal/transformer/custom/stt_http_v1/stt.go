@@ -18,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rapidaai/api/assistant-api/internal/observability"
+
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -96,15 +98,19 @@ func (transformer *speechToText) Initialize() error {
 	contextID := transformer.contextID
 	transformer.mu.Unlock()
 
-	transformer.onPacket(internal_type.ConversationEventPacket{
+	transformer.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: contextID,
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": transformer.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": transformer.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -117,11 +123,9 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		transformer.mu.Unlock()
 		return nil
 	case internal_type.SpeechToTextEndPacket:
-		transformer.logger.Debugf("Test -> STT END Packet received for context %s", input.ContextID)
 		transformer.flushBufferedSpeech(input.ContextID)
 		return nil
 	case internal_type.SpeechToTextStartPacket:
-		transformer.logger.Debugf("Test -> STT Start Packet received for context %s", input.ContextID)
 		transformer.mu.Lock()
 		if input.ContextID != "" {
 			transformer.contextID = input.ContextID
@@ -172,22 +176,42 @@ func (transformer *speechToText) Close(_ context.Context) error {
 	transformer.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		transformer.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: contextID,
-				Name:      "stt",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": transformer.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentSTT,
+					Event:     observability.STTClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": transformer.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total STT connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: contextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentSTT,
+					Provider:  transformer.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": contextID,
+						"provider":   transformer.Name(),
+						"metric":     type_enums.CONVERSATION_STT_DURATION.String(),
+					},
+				},
 			},
 		)
 	}
@@ -389,20 +413,27 @@ func (transformer *speechToText) emitTranscript(contextID string, outcome respon
 			Language:   language,
 			Interim:    false,
 		},
-		internal_type.ConversationEventPacket{
-			ContextID: contextID,
-			Name:      "stt",
-			Data:      eventData,
-			Time:      now,
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID:   contextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordEvent{
+				Component:  observability.ComponentSTT,
+				Event:      observability.STTEvent,
+				Attributes: eventData,
+				OccurredAt: now,
+			},
 		},
 	}
 	if !startedAt.IsZero() {
-		packets = append(packets, internal_type.UserMessageMetricPacket{
-			ContextID: contextID,
-			Metrics: []*protos.Metric{{
+		packets = append(packets, internal_type.ObservabilityMetricRecordPacket{
+			ContextID:   contextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.NewMessageMetricRecord(contextID, observability.MessageRoleUser, []*protos.Metric{{
 				Name:  "stt_latency_ms",
 				Value: fmt.Sprintf("%d", now.Sub(startedAt).Milliseconds()),
-			}},
+			}}),
 		})
 	}
 

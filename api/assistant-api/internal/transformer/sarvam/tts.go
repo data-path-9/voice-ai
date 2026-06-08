@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"net/http"
 	"sync"
 	"time"
@@ -93,14 +94,18 @@ func (rt *sarvamTextToSpeech) Initialize() error {
 
 	go rt.readLoop(conn)
 
-	rt.onPacket(internal_type.ConversationEventPacket{
-		Name: "tts",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": rt.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+	rt.onPacket(internal_type.ObservabilityEventRecordPacket{
+		Scope: internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentTTS,
+			Event:     observability.TTSInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": rt.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -182,12 +187,14 @@ func (rt *sarvamTextToSpeech) handleAudio(response sarvam_internal.SarvamTextToS
 	}
 
 	if !metricSent && !startedAt.IsZero() {
-		rt.onPacket(internal_type.AssistantMessageMetricPacket{
-			ContextID: contextId,
-			Metrics: []*protos.Metric{{
+		rt.onPacket(internal_type.ObservabilityMetricRecordPacket{
+			ContextID:   contextId,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleAssistant,
+			Record: observability.NewMessageMetricRecord(contextId, observability.MessageRoleAssistant, []*protos.Metric{{
 				Name:  "tts_latency_ms",
 				Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
-			}},
+			}}),
 		})
 	}
 	rt.onPacket(internal_type.TextToSpeechAudioPacket{ContextID: contextId, AudioChunk: raw})
@@ -205,10 +212,16 @@ func (rt *sarvamTextToSpeech) handleFlushComplete(conn *websocket.Conn) {
 
 	rt.onPacket(
 		internal_type.TextToSpeechEndPacket{ContextID: contextId},
-		internal_type.ConversationEventPacket{
-			Name: "tts",
-			Data: map[string]string{"type": "completed"},
-			Time: time.Now(),
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID:   contextId,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleAssistant,
+			Record: observability.RecordEvent{
+				Component:  observability.ComponentTTS,
+				Event:      observability.TTSCompleted,
+				Attributes: observability.Attributes{"type": "completed"},
+				OccurredAt: time.Now(),
+			},
 		},
 	)
 	conn.Close()
@@ -263,10 +276,16 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.Pa
 			conn.Close()
 		}
 		// Emit before Initialize so downstream sees the interrupt immediately.
-		rt.onPacket(internal_type.ConversationEventPacket{
-			Name: "tts",
-			Data: map[string]string{"type": "interrupted"},
-			Time: time.Now(),
+		rt.onPacket(internal_type.ObservabilityEventRecordPacket{
+			ContextID:   input.ContextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleAssistant,
+			Record: observability.RecordEvent{
+				Component:  observability.ComponentTTS,
+				Event:      observability.TTSInterrupted,
+				Attributes: observability.Attributes{"type": "interrupted"},
+				OccurredAt: time.Now(),
+			},
 		})
 		if err := rt.Initialize(); err != nil {
 			rt.logger.Errorf("sarvam-tts: reconnect after interrupt failed: %v", err)
@@ -310,10 +329,16 @@ func (rt *sarvamTextToSpeech) Transform(ctx context.Context, in internal_type.Pa
 			})
 			return nil
 		}
-		rt.onPacket(internal_type.ConversationEventPacket{
-			Name: "tts",
-			Data: map[string]string{"type": "speaking", "text": input.Text},
-			Time: time.Now(),
+		rt.onPacket(internal_type.ObservabilityEventRecordPacket{
+			ContextID:   input.ContextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleAssistant,
+			Record: observability.RecordEvent{
+				Component:  observability.ComponentTTS,
+				Event:      observability.TTSSpeaking,
+				Attributes: observability.Attributes{"type": "speaking", "text": input.Text},
+				OccurredAt: time.Now(),
+			},
 		})
 
 	case internal_type.TextToSpeechDonePacket:
@@ -353,23 +378,42 @@ func (rt *sarvamTextToSpeech) Close(ctx context.Context) error {
 	rt.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		rt.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "tts",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": rt.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentTTS,
+					Event:     observability.TTSClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": rt.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_TTS_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total TTS connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentTTS,
+					Provider:  rt.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   rt.Name(),
+						"metric":     type_enums.CONVERSATION_TTS_DURATION.String(),
+					},
+				},
 			},
 		)
 	}
