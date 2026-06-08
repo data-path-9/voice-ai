@@ -60,7 +60,7 @@ func (pc *packetCollector) Clear() {
 func createTestCallback(opts utils.Option) (*packetCollector, commons.Logger, msginterfaces.LiveMessageCallback) {
 	logger, _ := commons.NewApplicationLogger()
 	collector := newPacketCollector()
-	callback := NewDeepgramSttCallback(logger, collector.OnPacket, opts, func() time.Time { return time.Time{} }, func() string { return "ctx-test" })
+	callback := NewDeepgramSttCallback(logger, collector.OnPacket, opts, func() time.Time { return time.Time{} }, func() string { return "ctx-test" }, "deepgram-speech-to-text")
 	return collector, logger, callback
 }
 

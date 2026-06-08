@@ -191,7 +191,7 @@ func NewGenericRequestor(
 	go gr.runCriticalDispatcher(sessionCtx)
 	go gr.runOutputDispatcher(sessionCtx)
 	go gr.runDataDispatcher(sessionCtx)
-	go gr.runLowDispatcher(sessionCtx)
+
 	return gr
 }
 

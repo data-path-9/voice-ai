@@ -182,10 +182,13 @@ func (rt *rimeTTS) handleAudio(response rime_internal.RimeTextToSpeechResponse) 
 			ContextID:   contextId,
 			Scope:       internal_type.ObservabilityRecordScopeMessage,
 			MessageRole: observability.MessageRoleAssistant,
-			Record: observability.NewMessageMetricRecord(contextId, observability.MessageRoleAssistant, []*protos.Metric{{
-				Name:  "tts_latency_ms",
-				Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
-			}}),
+			Record: observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:  "tts_latency_ms",
+					Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
+				}},
+				Attributes: observability.Attributes{"provider": rt.Name()},
+			},
 		})
 	}
 	rt.onPacket(internal_type.TextToSpeechAudioPacket{ContextID: contextId, AudioChunk: raw})

@@ -205,7 +205,10 @@ func (st *groqSTT) transcribe(audioData []byte, ctxId string) {
 				ContextID:   ctxId,
 				Scope:       internal_type.ObservabilityRecordScopeMessage,
 				MessageRole: observability.MessageRoleUser,
-				Record:      observability.NewMessageMetricRecord(ctxId, observability.MessageRoleUser, []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}}),
+				Record: observability.RecordMetric{
+					Metrics:    []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+					Attributes: observability.Attributes{"provider": st.Name()},
+				},
 			},
 		)
 	}

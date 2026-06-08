@@ -484,10 +484,13 @@ func (transformer *speechToText) emitTranscript(outcome responseOutcome) {
 			ContextID:   contextID,
 			Scope:       internal_type.ObservabilityRecordScopeMessage,
 			MessageRole: observability.MessageRoleUser,
-			Record: observability.NewMessageMetricRecord(contextID, observability.MessageRoleUser, []*protos.Metric{{
-				Name:  "stt_latency_ms",
-				Value: fmt.Sprintf("%d", now.Sub(interruptionStartedAt).Milliseconds()),
-			}}),
+			Record: observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:  "stt_latency_ms",
+					Value: fmt.Sprintf("%d", now.Sub(interruptionStartedAt).Milliseconds()),
+				}},
+				Attributes: observability.Attributes{"provider": transformer.Name()},
+			},
 		})
 	}
 }

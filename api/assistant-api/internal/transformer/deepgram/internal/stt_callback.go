@@ -21,11 +21,12 @@ import (
 
 // Implement the LiveMessageCallback interface
 type deepgramSttCallback struct {
-	logger      commons.Logger
-	onPacket    func(pkt ...internal_type.Packet) error
-	options     utils.Option
-	swapStarted func() time.Time
-	contextID   func() string
+	logger       commons.Logger
+	onPacket     func(pkt ...internal_type.Packet) error
+	options      utils.Option
+	swapStarted  func() time.Time
+	contextID    func() string
+	providerName string
 }
 
 func NewDeepgramSttCallback(
@@ -34,13 +35,15 @@ func NewDeepgramSttCallback(
 	options utils.Option,
 	swapStarted func() time.Time,
 	contextID func() string,
+	providerName string,
 ) msginterfaces.LiveMessageCallback {
 	return &deepgramSttCallback{
-		logger:      logger,
-		onPacket:    onPacket,
-		options:     options,
-		swapStarted: swapStarted,
-		contextID:   contextID,
+		logger:       logger,
+		onPacket:     onPacket,
+		options:      options,
+		swapStarted:  swapStarted,
+		contextID:    contextID,
+		providerName: providerName,
 	}
 }
 
@@ -123,7 +126,10 @@ func (d *deepgramSttCallback) Message(mr *msginterfaces.MessageResponse) error {
 					ContextID:   ctxID,
 					Scope:       internal_type.ObservabilityRecordScopeMessage,
 					MessageRole: observability.MessageRoleUser,
-					Record:      observability.NewMessageMetricRecord(ctxID, observability.MessageRoleUser, []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}}),
+					Record: observability.RecordMetric{
+						Metrics:    []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+						Attributes: observability.Attributes{"provider": d.providerName},
+					},
 				},
 			)
 		} else {

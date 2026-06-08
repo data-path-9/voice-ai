@@ -332,10 +332,13 @@ func (g *googleTextToSpeech) recvLoop(streamClient texttospeechpb.TextToSpeech_S
 				ContextID:   effectiveContextId,
 				Scope:       internal_type.ObservabilityRecordScopeMessage,
 				MessageRole: observability.MessageRoleAssistant,
-				Record: observability.NewMessageMetricRecord(effectiveContextId, observability.MessageRoleAssistant, []*protos.Metric{{
-					Name:  "tts_latency_ms",
-					Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
-				}}),
+				Record: observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:  "tts_latency_ms",
+						Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
+					}},
+					Attributes: observability.Attributes{"provider": g.Name()},
+				},
 			})
 		}
 		if err := g.onPacket(internal_type.TextToSpeechAudioPacket{ContextID: effectiveContextId, AudioChunk: audioContent}); err != nil {

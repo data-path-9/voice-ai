@@ -187,10 +187,13 @@ func (t *nvidiaTTS) streamHTTPTTS(text string, ctxId string) {
 						ContextID:   ctxId,
 						Scope:       internal_type.ObservabilityRecordScopeMessage,
 						MessageRole: observability.MessageRoleAssistant,
-						Record: observability.NewMessageMetricRecord(ctxId, observability.MessageRoleAssistant, []*protos.Metric{{
-							Name:  "tts_latency_ms",
-							Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
-						}}),
+						Record: observability.RecordMetric{
+							Metrics: []*protos.Metric{{
+								Name:  "tts_latency_ms",
+								Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
+							}},
+							Attributes: observability.Attributes{"provider": t.Name()},
+						},
 					})
 				}
 			}

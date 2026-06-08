@@ -221,7 +221,10 @@ func (st *awsSTT) transcribe(audioData []byte, ctxID string) {
 				ContextID:   ctxID,
 				Scope:       internal_type.ObservabilityRecordScopeMessage,
 				MessageRole: observability.MessageRoleUser,
-				Record:      observability.NewMessageMetricRecord(ctxID, observability.MessageRoleUser, []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}}),
+				Record: observability.RecordMetric{
+					Metrics:    []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+					Attributes: observability.Attributes{"provider": st.Name()},
+				},
 			},
 		)
 	}

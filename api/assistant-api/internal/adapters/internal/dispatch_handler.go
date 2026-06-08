@@ -1623,6 +1623,8 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		return
 	}
 
+	// start accepting input as conversation is inilize properly
+	go h.r.runLowDispatcher(h.r.sessionCtx)
 	h.r.OnPacket(ctx,
 		internal_type.ObservabilityMetricRecordPacket{
 			ContextID: p.ContextID,
