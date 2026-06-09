@@ -32,7 +32,7 @@ const (
 	AuthTypeUser    AuthType = "user"
 	AuthTypeService AuthType = "service"
 	AuthTypeProject AuthType = "project"
-	AuthTypeOrg     AuthType = "org"
+	AuthTypeOrg     AuthType = "organization"
 )
 
 func (a AuthType) String() string {
