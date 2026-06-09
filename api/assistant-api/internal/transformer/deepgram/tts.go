@@ -19,7 +19,6 @@ import (
 	deepgram_internal "github.com/rapidaai/api/assistant-api/internal/transformer/deepgram/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
-	type_enums "github.com/rapidaai/pkg/types/enums"
 	utils "github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
@@ -76,6 +75,20 @@ func (t *deepgramTTS) Initialize() error {
 	conn, resp, err := websocket.DefaultDialer.Dial(t.GetTextToSpeechConnectionString(), header)
 	if err != nil {
 		t.logger.Errorf("deepgram-tts: websocket dial failed err=%v resp=%v", err, resp)
+		t.onPacket(
+			internal_type.ObservabilityLogRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: fmt.Sprintf("deepgram-tts: error while performing connect"),
+					Attributes: observability.Attributes{
+						"component": observability.ComponentSTT.String(),
+						"provider":  t.Name(),
+						"options":   observability.AttributeValue(t.SpeechToTextOptions()),
+					},
+					OccurredAt: time.Now(),
+				},
+			})
 		return err
 	}
 
@@ -85,26 +98,30 @@ func (t *deepgramTTS) Initialize() error {
 		t.ttsConnectedAt = time.Now()
 	}
 	t.mu.Unlock()
-
 	go t.readLoop(conn)
-	t.onPacket(internal_type.ObservabilityEventRecordPacket{
-		Scope: internal_type.ObservabilityRecordScopeConversation,
-		Record: observability.RecordEvent{
-			Component: observability.ComponentTTS,
-			Event:     observability.TTSInitialized,
-			Attributes: observability.Attributes{
-				"type":     "initialized",
-				"provider": t.Name(),
-				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
-			},
-			OccurredAt: time.Now(),
+	t.onPacket(
+		internal_type.ObservabilityMetricRecordPacket{
+			Scope:  internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewMetricTTSInitLatencyMs(time.Since(start), observability.Attributes{"provider": t.Name()}),
 		},
-	})
+		internal_type.ObservabilityLogRecordPacket{
+			Scope: internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.RecordLog{
+				Level:   observability.LevelInfo,
+				Message: "deepgram-tts: initialization completed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentSTT.String(),
+					"provider":  "deepgram",
+					"path":      observability.AttributeValue(t.GetTextToSpeechConnectionString()),
+				},
+				OccurredAt: time.Now(),
+			},
+		})
 	return nil
 }
 
 func (*deepgramTTS) Name() string {
-	return "deepgram-text-to-speech"
+	return "deepgram"
 }
 
 // handleFlushComplete is called when Deepgram signals Flushed. It emits
@@ -115,13 +132,11 @@ func (t *deepgramTTS) handleFlushComplete(conn *websocket.Conn) {
 	ctxId := t.contextId
 	t.connection = nil // mark before Close so readLoop error handler sees intentional
 	t.mu.Unlock()
-
 	t.onPacket(
 		internal_type.TextToSpeechEndPacket{ContextID: ctxId},
 		internal_type.ObservabilityEventRecordPacket{
-			ContextID:   ctxId,
-			Scope:       internal_type.ObservabilityRecordScopeMessage,
-			MessageRole: observability.MessageRoleAssistant,
+			ContextID: ctxId,
+			Scope:     internal_type.ObservabilityRecordScopeAssistant,
 			Record: observability.RecordEvent{
 				Component:  observability.ComponentTTS,
 				Event:      observability.TTSCompleted,
@@ -169,16 +184,9 @@ func (t *deepgramTTS) readLoop(conn *websocket.Conn) {
 			t.mu.Unlock()
 			if !metricSent && !startedAt.IsZero() {
 				t.onPacket(internal_type.ObservabilityMetricRecordPacket{
-					ContextID:   ctxId,
-					Scope:       internal_type.ObservabilityRecordScopeMessage,
-					MessageRole: observability.MessageRoleAssistant,
-					Record: observability.RecordMetric{
-						Metrics: []*protos.Metric{{
-							Name:  "tts_latency_ms",
-							Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
-						}},
-						Attributes: observability.Attributes{"provider": t.Name()},
-					},
+					ContextID: ctxId,
+					Scope:     internal_type.ObservabilityRecordScopeAssistant,
+					Record:    observability.NewMetricTTSLatencyMs(time.Since(startedAt), observability.Attributes{"provider": t.Name()}),
 				})
 			}
 			t.onPacket(internal_type.TextToSpeechAudioPacket{
@@ -233,9 +241,9 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 			conn.Close()
 		}
 		t.onPacket(internal_type.ObservabilityEventRecordPacket{
-			ContextID:   input.ContextID,
-			Scope:       internal_type.ObservabilityRecordScopeMessage,
-			MessageRole: observability.MessageRoleAssistant,
+			ContextID: input.ContextID,
+			Scope:     internal_type.ObservabilityRecordScopeAssistant,
+
 			Record: observability.RecordEvent{
 				Component:  observability.ComponentTTS,
 				Event:      observability.TTSInterrupted,
@@ -285,9 +293,9 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 			return nil
 		}
 		t.onPacket(internal_type.ObservabilityEventRecordPacket{
-			ContextID:   input.ContextID,
-			Scope:       internal_type.ObservabilityRecordScopeMessage,
-			MessageRole: observability.MessageRoleAssistant,
+			ContextID: input.ContextID,
+			Scope:     internal_type.ObservabilityRecordScopeAssistant,
+
 			Record: observability.RecordEvent{
 				Component: observability.ComponentTTS,
 				Event:     observability.TTSSpeaking,
@@ -327,58 +335,41 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 func (t *deepgramTTS) Close(ctx context.Context) error {
 	t.ctxCancel()
 	t.mu.Lock()
-	ctxID := t.contextId
 	connectedAt := t.ttsConnectedAt
 	t.ttsConnectedAt = time.Time{}
 
 	if t.connection != nil {
 		conn := t.connection
-		t.connection = nil // mark before Close so readLoop sees intentional
+		t.connection = nil
 		_ = conn.WriteJSON(map[string]string{"type": "Close"})
 		conn.Close()
 	}
 	t.mu.Unlock()
-
 	if !connectedAt.IsZero() {
 		duration := time.Since(connectedAt)
 		t.onPacket(
-			internal_type.ObservabilityEventRecordPacket{
-				ContextID: ctxID,
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.RecordEvent{
-					Component: observability.ComponentTTS,
-					Event:     observability.TTSClosed,
-					Attributes: observability.Attributes{
-						"type":     "closed",
-						"provider": t.Name(),
-					},
-					OccurredAt: time.Now(),
-				},
-			},
 			internal_type.ObservabilityMetricRecordPacket{
-				ContextID: ctxID,
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
-					Name:        type_enums.CONVERSATION_TTS_DURATION.String(),
-					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
-					Description: "Total TTS connection duration in nanoseconds",
-				}}),
+				Scope:  internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewMetricTTSDuration(duration, observability.Attributes{"provider": t.Name()}),
 			},
 			internal_type.ObservabilityUsageRecordPacket{
-				ContextID: ctxID,
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.RecordUsage{
-					Component: observability.ComponentTTS,
-					Provider:  t.Name(),
-					Duration:  duration,
-					Attributes: observability.Attributes{
-						"context_id": ctxID,
-						"provider":   t.Name(),
-						"metric":     type_enums.CONVERSATION_TTS_DURATION.String(),
-					},
-				},
+				Scope:  internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewTTSDurationUsageRecord(t.Name(), duration, observability.Attributes{}),
 			},
 		)
 	}
+	t.onPacket(
+		internal_type.ObservabilityEventRecordPacket{
+			Scope: internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.RecordEvent{
+				Component: observability.ComponentTTS,
+				Event:     observability.TTSClosed,
+				Attributes: observability.Attributes{
+					"type":     "closed",
+					"provider": t.Name(),
+				},
+				OccurredAt: time.Now(),
+			},
+		})
 	return nil
 }
