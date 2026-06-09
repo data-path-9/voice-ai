@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,15 +19,16 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/rapidaai/pkg/commons"
+	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/pkg/validator"
 )
 
 const (
-	defaultRegisterExpiry      = 3600 // seconds
-	renewalFraction            = 0.8  // re-register at 80% of expiry
-	defaultRegisterTimeout     = 10 * time.Second
-	renewRetryInterval         = 30 * time.Second
-	maxRegistrationExpiryGrace = 60 * time.Second
+	defaultRegisterExpiry      uint32 = 3600 // seconds
+	renewalFraction                   = 0.8  // re-register at 80% of expiry
+	defaultRegisterTimeout            = 10 * time.Second
+	renewRetryInterval                = 30 * time.Second
+	maxRegistrationExpiryGrace        = 60 * time.Second
 )
 
 // Registration describes a SIP registration to be maintained with an external registrar.
@@ -37,7 +37,7 @@ type Registration struct {
 	Config       *Config // SIP provider credentials (server, username, password, realm, domain)
 	DeploymentID uint64  // Deployment that owns this registration.
 	AssistantID  uint64  // Assistant that owns this DID
-	ExpiresIn    int     // Desired registration duration in seconds (0 = use default)
+	ExpiresIn    uint32  // Desired registration duration in seconds (0 = use default)
 }
 
 // Validate checks that the registration has the minimum required fields.
@@ -56,7 +56,7 @@ type activeRegistration struct {
 	reg                  *Registration
 	cancel               context.CancelFunc
 	expiresAt            time.Time
-	grantedExpirySeconds int
+	grantedExpirySeconds uint32
 	callID               string
 	cseq                 uint32
 
@@ -110,7 +110,7 @@ func (rc *RegistrationClient) Register(ctx context.Context, reg *Registration) e
 	}
 
 	expiresIn := reg.ExpiresIn
-	if expiresIn <= 0 {
+	if expiresIn == 0 {
 		expiresIn = defaultRegisterExpiry
 	}
 
@@ -246,18 +246,18 @@ func (rc *RegistrationClient) GetRegisteredDIDs() []string {
 
 // sendRegister constructs and sends a REGISTER request, handling digest auth if challenged.
 // Returns the granted expiry from the 200 OK response.
-func (rc *RegistrationClient) sendRegister(ctx context.Context, reg *Registration, expiresIn int, bindingCallID string, cseq uint32) (int, error) {
+func (rc *RegistrationClient) sendRegister(ctx context.Context, reg *Registration, expiresIn uint32, bindingCallID string, cseq uint32) (uint32, error) {
 	return rc.sendRegisterWithMinExpires(ctx, reg, expiresIn, bindingCallID, cseq, true)
 }
 
 func (rc *RegistrationClient) sendRegisterWithMinExpires(
 	ctx context.Context,
 	reg *Registration,
-	expiresIn int,
+	expiresIn uint32,
 	bindingCallID string,
 	cseq uint32,
 	allowMinExpiresRetry bool,
-) (int, error) {
+) (uint32, error) {
 	cfg := reg.Config
 
 	domain := cfg.Domain
@@ -380,7 +380,7 @@ func (rc *RegistrationClient) sendRegisterWithMinExpires(
 	}
 	if grantedExpiry == expiresIn {
 		if hdr := resp.GetHeader("Expires"); hdr != nil {
-			if parsed, err := strconv.Atoi(strings.TrimSpace(hdr.Value())); err == nil && parsed > 0 {
+			if parsed, err := parsePositiveUint32(hdr.Value()); err == nil {
 				grantedExpiry = parsed
 			}
 		}
@@ -392,7 +392,7 @@ func (rc *RegistrationClient) sendRegisterWithMinExpires(
 // renewLoop periodically re-registers before the registration expires.
 // Re-registers at renewalFraction (80%) of the granted expiry time.
 // On failure, retries every renewRetryInterval (30s) until successful or cancelled.
-func (rc *RegistrationClient) renewLoop(ctx context.Context, reg *Registration, expiresIn int) {
+func (rc *RegistrationClient) renewLoop(ctx context.Context, reg *Registration, expiresIn uint32) {
 	renewInterval := time.Duration(float64(expiresIn)*renewalFraction) * time.Second
 	timer := time.NewTimer(renewInterval)
 	defer timer.Stop()
@@ -588,8 +588,8 @@ func registrationErrorFrom(err error) *RegistrationError {
 	}
 }
 
-func registrationExpiryGrace(expiresIn int) time.Duration {
-	if expiresIn <= 0 {
+func registrationExpiryGrace(expiresIn uint32) time.Duration {
+	if expiresIn == 0 {
 		return maxRegistrationExpiryGrace
 	}
 	grace := time.Duration(math.Ceil(float64(expiresIn)*0.2)) * time.Second
@@ -690,6 +690,9 @@ func newRegistrationResponseError(statusCode int, statusText string) *Registrati
 // isPermanentSIPResponse returns true for SIP response codes that indicate a
 // configuration or authorization problem that will not resolve by retrying.
 func isPermanentSIPResponse(code int) bool {
+	if !validator.Between(code, 300, 699) {
+		return false
+	}
 	switch code {
 	case 403, // Forbidden — blocked, wrong credentials, or policy rejection
 		404, // Not Found — DID/AOR unknown to registrar
@@ -708,7 +711,7 @@ func isPermanentSIPResponse(code int) bool {
 
 // parseContactExpires extracts the expires parameter from a Contact header value.
 // Handles: <sip:user@host>;expires=3600 and <sip:user@host;expires=3600>
-func parseContactExpires(contact string) int {
+func parseContactExpires(contact string) uint32 {
 	lower := strings.ToLower(contact)
 	idx := strings.Index(lower, "expires=")
 	if idx < 0 {
@@ -719,14 +722,14 @@ func parseContactExpires(contact string) int {
 	if end > 0 {
 		val = val[:end]
 	}
-	parsed, err := strconv.Atoi(strings.TrimSpace(val))
-	if err != nil || parsed <= 0 {
+	parsed, err := parsePositiveUint32(val)
+	if err != nil {
 		return 0
 	}
 	return parsed
 }
 
-func parseMinExpires(resp *sip.Response) int {
+func parseMinExpires(resp *sip.Response) uint32 {
 	if resp == nil {
 		return 0
 	}
@@ -734,9 +737,17 @@ func parseMinExpires(resp *sip.Response) int {
 	if header == nil {
 		return 0
 	}
-	minExpires, err := strconv.Atoi(strings.TrimSpace(header.Value()))
-	if err != nil || minExpires <= 0 {
+	minExpires, err := parsePositiveUint32(header.Value())
+	if err != nil {
 		return 0
 	}
 	return minExpires
+}
+
+func parsePositiveUint32(value string) (uint32, error) {
+	parsed, err := utils.StringToUint32(value)
+	if err != nil || parsed == 0 {
+		return 0, fmt.Errorf("invalid positive uint32: %q", value)
+	}
+	return uint32(parsed), nil
 }

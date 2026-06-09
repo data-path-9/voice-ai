@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	internal_transformer_custom_dsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/dsl"
@@ -243,6 +244,9 @@ func (parser *configParser) loadOptions(config *Config) error {
 		if err != nil {
 			return fmt.Errorf("custom-stt http_v1: invalid %s: %w", optionKeySampleRate, err)
 		}
+		if uint64(sampleRate) > uint64(math.MaxInt) {
+			return fmt.Errorf("custom-stt http_v1: %s is too large", optionKeySampleRate)
+		}
 		config.SampleRate = int(sampleRate)
 	}
 
@@ -353,7 +357,7 @@ func (config *Config) validate() error {
 	if strings.TrimSpace(config.Encoding) == "" {
 		return fmt.Errorf("custom-stt http_v1: %s must not be empty", optionKeyEncoding)
 	}
-	if config.SampleRate <= 0 {
+	if !validator.Between(config.SampleRate, 1, math.MaxInt) {
 		return fmt.Errorf("custom-stt http_v1: %s must be positive", optionKeySampleRate)
 	}
 	if len(config.RequestRules) == 0 {

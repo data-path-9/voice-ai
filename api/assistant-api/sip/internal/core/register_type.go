@@ -97,7 +97,7 @@ type RegistrationEvent struct {
 	AssistantID   uint64
 	Server        string
 	ExpiresAt     time.Time
-	GrantedExpiry int
+	GrantedExpiry uint32
 	RetryCount    int
 	NextRetryAt   time.Time
 	Error         error

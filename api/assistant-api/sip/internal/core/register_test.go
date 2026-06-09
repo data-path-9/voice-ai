@@ -404,6 +404,18 @@ func TestParseMinExpires(t *testing.T) {
 	}
 }
 
+func TestParseRegistrationExpiryRejectsUint32Overflow(t *testing.T) {
+	if expires := parseContactExpires("<sip:user@example.com>;expires=4294967296"); expires != 0 {
+		t.Fatalf("expected overflowing contact expires to be ignored, got %d", expires)
+	}
+
+	resp := sip.NewResponse(423, "Interval Too Brief")
+	resp.AppendHeader(sip.NewHeader("Min-Expires", "4294967296"))
+	if minExpires := parseMinExpires(resp); minExpires != 0 {
+		t.Fatalf("expected overflowing min expires to be ignored, got %d", minExpires)
+	}
+}
+
 type digestAuthTestError struct{}
 
 func (digestAuthTestError) Error() string { return "digest calculation failed" }

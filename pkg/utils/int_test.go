@@ -50,3 +50,37 @@ func TestMinUint64(t *testing.T) {
 		})
 	}
 }
+
+func TestStringToUint32(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		expected  uint32
+		expectErr bool
+	}{
+		{name: "valid", value: "42", expected: 42},
+		{name: "trimmed", value: " 120 ", expected: 120},
+		{name: "max", value: "4294967295", expected: 4294967295},
+		{name: "overflow", value: "4294967296", expectErr: true},
+		{name: "negative", value: "-1", expectErr: true},
+		{name: "invalid", value: "abc", expectErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := StringToUint32(tt.value)
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result != tt.expected {
+				t.Fatalf("expected %d, got %d", tt.expected, result)
+			}
+		})
+	}
+}

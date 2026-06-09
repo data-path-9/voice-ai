@@ -56,6 +56,31 @@ func TestNotBlank(t *testing.T) {
 	}
 }
 
+func TestBetween(t *testing.T) {
+	tests := []struct {
+		name  string
+		value int
+		min   int
+		max   int
+		want  bool
+	}{
+		{name: "inside", value: 5, min: 1, max: 10, want: true},
+		{name: "lower bound", value: 1, min: 1, max: 10, want: true},
+		{name: "upper bound", value: 10, min: 1, max: 10, want: true},
+		{name: "below", value: 0, min: 1, max: 10, want: false},
+		{name: "above", value: 11, min: 1, max: 10, want: false},
+		{name: "invalid range", value: 5, min: 10, max: 1, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Between(tt.value, tt.min, tt.max); got != tt.want {
+				t.Fatalf("Between(%d, %d, %d) = %v, want %v", tt.value, tt.min, tt.max, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEmail(t *testing.T) {
 	if !Email("user@example.com") {
 		t.Fatal("expected valid email to pass validation")

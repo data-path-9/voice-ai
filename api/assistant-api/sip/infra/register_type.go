@@ -63,7 +63,7 @@ type Registration struct {
 	Config       *Config
 	DeploymentID uint64
 	AssistantID  uint64
-	ExpiresIn    int
+	ExpiresIn    uint32
 }
 
 type RegistrationClient struct {

@@ -50,6 +50,11 @@ func NotBlank(value string) bool {
 	return strings.TrimSpace(value) != ""
 }
 
+// Between returns true when value is within the inclusive min/max range.
+func Between(value, min, max int) bool {
+	return value >= min && value <= max
+}
+
 // Email returns true when value is a valid mailbox exactly as provided.
 func Email(value string) bool {
 	parsedEmail, err := mail.ParseAddress(value)
