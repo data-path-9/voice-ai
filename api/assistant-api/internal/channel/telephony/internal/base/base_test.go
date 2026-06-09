@@ -47,7 +47,7 @@ func TestCreateConnectionRequest_EmitsAllClientKeys(t *testing.T) {
 		ChannelUUID:    "live-call-id",
 		ContextID:      "ctx-uuid-123",
 	}
-	base := NewBaseTelephonyStreamer(newTestLogger(t), cc, nil)
+	base := New(newTestLogger(t), cc, nil, nil)
 
 	req := base.CreateConnectionRequest()
 	require.NotNil(t, req)
@@ -70,7 +70,7 @@ func TestCreateConnectionRequest_OmitsEmptyOptionalFields(t *testing.T) {
 		Provider:  "sip",
 		ContextID: "ctx-1",
 	}
-	base := NewBaseTelephonyStreamer(newTestLogger(t), cc, nil)
+	base := New(newTestLogger(t), cc, nil, nil)
 
 	req := base.CreateConnectionRequest()
 	md, err := utils.AnyMapToInterfaceMap(req.GetMetadata())

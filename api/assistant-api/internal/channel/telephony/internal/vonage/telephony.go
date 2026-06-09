@@ -68,6 +68,7 @@ func vonageAuth(vaultCredential *protos.VaultCredential) (vonage.Auth, error) {
 
 func (vng *vonageTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_type.StatusInfo, error) {
 	eventDetails := map[string]interface{}{}
+	rawCallbackPayload := ctx.Request.URL.RawQuery
 	for key, values := range ctx.Request.URL.Query() {
 		if len(values) > 0 {
 			eventDetails[key] = values[0]
@@ -76,7 +77,7 @@ func (vng *vonageTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 		}
 	}
 
-	callback, err := internal_vonage.NewStatusCallback(eventDetails)
+	callback, err := internal_vonage.NewStatusCallback(eventDetails, rawCallbackPayload)
 	if err != nil {
 		vng.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err
@@ -92,6 +93,7 @@ func (vng *vonageTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 
 func (vng *vonageTelephony) StatusCallback(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_type.StatusInfo, error) {
 	var payload map[string]interface{}
+	rawCallbackPayload := c.Request.URL.RawQuery
 	if len(c.Request.URL.Query()) > 0 {
 		payload = make(map[string]interface{})
 		for key, values := range c.Request.URL.Query() {
@@ -107,13 +109,14 @@ func (vng *vonageTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 			vng.logger.Errorf("failed to read request body with error %+v", err)
 			return nil, fmt.Errorf("%w: %w", internal_vonage.ErrRequestBodyReadFailed, err)
 		}
+		rawCallbackPayload = string(body)
 		if err := json.Unmarshal(body, &payload); err != nil {
 			vng.logger.Errorf("failed to parse request body: %+v", err)
 			return nil, fmt.Errorf("%w: %w", internal_vonage.ErrRequestBodyParseFailed, err)
 		}
 	}
 
-	callback, err := internal_vonage.NewStatusCallback(payload)
+	callback, err := internal_vonage.NewStatusCallback(payload, rawCallbackPayload)
 	if err != nil {
 		vng.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err

@@ -9,15 +9,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_telemetry_entity "github.com/rapidaai/api/assistant-api/internal/entity/telemetry"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/types"
+	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
@@ -198,11 +199,12 @@ func (tc *genericRequestor) applyMetadata(mt map[string]interface{}) {
 	utils.Go(context.Background(), func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
-		start := time.Now()
-		tc.conversationService.ApplyConversationMetadata(
-			dbCtx,
-			tc.auth, tc.assistant.Id, tc.assistantConversation.Id, types.NewMetadataList(modified))
-		tc.logger.Benchmark("genericRequestor.applyMetadata", time.Since(start))
+
+		var metadataList []*protos.Metadata
+		for key, value := range modified {
+			metadataList = append(metadataList, &protos.Metadata{Key: key, Value: fmt.Sprintf("%d", value)})
+		}
+		tc.conversationService.CreateOrUpdateConversationMetadata(dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, metadataList)
 	})
 }
 
@@ -215,10 +217,27 @@ func (tc *genericRequestor) applyArguments(args map[string]interface{}) {
 	utils.Go(context.Background(), func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
-		if _, err := tc.conversationService.ApplyConversationArgument(
+		if _, err := tc.conversationService.CreateOrUpdateConversationArgument(
 			dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, args,
 		); err != nil {
-			tc.logger.Errorf("apply arguments: %v", err)
+			tc.OnPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{
+				ContextID: tc.GetID(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "conversation arguments persistence failed",
+					Attributes: observability.Attributes{
+						"component":       observability.ComponentConversation.String(),
+						"operation":       "persist_arguments",
+						"context_id":      tc.GetID(),
+						"assistant_id":    fmt.Sprintf("%d", tc.assistant.Id),
+						"conversation_id": fmt.Sprintf("%d", tc.assistantConversation.Id),
+						"argument_count":  fmt.Sprintf("%d", len(args)),
+						"error":           err.Error(),
+						"error_type":      fmt.Sprintf("%T", err),
+					},
+				},
+			})
 		}
 	})
 }
@@ -232,30 +251,29 @@ func (tc *genericRequestor) applyOptions(opts map[string]interface{}) {
 	utils.Go(context.Background(), func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
-		if _, err := tc.conversationService.ApplyConversationOption(
+		if _, err := tc.conversationService.CreateOrUpdateConversationOption(
 			dbCtx, tc.auth, tc.assistant.Id, tc.assistantConversation.Id, opts,
 		); err != nil {
-			tc.logger.Errorf("apply options: %v", err)
+			tc.OnPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{
+				ContextID: tc.GetID(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "conversation options persistence failed",
+					Attributes: observability.Attributes{
+						"component":       observability.ComponentConversation.String(),
+						"operation":       "persist_options",
+						"context_id":      tc.GetID(),
+						"assistant_id":    fmt.Sprintf("%d", tc.assistant.Id),
+						"conversation_id": fmt.Sprintf("%d", tc.assistantConversation.Id),
+						"option_count":    fmt.Sprintf("%d", len(opts)),
+						"error":           err.Error(),
+						"error_type":      fmt.Sprintf("%T", err),
+					},
+				},
+			})
 		}
 	})
-}
-
-func (tc *genericRequestor) onAddMetadata(_ context.Context, metadata ...*protos.Metadata) error {
-	utils.Go(context.Background(), func() {
-		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-		defer cancel()
-		_, err := tc.conversationService.ApplyConversationMetadata(
-			dbCtx,
-			tc.auth,
-			tc.assistant.Id,
-			tc.assistantConversation.Id,
-			types.ToMetadatas(metadata),
-		)
-		if err != nil {
-			tc.logger.Errorf("unable to flush metadata for conversation %+v", err)
-		}
-	})
-	return nil
 }
 
 func (deb *genericRequestor) onAddMessage(_ context.Context, msg internal_type.MessagePacket) error {
@@ -266,29 +284,6 @@ func (deb *genericRequestor) onAddMessage(_ context.Context, msg internal_type.M
 		_, err := deb.conversationService.CreateConversationMessage(dbCtx, deb.Auth(), deb.GetSource(), deb.Assistant().Id, deb.Assistant().AssistantProviderId, deb.Conversation().Id,
 			fmt.Sprintf("%s-%s", msg.Role(), msg.ContextId()), msg.Role(), msg.Content())
 		if err != nil {
-			deb.logger.Error("unable to create message for the user")
-		}
-	})
-	return nil
-}
-
-func (deb *genericRequestor) onAddMessageMetric(_ context.Context, prefix string, messageId string, metrics []*protos.Metric) error {
-	utils.Go(context.Background(), func() {
-		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-		defer cancel()
-		if _, err := deb.conversationService.ApplyMessageMetrics(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metrics); err != nil {
-			deb.logger.Errorf("error updating metrics for message: %v", err)
-		}
-	})
-	return nil
-}
-
-func (deb *genericRequestor) onAddMessageMetadata(_ context.Context, prefix string, messageId string, metadata []*protos.Metadata) error {
-	utils.Go(context.Background(), func() {
-		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
-		defer cancel()
-		if _, err := deb.conversationService.ApplyMessageMetadata(dbCtx, deb.Auth(), deb.Conversation().Id, fmt.Sprintf("%s-%s", prefix, messageId), metadata); err != nil {
-			deb.logger.Errorf("Error in ApplyMessageMetadata: %v", err)
 		}
 	})
 	return nil
@@ -299,7 +294,26 @@ func (gr *genericRequestor) CreateConversationRecording(_ context.Context, user,
 		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
 		defer cancel()
 		if _, err := gr.conversationService.CreateConversationRecording(dbCtx, gr.auth, gr.assistant.Id, gr.assistantConversation.Id, user, assistant, conversation); err != nil {
-			gr.logger.Errorf("unable to create recording for the conversation id %d with error : %v", gr.assistantConversation.Id, err)
+			gr.OnPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{
+				ContextID: gr.GetID(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "conversation recording persistence failed",
+					Attributes: observability.Attributes{
+						"component":             observability.ComponentRecording.String(),
+						"operation":             "persist_recording",
+						"context_id":            gr.GetID(),
+						"assistant_id":          fmt.Sprintf("%d", gr.assistant.Id),
+						"conversation_id":       fmt.Sprintf("%d", gr.assistantConversation.Id),
+						"user_audio_bytes":      fmt.Sprintf("%d", len(user)),
+						"assistant_audio_bytes": fmt.Sprintf("%d", len(assistant)),
+						"mixed_audio_bytes":     fmt.Sprintf("%d", len(conversation)),
+						"error":                 err.Error(),
+						"error_type":            fmt.Sprintf("%T", err),
+					},
+				},
+			})
 		}
 	})
 	return nil
@@ -314,4 +328,86 @@ func (r *genericRequestor) identifier(config *protos.ConversationInitialization)
 	default:
 		return uuid.NewString()
 	}
+}
+
+func (kr *genericRequestor) CreateKnowledgeLog(ctx context.Context, knowledgeId uint64, retrievalMethod string,
+	topK uint32,
+	scoreThreshold float32,
+	documentCount int,
+	timeTaken int64,
+	additionalData map[string]string,
+	status type_enums.RecordState,
+	request, response []byte) error {
+	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+	defer cancel()
+	_, err := kr.knowledgeService.CreateLog(dbCtx, kr.Auth(), knowledgeId, retrievalMethod, topK, scoreThreshold, documentCount, timeTaken, additionalData, status, request, response)
+	return err
+}
+
+func (cr *genericRequestor) CreateHTTPLog(
+	ctx context.Context,
+	source string,
+	sourceRefID uint64,
+	sourceEvent string,
+	contextID string,
+	httpURL, httpMethod string,
+	responseStatus int64,
+	timeTaken int64,
+	retryCount uint32,
+	status type_enums.RecordState,
+	errorMessage *string,
+	request, response []byte) error {
+	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+	defer cancel()
+	_, err := cr.httpLogService.CreateLog(
+		dbCtx,
+		cr.auth,
+		source,
+		sourceRefID,
+		sourceEvent,
+		contextID,
+		cr.assistant.Id,
+		&cr.assistantConversation.Id,
+		httpURL,
+		httpMethod,
+		responseStatus,
+		timeTaken,
+		retryCount,
+		status,
+		errorMessage,
+		request,
+		response,
+	)
+	return err
+}
+
+func (cr *genericRequestor) CreateToolLog(
+	ctx context.Context,
+	messageId string,
+	toolCallId string,
+	toolName string,
+	status type_enums.RecordState,
+	request []byte) error {
+	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+	defer cancel()
+	_, err := cr.assistantToolService.CreateLog(
+		dbCtx, cr.Auth(), cr.assistant.Id,
+		cr.assistantConversation.Id, messageId, toolCallId, toolName,
+		status, request,
+	)
+	return err
+}
+
+func (cr *genericRequestor) UpdateToolLog(
+	ctx context.Context,
+	toolCallId string,
+	status type_enums.RecordState,
+	response []byte) error {
+	dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+	defer cancel()
+	_, err := cr.assistantToolService.UpdateLog(
+		dbCtx, cr.Auth(), toolCallId, cr.assistantConversation.Id,
+		status, response,
+	)
+	return err
 }

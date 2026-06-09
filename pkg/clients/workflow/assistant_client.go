@@ -109,7 +109,6 @@ type AssistantServiceClient interface {
 
 	GetAssistantToolLog(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAssistantToolLogRequest) (*protos.GetAssistantToolLogResponse, error)
 	GetAllAssistantToolLog(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAllAssistantToolLogRequest) (*protos.GetAllAssistantToolLogResponse, error)
-	GetAllAssistantTelemetry(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAllAssistantTelemetryRequest) (*protos.GetAllAssistantTelemetryResponse, error)
 
 	// telemetry providers
 	GetAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error)
@@ -1074,21 +1073,6 @@ func (client *assistantServiceClient) GetAllAssistantToolLog(ctx context.Context
 		client.logger.Errorf("error while calling to get tool %v", err)
 	}
 	client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantToolLog", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) GetAllAssistantTelemetry(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAllAssistantTelemetryRequest) (*protos.GetAllAssistantTelemetryResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.GetAllAssistantTelemetry(client.WithAuth(ctx, auth), in)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantTelemetry", time.Since(start))
-		client.logger.Errorf("error while calling GetAllAssistantTelemetry %v", err)
-		return nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get tool %v", err)
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantTelemetry", time.Since(start))
 	return res, nil
 }
 

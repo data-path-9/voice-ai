@@ -24,7 +24,7 @@ export function ConversationLogDialog(props: ConversationLogDialogProps) {
     <RightSideModal
       modalOpen={props.modalOpen}
       setModalOpen={props.setModalOpen}
-      className="w-[580px]"
+      className="w-145"
       label="Conversation Log"
       title={props.currentAssistantMessage.getAssistantconversationid()}
     >
@@ -35,8 +35,8 @@ export function ConversationLogDialog(props: ConversationLogDialogProps) {
           onChange={setSelectedTab}
           contained
           aria-label="Conversation log tabs"
-          className="!h-full !min-h-0 !flex !flex-col [&_.cds--tabs__nav]:border-b [&_.cds--tabs__nav]:border-gray-200 dark:[&_.cds--tabs__nav]:border-gray-800 [&_.cds--tab-content]:!h-full [&_.cds--tab-content]:!min-h-0 [&_.cds--tab-content]:!p-0"
-          panelClassName="!h-full !min-h-0 !overflow-auto !p-0"
+          className="h-full min-h-0 flex flex-col [&_.cds--tabs__nav]:border-b [&_.cds--tabs__nav]:border-gray-200 dark:[&_.cds--tabs__nav]:border-gray-800 [&_.cds--tab-content]:!h-full [&_.cds--tab-content]:!min-h-0 [&_.cds--tab-content]:!p-0"
+          panelClassName="!h-full min-h-0 overflow-auto p-0"
         >
           <div className="h-full overflow-auto">
             {props.currentAssistantMessage.getBody() ? (

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	cartesia_internal "github.com/rapidaai/api/assistant-api/internal/transformer/cartesia/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
@@ -81,15 +82,19 @@ func (cst *cartesiaSpeechToText) Initialize() error {
 	cst.mu.Lock()
 	ctxID := cst.contextId
 	cst.mu.Unlock()
-	cst.onPacket(internal_type.ConversationEventPacket{
+	cst.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: ctxID,
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": cst.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": cst.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -140,15 +145,20 @@ func (cst *cartesiaSpeechToText) readLoop(conn *websocket.Conn) {
 					Language:  resp.Language,
 					Interim:   true,
 				},
-				internal_type.ConversationEventPacket{
-					ContextID: ctxID,
-					Name:      "stt",
-					Data: map[string]string{
-						"type":       "interim",
-						"script":     resp.Text,
-						"confidence": "0.9000",
+				internal_type.ObservabilityEventRecordPacket{
+					ContextID:   ctxID,
+					Scope:       internal_type.ObservabilityRecordScopeMessage,
+					MessageRole: observability.MessageRoleUser,
+					Record: observability.RecordEvent{
+						Component: observability.ComponentSTT,
+						Event:     observability.STTInterim,
+						Attributes: observability.Attributes{
+							"type":       "interim",
+							"script":     resp.Text,
+							"confidence": "0.9000",
+						},
+						OccurredAt: time.Now(),
 					},
-					Time: time.Now(),
 				},
 			)
 		} else {
@@ -168,22 +178,32 @@ func (cst *cartesiaSpeechToText) readLoop(conn *websocket.Conn) {
 					Language:  resp.Language,
 					Interim:   false,
 				},
-				internal_type.ConversationEventPacket{
-					ContextID: ctxID,
-					Name:      "stt",
-					Data: map[string]string{
-						"type":       "completed",
-						"script":     resp.Text,
-						"confidence": "0.9000",
-						"language":   resp.Language,
-						"word_count": fmt.Sprintf("%d", len(strings.Fields(resp.Text))),
-						"char_count": fmt.Sprintf("%d", len(resp.Text)),
+				internal_type.ObservabilityEventRecordPacket{
+					ContextID:   ctxID,
+					Scope:       internal_type.ObservabilityRecordScopeMessage,
+					MessageRole: observability.MessageRoleUser,
+					Record: observability.RecordEvent{
+						Component: observability.ComponentSTT,
+						Event:     observability.STTCompleted,
+						Attributes: observability.Attributes{
+							"type":       "completed",
+							"script":     resp.Text,
+							"confidence": "0.9000",
+							"language":   resp.Language,
+							"word_count": fmt.Sprintf("%d", len(strings.Fields(resp.Text))),
+							"char_count": fmt.Sprintf("%d", len(resp.Text)),
+						},
+						OccurredAt: now,
 					},
-					Time: now,
 				},
-				internal_type.UserMessageMetricPacket{
-					ContextID: ctxID,
-					Metrics:   []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+				internal_type.ObservabilityMetricRecordPacket{
+					ContextID:   ctxID,
+					Scope:       internal_type.ObservabilityRecordScopeMessage,
+					MessageRole: observability.MessageRoleUser,
+					Record: observability.RecordMetric{
+						Metrics:    []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+						Attributes: observability.Attributes{"provider": cst.Name()},
+					},
 				},
 			)
 		}
@@ -197,7 +217,7 @@ func (cst *cartesiaSpeechToText) Transform(ctx context.Context, in internal_type
 		cst.contextId = pkt.ContextID
 		cst.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextEndPacket:
+	case internal_type.SpeechToTextStartPacket:
 		cst.mu.Lock()
 		if cst.startedAt.IsZero() {
 			cst.startedAt = time.Now()
@@ -205,6 +225,11 @@ func (cst *cartesiaSpeechToText) Transform(ctx context.Context, in internal_type
 		cst.mu.Unlock()
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
+		cst.mu.Lock()
+		if cst.startedAt.IsZero() {
+			cst.startedAt = time.Now()
+		}
+		cst.mu.Unlock()
 		cst.mu.Lock()
 		conn := cst.connection
 		cst.mu.Unlock()
@@ -246,23 +271,43 @@ func (cst *cartesiaSpeechToText) Close(ctx context.Context) error {
 	cst.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		cst.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "stt",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": cst.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentSTT,
+					Event:     observability.STTClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": cst.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total STT connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentSTT,
+					Provider:  cst.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   cst.Name(),
+						"metric":     type_enums.CONVERSATION_STT_DURATION.String(),
+					},
+				},
 			},
 		)
 	}

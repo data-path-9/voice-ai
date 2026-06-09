@@ -10,8 +10,9 @@ import (
 	"context"
 	"fmt"
 
-	obs "github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
+	"github.com/rapidaai/protos"
 )
 
 func (d *Dispatcher) handleByeReceived(ctx context.Context, v sip_infra.ByeReceivedPipeline) {
@@ -75,24 +76,43 @@ func (d *Dispatcher) handleCallFailed(ctx context.Context, v sip_infra.CallFaile
 		setup.OrganizationID = *auth.GetCurrentOrganizationId()
 	}
 
-	if d.onCreateObserver != nil {
-		observer := d.onCreateObserver(ctx, setup, auth)
-		if observer != nil {
-			eventData := map[string]string{
-				obs.DataType:      obs.EventCallFailed,
-				obs.DataProvider:  "sip",
-				obs.DataReason:    reason,
-				obs.DataDirection: string(v.Session.GetInfo().Direction),
-			}
-			if v.SIPCode > 0 {
-				eventData["sip_code"] = fmt.Sprintf("%d", v.SIPCode)
-			}
-			if v.Error != nil {
-				eventData[obs.DataError] = v.Error.Error()
-			}
-			observer.EmitMetric(ctx, obs.CallStatusMetric("FAILED", reason))
-			observer.EmitEvent(ctx, obs.ComponentTelephony, eventData)
-			observer.Shutdown(ctx)
-		}
+	observer := d.createObserver(ctx, setup, auth)
+	scope := observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: assistantID},
+		ConversationID: convID,
 	}
+	attributes := observability.Attributes{
+		"provider":  "sip",
+		"reason":    reason,
+		"direction": string(v.Session.GetInfo().Direction),
+		"call_id":   v.ID,
+	}
+	if v.SIPCode > 0 {
+		attributes["sip_code"] = fmt.Sprintf("%d", v.SIPCode)
+	}
+	if v.Error != nil {
+		attributes["error"] = v.Error.Error()
+	}
+	_ = observer.Record(
+		ctx,
+		scope,
+		observability.RecordLog{
+			Level:      observability.LevelError,
+			Message:    "SIP call failed",
+			Attributes: attributes,
+		},
+		observability.RecordEvent{
+			Component:  observability.ComponentCall,
+			Event:      observability.CallFailed,
+			Attributes: attributes,
+		},
+		observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       observability.MetricCallStatusFailed,
+				Description: reason,
+			}},
+		},
+	)
+	_ = observer.Close(ctx)
 }

@@ -60,7 +60,7 @@ func (pc *packetCollector) Clear() {
 func createTestCallback(opts utils.Option) (*packetCollector, commons.Logger, msginterfaces.LiveMessageCallback) {
 	logger, _ := commons.NewApplicationLogger()
 	collector := newPacketCollector()
-	callback := NewDeepgramSttCallback(logger, collector.OnPacket, opts, func() time.Time { return time.Time{} }, func() string { return "ctx-test" })
+	callback := NewDeepgramSttCallback(logger, collector.OnPacket, opts, func() time.Time { return time.Time{} }, func() string { return "ctx-test" }, "deepgram-speech-to-text")
 	return collector, logger, callback
 }
 
@@ -145,7 +145,7 @@ func TestMessage(t *testing.T) {
 
 		require.NoError(t, err)
 		packets := collector.GetPackets()
-		// Final: InterruptionDetectedPacket + SpeechToTextPacket + ConversationEventPacket + UserMessageMetricPacket
+		// Final: InterruptionDetectedPacket + SpeechToTextPacket + ObservabilityEventRecordPacket + ObservabilityMetricRecordPacket
 		require.Len(t, packets, 4)
 
 		// First packet should be InterruptionDetectedPacket
@@ -161,11 +161,11 @@ func TestMessage(t *testing.T) {
 		assert.Equal(t, "en", stt.Language)
 		assert.False(t, stt.Interim) // IsFinal=true means Interim=false
 
-		// Fourth packet should be UserMessageMetricPacket with stt_latency_ms
-		metric, ok := packets[3].(internal_type.UserMessageMetricPacket)
-		assert.True(t, ok, "fourth packet should be UserMessageMetricPacket")
-		assert.Len(t, metric.Metrics, 1)
-		assert.Equal(t, "stt_latency_ms", metric.Metrics[0].Name)
+		// Fourth packet should be ObservabilityMetricRecordPacket with stt_latency_ms
+		metric, ok := packets[3].(internal_type.ObservabilityMetricRecordPacket)
+		assert.True(t, ok, "fourth packet should be ObservabilityMetricRecordPacket")
+		assert.Len(t, metric.Record.Metrics, 1)
+		assert.Equal(t, "stt_latency_ms", metric.Record.Metrics[0].Name)
 	})
 
 	t.Run("sets interim true when IsFinal is false", func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestMessage(t *testing.T) {
 
 		require.NoError(t, err)
 		packets := collector.GetPackets()
-		// Interim: InterruptionDetectedPacket + SpeechToTextPacket + ConversationEventPacket (no metric)
+		// Interim: InterruptionDetectedPacket + SpeechToTextPacket + ObservabilityEventRecordPacket (no metric)
 		require.Len(t, packets, 3)
 
 		stt := packets[1].(internal_type.SpeechToTextPacket)
@@ -206,7 +206,7 @@ func TestMessage(t *testing.T) {
 
 		require.NoError(t, err)
 		packets := collector.GetPackets()
-		// Final: InterruptionDetectedPacket + SpeechToTextPacket + ConversationEventPacket + UserMessageMetricPacket
+		// Final: InterruptionDetectedPacket + SpeechToTextPacket + ObservabilityEventRecordPacket + ObservabilityMetricRecordPacket
 		require.Len(t, packets, 4)
 
 		stt := packets[1].(internal_type.SpeechToTextPacket)
@@ -261,15 +261,15 @@ func TestMessageWithConfidenceThreshold(t *testing.T) {
 
 		require.NoError(t, err)
 		packets := collector.GetPackets()
-		// Below threshold: only ConversationEventPacket emitted
+		// Below threshold: only ObservabilityEventRecordPacket emitted
 		require.Len(t, packets, 1, "should emit only a conversation event when confidence is below threshold")
 
-		evt := packets[0].(internal_type.ConversationEventPacket)
-		assert.Equal(t, "stt", evt.Name)
-		assert.Equal(t, "low_confidence", evt.Data["type"])
-		assert.Equal(t, "low confidence text", evt.Data["script"])
-		assert.Equal(t, "0.7000", evt.Data["confidence"])
-		assert.Equal(t, "0.9000", evt.Data["threshold"])
+		evt := packets[0].(internal_type.ObservabilityEventRecordPacket)
+		assert.Equal(t, "stt", evt.Record.Component.String())
+		assert.Equal(t, "low_confidence", evt.Record.Attributes["type"])
+		assert.Equal(t, "low confidence text", evt.Record.Attributes["script"])
+		assert.Equal(t, "0.7000", evt.Record.Attributes["confidence"])
+		assert.Equal(t, "0.9000", evt.Record.Attributes["threshold"])
 	})
 
 	t.Run("respects IsFinal when confidence above threshold", func(t *testing.T) {
@@ -284,7 +284,7 @@ func TestMessageWithConfidenceThreshold(t *testing.T) {
 
 		require.NoError(t, err)
 		packets := collector.GetPackets()
-		// Final above threshold: InterruptionDetectedPacket + SpeechToTextPacket + ConversationEventPacket + UserMessageMetricPacket
+		// Final above threshold: InterruptionDetectedPacket + SpeechToTextPacket + ObservabilityEventRecordPacket + ObservabilityMetricRecordPacket
 		require.Len(t, packets, 4)
 
 		stt := packets[1].(internal_type.SpeechToTextPacket)
@@ -303,7 +303,7 @@ func TestMessageWithConfidenceThreshold(t *testing.T) {
 
 		require.NoError(t, err)
 		packets := collector.GetPackets()
-		// Final at boundary: InterruptionDetectedPacket + SpeechToTextPacket + ConversationEventPacket + UserMessageMetricPacket
+		// Final at boundary: InterruptionDetectedPacket + SpeechToTextPacket + ObservabilityEventRecordPacket + ObservabilityMetricRecordPacket
 		require.Len(t, packets, 4)
 
 		stt := packets[1].(internal_type.SpeechToTextPacket)
@@ -319,7 +319,7 @@ func TestMessageWithConfidenceThreshold(t *testing.T) {
 
 		require.NoError(t, err)
 		packets := collector.GetPackets()
-		// Final without threshold: InterruptionDetectedPacket + SpeechToTextPacket + ConversationEventPacket + UserMessageMetricPacket
+		// Final without threshold: InterruptionDetectedPacket + SpeechToTextPacket + ObservabilityEventRecordPacket + ObservabilityMetricRecordPacket
 		require.Len(t, packets, 4)
 
 		stt := packets[1].(internal_type.SpeechToTextPacket)
@@ -338,7 +338,7 @@ func TestMessageWithConfidenceThreshold(t *testing.T) {
 
 		require.NoError(t, err)
 		packets := collector.GetPackets()
-		// Final above zero threshold: InterruptionDetectedPacket + SpeechToTextPacket + ConversationEventPacket + UserMessageMetricPacket
+		// Final above zero threshold: InterruptionDetectedPacket + SpeechToTextPacket + ObservabilityEventRecordPacket + ObservabilityMetricRecordPacket
 		require.Len(t, packets, 4)
 
 		stt := packets[1].(internal_type.SpeechToTextPacket)
@@ -357,11 +357,11 @@ func TestMessageWithConfidenceThreshold(t *testing.T) {
 
 		require.NoError(t, err)
 		packets := collector.GetPackets()
-		// Below threshold: only ConversationEventPacket emitted
+		// Below threshold: only ObservabilityEventRecordPacket emitted
 		require.Len(t, packets, 1, "should emit only a conversation event when confidence is below threshold")
 
-		evt := packets[0].(internal_type.ConversationEventPacket)
-		assert.Equal(t, "low_confidence", evt.Data["type"])
+		evt := packets[0].(internal_type.ObservabilityEventRecordPacket)
+		assert.Equal(t, "low_confidence", evt.Record.Attributes["type"])
 	})
 }
 

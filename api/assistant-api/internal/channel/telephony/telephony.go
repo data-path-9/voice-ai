@@ -11,17 +11,14 @@ import (
 	"fmt"
 
 	"github.com/rapidaai/api/assistant-api/config"
-	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_asterisk_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/asterisk"
 	internal_exotel_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/exotel"
 	internal_sip_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/sip"
 	internal_telnyx_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx"
 	internal_twilio_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio"
 	internal_vonage_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage"
-	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
-	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
 )
 
@@ -76,16 +73,4 @@ func GetTelephony(at Telephony, cfg *config.AssistantConfig, logger commons.Logg
 // TelephonyOption configures optional dependencies for telephony providers.
 type TelephonyOption struct {
 	SIPServer *sip_infra.Server
-}
-
-// TelephonyDispatcherDeps contains the shared dependencies used by both
-// InboundDispatcher and OutboundDispatcher.
-type TelephonyDispatcherDeps struct {
-	Cfg                 *config.AssistantConfig
-	Logger              commons.Logger
-	Store               callcontext.Store
-	VaultClient         web_client.VaultClient
-	AssistantService    internal_services.AssistantService
-	ConversationService internal_services.AssistantConversationService
-	TelephonyOpt        TelephonyOption
 }

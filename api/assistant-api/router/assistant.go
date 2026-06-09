@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	assistantApi "github.com/rapidaai/api/assistant-api/api/assistant"
 	assistantDeploymentApi "github.com/rapidaai/api/assistant-api/api/assistant-deployment"
+	observabilityApi "github.com/rapidaai/api/assistant-api/api/observability"
 	assistantTalkApi "github.com/rapidaai/api/assistant-api/api/talk"
 	"github.com/rapidaai/api/assistant-api/config"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
@@ -36,6 +37,11 @@ func AssistantApiRoute(
 		Opensearch,
 	)
 	workflow_api.RegisterAssistantServiceServer(S, assistantServiceServer)
+	workflow_api.RegisterObservabilityServiceServer(S,
+		observabilityApi.NewObservabilityGRPCApi(Cfg,
+			Logger,
+			Opensearch,
+		))
 
 	apiv1 := engine.Group("v1/assistant")
 	createAssistantRestHandler := assistantServiceServer.(interface {

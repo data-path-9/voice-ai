@@ -30,7 +30,7 @@ import (
 	channel_base "github.com/rapidaai/api/assistant-api/internal/channel/base"
 	internal_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
-	"github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -79,30 +79,106 @@ type webrtcStreamer struct {
 
 	audioBufferState webrtc_internal.WebRTCAudioBufferState
 	flushAudioCh     chan struct{}
+
+	observer observability.Recorder
 }
 
-// NewWebRTCStreamer creates a WebRTC media stream with gRPC signaling.
-func NewWebRTCStreamer(
-	ctx context.Context,
-	logger commons.Logger,
-	grpcStream grpc.BidiStreamingServer[protos.WebTalkRequest, protos.WebTalkResponse],
-	serverConfig *assistant_config.WebRTCConfig,
-) (internal_type.Streamer, error) {
-	resampler, err := internal_audio_resampler.GetResampler(logger)
+type StreamerOptions struct {
+	Context      context.Context
+	Logger       commons.Logger
+	GRPCStream   grpc.BidiStreamingServer[protos.WebTalkRequest, protos.WebTalkResponse]
+	ServerConfig *assistant_config.WebRTCConfig
+	Observer     observability.Recorder
+}
+
+type FuncOption func(*StreamerOptions)
+
+func WithContext(ctx context.Context) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Context = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithServer(server grpc.BidiStreamingServer[protos.WebTalkRequest, protos.WebTalkResponse]) FuncOption {
+	return func(options *StreamerOptions) {
+		options.GRPCStream = server
+	}
+}
+
+func WithServerConfig(serverConfig *assistant_config.WebRTCConfig) FuncOption {
+	return func(options *StreamerOptions) {
+		options.ServerConfig = serverConfig
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.Streamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	resampler, err := internal_audio_resampler.GetResampler(options.Logger)
 	if err != nil {
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "WebRTC streamer initialization failed",
+			Attributes: observability.Attributes{
+				"component": observability.ComponentWebRTC.String(),
+				"stage":     "resampler",
+				"error":     err.Error(),
+			},
+		})
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordEvent{
+			Component: observability.ComponentWebRTC,
+			Event:     observability.WebRTCFailed,
+			Attributes: observability.Attributes{
+				"component": observability.ComponentWebRTC.String(),
+				"stage":     "resampler",
+				"error":     err.Error(),
+			},
+		})
 		return nil, fmt.Errorf("failed to create resampler: %w", err)
 	}
 
 	opusCodec, err := webrtc_internal.NewOpusCodec()
 	if err != nil {
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "WebRTC streamer initialization failed",
+			Attributes: observability.Attributes{
+				"component": observability.ComponentWebRTC.String(),
+				"stage":     "opus_codec",
+				"error":     err.Error(),
+			},
+		})
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordEvent{
+			Component: observability.ComponentWebRTC,
+			Event:     observability.WebRTCFailed,
+			Attributes: observability.Attributes{
+				"component": observability.ComponentWebRTC.String(),
+				"stage":     "opus_codec",
+				"error":     err.Error(),
+			},
+		})
 		return nil, fmt.Errorf("failed to create Opus codec: %w", err)
 	}
 
 	peerConfig := webrtc_internal.DefaultConfig()
-	if serverConfig != nil {
-		if len(serverConfig.ICEServers) > 0 {
-			iceServers := make([]webrtc_internal.ICEServer, 0, len(serverConfig.ICEServers))
-			for _, server := range serverConfig.ICEServers {
+	if options.ServerConfig != nil {
+		if len(options.ServerConfig.ICEServers) > 0 {
+			iceServers := make([]webrtc_internal.ICEServer, 0, len(options.ServerConfig.ICEServers))
+			for _, server := range options.ServerConfig.ICEServers {
 				if len(server.URLs) == 0 {
 					continue
 				}
@@ -127,48 +203,81 @@ func NewWebRTCStreamer(
 			}
 		}
 
-		switch strings.ToLower(strings.TrimSpace(serverConfig.ICETransportPolicy)) {
+		switch strings.ToLower(strings.TrimSpace(options.ServerConfig.ICETransportPolicy)) {
 		case "", webrtc_internal.ICETransportPolicyAll:
 			peerConfig.ICETransportPolicy = webrtc_internal.ICETransportPolicyAll
 		case webrtc_internal.ICETransportPolicyRelay:
 			peerConfig.ICETransportPolicy = webrtc_internal.ICETransportPolicyRelay
 		default:
-			logger.Warnw("Invalid WebRTC ICE transport policy, using all", "policy", serverConfig.ICETransportPolicy)
+			_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Invalid WebRTC ICE transport policy, using all",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentWebRTC.String(),
+					"policy":    options.ServerConfig.ICETransportPolicy,
+				},
+			})
 			peerConfig.ICETransportPolicy = webrtc_internal.ICETransportPolicyAll
 		}
 	}
-
+	ambientMixer, err := internal_ambient.NewLoopMixer(internal_ambient.MixerSpec{
+		Logger:            options.Logger,
+		Resampler:         resampler,
+		TargetAudioConfig: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
+		FrameBytes:        webrtc_internal.WebRTCOutputPCM16kFrameBytes,
+	})
+	if err != nil {
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "WebRTC streamer initialization failed",
+			Attributes: observability.Attributes{
+				"component": observability.ComponentWebRTC.String(),
+				"stage":     "ambient_mixer",
+				"error":     err.Error(),
+			},
+		})
+		_ = options.Observer.Record(options.Context, observability.ProjectScope{}, observability.RecordEvent{
+			Component: observability.ComponentWebRTC,
+			Event:     observability.WebRTCFailed,
+			Attributes: observability.Attributes{
+				"component": observability.ComponentWebRTC.String(),
+				"stage":     "ambient_mixer",
+				"error":     err.Error(),
+			},
+		})
+		return nil, fmt.Errorf("failed to create ambient mixer: %w", err)
+	}
 	s := &webrtcStreamer{
 		BaseStreamer: channel_base.NewBaseStreamerWithChannelCapacity(
-			logger,
+			options.Logger,
 			webrtc_internal.InputChannelSize,
 			webrtc_internal.OutputChannelSize,
 		),
 		peerConfig:        peerConfig,
-		serverConfig:      serverConfig,
-		grpcStream:        grpcStream,
+		serverConfig:      options.ServerConfig,
+		grpcStream:        options.GRPCStream,
 		sessionID:         uuid.New().String(),
 		resampler:         resampler,
 		opusCodec:         opusCodec,
 		currentMode:       protos.StreamMode_STREAM_MODE_TEXT,
+		sessionState:      webrtc_internal.SessionState{Scope: observability.ProjectScope{}},
 		peerEventCh:       make(chan webrtc_internal.PeerEvent, webrtc_internal.PeerEventChannelSize),
 		mediaLifecycleCh:  make(chan webrtc_internal.MediaLifecycleEvent, webrtc_internal.MediaLifecycleChannelSize),
 		webrtcOperationCh: make(chan webrtc_internal.WebRTCOperation, webrtc_internal.WebRTCOperationChannelSize),
 		outputHealth:      internal_output.NewHealthStats(),
 		audioBufferState:  newWebRTCAudioBufferState(),
 		flushAudioCh:      make(chan struct{}, 1),
+		observer:          options.Observer,
+		ambientMixer:      ambientMixer,
 	}
-	ambientMixer, err := internal_ambient.NewLoopMixer(internal_ambient.MixerSpec{
-		Logger:            logger,
-		Resampler:         resampler,
-		TargetAudioConfig: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
-		FrameBytes:        webrtc_internal.WebRTCOutputPCM16kFrameBytes,
+	_ = options.Observer.Record(options.Context, s.sessionState.Scope, observability.RecordEvent{
+		Component: observability.ComponentWebRTC,
+		Event:     observability.WebRTCConnecting,
+		Attributes: observability.Attributes{
+			"component":  observability.ComponentWebRTC.String(),
+			"session_id": s.sessionID,
+		},
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ambient mixer: %w", err)
-	}
-	s.ambientMixer = ambientMixer
-
 	go s.runGrpcReader()
 	go s.runPeerEventLoop()
 	go s.runMediaLifecycleLoop()
@@ -177,9 +286,12 @@ func NewWebRTCStreamer(
 	go s.runAudioPacer()
 	go s.runOutputHealthReporter()
 	go s.runHealthWatchdog()
-	go s.watchCallerContext(ctx)
-
+	go s.watchCallerContext(options.Context)
 	return s, nil
+}
+
+func (s *webrtcStreamer) Observer() observability.Recorder {
+	return s.observer
 }
 
 func (s *webrtcStreamer) stopMediaSession() {
@@ -352,26 +464,41 @@ func (s *webrtcStreamer) bindPeerHandlers(peerConnection *pionwebrtc.PeerConnect
 		}
 		remoteAudioCodec, ok := remoteAudioTrack.SelectedCodec()
 		if !ok {
-			s.Logger.Errorw("No negotiated audio codec for WebRTC remote track")
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "No negotiated audio codec for WebRTC remote track",
+				Attributes: observability.Attributes{
+					"component":                   observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID: s.sessionID,
+				},
+			})
 			return
 		}
 		if !strings.EqualFold(remoteAudioCodec.MimeType, pionwebrtc.MimeTypeOpus) {
-			s.Logger.Errorw("Unsupported codec, only Opus is supported", webrtc_internal.DataCodec, remoteAudioCodec.MimeType)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Unsupported codec, only Opus is supported",
+				Attributes: observability.Attributes{
+					"component":                   observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID: s.sessionID,
+					webrtc_internal.DataCodec:     remoteAudioCodec.MimeType,
+				},
+			})
 			return
 		}
 		if !s.tryStartRemoteAudioReader(peerConnection, mediaSessionID) {
 			return
 		}
 
-		s.Logger.Infow("Remote audio track received", webrtc_internal.DataCodec, remoteAudioCodec.MimeType)
-		s.Input(&protos.ConversationEvent{
-			Name: observe.ComponentWebRTC,
-			Data: map[string]string{
-				webrtc_internal.DataType:      observe.EventAudioTrackReceived,
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+			Component: observability.ComponentWebRTC,
+			Event:     observability.EventName("webrtc.audio_track_received"),
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataType:      "audio_track_received",
 				webrtc_internal.DataSessionID: s.sessionID,
 				webrtc_internal.DataCodec:     remoteAudioCodec.MimeType,
 			},
-			Time: timestamppb.Now(),
 		})
 		go s.readRemoteAudio(track, mediaSessionID, remoteAudioCodec)
 	})
@@ -455,13 +582,31 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote, mediaSes
 	}
 
 	if !strings.EqualFold(remoteAudioCodec.MimeType, pionwebrtc.MimeTypeOpus) {
-		s.Logger.Errorw("Unsupported codec, only Opus is supported", webrtc_internal.DataCodec, remoteAudioCodec.MimeType)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Unsupported codec, only Opus is supported",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+				webrtc_internal.DataCodec:          remoteAudioCodec.MimeType,
+			},
+		})
 		return
 	}
 
 	opusDecoder, err := webrtc_internal.NewOpusDecoder()
 	if err != nil {
-		s.Logger.Errorw("Failed to create Opus decoder", "error", err)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to create Opus decoder",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+				"error":                            err.Error(),
+			},
+		})
 		return
 	}
 
@@ -492,7 +637,17 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote, mediaSes
 			s.mediaHealthState.RecordUserAudioReadError(consecutiveErrors)
 			s.Mu.Unlock()
 			if consecutiveErrors >= webrtc_internal.MaxConsecutiveReadErrors {
-				s.Logger.Errorw("Too many consecutive read errors, stopping audio reader", "lastError", err)
+				_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Too many consecutive read errors, stopping audio reader",
+					Attributes: observability.Attributes{
+						"component":                        observability.ComponentWebRTC.String(),
+						webrtc_internal.DataSessionID:      s.sessionID,
+						webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+						"consecutive_errors":               fmt.Sprintf("%d", consecutiveErrors),
+						"error":                            err.Error(),
+					},
+				})
 				return
 			}
 			continue
@@ -512,7 +667,16 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote, mediaSes
 			s.Mu.Lock()
 			s.mediaHealthState.RecordUserAudioRTPUnmarshalFailure()
 			s.Mu.Unlock()
-			s.Logger.Debugw("Failed to unmarshal RTP packet", "error", err)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Failed to unmarshal RTP packet",
+				Attributes: observability.Attributes{
+					"component":                        observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID:      s.sessionID,
+					webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+					"error":                            err.Error(),
+				},
+			})
 			continue
 		}
 		if len(pkt.Payload) == 0 {
@@ -533,7 +697,17 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote, mediaSes
 			s.Mu.Lock()
 			s.mediaHealthState.RecordUserAudioOpusDecodeFailure()
 			s.Mu.Unlock()
-			s.Logger.Debugw("Opus decode failed", "error", err, "payloadSize", len(pkt.Payload))
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Opus decode failed",
+				Attributes: observability.Attributes{
+					"component":                        observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID:      s.sessionID,
+					webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+					"payload_size":                     fmt.Sprintf("%d", len(pkt.Payload)),
+					"error":                            err.Error(),
+				},
+			})
 			continue
 		}
 		userPCM16k, err := s.resampler.Resample(userPCM48k, internal_audio.WEBRTC_AUDIO_CONFIG, internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG)
@@ -544,7 +718,16 @@ func (s *webrtcStreamer) readRemoteAudio(track *pionwebrtc.TrackRemote, mediaSes
 			s.Mu.Lock()
 			s.mediaHealthState.RecordUserAudioResampleFailure()
 			s.Mu.Unlock()
-			s.Logger.Debugw("Audio resample failed", "error", err)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Audio resample failed",
+				Attributes: observability.Attributes{
+					"component":                        observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID:      s.sessionID,
+					webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+					"error":                            err.Error(),
+				},
+			})
 			continue
 		}
 		userAudioReceivedAt := time.Now()
@@ -596,7 +779,16 @@ func (s *webrtcStreamer) readAssistantRTCP(assistantRTPSender *pionwebrtc.RTPSen
 				return
 			default:
 			}
-			s.Logger.Debugw("Failed to read WebRTC RTCP feedback", "session", s.sessionID, "error", err)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Failed to read WebRTC RTCP feedback",
+				Attributes: observability.Attributes{
+					"component":                        observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID:      s.sessionID,
+					webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+					"error":                            err.Error(),
+				},
+			})
 			continue
 		}
 
@@ -727,7 +919,16 @@ func (s *webrtcStreamer) applyAmbientConfig(cfg internal_ambient.Config, source 
 		return
 	}
 	if err := s.ambientMixer.Configure(cfg); err != nil {
-		s.Logger.Warnw("WebRTC ambient configuration ignored", "session", s.sessionID, "error", err)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "WebRTC ambient configuration ignored",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+				"source":                      source,
+				"error":                       err.Error(),
+			},
+		})
 		return
 	}
 }
@@ -738,7 +939,15 @@ func (s *webrtcStreamer) applyAmbientToFrame(primary []byte) []byte {
 	}
 	out, err := s.ambientMixer.Mix(primary)
 	if err != nil {
-		s.Logger.Debugw("WebRTC ambient mix failed", "session", s.sessionID, "error", err)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "WebRTC ambient mix failed",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+				"error":                       err.Error(),
+			},
+		})
 		return primary
 	}
 	return out
@@ -776,9 +985,11 @@ func (s *webrtcStreamer) enqueueOutputAudio(frame []byte) {
 
 	if droppedFrames > 0 {
 		totalDropped := s.sessionState.AddOutputAudioDroppedFrames(droppedFrames)
-		s.Input(&protos.ConversationEvent{
-			Name: observe.ComponentWebRTC,
-			Data: map[string]string{
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelInfo,
+			Message: "WebRTC output queue overflow dropped the oldest assistant audio frame; this keeps playback current when audio is produced faster than WebRTC can send it.",
+			Attributes: observability.Attributes{
+				"component":                            observability.ComponentWebRTC.String(),
 				webrtc_internal.DataType:               webrtc_internal.EventOutputQueueOverflow,
 				webrtc_internal.DataSessionID:          s.sessionID,
 				webrtc_internal.DataPolicy:             webrtc_internal.OutputQueuePolicyDropOldest,
@@ -787,7 +998,6 @@ func (s *webrtcStreamer) enqueueOutputAudio(frame []byte) {
 				webrtc_internal.DataQueueDepthFrames:   fmt.Sprintf("%d", queueDepth),
 				webrtc_internal.DataTotalDroppedFrames: fmt.Sprintf("%d", totalDropped),
 			},
-			Time: timestamppb.Now(),
 		})
 	}
 }
@@ -901,7 +1111,15 @@ func (s *webrtcStreamer) handleConfigurationMessage(mode protos.StreamMode) {
 		s.signalClear()
 		s.sessionState.ResetMediaRestartAttempts()
 		if err := s.startMediaSession(); err != nil {
-			s.Logger.Errorf("error while starting media session %s", err)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Error while starting WebRTC media session",
+				Attributes: observability.Attributes{
+					"component":                   observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID: s.sessionID,
+					"error":                       err.Error(),
+				},
+			})
 			s.stopMediaSessionAndFallbackToText()
 		}
 	case protos.StreamMode_STREAM_MODE_TEXT:
@@ -1086,9 +1304,21 @@ func (s *webrtcStreamer) Send(response internal_type.Stream) error {
 		s.handleConfigurationMessage(data.GetStreamMode())
 		s.Output(data)
 	case *protos.ConversationInitialization:
+		s.sessionState.ChangeScope(observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: data.GetAssistant().GetAssistantId()},
+			ConversationID: data.GetAssistantConversationId(),
+		})
 		s.handleConfigurationMessage(data.GetStreamMode())
 		if ambientCfg, ok := internal_ambient.ParseFromInitialization(data); ok {
-			s.Logger.Debugf("Parsed ambient configuration from initialization message: %+v", ambientCfg)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Parsed ambient configuration from initialization message",
+				Attributes: observability.Attributes{
+					"component":                   observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID: s.sessionID,
+					"source":                      "server_initialization",
+				},
+			})
 			s.applyAmbientConfig(ambientCfg, "server_initialization")
 		}
 		s.Output(data)
@@ -1099,16 +1329,17 @@ func (s *webrtcStreamer) Send(response internal_type.Stream) error {
 			s.clearBufferedOutputAudio()
 			clearedFrames := s.clearOutputAudio()
 			if clearedFrames > 0 {
-				s.Input(&protos.ConversationEvent{
-					Name: observe.ComponentWebRTC,
-					Data: map[string]string{
+				_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+					Level:   observability.LevelInfo,
+					Message: "WebRTC output queue cleared after user interruption; this drops queued assistant audio so the response stops promptly when the user speaks.",
+					Attributes: observability.Attributes{
+						"component":                              observability.ComponentWebRTC.String(),
 						webrtc_internal.DataType:                 webrtc_internal.EventOutputQueueCleared,
 						webrtc_internal.DataSessionID:            s.sessionID,
 						webrtc_internal.DataReason:               webrtc_internal.OutputQueueClearReasonInterruption,
 						webrtc_internal.DataClearedFrames:        fmt.Sprintf("%d", clearedFrames),
 						webrtc_internal.DataRemainingQueueFrames: fmt.Sprintf("%d", webrtc_internal.OutputAudioQueueEmptySize),
 					},
-					Time: timestamppb.Now(),
 				})
 			}
 			s.signalClear()
@@ -1142,14 +1373,30 @@ func (s *webrtcStreamer) Send(response internal_type.Stream) error {
 	case *protos.ConversationMetadata:
 		s.Output(data)
 	case *protos.ConversationDisconnection:
-		s.Logger.Infow("WebRTC streamer closing from ConversationDisconnection", "session", s.sessionID, "disconnection_type", data.GetType())
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelInfo,
+			Message: "WebRTC streamer closing from ConversationDisconnection",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+				"disconnection_type":          data.GetType().String(),
+			},
+		})
 		_ = s.Disconnect(data.GetType())
 		s.Output(data)
 		s.Close()
 	case *protos.ConversationMetric:
 		s.Output(data)
 	default:
-		s.Logger.Warnw("Unknown send message type, skipping", webrtc_internal.DataType, fmt.Sprintf("%T", response))
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Unknown WebRTC send message type, skipping",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+				webrtc_internal.DataType:      fmt.Sprintf("%T", response),
+			},
+		})
 	}
 	return nil
 }

@@ -15,41 +15,39 @@ import (
 )
 
 type fakeExporter struct {
-	mu            sync.Mutex
-	eventCalls    int
-	metricCalls   int
-	shutdownCalls int
-	eventErr      error
-	metricErr     error
-	shutdownErr   error
-	blockUntil    <-chan struct{}
+	mu          sync.Mutex
+	eventCalls  int
+	metricCalls int
+	CloseCalls  int
+	eventErr    error
+	metricErr   error
+	CloseErr    error
+	blockUntil  <-chan struct{}
 }
 
-func (f *fakeExporter) ExportEvent(_ context.Context, _ telemetry.SessionMeta, _ telemetry.EventRecord) error {
+func (f *fakeExporter) Export(_ context.Context, _ telemetry.Scope, rec telemetry.Record) error {
 	if f.blockUntil != nil {
 		<-f.blockUntil
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.eventCalls++
-	return f.eventErr
-}
-
-func (f *fakeExporter) ExportMetric(_ context.Context, _ telemetry.SessionMeta, _ telemetry.MetricRecord) error {
-	if f.blockUntil != nil {
-		<-f.blockUntil
+	switch rec.(type) {
+	case telemetry.EventRecord:
+		f.eventCalls++
+		return f.eventErr
+	case telemetry.MetricRecord:
+		f.metricCalls++
+		return f.metricErr
+	default:
+		return nil
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.metricCalls++
-	return f.metricErr
 }
 
-func (f *fakeExporter) Shutdown(_ context.Context) error {
+func (f *fakeExporter) Close(_ context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.shutdownCalls++
-	return f.shutdownErr
+	f.CloseCalls++
+	return f.CloseErr
 }
 
 func testLogger(t *testing.T) commons.Logger {
@@ -63,91 +61,90 @@ func testLogger(t *testing.T) commons.Logger {
 	return logger
 }
 
-func TestCollectors_FanoutAndShutdown(t *testing.T) {
+func TestCollectors_FanoutAndClose(t *testing.T) {
 	logger := testLogger(t)
-	meta := telemetry.SessionMeta{AssistantID: 1}
+	scope := telemetry.Scope{Name: "conversation"}
 
 	evt1 := &fakeExporter{}
 	evt2 := &fakeExporter{}
-	eventCollector := telemetry.NewEventCollector(logger, meta, evt1, evt2)
-	eventCollector.Collect(context.Background(), telemetry.EventRecord{Name: "session"})
-	eventCollector.Shutdown(context.Background())
+	eventCollector := telemetry.NewEventCollector(logger, evt1, evt2)
+	eventCollector.Collect(context.Background(), scope, telemetry.EventRecord{Event: "session"})
+	eventCollector.Close(context.Background())
 
 	assert.Equal(t, 1, evt1.eventCalls)
 	assert.Equal(t, 1, evt2.eventCalls)
-	assert.Equal(t, 1, evt1.shutdownCalls)
-	assert.Equal(t, 1, evt2.shutdownCalls)
+	assert.Equal(t, 1, evt1.CloseCalls)
+	assert.Equal(t, 1, evt2.CloseCalls)
 
 	met1 := &fakeExporter{}
 	met2 := &fakeExporter{}
-	metricCollector := telemetry.NewMetricCollector(logger, meta, met1, met2)
-	metricCollector.Collect(context.Background(), telemetry.ConversationMetricRecord{})
-	metricCollector.Shutdown(context.Background())
+	metricCollector := telemetry.NewMetricCollector(logger, met1, met2)
+	metricCollector.Collect(context.Background(), scope, telemetry.MetricRecord{})
+	metricCollector.Close(context.Background())
 
 	assert.Equal(t, 1, met1.metricCalls)
 	assert.Equal(t, 1, met2.metricCalls)
-	assert.Equal(t, 1, met1.shutdownCalls)
-	assert.Equal(t, 1, met2.shutdownCalls)
+	assert.Equal(t, 1, met1.CloseCalls)
+	assert.Equal(t, 1, met2.CloseCalls)
 }
 
 func TestCollectors_Noop(t *testing.T) {
 	logger := testLogger(t)
-	meta := telemetry.SessionMeta{}
 
-	eventCollector := telemetry.NewEventCollector(logger, meta)
-	metricCollector := telemetry.NewMetricCollector(logger, meta)
+	eventCollector := telemetry.NewEventCollector(logger)
+	metricCollector := telemetry.NewMetricCollector(logger)
 
 	assert.NotPanics(t, func() {
-		eventCollector.Collect(context.Background(), telemetry.EventRecord{Name: "x"})
-		metricCollector.Collect(context.Background(), telemetry.ConversationMetricRecord{})
-		eventCollector.Shutdown(context.Background())
-		metricCollector.Shutdown(context.Background())
+		eventCollector.Collect(context.Background(), telemetry.Scope{Name: "conversation"}, telemetry.EventRecord{Event: "x"})
+		metricCollector.Collect(context.Background(), telemetry.Scope{Name: "conversation"}, telemetry.MetricRecord{})
+		eventCollector.Close(context.Background())
+		metricCollector.Close(context.Background())
 	})
 }
 
 func TestCollectors_ExporterErrorsDoNotPanic(t *testing.T) {
 	logger := testLogger(t)
-	meta := telemetry.SessionMeta{AssistantID: 1}
 
 	exp := &fakeExporter{
-		eventErr:    errors.New("event export failed"),
-		metricErr:   errors.New("metric export failed"),
-		shutdownErr: errors.New("shutdown failed"),
+		eventErr:  errors.New("event export failed"),
+		metricErr: errors.New("metric export failed"),
+		CloseErr:  errors.New("Close failed"),
 	}
 
-	eventCollector := telemetry.NewEventCollector(logger, meta, exp)
-	metricCollector := telemetry.NewMetricCollector(logger, meta, exp)
+	eventCollector := telemetry.NewEventCollector(logger, exp)
+	metricCollector := telemetry.NewMetricCollector(logger, exp)
+	scope := telemetry.Scope{Name: "conversation"}
 
 	assert.NotPanics(t, func() {
-		eventCollector.Collect(context.Background(), telemetry.EventRecord{Name: "session"})
-		metricCollector.Collect(context.Background(), telemetry.ConversationMetricRecord{})
-		eventCollector.Shutdown(context.Background())
-		metricCollector.Shutdown(context.Background())
+		eventCollector.Collect(context.Background(), scope, telemetry.EventRecord{Event: "session"})
+		metricCollector.Collect(context.Background(), scope, telemetry.MetricRecord{})
+		eventCollector.Close(context.Background())
+		metricCollector.Close(context.Background())
 	})
 }
 
-func TestCollectors_ShutdownWaitsForInflightExports(t *testing.T) {
+func TestCollectors_CloseWaitsForInflightExports(t *testing.T) {
 	logger := testLogger(t)
-	meta := telemetry.SessionMeta{AssistantID: 1}
 
 	blocker := make(chan struct{})
 	exp := &fakeExporter{blockUntil: blocker}
-	eventCollector := telemetry.NewEventCollector(logger, meta, exp)
-	metricCollector := telemetry.NewMetricCollector(logger, meta, exp)
+	eventCollector := telemetry.NewEventCollector(logger, exp)
+	metricCollector := telemetry.NewMetricCollector(logger, exp)
+	scope := telemetry.Scope{Name: "conversation"}
 
-	eventCollector.Collect(context.Background(), telemetry.EventRecord{Name: "session"})
-	metricCollector.Collect(context.Background(), telemetry.ConversationMetricRecord{})
+	eventCollector.Collect(context.Background(), scope, telemetry.EventRecord{Event: "session"})
+	metricCollector.Collect(context.Background(), scope, telemetry.MetricRecord{})
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		eventCollector.Shutdown(context.Background())
-		metricCollector.Shutdown(context.Background())
+		eventCollector.Close(context.Background())
+		metricCollector.Close(context.Background())
 	}()
 
 	select {
 	case <-done:
-		t.Fatal("shutdown returned before in-flight exports were unblocked")
+		t.Fatal("Close returned before in-flight exports were unblocked")
 	case <-time.After(50 * time.Millisecond):
 	}
 
@@ -156,6 +153,6 @@ func TestCollectors_ShutdownWaitsForInflightExports(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("shutdown did not complete after unblocking in-flight exports")
+		t.Fatal("Close did not complete after unblocking in-flight exports")
 	}
 }

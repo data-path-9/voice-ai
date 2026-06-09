@@ -74,7 +74,7 @@ func (tpc *telnyxTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 		return nil, fmt.Errorf("%w: %w", internal_telnyx.ErrRequestBodyParseFailed, err)
 	}
 
-	callback, err := internal_telnyx.NewStatusCallback(payload)
+	callback, err := internal_telnyx.NewStatusCallback(payload, string(body))
 	if err != nil {
 		tpc.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err

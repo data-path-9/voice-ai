@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telnyx "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -141,6 +142,7 @@ func TestStatusCallback(t *testing.T) {
 		payload     map[string]interface{}
 		expectErr   bool
 		expectEvent string
+		expectDone  bool
 	}{
 		{
 			name: "valid call.answered event",
@@ -155,6 +157,7 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.answered",
+			expectDone:  false,
 		},
 		{
 			name: "valid call.hangup failure event",
@@ -171,6 +174,7 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.hangup",
+			expectDone:  false,
 		},
 		{
 			name: "valid call.hangup event",
@@ -182,6 +186,7 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.hangup",
+			expectDone:  true,
 		},
 		{
 			name: "missing data field",
@@ -224,6 +229,12 @@ func TestStatusCallback(t *testing.T) {
 
 			if statusInfo.Event != tt.expectEvent {
 				t.Errorf("expected event %s, got %s", tt.expectEvent, statusInfo.Event)
+			}
+			if statusInfo.Completed != tt.expectDone {
+				t.Errorf("expected completed %t, got %t", tt.expectDone, statusInfo.Completed)
+			}
+			if statusInfo.RawPayload == "" {
+				t.Error("expected raw payload, got empty")
 			}
 			if tt.name == "valid call.answered event" && statusInfo.ChannelUUID != "call-control-123" {
 				t.Errorf("expected call-control-123, got %s", statusInfo.ChannelUUID)
@@ -531,7 +542,7 @@ func TestOutboundCall_MissingCredentials(t *testing.T) {
 	if info.Status != "FAILED" {
 		t.Errorf("expected FAILED status, got %s", info.Status)
 	}
-	if statusUpdate.CallStatus != internal_telephony_base.OutboundCallStatusFailed {
+	if statusUpdate.CallStatus != callcontext.CallStatusFailed {
 		t.Errorf("expected outbound status failed, got %s", statusUpdate.CallStatus)
 	}
 	if statusUpdate.FailureClass != internal_telephony_base.OutboundFailureClassAuthentication {

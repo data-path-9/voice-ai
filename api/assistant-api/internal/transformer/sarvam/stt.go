@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"net/http"
 	"strings"
 	"sync"
@@ -82,15 +83,19 @@ func (cst *sarvamSpeechToText) Initialize() error {
 
 	go cst.readLoop(conn)
 
-	cst.onPacket(internal_type.ConversationEventPacket{
+	cst.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: cst.contextId,
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": cst.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": cst.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -173,22 +178,32 @@ func (cst *sarvamSpeechToText) handleTranscription(response sarvam_internal.Sarv
 			Language:   langCode,
 			Interim:    false,
 		},
-		internal_type.ConversationEventPacket{
-			ContextID: ctxID,
-			Name:      "stt",
-			Data: map[string]string{
-				"type":       "completed",
-				"script":     transcriptionData.Transcript,
-				"confidence": "0.9000",
-				"language":   langCode,
-				"word_count": fmt.Sprintf("%d", len(strings.Fields(transcriptionData.Transcript))),
-				"char_count": fmt.Sprintf("%d", len(transcriptionData.Transcript)),
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID:   ctxID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordEvent{
+				Component: observability.ComponentSTT,
+				Event:     observability.STTCompleted,
+				Attributes: observability.Attributes{
+					"type":       "completed",
+					"script":     transcriptionData.Transcript,
+					"confidence": "0.9000",
+					"language":   langCode,
+					"word_count": fmt.Sprintf("%d", len(strings.Fields(transcriptionData.Transcript))),
+					"char_count": fmt.Sprintf("%d", len(transcriptionData.Transcript)),
+				},
+				OccurredAt: now,
 			},
-			Time: now,
 		},
-		internal_type.UserMessageMetricPacket{
-			ContextID: ctxID,
-			Metrics:   []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+		internal_type.ObservabilityMetricRecordPacket{
+			ContextID:   ctxID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordMetric{
+				Metrics:    []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+				Attributes: observability.Attributes{"provider": cst.Name()},
+			},
 		},
 	)
 }
@@ -214,7 +229,7 @@ func (cst *sarvamSpeechToText) Transform(ctx context.Context, in internal_type.P
 		cst.contextId = pkt.ContextID
 		cst.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextEndPacket:
+	case internal_type.SpeechToTextStartPacket:
 		cst.mu.Lock()
 		if cst.startedAt.IsZero() {
 			cst.startedAt = time.Now()
@@ -222,6 +237,11 @@ func (cst *sarvamSpeechToText) Transform(ctx context.Context, in internal_type.P
 		cst.mu.Unlock()
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
+		cst.mu.Lock()
+		if cst.startedAt.IsZero() {
+			cst.startedAt = time.Now()
+		}
+		cst.mu.Unlock()
 		vl, err := cst.speechToTextMessage(pkt.Audio)
 		if err != nil {
 			return fmt.Errorf("sarvam-stt: failed to encode audio: %w", err)
@@ -264,23 +284,42 @@ func (cst *sarvamSpeechToText) Close(ctx context.Context) error {
 	cst.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		cst.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "stt",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": cst.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentSTT,
+					Event:     observability.STTClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": cst.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total STT connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentSTT,
+					Provider:  cst.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   cst.Name(),
+						"metric":     type_enums.CONVERSATION_STT_DURATION.String(),
+					},
+				},
 			},
 		)
 	}

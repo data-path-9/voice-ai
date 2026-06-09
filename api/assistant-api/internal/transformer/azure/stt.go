@@ -17,6 +17,7 @@ import (
 	"github.com/Microsoft/cognitive-services-speech-sdk-go/audio"
 	"github.com/Microsoft/cognitive-services-speech-sdk-go/common"
 	"github.com/Microsoft/cognitive-services-speech-sdk-go/speech"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	azure_internal "github.com/rapidaai/api/assistant-api/internal/transformer/azure/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
@@ -108,15 +109,19 @@ func (s *azureSpeechToText) Initialize() error {
 	s.registerEventHandlers()
 	s.client.StartContinuousRecognitionAsync()
 
-	s.onPacket(internal_type.ConversationEventPacket{
+	s.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: s.contextId,
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": s.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": s.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -143,7 +148,7 @@ func (s *azureSpeechToText) Transform(_ context.Context, in internal_type.Packet
 		s.contextId = pkt.ContextID
 		s.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextEndPacket:
+	case internal_type.SpeechToTextStartPacket:
 		s.mu.Lock()
 		if s.startedAt.IsZero() {
 			s.startedAt = time.Now()
@@ -151,6 +156,11 @@ func (s *azureSpeechToText) Transform(_ context.Context, in internal_type.Packet
 		s.mu.Unlock()
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
+		s.mu.Lock()
+		if s.startedAt.IsZero() {
+			s.startedAt = time.Now()
+		}
+		s.mu.Unlock()
 		s.mu.Lock()
 		stream := s.inputstream
 		s.mu.Unlock()
@@ -217,15 +227,20 @@ func (s *azureSpeechToText) OnRecognizing(event speech.SpeechRecognitionEventArg
 			Language:   language,
 			Interim:    true,
 		},
-		internal_type.ConversationEventPacket{
-			ContextID: ctxID,
-			Name:      "stt",
-			Data: map[string]string{
-				"type":       "interim",
-				"script":     result.Text,
-				"confidence": "0.9000",
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID:   ctxID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordEvent{
+				Component: observability.ComponentSTT,
+				Event:     observability.STTInterim,
+				Attributes: observability.Attributes{
+					"type":       "interim",
+					"script":     result.Text,
+					"confidence": "0.9000",
+				},
+				OccurredAt: time.Now(),
 			},
-			Time: time.Now(),
 		},
 	)
 }
@@ -254,16 +269,21 @@ func (s *azureSpeechToText) OnRecognized(event speech.SpeechRecognitionEventArgs
 				s.logger.Debugf("confidence %.4f below threshold %.4f, skipping", confidence, threshold)
 				// emit event for low confidence and skip stt processing
 				s.onPacket(
-					internal_type.ConversationEventPacket{
-						ContextID: s.contextId,
-						Name:      "stt",
-						Data: map[string]string{
-							"type":       "low_confidence",
-							"script":     text,
-							"confidence": fmt.Sprintf("%.4f", confidence),
-							"threshold":  fmt.Sprintf("%.4f", threshold),
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   s.contextId,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record: observability.RecordEvent{
+							Component: observability.ComponentSTT,
+							Event:     observability.STTLowConfidence,
+							Attributes: observability.Attributes{
+								"type":       "low_confidence",
+								"script":     text,
+								"confidence": fmt.Sprintf("%.4f", confidence),
+								"threshold":  fmt.Sprintf("%.4f", threshold),
+							},
+							OccurredAt: time.Now(),
 						},
-						Time: time.Now(),
 					},
 				)
 				return
@@ -298,22 +318,32 @@ func (s *azureSpeechToText) OnRecognized(event speech.SpeechRecognitionEventArgs
 			Language:   "en-US",
 			Interim:    false,
 		},
-		internal_type.ConversationEventPacket{
-			ContextID: ctxID,
-			Name:      "stt",
-			Data: map[string]string{
-				"type":       "completed",
-				"script":     text,
-				"confidence": confStr,
-				"language":   "en-US",
-				"word_count": fmt.Sprintf("%d", len(strings.Fields(text))),
-				"char_count": fmt.Sprintf("%d", len(text)),
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID:   ctxID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordEvent{
+				Component: observability.ComponentSTT,
+				Event:     observability.STTCompleted,
+				Attributes: observability.Attributes{
+					"type":       "completed",
+					"script":     text,
+					"confidence": confStr,
+					"language":   "en-US",
+					"word_count": fmt.Sprintf("%d", len(strings.Fields(text))),
+					"char_count": fmt.Sprintf("%d", len(text)),
+				},
+				OccurredAt: now,
 			},
-			Time: now,
 		},
-		internal_type.UserMessageMetricPacket{
-			ContextID: ctxID,
-			Metrics:   []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+		internal_type.ObservabilityMetricRecordPacket{
+			ContextID:   ctxID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordMetric{
+				Metrics:    []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+				Attributes: observability.Attributes{"provider": s.Name()},
+			},
 		},
 	)
 }
@@ -349,23 +379,43 @@ func (s *azureSpeechToText) Close(_ context.Context) error {
 	s.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		s.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "stt",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": s.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentSTT,
+					Event:     observability.STTClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": s.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total STT connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentSTT,
+					Provider:  s.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   s.Name(),
+						"metric":     type_enums.CONVERSATION_STT_DURATION.String(),
+					},
+				},
 			},
 		)
 	}

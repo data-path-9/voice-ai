@@ -6,12 +6,14 @@
 package assistant_talk_api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/openapi"
 	pkg_errors "github.com/rapidaai/pkg/errors"
 	"github.com/rapidaai/pkg/preset"
@@ -66,6 +68,8 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 	}
 
 	conversations := make([]openapi.AssistantConversation, 0, len(*ir.PhoneCalls))
+	observer := cApi.Observability(c, auth, observability.WithGracePeriod())
+	defer observer.Close(context.Background())
 	for _, phoneCall := range *ir.PhoneCalls {
 		if !validator.NonNil(phoneCall.ToNumber) || !validator.NotBlank(*phoneCall.ToNumber) {
 			c.JSON(pkg_errors.CreateBulkPhoneCallMissingToNumber.HTTPStatusCode, openapi.ErrorResponse{
@@ -124,7 +128,6 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 		if validator.NonNil(phoneCall.Options) {
 			opts = *phoneCall.Options
 		}
-
 		result := cApi.channelPipeline.Run(c, channel_pipeline.OutboundRequestedPipeline{
 			ID:          fmt.Sprintf("%d", assistant.GetAssistantId()),
 			Auth:        auth,
@@ -135,7 +138,9 @@ func (cApi *ConversationApi) CreateBulkPhoneCallRest(c *gin.Context) {
 			Metadata:    metadata,
 			Args:        args,
 			Options:     opts,
+			Observer:    observer,
 		})
+
 		if result.Error != nil {
 			cApi.logger.Errorf("bulk outbound call failed: %v", result.Error)
 			c.JSON(pkg_errors.CreateBulkPhoneCallInitiateOutbound.HTTPStatusCode, openapi.ErrorResponse{

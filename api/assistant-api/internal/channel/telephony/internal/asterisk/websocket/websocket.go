@@ -21,10 +21,10 @@ import (
 	internal_asterisk "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/asterisk/internal"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type asteriskWebsocketStreamer struct {
@@ -41,14 +41,52 @@ type asteriskWebsocketStreamer struct {
 	mediaBufferMu  sync.Mutex
 }
 
-// NewAsteriskWebsocketStreamer creates a new Asterisk WebSocket streamer.
-func NewAsteriskWebsocketStreamer(
-	logger commons.Logger,
-	connection *websocket.Conn,
-	cc *callcontext.CallContext,
-	vaultCred *protos.VaultCredential,
-) (internal_type.Streamer, error) {
-	audioProcessor, err := internal_asterisk.NewAudioProcessor(logger, internal_asterisk.AudioProcessorConfig{
+type StreamerOptions struct {
+	Logger          commons.Logger
+	Connection      *websocket.Conn
+	CallContext     *callcontext.CallContext
+	VaultCredential *protos.VaultCredential
+	Observer        observability.Recorder
+}
+
+type FuncOption func(*StreamerOptions)
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithConnection(connection *websocket.Conn) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Connection = connection
+	}
+}
+
+func WithCallContext(callContext *callcontext.CallContext) FuncOption {
+	return func(options *StreamerOptions) {
+		options.CallContext = callContext
+	}
+}
+
+func WithVaultCredential(vaultCredential *protos.VaultCredential) FuncOption {
+	return func(options *StreamerOptions) {
+		options.VaultCredential = vaultCredential
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.Streamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	audioProcessor, err := internal_asterisk.NewAudioProcessor(options.Logger, internal_asterisk.AudioProcessorConfig{
 		AsteriskConfig:   internal_audio.NewMulaw8khzMonoAudioConfig(),
 		DownstreamConfig: internal_audio.NewLinear16khzMonoAudioConfig(),
 		SilenceByte:      0xFF, // mu-law silence
@@ -59,15 +97,15 @@ func NewAsteriskWebsocketStreamer(
 	}
 
 	aws := &asteriskWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, vaultCred,
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			options.Logger, options.CallContext, options.VaultCredential, options.Observer,
 		),
 		audioProcessor: audioProcessor,
-		connection:     connection,
+		connection:     options.Connection,
 	}
 	aws.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     aws.Ctx,
-		Logger:      logger,
+		Logger:      options.Logger,
 		MediaEngine: audioProcessor,
 		SendProviderClear: func() error {
 			if aws.isMediaBuffering() {
@@ -77,15 +115,7 @@ func NewAsteriskWebsocketStreamer(
 		},
 		StreamSink: aws.Input,
 		OutputSink: aws.sendOutputFrame,
-		EventSink: func(event *protos.ConversationEvent) {
-			if event != nil {
-				if event.Data == nil {
-					event.Data = map[string]string{}
-				}
-				event.Data["provider"] = "asterisk_ws"
-			}
-			aws.Input(event)
-		},
+		Record:     aws.Record,
 	})
 
 	go aws.runWebSocketReader()
@@ -98,7 +128,22 @@ func (aws *asteriskWebsocketStreamer) sendOutputFrame(frame internal_telephony_m
 	}
 	aws.writeMu.Lock()
 	defer aws.writeMu.Unlock()
-	return aws.connection.WriteMessage(websocket.BinaryMessage, frame.ProviderAudio)
+	if err := aws.connection.WriteMessage(websocket.BinaryMessage, frame.ProviderAudio); err != nil {
+		_ = aws.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to send audio frame to Asterisk websocket",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          "asterisk_ws",
+				"channel_name":      aws.channelName,
+				"conversation_uuid": aws.ChannelUUID,
+				"payload_bytes":     fmt.Sprintf("%d", len(frame.ProviderAudio)),
+				"error":             err.Error(),
+			},
+		})
+		return err
+	}
+	return nil
 }
 
 func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
@@ -109,6 +154,38 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
+			_ = aws.Record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Asterisk websocket reader closed",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          "asterisk_ws",
+					"channel_name":      aws.channelName,
+					"conversation_uuid": aws.ChannelUUID,
+					"error":             err.Error(),
+				},
+			}, observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallEnded,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          "asterisk_ws",
+					"channel_name":      aws.channelName,
+					"conversation_uuid": aws.ChannelUUID,
+					"reason":            "websocket_closed",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "websocket_closed"},
+					{Key: observability.MetadataDisconnectReason, Value: "websocket_closed"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "COMPLETE",
+					Description: "Asterisk websocket reader closed",
+				}},
+			})
 			if msg := aws.Disconnect(disconnectTypeFromReadError(err)); msg != nil {
 				aws.Input(msg)
 			}
@@ -118,45 +195,109 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 		switch messageType {
 		case websocket.BinaryMessage:
 			if err := aws.handleAudioData(message); err != nil {
-				aws.Logger.Errorw("Failed to process Asterisk media frame",
-					"error", err,
-					"conversation_uuid", aws.ChannelUUID,
-					"channel_name", aws.channelName,
-					"payload_bytes", len(message),
-				)
+				_ = aws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to process Asterisk media frame",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"payload_bytes":     fmt.Sprintf("%d", len(message)),
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Asterisk media frame processing failed",
+					}},
+				})
 			}
 		case websocket.TextMessage:
 			event, err := internal_asterisk.ParseAsteriskEvent(string(message))
 			if err != nil {
-				aws.Logger.Warn("Failed to parse Asterisk event", "error", err.Error(), "message", message)
+				_ = aws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to parse Asterisk event",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"message":           string(message),
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Failed to parse Asterisk event",
+					}},
+				})
 				continue
 			}
 			switch event.Event {
 			case "MEDIA_START":
 				aws.channelName = event.Channel
 				aws.ChannelUUID = event.Channel
-				aws.Logger.Info("Asterisk media started", "channel", aws.channelName, "optimal_frame_size", event.OptimalFrameSize)
 				if event.OptimalFrameSize > 0 {
 					aws.audioProcessor.SetOptimalFrameSize(event.OptimalFrameSize)
 				}
 				aws.mediaSession.Start()
 				aws.Input(aws.CreateConnectionRequest())
-				// The inbound webhook may not have carried channel_id, so the
-				// init payload's client.provider_call_id can be empty. Emit
-				// the live channel as metadata so it still lands in conversation
-				// metadata.
-				if event.Channel != "" {
-					aws.Input(&protos.ConversationMetadata{
-						Metadata: []*protos.Metadata{{Key: "client.provider_call_id", Value: event.Channel}},
-					})
-				}
-				aws.Input(&protos.ConversationEvent{
-					Name: "channel",
-					Data: map[string]string{"type": "media_started", "provider": "asterisk_ws", "channel_name": aws.channelName},
-					Time: timestamppb.Now(),
+				_ = aws.Record(observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallMediaStarted,
+					Attributes: observability.Attributes{
+						"component":          observability.ComponentCall.String(),
+						"provider":           "asterisk_ws",
+						"provider_event":     event.Event,
+						"channel_name":       aws.channelName,
+						"conversation_uuid":  aws.ChannelUUID,
+						"optimal_frame_size": fmt.Sprintf("%d", event.OptimalFrameSize),
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataClientChannel, Value: "asterisk_ws"},
+						{Key: observability.MetadataClientProviderCallID, Value: event.Channel},
+						{Key: observability.MetadataClientCodec, Value: "mulaw"},
+						{Key: observability.MetadataClientSampleRate, Value: "8000"},
+						{Key: observability.MetadataCallStatus, Value: "media_started"},
+						{Key: "asterisk.channel_name", Value: aws.channelName},
+						{Key: "asterisk.optimal_frame_size", Value: fmt.Sprintf("%d", event.OptimalFrameSize)},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "INPROGRESS",
+						Description: "Asterisk media stream started",
+					}},
 				})
 			case "MEDIA_STOP":
-				aws.Logger.Info("Asterisk media stopped")
+				_ = aws.Record(observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallHangup,
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"provider_event":    event.Event,
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"reason":            "provider_stop",
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "provider_stop"},
+						{Key: observability.MetadataDisconnectReason, Value: "provider_stop"},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "COMPLETE",
+						Description: "Asterisk media stream stopped by provider",
+					}},
+				})
 				if msg := aws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 					aws.Input(msg)
 				}
@@ -164,32 +305,78 @@ func (aws *asteriskWebsocketStreamer) runWebSocketReader() {
 				return
 			case "MEDIA_XON":
 				aws.audioProcessor.SetXON()
-				aws.Input(&protos.ConversationEvent{
-					Name: "channel",
-					Data: map[string]string{"type": "flow_control", "provider": "asterisk_ws", "state": "xon"},
-					Time: timestamppb.Now(),
+				_ = aws.Record(observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallStatus,
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"provider_event":    event.Event,
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"status":            "flow_control",
+						"state":             "xon",
+					},
 				})
 			case "MEDIA_XOFF":
 				aws.audioProcessor.SetXOFF()
-				aws.Input(&protos.ConversationEvent{
-					Name: "channel",
-					Data: map[string]string{"type": "flow_control", "provider": "asterisk_ws", "state": "xoff"},
-					Time: timestamppb.Now(),
+				_ = aws.Record(observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallStatus,
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"provider_event":    event.Event,
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"status":            "flow_control",
+						"state":             "xoff",
+					},
 				})
 			case "MEDIA_BUFFERING_COMPLETED":
 				aws.setMediaBuffering(false)
 			default:
 				if event.Command != "" {
-					aws.Logger.Debug("Received Asterisk command response", "command", event.Command)
+					_ = aws.Record(observability.RecordLog{
+						Level:   observability.LevelDebug,
+						Message: "Received Asterisk command response",
+						Attributes: observability.Attributes{
+							"component":         observability.ComponentCall.String(),
+							"provider":          "asterisk_ws",
+							"command":           event.Command,
+							"channel_name":      aws.channelName,
+							"conversation_uuid": aws.ChannelUUID,
+						},
+					})
 				} else if event.RawMessage != "" {
-					aws.Logger.Debug("Received unhandled Asterisk message", "message", event.RawMessage)
+					_ = aws.Record(observability.RecordLog{
+						Level:   observability.LevelDebug,
+						Message: "Received unhandled Asterisk message",
+						Attributes: observability.Attributes{
+							"component":         observability.ComponentCall.String(),
+							"provider":          "asterisk_ws",
+							"message":           event.RawMessage,
+							"channel_name":      aws.channelName,
+							"conversation_uuid": aws.ChannelUUID,
+						},
+					})
 				}
 			}
 		case websocket.CloseMessage:
 			aws.Cancel()
 			return
 		default:
-			aws.Logger.Warn("Received unsupported WebSocket message type", "type", messageType)
+			_ = aws.Record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Received unsupported Asterisk websocket message type",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          "asterisk_ws",
+					"message_type":      fmt.Sprintf("%d", messageType),
+					"channel_name":      aws.channelName,
+					"conversation_uuid": aws.ChannelUUID,
+				},
+			})
 		}
 	}
 }
@@ -220,7 +407,23 @@ func (aws *asteriskWebsocketStreamer) Send(response internal_type.Stream) error 
 				return nil
 			}
 			if err := aws.mediaSession.HandleAssistantAudio(content.Audio, data.GetCompleted()); err != nil {
-				aws.Logger.Error("Failed to process output audio", "error", err.Error())
+				_ = aws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to process Asterisk output audio",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Failed to process Asterisk output audio",
+					}},
+				})
 				return err
 			}
 		}
@@ -239,7 +442,48 @@ func (aws *asteriskWebsocketStreamer) Send(response internal_type.Stream) error 
 		_ = aws.Disconnect(data.GetType())
 		aws.stopAudioProcessing()
 		if err := aws.hangupCall(); err != nil {
-			aws.Logger.Warnw("Failed to hang up call for disconnection", "error", err)
+			_ = aws.Record(observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Failed to hang up Asterisk call for disconnection",
+				Attributes: observability.Attributes{
+					"component":          observability.ComponentCall.String(),
+					"provider":           "asterisk_ws",
+					"channel_name":       aws.channelName,
+					"conversation_uuid":  aws.ChannelUUID,
+					"disconnection_type": data.GetType().String(),
+					"error":              err.Error(),
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "FAILED",
+					Description: "Failed to hang up Asterisk call for disconnection",
+				}},
+			})
+		} else {
+			_ = aws.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallHangup,
+				Attributes: observability.Attributes{
+					"component":          observability.ComponentCall.String(),
+					"provider":           "asterisk_ws",
+					"channel_name":       aws.channelName,
+					"conversation_uuid":  aws.ChannelUUID,
+					"disconnection_type": data.GetType().String(),
+					"reason":             "server_side_disconnect",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "completed"},
+					{Key: observability.MetadataDisconnectReason, Value: "server_side_disconnect"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "COMPLETE",
+					Description: "Asterisk call ended by server-side disconnect",
+				}},
+			})
 		}
 		aws.Cancel()
 	case *protos.ConversationToolCall:
@@ -248,8 +492,49 @@ func (aws *asteriskWebsocketStreamer) Send(response internal_type.Stream) error 
 			aws.stopAudioProcessing()
 			result := map[string]string{"status": "completed"}
 			if err := aws.hangupCall(); err != nil {
-				aws.Logger.Error("Failed to hang up call", "error", err)
+				_ = aws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to hang up Asterisk call",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"tool_action":       data.GetAction().String(),
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Failed to hang up Asterisk call",
+					}},
+				})
 				result = map[string]string{"status": "failed", "reason": fmt.Sprintf("hangup failed: %v", err)}
+			} else {
+				_ = aws.Record(observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallHangup,
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"tool_action":       data.GetAction().String(),
+						"reason":            "tool_end_conversation",
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "completed"},
+						{Key: observability.MetadataDisconnectReason, Value: "tool_end_conversation"},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "COMPLETE",
+						Description: "Asterisk call ended by tool action",
+					}},
+				})
 			}
 			aws.Input(&protos.ConversationToolCallResult{
 				Id:     data.GetId(),
@@ -264,6 +549,29 @@ func (aws *asteriskWebsocketStreamer) Send(response internal_type.Stream) error 
 			raw := data.GetArgs()["transfer_to"]
 			targets := aws.SplitTransferTargets(raw)
 			if raw == "" || len(targets) == 0 || aws.channelName == "" {
+				_ = aws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Asterisk transfer failed before dispatch",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"tool_action":       data.GetAction().String(),
+						"reason":            "missing target or channel name",
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "transfer_failed"},
+						{Key: observability.MetadataFailureReason, Value: "missing target or channel name"},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Asterisk transfer failed before dispatch",
+					}},
+				})
 				aws.Input(&protos.ConversationToolCallResult{
 					Id:     data.GetId(),
 					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
@@ -273,19 +581,77 @@ func (aws *asteriskWebsocketStreamer) Send(response internal_type.Stream) error 
 			}
 			to := targets[0]
 			if len(targets) > 1 {
-				aws.Logger.Warnw("Asterisk transfer received multiple targets; failover not supported, using first only",
-					"chosen", to, "ignored", targets[1:])
+				_ = aws.Record(observability.RecordLog{
+					Level:   observability.LevelDebug,
+					Message: "Asterisk transfer received multiple targets",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"tool_action":       data.GetAction().String(),
+						"transfer_to":       to,
+						"ignored_targets":   fmt.Sprintf("%v", targets[1:]),
+					},
+				})
 			}
-			aws.Logger.Infow("Transferring Asterisk call via ARI redirect", "to", to, "channel", aws.channelName)
 			aws.stopAudioProcessing()
 			if err := aws.redirectViaARI(to); err != nil {
-				aws.Logger.Errorw("ARI redirect failed", "error", err, "to", to)
+				_ = aws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Asterisk ARI redirect failed",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"tool_action":       data.GetAction().String(),
+						"transfer_to":       to,
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "transfer_failed"},
+						{Key: observability.MetadataFailureReason, Value: err.Error()},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Asterisk ARI redirect failed",
+					}},
+				})
 				aws.Input(&protos.ConversationToolCallResult{
 					Id:     data.GetId(),
 					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
 					Result: map[string]string{"status": "failed", "reason": fmt.Sprintf("ARI redirect failed: %v", err), "next_action": "end_call"},
 				})
 			} else {
+				_ = aws.Record(observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallHangup,
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          "asterisk_ws",
+						"channel_name":      aws.channelName,
+						"conversation_uuid": aws.ChannelUUID,
+						"tool_action":       data.GetAction().String(),
+						"transfer_to":       to,
+						"reason":            "tool_transfer_conversation",
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "transfer_dispatched"},
+						{Key: observability.MetadataBridgeTransferTarget, Value: to},
+						{Key: observability.MetadataBridgeTransferStatus, Value: "dispatched"},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "INPROGRESS",
+						Description: "Asterisk transfer dispatched",
+					}},
+				})
 				aws.Input(&protos.ConversationToolCallResult{
 					Id:     data.GetId(),
 					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
@@ -318,7 +684,17 @@ func disconnectTypeFromReadError(err error) protos.ConversationDisconnection_Dis
 
 func (aws *asteriskWebsocketStreamer) hangupCall() error {
 	if wsErr := aws.sendCommand("HANGUP"); wsErr != nil {
-		aws.Logger.Warn("Failed to send HANGUP via WebSocket, trying ARI API", "error", wsErr)
+		_ = aws.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to send Asterisk HANGUP over websocket",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          "asterisk_ws",
+				"channel_name":      aws.channelName,
+				"conversation_uuid": aws.ChannelUUID,
+				"error":             wsErr.Error(),
+			},
+		})
 		if aws.channelName == "" {
 			return wsErr
 		}
@@ -387,7 +763,16 @@ func (aws *asteriskWebsocketStreamer) hangupViaARI() error {
 		return fmt.Errorf("ARI API returned status: %d", resp.StatusCode)
 	}
 
-	aws.Logger.Info("Successfully hung up call via ARI API", "channel", aws.channelName)
+	_ = aws.Record(observability.RecordLog{
+		Level:   observability.LevelDebug,
+		Message: "Asterisk call hung up via ARI API",
+		Attributes: observability.Attributes{
+			"component":         observability.ComponentCall.String(),
+			"provider":          "asterisk_ws",
+			"channel_name":      aws.channelName,
+			"conversation_uuid": aws.ChannelUUID,
+		},
+	})
 	return nil
 }
 
@@ -422,7 +807,17 @@ func (aws *asteriskWebsocketStreamer) redirectViaARI(target string) error {
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("ARI redirect returned status: %d", resp.StatusCode)
 	}
-	aws.Logger.Infow("Asterisk call redirected via ARI", "channel", aws.channelName, "target", target)
+	_ = aws.Record(observability.RecordLog{
+		Level:   observability.LevelDebug,
+		Message: "Asterisk call redirected via ARI",
+		Attributes: observability.Attributes{
+			"component":         observability.ComponentCall.String(),
+			"provider":          "asterisk_ws",
+			"channel_name":      aws.channelName,
+			"conversation_uuid": aws.ChannelUUID,
+			"transfer_to":       target,
+		},
+	})
 	return nil
 }
 

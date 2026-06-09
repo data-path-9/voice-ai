@@ -61,11 +61,9 @@ func NewAuthenticationUnaryServerMiddleware(resolver types.Authenticator, logger
 func NewAuthenticationStreamServerMiddleware(resolver types.Authenticator, logger commons.Logger) grpc.StreamServerInterceptor {
 	return func(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		ctx := stream.Context()
-
 		authToken := metadata.ExtractIncoming(ctx).Get(types.AUTHORIZATION_KEY)
 		authId := metadata.ExtractIncoming(ctx).Get(types.AUTH_KEY)
 		projectId := metadata.ExtractIncoming(ctx).Get(types.PROJECT_KEY)
-		logger.Debugf("received authentication information %v and %v", authId, authToken)
 		if authToken == "" {
 			wrapped := middleware.WrapServerStream(stream)
 			wrapped.WrappedContext = ctx

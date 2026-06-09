@@ -28,7 +28,7 @@ func TestRequestorChannels_OnRoutesToExpectedChannel(t *testing.T) {
 	bootstrapEnv := Envelope{Ctx: ctx, Pkt: internal_type.InitializeAssistantPacket{ContextID: "boot"}}
 	ingressEnv := Envelope{Ctx: ctx, Pkt: internal_type.UserTextReceivedPacket{ContextID: "in", Text: "hello"}}
 	egressEnv := Envelope{Ctx: ctx, Pkt: internal_type.TextToSpeechTextPacket{ContextID: "out", Text: "hi"}}
-	backgroundEnv := Envelope{Ctx: ctx, Pkt: internal_type.ConversationEventPacket{ContextID: "bg"}}
+	backgroundEnv := Envelope{Ctx: ctx, Pkt: internal_type.ObservabilityEventRecordPacket{ContextID: "bg"}}
 
 	chs.OnControl(controlEnv)
 	chs.OnBootstrap(bootstrapEnv)
@@ -118,8 +118,8 @@ func TestRequestorChannels_FlushAll(t *testing.T) {
 
 	chs.OnEgress(Envelope{Ctx: context.Background(), Pkt: internal_type.TextToSpeechTextPacket{ContextID: "e1"}})
 
-	chs.OnBackground(Envelope{Ctx: context.Background(), Pkt: internal_type.ConversationEventPacket{ContextID: "g1"}})
-	chs.OnBackground(Envelope{Ctx: context.Background(), Pkt: internal_type.ConversationEventPacket{ContextID: "g2"}})
+	chs.OnBackground(Envelope{Ctx: context.Background(), Pkt: internal_type.ObservabilityEventRecordPacket{ContextID: "g1"}})
+	chs.OnBackground(Envelope{Ctx: context.Background(), Pkt: internal_type.ObservabilityEventRecordPacket{ContextID: "g2"}})
 
 	dropped := chs.FlushAll()
 	if dropped != 9 {

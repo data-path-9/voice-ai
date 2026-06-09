@@ -98,8 +98,8 @@ func TestRecvLoop_ReinitOnTimeout(t *testing.T) {
 	var errorEvents atomic.Int32
 	onPacket := func(pkts ...internal_type.Packet) error {
 		for _, p := range pkts {
-			if evt, ok := p.(internal_type.ConversationEventPacket); ok {
-				if evt.Data["type"] == "error" {
+			if evt, ok := p.(internal_type.ObservabilityEventRecordPacket); ok {
+				if evt.Record.Attributes["type"] == "error" {
 					errorEvents.Add(1)
 				}
 			}

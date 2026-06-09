@@ -13,9 +13,8 @@ import (
 
 	pionwebrtc "github.com/pion/webrtc/v4"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
-	"github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/protos"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (s *webrtcStreamer) runWebRTCOperationLoop() {
@@ -51,7 +50,17 @@ func (s *webrtcStreamer) enqueueWebRTCOperation(operation webrtc_internal.WebRTC
 	case s.webrtcOperationCh <- operation:
 	case <-s.Ctx.Done():
 	default:
-		s.Logger.Warnw("WebRTC operation queue full, dropping operation", "session", s.sessionID, "operation", operation.Kind.String(), "reason", operation.Reason)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "WebRTC operation queue full, dropping operation",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", operation.MediaSessionID),
+				webrtc_internal.DataOperation:      operation.Kind.String(),
+				webrtc_internal.DataReason:         operation.Reason,
+			},
+		})
 	}
 }
 
@@ -63,7 +72,17 @@ func (s *webrtcStreamer) handleWebRTCOperation(operation webrtc_internal.WebRTCO
 	switch operation.Kind {
 	case webrtc_internal.WebRTCOperationSendOffer:
 		if _, err := s.sendWebRTCOffer(operation); err != nil {
-			s.Logger.Errorw("Failed to send WebRTC offer", "error", err, "session", s.sessionID, "reason", operation.Reason)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Failed to send WebRTC offer",
+				Attributes: observability.Attributes{
+					"component":                        observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID:      s.sessionID,
+					webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", operation.MediaSessionID),
+					webrtc_internal.DataReason:         operation.Reason,
+					"error":                            err.Error(),
+				},
+			})
 			s.stopMediaSessionAndFallbackToText()
 		}
 
@@ -73,7 +92,17 @@ func (s *webrtcStreamer) handleWebRTCOperation(operation webrtc_internal.WebRTCO
 			if requestedAt.IsZero() {
 				requestedAt = time.Now()
 			}
-			s.Logger.Errorw("Failed to restart WebRTC ICE, restarting media session", "error", err, "session", s.sessionID, "reason", operation.Reason)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Failed to restart WebRTC ICE, restarting media session",
+				Attributes: observability.Attributes{
+					"component":                        observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID:      s.sessionID,
+					webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", operation.MediaSessionID),
+					webrtc_internal.DataReason:         operation.Reason,
+					"error":                            err.Error(),
+				},
+			})
 			s.restartMediaSessionOrFallbackToText(operation.MediaSessionID, operation.Reason, requestedAt)
 		}
 
@@ -96,7 +125,15 @@ func (s *webrtcStreamer) applyRemoteAnswer(operation webrtc_internal.WebRTCOpera
 	peerConnection := s.peerConnection
 	s.Mu.Unlock()
 	if peerConnection == nil {
-		s.Logger.Warnw("Received SDP answer but peer connection is nil, ignoring", "session", s.sessionID)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Received SDP answer but peer connection is nil, ignoring",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", operation.MediaSessionID),
+			},
+		})
 		return
 	}
 
@@ -105,7 +142,16 @@ func (s *webrtcStreamer) applyRemoteAnswer(operation webrtc_internal.WebRTCOpera
 		SDP:  operation.RemoteAnswerSDP,
 	}); err != nil {
 		s.clearNegotiationState(peerConnection)
-		s.Logger.Errorw("Failed to set remote description", "error", err)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to set WebRTC remote description",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", operation.MediaSessionID),
+				"error":                            err.Error(),
+			},
+		})
 		return
 	}
 
@@ -138,13 +184,18 @@ func (s *webrtcStreamer) applyRemoteAnswer(operation webrtc_internal.WebRTCOpera
 	if !audioMediaSectionFound {
 		negotiatedAudioDirection = "missing"
 	}
-	s.Logger.Debugw("WebRTC remote answer audio negotiation",
-		"session", s.sessionID,
-		"media_session_id", operation.MediaSessionID,
-		"audio", audioMediaSectionFound,
-		"direction", negotiatedAudioDirection,
-		"msid", audioMediaHasClientStream,
-	)
+	_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+		Level:   observability.LevelDebug,
+		Message: "WebRTC remote answer audio negotiation",
+		Attributes: observability.Attributes{
+			"component":                        observability.ComponentWebRTC.String(),
+			webrtc_internal.DataSessionID:      s.sessionID,
+			webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", operation.MediaSessionID),
+			"audio_media_section":              fmt.Sprintf("%t", audioMediaSectionFound),
+			"direction":                        negotiatedAudioDirection,
+			"client_stream":                    fmt.Sprintf("%t", audioMediaHasClientStream),
+		},
+	})
 
 	remoteDescriptionSetAt := time.Now()
 	s.Mu.Lock()
@@ -186,7 +237,17 @@ func (s *webrtcStreamer) applyRemoteAnswer(operation webrtc_internal.WebRTCOpera
 		offerSent, err = s.sendWebRTCOffer(retryOperation)
 	}
 	if err != nil {
-		s.Logger.Errorw("Failed to send queued WebRTC negotiation offer", "error", err)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to send queued WebRTC negotiation offer",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", mediaSessionID),
+				webrtc_internal.DataReason:         operation.Reason,
+				"error":                            err.Error(),
+			},
+		})
 		s.queueMediaSessionRestart(mediaSessionID, webrtc_internal.ReasonRemoteAnswerDeadline, time.Now())
 		return
 	}
@@ -200,7 +261,15 @@ func (s *webrtcStreamer) addRemoteICECandidateFromOperation(operation webrtc_int
 	peerConnection := s.peerConnection
 	s.Mu.Unlock()
 	if peerConnection == nil {
-		s.Logger.Warnw("Received ICE candidate but peer connection is nil, ignoring", "session", s.sessionID)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Received ICE candidate but peer connection is nil, ignoring",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", operation.MediaSessionID),
+			},
+		})
 		return
 	}
 
@@ -209,7 +278,16 @@ func (s *webrtcStreamer) addRemoteICECandidateFromOperation(operation webrtc_int
 		if s.peerConnection == peerConnection && peerConnection.RemoteDescription() == nil {
 			if len(s.signalPendingRemoteICECandidates) >= webrtc_internal.PendingRemoteICECandidateLimit {
 				s.Mu.Unlock()
-				s.Logger.Warnw("WebRTC pending remote ICE candidate queue full, dropping candidate", "session", s.sessionID, "limit", webrtc_internal.PendingRemoteICECandidateLimit)
+				_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+					Level:   observability.LevelDebug,
+					Message: "WebRTC pending remote ICE candidate queue full, dropping candidate",
+					Attributes: observability.Attributes{
+						"component":                        observability.ComponentWebRTC.String(),
+						webrtc_internal.DataSessionID:      s.sessionID,
+						webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", operation.MediaSessionID),
+						"limit":                            fmt.Sprintf("%d", webrtc_internal.PendingRemoteICECandidateLimit),
+					},
+				})
 				return
 			}
 			s.signalPendingRemoteICECandidates = append(s.signalPendingRemoteICECandidates, operation.RemoteICECandidate)
@@ -296,7 +374,17 @@ func (s *webrtcStreamer) handleICEGatheringCompleteOperation(operation webrtc_in
 		if requestedAt.IsZero() {
 			requestedAt = time.Now()
 		}
-		s.Logger.Errorw("Failed to restart deferred WebRTC ICE, restarting media session", "error", err, "session", s.sessionID, "reason", deferredICERestart.Reason)
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to restart deferred WebRTC ICE, restarting media session",
+			Attributes: observability.Attributes{
+				"component":                        observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID:      s.sessionID,
+				webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", deferredICERestart.MediaSessionID),
+				webrtc_internal.DataReason:         deferredICERestart.Reason,
+				"error":                            err.Error(),
+			},
+		})
 		s.restartMediaSessionOrFallbackToText(deferredICERestart.MediaSessionID, deferredICERestart.Reason, requestedAt)
 	}
 }
@@ -305,7 +393,8 @@ func (s *webrtcStreamer) emitWebRTCNegotiationEvent(eventType string, operation 
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
 	}
-	eventData := map[string]string{
+	eventData := observability.Attributes{
+		"component":                        observability.ComponentWebRTC.String(),
 		webrtc_internal.DataType:           eventType,
 		webrtc_internal.DataSessionID:      s.sessionID,
 		webrtc_internal.DataMediaSessionID: fmt.Sprintf("%d", operation.MediaSessionID),
@@ -316,9 +405,9 @@ func (s *webrtcStreamer) emitWebRTCNegotiationEvent(eventType string, operation 
 	if operation.Reason != "" {
 		eventData[webrtc_internal.DataReason] = operation.Reason
 	}
-	s.Input(&protos.ConversationEvent{
-		Name: observe.ComponentWebRTC,
-		Data: eventData,
-		Time: timestamppb.New(occurredAt),
+	_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordEvent{
+		Component:  observability.ComponentWebRTC,
+		Event:      observability.EventName("webrtc." + eventType),
+		Attributes: eventData,
 	})
 }

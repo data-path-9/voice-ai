@@ -16,12 +16,11 @@ import (
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_sip "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/sip/internal"
-	"github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type Streamer struct {
@@ -45,32 +44,112 @@ type assistantAudioFrame struct {
 	completed bool
 }
 
-func NewStreamer(ctx context.Context,
-	logger commons.Logger,
-	sipSession *sip_infra.Session,
-	lifecycle sip_infra.LifecycleController,
-	cc *callcontext.CallContext,
-	vaultCred *protos.VaultCredential,
-) (internal_type.SIPCallStreamer, error) {
-	if sipSession == nil {
+type StreamerOptions struct {
+	Context         context.Context
+	Logger          commons.Logger
+	Session         *sip_infra.Session
+	Lifecycle       sip_infra.LifecycleController
+	CallContext     *callcontext.CallContext
+	VaultCredential *protos.VaultCredential
+	Observer        observability.Recorder
+}
+
+type FuncOption func(*StreamerOptions)
+
+func WithContext(ctx context.Context) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Context = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithSession(session *sip_infra.Session) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Session = session
+	}
+}
+
+func WithLifecycle(lifecycle sip_infra.LifecycleController) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Lifecycle = lifecycle
+	}
+}
+
+func WithCallContext(callContext *callcontext.CallContext) FuncOption {
+	return func(options *StreamerOptions) {
+		options.CallContext = callContext
+	}
+}
+
+func WithVaultCredential(vaultCredential *protos.VaultCredential) FuncOption {
+	return func(options *StreamerOptions) {
+		options.VaultCredential = vaultCredential
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.SIPCallStreamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	if options.Session == nil {
 		return nil, fmt.Errorf("SIP session is required; standalone server mode is not supported")
 	}
-	if lifecycle == nil {
+	if options.Lifecycle == nil {
 		return nil, fmt.Errorf("SIP lifecycle controller is required")
 	}
 
 	s := &Streamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, vaultCred,
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			options.Logger, options.CallContext, options.VaultCredential, options.Observer,
 		),
 	}
 
 	// Peer BYE is reported to Talk; MediaPort owns bridge teardown safety.
 	go func() {
 		select {
-		case <-sipSession.ByeReceived():
-			s.Logger.Infow("SIP streamer: user BYE received")
-			s.emitChannelEvent("disconnected", map[string]string{"reason": "bye_received"})
+		case <-options.Session.ByeReceived():
+			_ = s.Record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "SIP user BYE received",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentCall.String(),
+					"provider":  internal_sip.Provider,
+					"call_id":   options.Session.GetCallID(),
+					"reason":    "bye_received",
+				},
+			}, observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallEnded,
+				Attributes: observability.Attributes{
+					"component": observability.ComponentCall.String(),
+					"provider":  internal_sip.Provider,
+					"call_id":   options.Session.GetCallID(),
+					"reason":    "bye_received",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "bye_received"},
+					{Key: observability.MetadataDisconnectReason, Value: "bye_received"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       observability.MetricCallStatusComplete,
+					Description: "SIP user BYE received",
+				}},
+			})
 			if msg := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				s.Input(msg)
 			}
@@ -80,32 +159,44 @@ func NewStreamer(ctx context.Context,
 
 	// Context cancellation is a safety net when Talk cannot drive teardown.
 	go func() {
+		reason := ""
 		select {
-		case <-sipSession.Context().Done():
-			s.Logger.Infow("SIP streamer: session context cancelled, closing")
-		case <-ctx.Done():
-			s.Logger.Infow("SIP streamer: caller context cancelled, closing")
+		case <-options.Session.Context().Done():
+			reason = "session_context_cancelled"
+		case <-options.Context.Done():
+			reason = "caller_context_cancelled"
 		case <-s.Ctx.Done():
 			return
 		}
+		_ = s.Record(observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "SIP context cancelled",
+			Attributes: observability.Attributes{
+				"component": observability.ComponentCall.String(),
+				"provider":  internal_sip.Provider,
+				"call_id":   options.Session.GetCallID(),
+				"reason":    reason,
+			},
+		})
 		if msg := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 			s.Input(msg)
 		}
 		s.Close()
 	}()
 
-	s.session = sipSession
-	s.lifecycle = lifecycle
-	isInbound := sipSession.GetInfo().Direction == sip_infra.CallDirectionInbound
+	s.session = options.Session
+	s.lifecycle = options.Lifecycle
+	isInbound := options.Session.GetInfo().Direction == sip_infra.CallDirectionInbound
 	if !isInbound {
 		s.assistantOutputActive.Store(true)
 	}
 	mediaPort, err := internal_sip.NewMediaPort(internal_sip.MediaPortConfig{
 		Context:    s.Ctx,
-		Logger:     logger,
-		Session:    sipSession,
+		Logger:     options.Logger,
+		Session:    options.Session,
 		Resampler:  s.Resampler(),
 		StreamSink: s.Input,
+		Record:     s.Record,
 	})
 	if err != nil {
 		return nil, err
@@ -115,17 +206,62 @@ func NewStreamer(ctx context.Context,
 		s.mediaPort.StartInput()
 	} else {
 		s.mediaPort.Start()
-		s.emitChannelEvent("media_started", nil)
+		_ = s.Record(observability.RecordEvent{
+			Component: observability.ComponentCall,
+			Event:     observability.CallMediaStarted,
+			Attributes: observability.Attributes{
+				"component": observability.ComponentCall.String(),
+				"provider":  internal_sip.Provider,
+				"call_id":   options.Session.GetCallID(),
+			},
+		}, observability.RecordMetadata{
+			Metadata: []*protos.Metadata{
+				{Key: observability.MetadataClientChannel, Value: internal_sip.Provider},
+				{Key: observability.MetadataCallStatus, Value: "media_started"},
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       observability.MetricCallStatusInProgress,
+				Description: "SIP media started",
+			}},
+		})
 	}
 	s.Input(s.CreateConnectionRequest())
-	s.emitChannelEvent("connected", nil)
+	_ = s.Record(observability.RecordEvent{
+		Component: observability.ComponentCall,
+		Event:     observability.CallSessionConnected,
+		Attributes: observability.Attributes{
+			"component": observability.ComponentCall.String(),
+			"provider":  internal_sip.Provider,
+			"call_id":   options.Session.GetCallID(),
+		},
+	}, observability.RecordMetadata{
+		Metadata: []*protos.Metadata{
+			{Key: observability.MetadataClientChannel, Value: internal_sip.Provider},
+			{Key: observability.MetadataCallStatus, Value: "connected"},
+		},
+	}, observability.RecordMetric{
+		Metrics: []*protos.Metric{{
+			Name:        observability.MetricCallStatus,
+			Value:       observability.MetricCallStatusInProgress,
+			Description: "SIP streamer connected",
+		}},
+	})
 
 	localIP, localPort := mediaPort.LocalAddr()
-	logger.Infow("SIP streamer created",
-		"call_id", sipSession.GetCallID(),
-		"codec", mediaPort.CodecName(),
-		"rtp_port", localPort,
-		"local_ip", localIP)
+	_ = s.Record(observability.RecordLog{
+		Level:   observability.LevelDebug,
+		Message: "SIP streamer created",
+		Attributes: observability.Attributes{
+			"component": observability.ComponentCall.String(),
+			"provider":  internal_sip.Provider,
+			"call_id":   options.Session.GetCallID(),
+			"codec":     mediaPort.CodecName(),
+			"rtp_port":  fmt.Sprintf("%d", localPort),
+			"local_ip":  localIP,
+		},
+	})
 
 	return s, nil
 }
@@ -164,19 +300,80 @@ func (s *Streamer) Send(response internal_type.Stream) error {
 		}
 	case *protos.ConversationDisconnection:
 		_ = s.Disconnect(data.GetType())
-		s.emitChannelEvent("disconnected", map[string]string{"reason": data.GetType().String()})
+		_ = s.Record(observability.RecordEvent{
+			Component: observability.ComponentCall,
+			Event:     observability.CallHangup,
+			Attributes: observability.Attributes{
+				"component":          observability.ComponentCall.String(),
+				"provider":           internal_sip.Provider,
+				"disconnection_type": data.GetType().String(),
+				"reason":             data.GetType().String(),
+			},
+		}, observability.RecordMetadata{
+			Metadata: []*protos.Metadata{
+				{Key: observability.MetadataCallStatus, Value: "completed"},
+				{Key: observability.MetadataDisconnectReason, Value: data.GetType().String()},
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       observability.MetricCallStatusComplete,
+				Description: "SIP call ended by server-side disconnect",
+			}},
+		})
 		s.endSession()
 		s.Close()
 	case *protos.ConversationToolCall:
 		switch data.GetAction() {
 		case protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION:
+			_ = s.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallHangup,
+				Attributes: observability.Attributes{
+					"component":   observability.ComponentCall.String(),
+					"provider":    internal_sip.Provider,
+					"tool_action": data.GetAction().String(),
+					"reason":      "tool_end_conversation",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "completed"},
+					{Key: observability.MetadataDisconnectReason, Value: "tool_end_conversation"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       observability.MetricCallStatusComplete,
+					Description: "SIP call ended by tool action",
+				}},
+			})
 			s.SendTransferToolResult(data.GetId(), data.GetToolId(), data.GetName(), data.GetAction(), map[string]string{
 				"status": "completed",
 			})
 		case protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION:
 			raw := data.GetArgs()["transfer_to"]
 			if raw == "" {
-				s.Logger.Warnw("Transfer tool call missing 'transfer_to' target")
+				_ = s.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "SIP transfer missing target",
+					Attributes: observability.Attributes{
+						"component":   observability.ComponentCall.String(),
+						"provider":    internal_sip.Provider,
+						"tool_action": data.GetAction().String(),
+						"reason":      "missing transfer target",
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "transfer_failed"},
+						{Key: observability.MetadataFailureReason, Value: "missing transfer target"},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       observability.MetricCallStatusFailed,
+						Description: "SIP transfer missing target",
+					}},
+				})
 				s.SendTransferToolResult(data.GetId(), data.GetToolId(), data.GetName(), data.GetAction(), map[string]string{
 					"status": "failed", "reason": "missing transfer target",
 				})
@@ -206,7 +403,24 @@ func (s *Streamer) StartAssistantOutput() {
 	if s.mediaPort != nil {
 		s.mediaPort.StartOutput()
 		s.mediaPort.StartBridgeRecorder()
-		s.emitChannelEvent("media_started", nil)
+		_ = s.Record(observability.RecordEvent{
+			Component: observability.ComponentCall,
+			Event:     observability.CallMediaStarted,
+			Attributes: observability.Attributes{
+				"component": observability.ComponentCall.String(),
+				"provider":  internal_sip.Provider,
+			},
+		}, observability.RecordMetadata{
+			Metadata: []*protos.Metadata{
+				{Key: observability.MetadataCallStatus, Value: "media_started"},
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       observability.MetricCallStatusInProgress,
+				Description: "SIP media started",
+			}},
+		})
 	}
 	s.outputMu.Lock()
 	frames := s.pendingAssistantAudioFrames
@@ -215,7 +429,21 @@ func (s *Streamer) StartAssistantOutput() {
 	for _, frame := range frames {
 		if s.mediaPort != nil {
 			if err := s.mediaPort.HandleAssistantAudio(frame.audio, frame.completed); err != nil {
-				s.Logger.Warnw("SIP queued assistant audio delivery failed", "error", err.Error())
+				_ = s.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "SIP queued assistant audio delivery failed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentCall.String(),
+						"provider":  internal_sip.Provider,
+						"error":     err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       observability.MetricCallStatusFailed,
+						Description: "SIP queued assistant audio delivery failed",
+					}},
+				})
 			}
 		}
 	}
@@ -243,7 +471,16 @@ func (s *Streamer) markAssistantAudioReady(audio []byte) {
 		return
 	}
 	if session.MarkInboundAssistantAudioReady() {
-		s.Logger.Infow("SIP assistant audio ready", "call_id", session.GetCallID())
+		_ = s.Record(observability.RecordEvent{
+			Component: observability.ComponentCall,
+			Event:     observability.CallStatus,
+			Attributes: observability.Attributes{
+				"component": observability.ComponentCall.String(),
+				"provider":  internal_sip.Provider,
+				"call_id":   session.GetCallID(),
+				"status":    "assistant_audio_ready",
+			},
+		})
 	}
 }
 
@@ -279,7 +516,15 @@ func (s *Streamer) ResumeAssistant() {
 		s.transitionCall(session, sip_infra.CallStateConnected, sip_infra.LifecycleReasonTransferModeEnded)
 	}
 
-	s.Logger.Infow("Transfer mode: exited, AI resuming")
+	_ = s.Record(observability.RecordEvent{
+		Component: observability.ComponentCall,
+		Event:     observability.CallStatus,
+		Attributes: observability.Attributes{
+			"component": observability.ComponentCall.String(),
+			"provider":  internal_sip.Provider,
+			"status":    "transfer_resumed",
+		},
+	})
 }
 
 func (s *Streamer) StopTransferRingback() {
@@ -339,11 +584,43 @@ func (s *Streamer) Close() error {
 	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	s.emitChannelEvent("media_stopped", nil)
+	_ = s.Record(observability.RecordEvent{
+		Component: observability.ComponentCall,
+		Event:     observability.CallStatus,
+		Attributes: observability.Attributes{
+			"component": observability.ComponentCall.String(),
+			"provider":  internal_sip.Provider,
+			"status":    "media_stopped",
+		},
+	}, observability.RecordMetadata{
+		Metadata: []*protos.Metadata{
+			{Key: observability.MetadataCallStatus, Value: "media_stopped"},
+		},
+	}, observability.RecordMetric{
+		Metrics: []*protos.Metric{{
+			Name:        observability.MetricCallStatus,
+			Value:       observability.MetricCallStatusComplete,
+			Description: "SIP media stopped",
+		}},
+	})
 
 	if s.mediaPort != nil {
 		if err := s.mediaPort.Close(); err != nil {
-			s.Logger.Warnw("SIP media port close failed", "error", err)
+			_ = s.Record(observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "SIP media port close failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentCall.String(),
+					"provider":  internal_sip.Provider,
+					"error":     err.Error(),
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       observability.MetricCallStatusFailed,
+					Description: "SIP media port close failed",
+				}},
+			})
 		}
 	}
 	s.outputMu.Lock()
@@ -359,7 +636,14 @@ func (s *Streamer) Close() error {
 		s.endCall(session, sip_infra.LifecycleReasonStreamerClosed)
 	}
 
-	s.Logger.Infow("SIP streamer closed")
+	_ = s.Record(observability.RecordLog{
+		Level:   observability.LevelDebug,
+		Message: "SIP streamer closed",
+		Attributes: observability.Attributes{
+			"component": observability.ComponentCall.String(),
+			"provider":  internal_sip.Provider,
+		},
+	})
 	return nil
 }
 
@@ -374,10 +658,17 @@ func shouldEndSessionOnClose(state sip_infra.CallState) bool {
 
 func (s *Streamer) transitionCall(session *sip_infra.Session, next sip_infra.CallState, reason sip_infra.LifecycleReason) {
 	if s.lifecycle == nil {
-		s.Logger.Warnw("SIP lifecycle transition skipped: controller unavailable",
-			"call_id", session.GetCallID(),
-			"to", next,
-			"reason", reason)
+		_ = s.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "SIP lifecycle transition skipped",
+			Attributes: observability.Attributes{
+				"component": observability.ComponentCall.String(),
+				"provider":  internal_sip.Provider,
+				"call_id":   session.GetCallID(),
+				"to":        string(next),
+				"reason":    string(reason),
+			},
+		})
 		return
 	}
 	s.lifecycle.TransitionCall(session, next, reason)
@@ -385,30 +676,35 @@ func (s *Streamer) transitionCall(session *sip_infra.Session, next sip_infra.Cal
 
 func (s *Streamer) endCall(session *sip_infra.Session, reason sip_infra.LifecycleReason) {
 	if s.lifecycle == nil {
-		s.Logger.Warnw("SIP lifecycle end skipped: controller unavailable",
-			"call_id", session.GetCallID(),
-			"reason", reason)
+		_ = s.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "SIP lifecycle end skipped",
+			Attributes: observability.Attributes{
+				"component": observability.ComponentCall.String(),
+				"provider":  internal_sip.Provider,
+				"call_id":   session.GetCallID(),
+				"reason":    string(reason),
+			},
+		})
 		return
 	}
 	if err := s.lifecycle.EndCallWithReason(session, reason); err != nil {
-		s.Logger.Warnw("SIP lifecycle end failed",
-			"call_id", session.GetCallID(),
-			"reason", reason,
-			"error", err)
+		_ = s.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "SIP lifecycle end failed",
+			Attributes: observability.Attributes{
+				"component": observability.ComponentCall.String(),
+				"provider":  internal_sip.Provider,
+				"call_id":   session.GetCallID(),
+				"reason":    string(reason),
+				"error":     err.Error(),
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       observability.MetricCallStatusFailed,
+				Description: "SIP lifecycle end failed",
+			}},
+		})
 	}
-}
-
-func (s *Streamer) emitChannelEvent(eventType string, extra map[string]string) {
-	data := map[string]string{
-		"type":     eventType,
-		"provider": internal_sip.Provider,
-	}
-	for k, v := range extra {
-		data[k] = v
-	}
-	s.Input(&protos.ConversationEvent{
-		Name: observe.ComponentTelephony,
-		Data: data,
-		Time: timestamppb.Now(),
-	})
 }

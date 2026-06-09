@@ -22,15 +22,15 @@ type StatusCallback struct {
 	Cause        string
 	ErrorCode    string
 	ErrorMessage string
+	RawPayload   string
 	Payload      utils.Option
 }
 
-func NewStatusCallback(eventDetails utils.Option) (*StatusCallback, error) {
+func NewStatusCallback(eventDetails utils.Option, rawCallbackPayload string) (*StatusCallback, error) {
 	event, _ := eventDetails.GetString("Status")
 	if !validator.NotBlank(event) {
 		return nil, ErrStatusCallbackStatusMissing
 	}
-
 	channelUUID, _ := eventDetails.GetString("CallSid")
 	duration, err := eventDetails.GetDuration("ConversationDuration")
 	if err != nil {
@@ -43,12 +43,10 @@ func NewStatusCallback(eventDetails utils.Option) (*StatusCallback, error) {
 	if err == nil {
 		durationPtr = utils.Ptr(duration)
 	}
-
 	price, _ := eventDetails.GetString("Price")
 	cause, _ := eventDetails.GetString("Cause")
 	errorMessage, _ := eventDetails.GetString("ErrorMessage")
 	errorCode, _ := eventDetails.GetString("ErrorCode")
-
 	return &StatusCallback{
 		Event:        event,
 		ChannelUUID:  channelUUID,
@@ -57,19 +55,23 @@ func NewStatusCallback(eventDetails utils.Option) (*StatusCallback, error) {
 		Cause:        cause,
 		ErrorCode:    errorCode,
 		ErrorMessage: errorMessage,
+		RawPayload:   rawCallbackPayload,
 		Payload:      eventDetails,
 	}, nil
 }
 
 func (s *StatusCallback) StatusInfo() *internal_type.StatusInfo {
+	callbackFailed := s.Failed()
 	statusInfo := &internal_type.StatusInfo{
 		Event:       s.Event,
 		ChannelUUID: s.ChannelUUID,
+		Completed:   strings.EqualFold(s.Event, "completed") && !callbackFailed,
 		Duration:    s.Duration,
 		Price:       s.Price,
+		RawPayload:  s.RawPayload,
 		Payload:     s.Payload,
 	}
-	if s.Failed() {
+	if callbackFailed {
 		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: s.FailureReason()}
 	}
 	return statusInfo

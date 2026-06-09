@@ -122,8 +122,8 @@ func newTestTwilioStreamer(t *testing.T) (*twilioWebsocketStreamer, func()) {
 	conn, cleanup := testWSPair(t)
 
 	tws := &twilioWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, nil,
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			logger, cc, nil, nil,
 		),
 		streamID:   "test-stream",
 		connection: conn,
@@ -139,7 +139,12 @@ func TestNewTwilioWebsocketStreamer_WiresMediaSession(t *testing.T) {
 		ConversationID: 2,
 		Provider:       "twilio",
 	}
-	streamer, err := NewTwilioWebsocketStreamer(logger, nil, callContext, nil)
+	streamer, err := New(
+		WithLogger(logger),
+		WithConnection(nil),
+		WithCallContext(callContext),
+		WithVaultCredential(nil),
+	)
 	require.NoError(t, err)
 	tws, ok := streamer.(*twilioWebsocketStreamer)
 	require.True(t, ok, "expected twilio websocket streamer")
@@ -157,7 +162,7 @@ func TestHandleMediaEvent_EmitsBridgeUserAudio(t *testing.T) {
 	}
 	mediaEngine := &fakeTwilioMediaEngine{}
 	tws := &twilioWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	tws.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     tws.Ctx,
@@ -200,7 +205,7 @@ func TestHandleMediaEvent_ReturnsMediaProcessingError(t *testing.T) {
 	}
 	mediaEngine := &fakeTwilioMediaEngine{processError: errors.New("media process failed")}
 	tws := &twilioWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	tws.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     tws.Ctx,
@@ -230,7 +235,7 @@ func TestHandleMediaEvent_MissingMediaPayloadDoesNotPanic(t *testing.T) {
 		Provider:       "twilio",
 	}
 	tws := &twilioWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 
 	err := tws.handleMediaEvent(internal_twilio.TwilioMediaEvent{})
@@ -268,12 +273,13 @@ func TestSend_EndConversation_PushesToolCallResult(t *testing.T) {
 func TestSend_EndConversation_NilConnectionStillPushesToolCallResult(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 	tws := &twilioWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
+		BaseTelephonyStreamer: internal_telephony_base.New(
 			logger,
 			&callcontext.CallContext{
 				AssistantID:    1,
 				ConversationID: 2,
 			},
+			nil,
 			nil,
 		),
 		connection: nil,
@@ -342,13 +348,14 @@ func TestSend_Disconnection_LogsTwilioClientError(t *testing.T) {
 	defer cleanup()
 
 	tws := &twilioWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
+		BaseTelephonyStreamer: internal_telephony_base.New(
 			logger,
 			&callcontext.CallContext{
 				AssistantID:    1,
 				ConversationID: 2,
 				ChannelUUID:    "CA123",
 			},
+			nil,
 			nil,
 		),
 		connection: conn,

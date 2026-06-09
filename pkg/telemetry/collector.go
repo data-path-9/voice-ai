@@ -14,14 +14,14 @@ import (
 
 // EventCollector fans out EventRecord to all registered exporters.
 type EventCollector interface {
-	Collect(ctx context.Context, rec EventRecord)
-	Shutdown(ctx context.Context)
+	Collect(ctx context.Context, scope Scope, rec EventRecord)
+	Close(ctx context.Context)
 }
 
 // MetricCollector fans out MetricRecord to all registered exporters.
 type MetricCollector interface {
-	Collect(ctx context.Context, rec MetricRecord)
-	Shutdown(ctx context.Context)
+	Collect(ctx context.Context, scope Scope, rec MetricRecord)
+	Close(ctx context.Context)
 }
 
 // =============================================================================
@@ -30,40 +30,39 @@ type MetricCollector interface {
 
 type fanoutEventCollector struct {
 	logger    commons.Logger
-	meta      SessionMeta
 	exporters []Exporter
 	wg        sync.WaitGroup
 }
 
 // NewEventCollector returns a fan-out EventCollector. When no exporters are
 // provided, a no-op implementation is returned to avoid any allocations.
-func NewEventCollector(logger commons.Logger, meta SessionMeta, exporters ...Exporter) EventCollector {
+func NewEventCollector(logger commons.Logger, exporters ...Exporter) EventCollector {
 	if len(exporters) == 0 {
 		return noopEventCollector{}
 	}
-	return &fanoutEventCollector{logger: logger, meta: meta, exporters: exporters}
+	return &fanoutEventCollector{logger: logger, exporters: exporters}
 }
 
-func (c *fanoutEventCollector) Collect(_ context.Context, rec EventRecord) {
+func (c *fanoutEventCollector) Collect(_ context.Context, scope Scope, rec EventRecord) {
 	for _, exp := range c.exporters {
 		exp := exp
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			if err := exp.ExportEvent(context.Background(), c.meta, rec); err != nil {
+			if err := exp.Export(context.Background(), scope, rec); err != nil {
 				c.logger.Errorf("telemetry: event export error: %v", err)
 			}
 		}()
 	}
 }
 
-// Shutdown waits for all in-flight export goroutines to finish, then shuts down
+// Close waits for all in-flight export goroutines to finish, then shuts down
 // each exporter in order.
-func (c *fanoutEventCollector) Shutdown(ctx context.Context) {
+func (c *fanoutEventCollector) Close(ctx context.Context) {
 	c.wg.Wait()
 	for _, exp := range c.exporters {
-		if err := exp.Shutdown(ctx); err != nil {
-			c.logger.Errorf("telemetry: event exporter shutdown error: %v", err)
+		if err := exp.Close(ctx); err != nil {
+			c.logger.Errorf("telemetry: event exporter Close error: %v", err)
 		}
 	}
 }
@@ -74,40 +73,39 @@ func (c *fanoutEventCollector) Shutdown(ctx context.Context) {
 
 type fanoutMetricCollector struct {
 	logger    commons.Logger
-	meta      SessionMeta
 	exporters []Exporter
 	wg        sync.WaitGroup
 }
 
 // NewMetricCollector returns a fan-out MetricCollector. When no exporters are
 // provided, a no-op implementation is returned to avoid any allocations.
-func NewMetricCollector(logger commons.Logger, meta SessionMeta, exporters ...Exporter) MetricCollector {
+func NewMetricCollector(logger commons.Logger, exporters ...Exporter) MetricCollector {
 	if len(exporters) == 0 {
 		return noopMetricCollector{}
 	}
-	return &fanoutMetricCollector{logger: logger, meta: meta, exporters: exporters}
+	return &fanoutMetricCollector{logger: logger, exporters: exporters}
 }
 
-func (c *fanoutMetricCollector) Collect(_ context.Context, rec MetricRecord) {
+func (c *fanoutMetricCollector) Collect(_ context.Context, scope Scope, rec MetricRecord) {
 	for _, exp := range c.exporters {
 		exp := exp
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			if err := exp.ExportMetric(context.Background(), c.meta, rec); err != nil {
+			if err := exp.Export(context.Background(), scope, rec); err != nil {
 				c.logger.Errorf("telemetry: metric export error: %v", err)
 			}
 		}()
 	}
 }
 
-// Shutdown waits for all in-flight export goroutines to finish, then shuts down
+// Close waits for all in-flight export goroutines to finish, then shuts down
 // each exporter in order.
-func (c *fanoutMetricCollector) Shutdown(ctx context.Context) {
+func (c *fanoutMetricCollector) Close(ctx context.Context) {
 	c.wg.Wait()
 	for _, exp := range c.exporters {
-		if err := exp.Shutdown(ctx); err != nil {
-			c.logger.Errorf("telemetry: metric exporter shutdown error: %v", err)
+		if err := exp.Close(ctx); err != nil {
+			c.logger.Errorf("telemetry: metric exporter Close error: %v", err)
 		}
 	}
 }
@@ -118,10 +116,10 @@ func (c *fanoutMetricCollector) Shutdown(ctx context.Context) {
 
 type noopEventCollector struct{}
 
-func (noopEventCollector) Collect(_ context.Context, _ EventRecord) {}
-func (noopEventCollector) Shutdown(_ context.Context)               {}
+func (noopEventCollector) Collect(_ context.Context, _ Scope, _ EventRecord) {}
+func (noopEventCollector) Close(_ context.Context)                           {}
 
 type noopMetricCollector struct{}
 
-func (noopMetricCollector) Collect(_ context.Context, _ MetricRecord) {}
-func (noopMetricCollector) Shutdown(_ context.Context)                {}
+func (noopMetricCollector) Collect(_ context.Context, _ Scope, _ MetricRecord) {}
+func (noopMetricCollector) Close(_ context.Context)                            {}

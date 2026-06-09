@@ -12,6 +12,7 @@ import (
 	"io"
 
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/protos"
 	"google.golang.org/grpc/codes"
@@ -47,7 +48,15 @@ func (s *webrtcStreamer) buildGRPCResponse(msg internal_type.Stream) *protos.Web
 	case *protos.ServerSignaling:
 		resp.Data = &protos.WebTalkResponse_Signaling{Signaling: m}
 	default:
-		s.Logger.Warnw("Unknown output message type, skipping", webrtc_internal.DataType, fmt.Sprintf("%T", msg))
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "WebRTC output message skipped",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+				webrtc_internal.DataType:      fmt.Sprintf("%T", msg),
+			},
+		})
 		return nil
 	}
 	return resp
@@ -57,9 +66,27 @@ func (s *webrtcStreamer) buildGRPCResponse(msg internal_type.Stream) *protos.Web
 func (s *webrtcStreamer) dispatchOutput(resp *protos.WebTalkResponse) bool {
 	if err := s.grpcStream.Send(resp); err != nil {
 		if s.Ctx.Err() != nil || errors.Is(err, io.EOF) || status.Code(err) == codes.Canceled || status.Code(err) == codes.Unavailable {
-			s.Logger.Infow("WebRTC gRPC stream closed during send", "session", s.sessionID, "code", status.Code(err), "error", err)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelInfo,
+				Message: "WebRTC gRPC stream closed during send",
+				Attributes: observability.Attributes{
+					"component":                   observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID: s.sessionID,
+					"grpc_code":                   status.Code(err).String(),
+					"error":                       err.Error(),
+				},
+			})
 		} else {
-			s.Logger.Errorw("Failed to send gRPC response", "session", s.sessionID, "code", status.Code(err), "error", err)
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Failed to send WebRTC gRPC response",
+				Attributes: observability.Attributes{
+					"component":                   observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID: s.sessionID,
+					"grpc_code":                   status.Code(err).String(),
+					"error":                       err.Error(),
+				},
+			})
 		}
 		if disc := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); disc != nil {
 			s.Input(disc)
@@ -76,9 +103,27 @@ func (s *webrtcStreamer) runGrpcReader() {
 		msg, err := s.grpcStream.Recv()
 		if err != nil {
 			if s.Ctx.Err() != nil || errors.Is(err, io.EOF) || status.Code(err) == codes.Canceled || status.Code(err) == codes.Unavailable {
-				s.Logger.Infow("WebRTC gRPC stream closed", "session", s.sessionID, "code", status.Code(err), "error", err)
+				_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+					Level:   observability.LevelInfo,
+					Message: "WebRTC gRPC stream closed",
+					Attributes: observability.Attributes{
+						"component":                   observability.ComponentWebRTC.String(),
+						webrtc_internal.DataSessionID: s.sessionID,
+						"grpc_code":                   status.Code(err).String(),
+						"error":                       err.Error(),
+					},
+				})
 			} else {
-				s.Logger.Warnw("WebRTC gRPC receive failed", "error", err, "session", s.sessionID, "code", status.Code(err))
+				_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "WebRTC gRPC receive failed",
+					Attributes: observability.Attributes{
+						"component":                   observability.ComponentWebRTC.String(),
+						webrtc_internal.DataSessionID: s.sessionID,
+						"grpc_code":                   status.Code(err).String(),
+						"error":                       err.Error(),
+					},
+				})
 			}
 			if disc := s.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); disc != nil {
 				s.Input(disc)
@@ -86,7 +131,15 @@ func (s *webrtcStreamer) runGrpcReader() {
 			s.Close()
 			return
 		}
-		s.Logger.Infow("WebRTC gRPC received request", "session", s.sessionID, webrtc_internal.DataType, fmt.Sprintf("%T", msg.GetRequest()))
+		_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "WebRTC gRPC request received",
+			Attributes: observability.Attributes{
+				"component":                   observability.ComponentWebRTC.String(),
+				webrtc_internal.DataSessionID: s.sessionID,
+				webrtc_internal.DataType:      fmt.Sprintf("%T", msg.GetRequest()),
+			},
+		})
 		switch msg.GetRequest().(type) {
 		case *protos.WebTalkRequest_Initialization:
 			s.Input(msg.GetInitialization())
@@ -107,7 +160,15 @@ func (s *webrtcStreamer) runGrpcReader() {
 		case *protos.WebTalkRequest_Signaling:
 			s.queueClientSignal(msg.GetSignaling())
 		default:
-			s.Logger.Warnw("Unknown message type", webrtc_internal.DataType, fmt.Sprintf("%T", msg.GetRequest()))
+			_ = s.observer.Record(s.Ctx, s.sessionState.Scope, observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Unknown WebRTC gRPC request type",
+				Attributes: observability.Attributes{
+					"component":                   observability.ComponentWebRTC.String(),
+					webrtc_internal.DataSessionID: s.sessionID,
+					webrtc_internal.DataType:      fmt.Sprintf("%T", msg.GetRequest()),
+				},
+			})
 		}
 	}
 }

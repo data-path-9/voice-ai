@@ -23,10 +23,11 @@ type StatusCallback struct {
 	Reason       string
 	ErrorCode    string
 	ErrorMessage string
+	RawPayload   string
 	Payload      map[string]interface{}
 }
 
-func NewStatusCallback(payload map[string]interface{}) (*StatusCallback, error) {
+func NewStatusCallback(payload map[string]interface{}, rawCallbackPayload string) (*StatusCallback, error) {
 	rawData, ok := payload["data"].(map[string]interface{})
 	if !ok {
 		return nil, ErrStatusCallbackDataMissing
@@ -89,19 +90,23 @@ func NewStatusCallback(payload map[string]interface{}) (*StatusCallback, error) 
 		Reason:       reason,
 		ErrorCode:    errorCode,
 		ErrorMessage: errorMessage,
+		RawPayload:   rawCallbackPayload,
 		Payload:      payload,
 	}, nil
 }
 
 func (s *StatusCallback) StatusInfo() *internal_type.StatusInfo {
+	callbackFailed := s.Failed()
 	statusInfo := &internal_type.StatusInfo{
 		Event:       s.EventType,
 		ChannelUUID: s.ChannelUUID,
+		Completed:   strings.EqualFold(s.EventType, "call.hangup") && !callbackFailed,
 		Duration:    s.Duration,
 		Price:       s.Price,
+		RawPayload:  s.RawPayload,
 		Payload:     s.Payload,
 	}
-	if s.Failed() {
+	if callbackFailed {
 		statusInfo.Error = &internal_type.StatusError{Error: "failed", Reason: s.FailureReason()}
 	}
 	return statusInfo

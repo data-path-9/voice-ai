@@ -148,9 +148,7 @@ func TestDispatcher_RoutesTransferStages(t *testing.T) {
 
 	var failedCount atomic.Int32
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
-	})
+	d := New(WithLogger(newPipelineTestLogger(t)))
 	d.Start(context.Background())
 
 	// Override dispatch to count routing (we can't easily override handlers,
@@ -205,10 +203,7 @@ func TestHandleTransferInitiated_OnFailedCalled(t *testing.T) {
 
 	var failedCalled atomic.Bool
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
-		// server is nil — MakeTransferBridgeCall will fail
-	})
+	d := New(WithLogger(newPipelineTestLogger(t)))
 
 	s := newTransferTestSession(t)
 
@@ -247,9 +242,7 @@ func TestHandleTransferInitiated_OnFailedCalled(t *testing.T) {
 func TestHandleTransferInitiated_CallerIDResolution(t *testing.T) {
 	t.Parallel()
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
-	})
+	d := New(WithLogger(newPipelineTestLogger(t)))
 
 	// Config with empty CallerID and no assistant — should still not panic
 	cfg := &sip_infra.Config{
@@ -289,9 +282,7 @@ func TestHandleTransferInitiated_CallerIDResolution(t *testing.T) {
 func TestHandleTransferConnected_NoPanic(t *testing.T) {
 	t.Parallel()
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
-	})
+	d := New(WithLogger(newPipelineTestLogger(t)))
 
 	s := newTransferTestSession(t)
 	outbound := newTransferTestSession(t)
@@ -307,9 +298,7 @@ func TestHandleTransferConnected_NoPanic(t *testing.T) {
 func TestHandleTransferFailed_NoPanic(t *testing.T) {
 	t.Parallel()
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
-	})
+	d := New(WithLogger(newPipelineTestLogger(t)))
 
 	d.handleTransferFailed(context.Background(), sip_infra.TransferFailedPipeline{
 		ID:     "test-failed",
@@ -341,10 +330,7 @@ func TestHandleTransferInitiated_OnTeardownNotCalledOnFailure(t *testing.T) {
 	var failedCalled atomic.Bool
 	var teardownCalled atomic.Bool
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
-		// server is nil — MakeTransferBridgeCall will fail
-	})
+	d := New(WithLogger(newPipelineTestLogger(t)))
 
 	s := newTransferTestSession(t)
 
@@ -405,10 +391,7 @@ func TestCallStateTransferring_IsActive(t *testing.T) {
 func TestHandleTransferInitiated_FailureMetadata(t *testing.T) {
 	t.Parallel()
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
-		// server is nil — will fail immediately
-	})
+	d := New(WithLogger(newPipelineTestLogger(t)))
 
 	s := newTransferTestSession(t)
 
@@ -534,9 +517,7 @@ func TestCategorizeTransferError(t *testing.T) {
 func TestHandleTransferConnected_RichLogging(t *testing.T) {
 	t.Parallel()
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
-	})
+	d := New(WithLogger(newPipelineTestLogger(t)))
 
 	s := newTransferTestSession(t)
 	outbound := newTransferTestSession(t)
@@ -556,9 +537,7 @@ func TestHandleTransferConnected_RichLogging(t *testing.T) {
 func TestHandleTransferFailed_WithCategory(t *testing.T) {
 	t.Parallel()
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger: newPipelineTestLogger(t),
-	})
+	d := New(WithLogger(newPipelineTestLogger(t)))
 
 	// Should not panic with various error types
 	d.handleTransferFailed(context.Background(), sip_infra.TransferFailedPipeline{
@@ -612,10 +591,10 @@ func TestTransferRace_UserHangupCancelsDialAttempt(t *testing.T) {
 		},
 	}
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger:         newPipelineTestLogger(t),
-		TransferServer: srv,
-	})
+	d := New(
+		WithLogger(newPipelineTestLogger(t)),
+		WithTransferServer(srv),
+	)
 
 	inbound := newTransferTestSession(t)
 	done := make(chan struct{})
@@ -664,10 +643,10 @@ func TestExecuteTransfer_PassesParentContextToTransferBridgeLeg(t *testing.T) {
 		},
 	}
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger:         newPipelineTestLogger(t),
-		TransferServer: srv,
-	})
+	d := New(
+		WithLogger(newPipelineTestLogger(t)),
+		WithTransferServer(srv),
+	)
 
 	d.executeTransfer(context.Background(), sip_infra.TransferInitiatedPipeline{
 		ID:        inbound.GetCallID(),
@@ -709,10 +688,10 @@ func TestExecuteTransfer_DoesNotOwnBridgeConnectedState(t *testing.T) {
 		},
 	}
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger:         newPipelineTestLogger(t),
-		TransferServer: srv,
-	})
+	d := New(
+		WithLogger(newPipelineTestLogger(t)),
+		WithTransferServer(srv),
+	)
 
 	d.executeTransfer(context.Background(), sip_infra.TransferInitiatedPipeline{
 		ID:        inbound.GetCallID(),
@@ -752,10 +731,10 @@ func TestTransferRace_AIDisconnectContextTeardownAllLegs(t *testing.T) {
 		},
 	}
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger:         newPipelineTestLogger(t),
-		TransferServer: srv,
-	})
+	d := New(
+		WithLogger(newPipelineTestLogger(t)),
+		WithTransferServer(srv),
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -812,10 +791,10 @@ func TestTransferRace_OperatorDisconnectResumesAI(t *testing.T) {
 		},
 	}
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger:         newPipelineTestLogger(t),
-		TransferServer: srv,
-	})
+	d := New(
+		WithLogger(newPipelineTestLogger(t)),
+		WithTransferServer(srv),
+	)
 
 	d.executeTransfer(context.Background(), sip_infra.TransferInitiatedPipeline{
 		ID:        inbound.GetCallID(),
@@ -860,10 +839,10 @@ func TestTransferRace_ConcurrentCallerEndAndBridgeComplete(t *testing.T) {
 		},
 	}
 
-	d := NewDispatcher(&DispatcherConfig{
-		Logger:         newPipelineTestLogger(t),
-		TransferServer: srv,
-	})
+	d := New(
+		WithLogger(newPipelineTestLogger(t)),
+		WithTransferServer(srv),
+	)
 
 	done := make(chan struct{})
 	go func() {

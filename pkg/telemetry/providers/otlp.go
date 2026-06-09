@@ -25,7 +25,7 @@ import (
 	"github.com/rapidaai/pkg/telemetry"
 )
 
-// OTLPExporter converts EventRecord and MetricRecord to OTEL spans and ships
+// OTLPExporter converts telemetry records to OTEL spans and ships
 // them to any OTLP-compatible backend via the configured endpoint.
 type OTLPExporter struct {
 	provider *sdktrace.TracerProvider
@@ -62,65 +62,86 @@ func NewOTLPExporter(ctx context.Context, cfg OTLPConfig) (*OTLPExporter, error)
 	}, nil
 }
 
-func (e *OTLPExporter) ExportEvent(ctx context.Context, meta telemetry.SessionMeta, rec telemetry.EventRecord) error {
-	t := rec.Time
-	if t.IsZero() {
-		t = time.Now()
-	}
-	attrs := []attribute.KeyValue{
-		attribute.Int64("rapida.assistant.id", int64(meta.AssistantID)),
-		attribute.Int64("rapida.conversation.id", int64(meta.AssistantConversationID)),
-		attribute.Int64("rapida.project.id", int64(meta.ProjectID)),
-		attribute.Int64("rapida.organization.id", int64(meta.OrganizationID)),
-		attribute.String("rapida.event.message_id", rec.MessageID),
-		attribute.String("rapida.event.name", rec.Name),
-	}
-	for k, v := range rec.Data {
-		attrs = append(attrs, attribute.String("rapida.event.data."+k, v))
-	}
-	_, span := e.tracer.Start(ctx, "rapida.voice.event."+rec.Name,
-		trace.WithTimestamp(t),
-		trace.WithAttributes(attrs...),
-	)
-	span.End(trace.WithTimestamp(t))
-	return nil
-}
-
-func (e *OTLPExporter) ExportMetric(ctx context.Context, meta telemetry.SessionMeta, rec telemetry.MetricRecord) error {
-	base := []attribute.KeyValue{
-		attribute.Int64("rapida.assistant.id", int64(meta.AssistantID)),
-		attribute.Int64("rapida.conversation.id", int64(meta.AssistantConversationID)),
-		attribute.Int64("rapida.project.id", int64(meta.ProjectID)),
-		attribute.Int64("rapida.organization.id", int64(meta.OrganizationID)),
-	}
-	switch m := rec.(type) {
-	case telemetry.ConversationMetricRecord:
-		t := m.Time
+func (e *OTLPExporter) Export(ctx context.Context, scope telemetry.Scope, rec telemetry.Record) error {
+	switch typed := rec.(type) {
+	case telemetry.LogRecord:
+		t := typed.OccurredAt
 		if t.IsZero() {
 			t = time.Now()
 		}
-		attrs := append(base, attribute.String("rapida.metric.conversation_id", m.ConversationID))
-		for _, metric := range m.Metrics {
-			attrs = append(attrs, attribute.String("rapida.metric."+metric.GetName(), metric.GetValue()))
+		attrs := []attribute.KeyValue{
+			attribute.String("rapida.telemetry.kind", "log"),
+			attribute.String("rapida.log.level", typed.Level),
+			attribute.String("rapida.log.message", typed.Message),
+			attribute.Int64("rapida.project.id", int64(scope.ProjectID)),
+			attribute.Int64("rapida.organization.id", int64(scope.OrganizationID)),
+			attribute.String("rapida.scope", scope.Name),
 		}
-		_, span := e.tracer.Start(ctx, "rapida.voice.metric.conversation",
+		for k, v := range typed.Context {
+			attrs = append(attrs, attribute.String("rapida.context."+k, v))
+		}
+		for k, v := range scope.ScopeAttributes {
+			attrs = append(attrs, attribute.String("rapida.scope."+k, v))
+		}
+		for k, v := range typed.Attributes {
+			attrs = append(attrs, attribute.String("rapida.attribute."+k, v))
+		}
+		_, span := e.tracer.Start(ctx, "rapida.voice.log",
 			trace.WithTimestamp(t),
 			trace.WithAttributes(attrs...),
 		)
 		span.End(trace.WithTimestamp(t))
-	case telemetry.MessageMetricRecord:
-		t := m.Time
+	case telemetry.EventRecord:
+		t := typed.OccurredAt
 		if t.IsZero() {
 			t = time.Now()
 		}
-		attrs := append(base,
-			attribute.String("rapida.metric.message_id", m.MessageID),
-			attribute.String("rapida.metric.conversation_id", m.ConversationID),
-		)
-		for _, metric := range m.Metrics {
-			attrs = append(attrs, attribute.String("rapida.metric."+metric.GetName(), metric.GetValue()))
+		attrs := []attribute.KeyValue{
+			attribute.String("rapida.telemetry.kind", "event"),
+			attribute.String("rapida.event", typed.Event),
+			attribute.String("rapida.component", typed.Component),
+			attribute.Int64("rapida.project.id", int64(scope.ProjectID)),
+			attribute.Int64("rapida.organization.id", int64(scope.OrganizationID)),
+			attribute.String("rapida.scope", scope.Name),
 		}
-		_, span := e.tracer.Start(ctx, "rapida.voice.metric.message",
+		for k, v := range typed.Context {
+			attrs = append(attrs, attribute.String("rapida.context."+k, v))
+		}
+		for k, v := range scope.ScopeAttributes {
+			attrs = append(attrs, attribute.String("rapida.scope."+k, v))
+		}
+		for k, v := range typed.Attributes {
+			attrs = append(attrs, attribute.String("rapida.attribute."+k, v))
+		}
+		_, span := e.tracer.Start(ctx, "rapida.voice.event."+typed.Event,
+			trace.WithTimestamp(t),
+			trace.WithAttributes(attrs...),
+		)
+		span.End(trace.WithTimestamp(t))
+	case telemetry.MetricRecord:
+		t := typed.OccurredAt
+		if t.IsZero() {
+			t = time.Now()
+		}
+		attrs := []attribute.KeyValue{
+			attribute.String("rapida.telemetry.kind", "metric"),
+			attribute.String("rapida.metric.name", typed.Name),
+			attribute.String("rapida.metric.value", typed.Value),
+			attribute.String("rapida.metric.description", typed.Description),
+			attribute.Int64("rapida.project.id", int64(scope.ProjectID)),
+			attribute.Int64("rapida.organization.id", int64(scope.OrganizationID)),
+			attribute.String("rapida.scope", scope.Name),
+		}
+		for k, v := range typed.Context {
+			attrs = append(attrs, attribute.String("rapida.context."+k, v))
+		}
+		for k, v := range scope.ScopeAttributes {
+			attrs = append(attrs, attribute.String("rapida.scope."+k, v))
+		}
+		for k, v := range typed.Attributes {
+			attrs = append(attrs, attribute.String("rapida.attribute."+k, v))
+		}
+		_, span := e.tracer.Start(ctx, "rapida.voice.metric."+typed.Name,
 			trace.WithTimestamp(t),
 			trace.WithAttributes(attrs...),
 		)
@@ -129,8 +150,8 @@ func (e *OTLPExporter) ExportMetric(ctx context.Context, meta telemetry.SessionM
 	return nil
 }
 
-// Shutdown flushes the batch processor and releases OTLP resources.
-func (e *OTLPExporter) Shutdown(ctx context.Context) error {
+// Close flushes the batch processor and releases OTLP resources.
+func (e *OTLPExporter) Close(ctx context.Context) error {
 	var err error
 	e.once.Do(func() {
 		if ferr := e.provider.ForceFlush(ctx); ferr != nil {

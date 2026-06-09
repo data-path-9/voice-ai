@@ -326,7 +326,7 @@ func (conversationService *assistantConversationService) CreateConversationMessa
 	return conversationMessage, nil
 }
 
-func (conversationService *assistantConversationService) ApplyMessageMetadata(
+func (conversationService *assistantConversationService) CreateOrUpdateMessageMetadata(
 	ctx context.Context,
 	auth types.SimplePrinciple,
 	assistantConversationId uint64,
@@ -361,11 +361,11 @@ func (conversationService *assistantConversationService) ApplyMessageMetadata(
 			"updated_by", "updated_date"}),
 	}).Create(&_mtdata)
 	if tx.Error != nil {
-		conversationService.logger.Benchmark("conversationService.ApplyMessageMetadata", time.Since(start))
-		conversationService.logger.Errorf("error while applying message metadata %v", tx.Error)
+		conversationService.logger.Benchmark("conversationService.CreateOrUpdateMessageMetadata", time.Since(start))
+		conversationService.logger.Errorf("error while creating or updating message metadata %v", tx.Error)
 		return nil, tx.Error
 	}
-	conversationService.logger.Benchmark("conversationService.ApplyMessageMetadata", time.Since(start))
+	conversationService.logger.Benchmark("conversationService.CreateOrUpdateMessageMetadata", time.Since(start))
 	return _mtdata, nil
 }
 
@@ -374,7 +374,7 @@ func (conversationService *assistantConversationService) ApplyMessageMetadata(
 *
  */
 
-func (conversationService *assistantConversationService) ApplyMessageMetrics(
+func (conversationService *assistantConversationService) CreateOrUpdateMessageMetrics(
 	ctx context.Context,
 	auth types.SimplePrinciple,
 	assistantConversationId uint64,
@@ -412,10 +412,10 @@ func (conversationService *assistantConversationService) ApplyMessageMetrics(
 			"updated_by", "updated_date"}),
 	}).Create(&mtrs)
 	if tx.Error != nil {
-		conversationService.logger.Benchmark("conversationService.ApplyMessageMetrics", time.Since(start))
-		conversationService.logger.Errorf("error while applying message metrics %v", tx.Error)
+		conversationService.logger.Benchmark("conversationService.CreateOrUpdateMessageMetrics", time.Since(start))
+		conversationService.logger.Errorf("error while creating or updating message metrics %v", tx.Error)
 		return nil, tx.Error
 	}
-	conversationService.logger.Benchmark("conversationService.ApplyMessageMetrics", time.Since(start))
+	conversationService.logger.Benchmark("conversationService.CreateOrUpdateMessageMetrics", time.Since(start))
 	return mtrs, nil
 }

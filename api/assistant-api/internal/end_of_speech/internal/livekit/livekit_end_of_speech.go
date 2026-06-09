@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/utils"
@@ -26,14 +27,10 @@ const (
 	optKeyExtendedTimeout = "microphone.eos.extended_timeout"
 	optKeyFallbackTimeout = "microphone.eos.fallback_timeout"
 	optKeyMaxHistory      = "microphone.eos.max_history_turns"
-	optEventLevel         = "microphone.eos.events"
 
 	// Backward-compatible aliases.
 	optKeyLegacySilenceTimeout = "microphone.eos.silence_timeout"
 	optKeyLegacyTimeout        = "microphone.eos.timeout"
-	eventLevelOff              = "off"
-	eventLevelStandard         = "standard"
-	eventLevelDebug            = "debug"
 
 	// defaultThreshold is the English "unlikely_threshold" from LiveKit's
 	// languages.json. Probabilities below this → user still speaking.
@@ -119,7 +116,6 @@ type livekitEndOfSpeech struct {
 	silenceTimeout  time.Duration
 	fallbackTimeout time.Duration
 	maxHistory      int
-	eventLevel      string
 
 	// Worker orchestration
 	commandCh chan workerCommand
@@ -163,7 +159,6 @@ func NewLivekitEndOfSpeech(
 		silenceTimeout:  time.Duration(defaultSilenceTimeout) * time.Millisecond,
 		fallbackTimeout: time.Duration(defaultFallbackTimeout) * time.Millisecond,
 		maxHistory:      int(defaultMaxHistory),
-		eventLevel:      eventLevelStandard,
 		commandCh:       make(chan workerCommand, 32),
 		stopCh:          make(chan struct{}),
 		state:           &endOfSpeechState{segment: speechSegment{}},
@@ -188,25 +183,45 @@ func NewLivekitEndOfSpeech(
 	} else if v, err := opts.GetFloat64(optKeyLegacyTimeout); err == nil {
 		endOfSpeech.fallbackTimeout = time.Duration(v) * time.Millisecond
 	}
-	if v, err := opts.GetString(optEventLevel); err == nil {
-		switch v {
-		case eventLevelOff, eventLevelStandard, eventLevelDebug:
-			endOfSpeech.eventLevel = v
-		}
-	}
 
 	go endOfSpeech.worker()
-
-	if onPacket != nil && endOfSpeech.eventLevel == eventLevelDebug {
-		_ = onPacket(context.Background(), internal_type.ConversationEventPacket{
-			Name: "eos",
-			Data: map[string]string{
-				"type":     "initialized",
-				"provider": eosName,
-				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+	if onPacket != nil {
+		_ = onPacket(context.Background(),
+			internal_type.ObservabilityEventRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentEOS,
+					Event:     observability.EOSStarted,
+					Attributes: observability.Attributes{
+						"provider":            eosName,
+						"init_ms":             fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+						"threshold":           fmt.Sprintf("%.4f", endOfSpeech.threshold),
+						"quick_timeout_ms":    fmt.Sprintf("%d", endOfSpeech.quickTimeout.Milliseconds()),
+						"extended_timeout_ms": fmt.Sprintf("%d", endOfSpeech.silenceTimeout.Milliseconds()),
+						"fallback_timeout_ms": fmt.Sprintf("%d", endOfSpeech.fallbackTimeout.Milliseconds()),
+						"max_history":         fmt.Sprintf("%d", endOfSpeech.maxHistory),
+					},
+				},
 			},
-			Time: time.Now(),
-		})
+			internal_type.ObservabilityLogRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelDebug,
+					Message: "eos initialized",
+					Attributes: observability.Attributes{
+						"component":           observability.ComponentEOS.String(),
+						"operation":           "initialize",
+						"provider":            eosName,
+						"init_ms":             fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+						"threshold":           fmt.Sprintf("%.4f", endOfSpeech.threshold),
+						"quick_timeout_ms":    fmt.Sprintf("%d", endOfSpeech.quickTimeout.Milliseconds()),
+						"extended_timeout_ms": fmt.Sprintf("%d", endOfSpeech.silenceTimeout.Milliseconds()),
+						"fallback_timeout_ms": fmt.Sprintf("%d", endOfSpeech.fallbackTimeout.Milliseconds()),
+						"max_history":         fmt.Sprintf("%d", endOfSpeech.maxHistory),
+					},
+				},
+			},
+		)
 	}
 
 	return endOfSpeech, nil
@@ -242,19 +257,6 @@ func (endOfSpeech *livekitEndOfSpeech) Execute(ctx context.Context, packet inter
 			Speech:    segment.Committed,
 			ContextID: segment.ContextID,
 		}}
-		if endOfSpeech.eventLevel == eventLevelDebug {
-			packets = append(packets, internal_type.ConversationEventPacket{
-				ContextID: segment.ContextID,
-				Name:      "eos",
-				Data: map[string]string{
-					"type":       "interim",
-					"provider":   endOfSpeech.Name(),
-					"context_id": segment.ContextID,
-					"speech":     segment.Committed,
-				},
-				Time: time.Now(),
-			})
-		}
 		_ = endOfSpeech.onPacket(ctx, packets...)
 		endOfSpeech.enqueueCommand(workerCommand{
 			ctx:             ctx,
@@ -336,24 +338,10 @@ func (endOfSpeech *livekitEndOfSpeech) Execute(ctx context.Context, packet inter
 		}
 
 		// Emit interim update (same as silence-based on final STT)
-		emittedAt := time.Now()
 		packets := []internal_type.Packet{internal_type.InterimEndOfSpeechPacket{
 			Speech:    fullText,
 			ContextID: segment.ContextID,
 		}}
-		if endOfSpeech.eventLevel == eventLevelDebug {
-			packets = append(packets, internal_type.ConversationEventPacket{
-				ContextID: segment.ContextID,
-				Name:      "eos",
-				Data: map[string]string{
-					"type":       "interim",
-					"provider":   endOfSpeech.Name(),
-					"context_id": segment.ContextID,
-					"speech":     fullText,
-				},
-				Time: emittedAt,
-			})
-		}
 		_ = endOfSpeech.onPacket(ctx, packets...)
 
 		// Run model inference on accumulated final text.
@@ -545,51 +533,75 @@ func (endOfSpeech *livekitEndOfSpeech) fire(command workerCommand, timerArmedAt 
 	if !timerArmedAt.IsZero() {
 		waitToTriggerMs = triggerAt.Sub(timerArmedAt).Milliseconds()
 	}
-	packets := []internal_type.Packet{
+	_ = endOfSpeech.onPacket(ctx,
 		internal_type.EndOfSpeechPacket{
 			Speech:    speech,
 			ContextID: segment.ContextID,
 			Speechs:   append([]internal_type.SpeechToTextPacket(nil), segment.Chunks...),
 		},
-		internal_type.UserMessageMetricPacket{
-			ContextID: segment.ContextID,
-			Metrics: []*protos.Metric{{
-				Name:  "eos_latency_ms",
-				Value: fmt.Sprintf("%d", waitToTriggerMs),
-			}},
-		},
-	}
-	if endOfSpeech.eventLevel != eventLevelOff {
-		packets = append(packets, internal_type.ConversationEventPacket{
-			ContextID: segment.ContextID,
-			Name:      "eos",
-			Data: map[string]string{
-				"type":               "detected",
-				"provider":           eosName,
-				"context_id":         segment.ContextID,
-				"speech":             speech,
-				"confidence":         fmt.Sprintf("%.4f", confidence),
-				"word_count":         fmt.Sprintf("%d", wordCount),
-				"char_count":         fmt.Sprintf("%d", len(speech)),
-				"text_to_trigger_ms": fmt.Sprintf("%d", textToTriggerMs),
-				"wait_to_trigger_ms": fmt.Sprintf("%d", waitToTriggerMs),
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID:   segment.ContextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordEvent{
+				Component:  observability.ComponentEOS,
+				Event:      observability.EOSCompleted,
+				OccurredAt: triggerAt,
+				Attributes: observability.Attributes{
+					"provider":           eosName,
+					"context_id":         segment.ContextID,
+					"speech":             speech,
+					"confidence":         fmt.Sprintf("%.4f", confidence),
+					"word_count":         fmt.Sprintf("%d", wordCount),
+					"char_count":         fmt.Sprintf("%d", len(speech)),
+					"text_to_trigger_ms": fmt.Sprintf("%d", textToTriggerMs),
+					"wait_to_trigger_ms": fmt.Sprintf("%d", waitToTriggerMs),
+				},
 			},
-			Time: triggerAt,
+		},
+		internal_type.ObservabilityMetricRecordPacket{
+			ContextID:   segment.ContextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordMetric{
+				OccurredAt: triggerAt,
+				Metrics: []*protos.Metric{
+					{Name: observability.MetricEOSLatencyMs, Value: fmt.Sprintf("%d", waitToTriggerMs)},
+					{Name: observability.MetricEOSTextToTriggerMs, Value: fmt.Sprintf("%d", textToTriggerMs)},
+					{Name: observability.MetricEOSWordCount, Value: fmt.Sprintf("%d", wordCount)},
+					{Name: observability.MetricEOSCharCount, Value: fmt.Sprintf("%d", len(speech))},
+					{Name: observability.MetricEOSConfidence, Value: fmt.Sprintf("%.4f", confidence)},
+				},
+			},
 		})
-	}
-	_ = endOfSpeech.onPacket(ctx, packets...)
 }
 
-func (endOfSpeech *livekitEndOfSpeech) Close(_ context.Context) error {
-	if endOfSpeech.eventLevel == eventLevelDebug && endOfSpeech.onPacket != nil {
-		_ = endOfSpeech.onPacket(context.Background(), internal_type.ConversationEventPacket{
-			Name: "eos",
-			Data: map[string]string{
-				"type":     "closed",
-				"provider": endOfSpeech.Name(),
+func (endOfSpeech *livekitEndOfSpeech) Close(ctx context.Context) error {
+	if endOfSpeech.onPacket != nil {
+		_ = endOfSpeech.onPacket(ctx,
+			internal_type.ObservabilityEventRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentEOS,
+					Event:     observability.EOSClosed,
+					Attributes: observability.Attributes{
+						"provider": endOfSpeech.Name(),
+					},
+				},
 			},
-			Time: time.Now(),
-		})
+			internal_type.ObservabilityLogRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelDebug,
+					Message: "eos closed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentEOS.String(),
+						"operation": "close",
+						"provider":  endOfSpeech.Name(),
+					},
+				},
+			},
+		)
 	}
 	close(endOfSpeech.stopCh)
 

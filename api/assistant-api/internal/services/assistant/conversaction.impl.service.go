@@ -267,12 +267,12 @@ func (conversationService *assistantConversationService) CreateConversation(
 	return conversation, nil
 }
 
-func (conversationService *assistantConversationService) ApplyConversationMetadata(
+func (conversationService *assistantConversationService) CreateOrUpdateConversationMetadata(
 	ctx context.Context,
 	auth types.SimplePrinciple,
 	assistantId,
 	assistantConversationId uint64,
-	metadata []*types.Metadata,
+	metadata []*protos.Metadata,
 ) ([]*internal_conversation_entity.AssistantConversationMetadata, error) {
 	start := time.Now()
 	//
@@ -307,15 +307,15 @@ func (conversationService *assistantConversationService) ApplyConversationMetada
 			"updated_by", "updated_date"}),
 	}).Create(&_metadatas)
 	if tx.Error != nil {
-		conversationService.logger.Benchmark("conversationService.ApplyConversationMetadata", time.Since(start))
-		conversationService.logger.Errorf("error while ApplyConversationMetadata %v", tx.Error)
+		conversationService.logger.Benchmark("conversationService.CreateOrUpdateConversationMetadata", time.Since(start))
+		conversationService.logger.Errorf("error while CreateOrUpdateConversationMetadata %v", tx.Error)
 		return nil, tx.Error
 	}
-	conversationService.logger.Benchmark("conversationService.ApplyConversationMetadata", time.Since(start))
+	conversationService.logger.Benchmark("conversationService.CreateOrUpdateConversationMetadata", time.Since(start))
 	return _metadatas, nil
 }
 
-func (conversationService *assistantConversationService) ApplyConversationOption(ctx context.Context,
+func (conversationService *assistantConversationService) CreateOrUpdateConversationOption(ctx context.Context,
 	auth types.SimplePrinciple,
 	assistantId,
 	assistantConversationId uint64,
@@ -351,16 +351,16 @@ func (conversationService *assistantConversationService) ApplyConversationOption
 			"updated_by", "updated_date"}),
 	}).Create(&options)
 	if tx.Error != nil {
-		conversationService.logger.Benchmark("conversationService.ApplyConversationOptions", time.Since(start))
+		conversationService.logger.Benchmark("conversationService.CreateOrUpdateConversationOptions", time.Since(start))
 		conversationService.logger.Errorf("error while updating conversation argument %v", tx.Error)
 		return nil, tx.Error
 	}
-	conversationService.logger.Benchmark("conversationService.ApplyConversationOptions", time.Since(start))
+	conversationService.logger.Benchmark("conversationService.CreateOrUpdateConversationOptions", time.Since(start))
 	return options, nil
 
 }
 
-func (conversationService *assistantConversationService) ApplyConversationArgument(ctx context.Context,
+func (conversationService *assistantConversationService) CreateOrUpdateConversationArgument(ctx context.Context,
 	auth types.SimplePrinciple,
 	assistantId,
 	assistantConversationId uint64,
@@ -409,12 +409,12 @@ func (conversationService *assistantConversationService) ApplyConversationArgume
 * Once the conversation is over the user will be prompted about conversation quality and xyz defined by the client
 * client push the feedback as string and it will be stored as metrics later there might be different kind of feedback client can ask
 **/
-func (conversationService *assistantConversationService) ApplyConversationMetrics(
+func (conversationService *assistantConversationService) CreateOrUpdateConversationMetrics(
 	ctx context.Context,
 	auth types.SimplePrinciple,
 	assistantId,
 	assistantConversationId uint64,
-	metrics []*types.Metric,
+	metrics []*protos.Metric,
 ) ([]*internal_conversation_entity.AssistantConversationMetric, error) {
 	start := time.Now()
 	db := conversationService.postgres.DB(ctx)
@@ -444,61 +444,12 @@ func (conversationService *assistantConversationService) ApplyConversationMetric
 			"updated_by", "updated_date"}),
 	}).Create(&mtrs)
 	if tx.Error != nil {
-		conversationService.logger.Benchmark("conversationService.ApplyConversationMetrics", time.Since(start))
+		conversationService.logger.Benchmark("conversationService.CreateOrUpdateConversationMetrics", time.Since(start))
 		conversationService.logger.Errorf("error while updating conversation %v", tx.Error)
 		return nil, tx.Error
 	}
-	conversationService.logger.Benchmark("conversationService.ApplyConversationMetrics", time.Since(start))
+	conversationService.logger.Benchmark("conversationService.CreateOrUpdateConversationMetrics", time.Since(start))
 	return mtrs, nil
-}
-
-func (s *assistantConversationService) PersistMetrics(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, metrics []*types.Metric) error {
-	_, err := s.ApplyConversationMetrics(ctx, auth, assistantID, conversationID, metrics)
-	return err
-}
-
-func (s *assistantConversationService) PersistMetadata(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, metadata []*types.Metadata) error {
-	_, err := s.ApplyConversationMetadata(ctx, auth, assistantID, conversationID, metadata)
-	return err
-}
-
-/* */
-func (conversationService *assistantConversationService) CreateConversationMetric(
-	ctx context.Context,
-	auth types.SimplePrinciple,
-	assistantId uint64,
-	assistantConversationId uint64,
-	name, description, value string,
-) (*internal_conversation_entity.AssistantConversationMetric, error) {
-	start := time.Now()
-	db := conversationService.postgres.DB(ctx)
-	metric := &internal_conversation_entity.AssistantConversationMetric{
-		Metric: gorm_models.Metric{
-			Name:        fmt.Sprintf("%s.%s", "custom", name),
-			Description: description,
-			Value:       value,
-		},
-		AssistantId:             assistantId,
-		AssistantConversationId: assistantConversationId,
-	}
-
-	if auth.GetUserId() != nil {
-		metric.UpdatedBy = *auth.GetUserId()
-		metric.CreatedBy = *auth.GetUserId()
-	}
-	tx := db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "assistant_conversation_id"}, {Name: "name"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"value", "description",
-			"updated_by", "updated_date"}),
-	}).Create(&metric)
-	if tx.Error != nil {
-		conversationService.logger.Benchmark("conversationService.CreateConversationMetric", time.Since(start))
-		conversationService.logger.Errorf("error while updating conversation %v", tx.Error)
-		return nil, tx.Error
-	}
-	conversationService.logger.Benchmark("conversationService.CreateConversationMetric", time.Since(start))
-	return metric, nil
 }
 
 func (conversationService *assistantConversationService) CreateCustomConversationMetric(

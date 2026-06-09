@@ -22,7 +22,7 @@ import (
 	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
 	channel_base "github.com/rapidaai/api/assistant-api/internal/channel/base"
 	webrtc_internal "github.com/rapidaai/api/assistant-api/internal/channel/webrtc/internal"
-	"github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +35,45 @@ func newTestLogger(t *testing.T) commons.Logger {
 	l, err := commons.NewApplicationLogger(commons.Level("error"), commons.Name("webrtc-test"), commons.EnableFile(false))
 	require.NoError(t, err)
 	return l
+}
+
+func newTestObserver(t *testing.T) observability.Recorder {
+	t.Helper()
+	observer := observability.New(observability.WithGlobalScope(observability.GlobalScope{
+		OrganizationID: 1,
+		ProjectID:      1,
+	}))
+	t.Cleanup(func() { _ = observer.Close(context.Background()) })
+	return observer
+}
+
+type testObservabilityCollector struct {
+	mu      sync.Mutex
+	logs    []observability.RecordLog
+	events  []observability.RecordEvent
+	metrics []observability.RecordMetric
+}
+
+func (c *testObservabilityCollector) Key() string {
+	return "test"
+}
+
+func (c *testObservabilityCollector) Collect(_ context.Context, _ observability.Scope, _ observability.Context, record observability.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch typed := record.(type) {
+	case observability.RecordLog:
+		c.logs = append(c.logs, typed)
+	case observability.RecordEvent:
+		c.events = append(c.events, typed)
+	case observability.RecordMetric:
+		c.metrics = append(c.metrics, typed)
+	}
+	return nil
+}
+
+func (c *testObservabilityCollector) Close(context.Context) error {
+	return nil
 }
 
 // newTestStreamer creates a WebRTC streamer with test-owned dependencies.
@@ -53,8 +92,10 @@ func newTestStreamer(t *testing.T) *webrtcStreamer {
 		resampler:        resampler,
 		opusCodec:        opusCodec,
 		currentMode:      protos.StreamMode_STREAM_MODE_TEXT,
+		sessionState:     webrtc_internal.SessionState{Scope: observability.ProjectScope{}},
 		audioBufferState: newWebRTCAudioBufferState(),
 		flushAudioCh:     make(chan struct{}, 1),
+		observer:         newTestObserver(t),
 	}
 }
 
@@ -113,21 +154,24 @@ func (f *fakeAmbientMixer) Reset() {}
 
 func (f *fakeAmbientMixer) CurrentConfig() internal_ambient.Config { return f.cfg }
 
-func requireLowConversationEvent(t *testing.T, s *webrtcStreamer, eventType string) *protos.ConversationEvent {
+func requireObservabilityEvent(t *testing.T, collector *testObservabilityCollector, eventType string) observability.RecordEvent {
 	t.Helper()
 	deadline := time.After(time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
-		case msg := <-s.LowCh:
-			event, ok := msg.(*protos.ConversationEvent)
-			if !ok {
-				continue
+		case <-ticker.C:
+			collector.mu.Lock()
+			for _, event := range collector.events {
+				if event.Attributes[webrtc_internal.DataType] == eventType {
+					collector.mu.Unlock()
+					return event
+				}
 			}
-			if event.GetData()[webrtc_internal.DataType] == eventType {
-				return event
-			}
+			collector.mu.Unlock()
 		case <-deadline:
-			t.Fatalf("timed out waiting for WebRTC event %q", eventType)
+			t.Fatalf("timed out waiting for WebRTC observability event %q", eventType)
 		}
 	}
 }
@@ -174,26 +218,32 @@ func TestBuildGRPCResponse_Event(t *testing.T) {
 	assert.NotNil(t, resp.GetEvent())
 }
 
-func TestNewWebRTCStreamer_UsesConfiguredICEServers(t *testing.T) {
+func TestNew_UsesConfiguredICEServers(t *testing.T) {
 	t.Setenv("TURN_USERNAME", "turn-user")
 	t.Setenv("TURN_CREDENTIAL", "turn-secret")
-	streamer, err := NewWebRTCStreamer(context.Background(), newTestLogger(t), &failingGRPCStream{sendErr: io.EOF}, &assistant_config.WebRTCConfig{
-		ICEServers: []assistant_config.WebRTCICEServer{
-			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
-			},
-			{
-				URLs: []string{
-					"turn:turn.rapida.ai:3478?transport=udp",
-					"turn:turn.rapida.ai:3478?transport=tcp",
-					"turns:turn.rapida.ai:443?transport=tcp",
+	streamer, err := New(
+		WithContext(context.Background()),
+		WithLogger(newTestLogger(t)),
+		WithServer(&failingGRPCStream{sendErr: io.EOF}),
+		WithObserver(newTestObserver(t)),
+		WithServerConfig(&assistant_config.WebRTCConfig{
+			ICEServers: []assistant_config.WebRTCICEServer{
+				{
+					URLs: []string{"stun:stun.l.google.com:19302"},
 				},
-				Username:   "${TURN_USERNAME}",
-				Credential: "${TURN_CREDENTIAL}",
+				{
+					URLs: []string{
+						"turn:turn.rapida.ai:3478?transport=udp",
+						"turn:turn.rapida.ai:3478?transport=tcp",
+						"turns:turn.rapida.ai:443?transport=tcp",
+					},
+					Username:   "${TURN_USERNAME}",
+					Credential: "${TURN_CREDENTIAL}",
+				},
 			},
-		},
-		ICETransportPolicy: webrtc_internal.ICETransportPolicyRelay,
-	})
+			ICETransportPolicy: webrtc_internal.ICETransportPolicyRelay,
+		}),
+	)
 	require.NoError(t, err)
 	s := streamer.(*webrtcStreamer)
 	t.Cleanup(func() { _ = s.Close() })
@@ -210,9 +260,15 @@ func TestNewWebRTCStreamer_UsesConfiguredICEServers(t *testing.T) {
 	assert.Equal(t, webrtc_internal.ICETransportPolicyRelay, s.peerConfig.ICETransportPolicy)
 }
 
-func TestNewWebRTCStreamer_DefaultsToGoogleSTUN(t *testing.T) {
+func TestNew_DefaultsToGoogleSTUN(t *testing.T) {
 	t.Parallel()
-	streamer, err := NewWebRTCStreamer(context.Background(), newTestLogger(t), &failingGRPCStream{sendErr: io.EOF}, &assistant_config.WebRTCConfig{})
+	streamer, err := New(
+		WithContext(context.Background()),
+		WithLogger(newTestLogger(t)),
+		WithServer(&failingGRPCStream{sendErr: io.EOF}),
+		WithObserver(newTestObserver(t)),
+		WithServerConfig(&assistant_config.WebRTCConfig{}),
+	)
 	require.NoError(t, err)
 	s := streamer.(*webrtcStreamer)
 	t.Cleanup(func() { _ = s.Close() })
@@ -223,11 +279,17 @@ func TestNewWebRTCStreamer_DefaultsToGoogleSTUN(t *testing.T) {
 	assert.Equal(t, webrtc_internal.ICETransportPolicyAll, s.peerConfig.ICETransportPolicy)
 }
 
-func TestNewWebRTCStreamer_InvalidICETransportPolicyFallsBackToAll(t *testing.T) {
+func TestNew_InvalidICETransportPolicyFallsBackToAll(t *testing.T) {
 	t.Parallel()
-	streamer, err := NewWebRTCStreamer(context.Background(), newTestLogger(t), &failingGRPCStream{sendErr: io.EOF}, &assistant_config.WebRTCConfig{
-		ICETransportPolicy: "invalid",
-	})
+	streamer, err := New(
+		WithContext(context.Background()),
+		WithLogger(newTestLogger(t)),
+		WithServer(&failingGRPCStream{sendErr: io.EOF}),
+		WithObserver(newTestObserver(t)),
+		WithServerConfig(&assistant_config.WebRTCConfig{
+			ICETransportPolicy: "invalid",
+		}),
+	)
 	require.NoError(t, err)
 	s := streamer.(*webrtcStreamer)
 	t.Cleanup(func() { _ = s.Close() })
@@ -235,19 +297,25 @@ func TestNewWebRTCStreamer_InvalidICETransportPolicyFallsBackToAll(t *testing.T)
 	assert.Equal(t, webrtc_internal.ICETransportPolicyAll, s.peerConfig.ICETransportPolicy)
 }
 
-func TestNewWebRTCStreamer_IgnoresEmptyICEServerEntries(t *testing.T) {
+func TestNew_IgnoresEmptyICEServerEntries(t *testing.T) {
 	t.Setenv("WEBRTC_TURN_URL", "turn:turn.rapida.ai:3478?transport=tcp")
-	streamer, err := NewWebRTCStreamer(context.Background(), newTestLogger(t), &failingGRPCStream{sendErr: io.EOF}, &assistant_config.WebRTCConfig{
-		ICEServers: []assistant_config.WebRTCICEServer{
-			{URLs: []string{"", "   "}},
-			{URLs: nil},
-			{
-				URLs:       []string{" ${WEBRTC_TURN_URL} "},
-				Username:   "turn-user",
-				Credential: "turn-secret",
+	streamer, err := New(
+		WithContext(context.Background()),
+		WithLogger(newTestLogger(t)),
+		WithServer(&failingGRPCStream{sendErr: io.EOF}),
+		WithObserver(newTestObserver(t)),
+		WithServerConfig(&assistant_config.WebRTCConfig{
+			ICEServers: []assistant_config.WebRTCICEServer{
+				{URLs: []string{"", "   "}},
+				{URLs: nil},
+				{
+					URLs:       []string{" ${WEBRTC_TURN_URL} "},
+					Username:   "turn-user",
+					Credential: "turn-secret",
+				},
 			},
-		},
-	})
+		}),
+	)
 	require.NoError(t, err)
 	s := streamer.(*webrtcStreamer)
 	t.Cleanup(func() { _ = s.Close() })
@@ -1001,6 +1069,11 @@ func TestWebRTCOperationLoop_HandlesICEGatheringComplete(t *testing.T) {
 func TestWebRTCOperation_DefersICERestartDuringGathering(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
+	collector := &testObservabilityCollector{}
+	s.observer = observability.New(
+		observability.WithGlobalScope(observability.GlobalScope{OrganizationID: 1, ProjectID: 1}),
+		observability.WithCollector(collector),
+	)
 	mediaSessionID := s.sessionState.StartMediaSession()
 	s.sessionState.SetICEGatheringActive(true)
 
@@ -1014,9 +1087,9 @@ func TestWebRTCOperation_DefersICERestartDuringGathering(t *testing.T) {
 
 	assert.True(t, s.sessionState.ICEGatheringActive())
 	assert.True(t, s.sessionState.DeferredICERestartPending(mediaSessionID))
-	event := requireLowConversationEvent(t, s, webrtc_internal.EventICERestartDeferred)
-	assert.Equal(t, webrtc_internal.WebRTCOperationRestartICE.String(), event.GetData()[webrtc_internal.DataOperation])
-	assert.Equal(t, "true", event.GetData()[webrtc_internal.DataICERestart])
+	event := requireObservabilityEvent(t, collector, webrtc_internal.EventICERestartDeferred)
+	assert.Equal(t, webrtc_internal.WebRTCOperationRestartICE.String(), event.Attributes[webrtc_internal.DataOperation])
+	assert.Equal(t, "true", event.Attributes[webrtc_internal.DataICERestart])
 
 	select {
 	case msg := <-s.OutputCh:
@@ -1028,6 +1101,11 @@ func TestWebRTCOperation_DefersICERestartDuringGathering(t *testing.T) {
 func TestWebRTCOperation_RunsDeferredICERestartAfterGatheringComplete(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
+	collector := &testObservabilityCollector{}
+	s.observer = observability.New(
+		observability.WithGlobalScope(observability.GlobalScope{OrganizationID: 1, ProjectID: 1}),
+		observability.WithCollector(collector),
+	)
 	mediaSessionID := s.sessionState.StartMediaSession()
 	require.NoError(t, s.createPeer(mediaSessionID))
 	t.Cleanup(func() { s.stopMediaSession() })
@@ -1047,9 +1125,9 @@ func TestWebRTCOperation_RunsDeferredICERestartAfterGatheringComplete(t *testing
 	assert.False(t, s.sessionState.DeferredICERestartPending(mediaSessionID))
 	assert.Equal(t, webrtc_internal.NegotiationStateRetryPending, s.sessionState.NegotiationState())
 	assert.True(t, s.sessionState.NegotiationRetryICE())
-	event := requireLowConversationEvent(t, s, webrtc_internal.EventNegotiationRetryQueued)
-	assert.Equal(t, webrtc_internal.WebRTCOperationRestartICE.String(), event.GetData()[webrtc_internal.DataOperation])
-	assert.Equal(t, "true", event.GetData()[webrtc_internal.DataICERestart])
+	event := requireObservabilityEvent(t, collector, webrtc_internal.EventNegotiationRetryQueued)
+	assert.Equal(t, webrtc_internal.WebRTCOperationRestartICE.String(), event.Attributes[webrtc_internal.DataOperation])
+	assert.Equal(t, "true", event.Attributes[webrtc_internal.DataICERestart])
 }
 
 func TestWebRTCOperation_ICEGatheringCompleteWithoutDeferredRestartClearsGatheringState(t *testing.T) {
@@ -1200,6 +1278,11 @@ func TestWebRTCOperation_AppliesAnswerThenDrainsRemoteICE(t *testing.T) {
 func TestWebRTCOperation_EmitsNegotiationLifecycleEvents(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
+	collector := &testObservabilityCollector{}
+	s.observer = observability.New(
+		observability.WithGlobalScope(observability.GlobalScope{OrganizationID: 1, ProjectID: 1}),
+		observability.WithCollector(collector),
+	)
 	s.signalingSessionID = "media-signaling-session"
 	mediaSessionID := s.sessionState.StartMediaSession()
 	require.NoError(t, s.createPeer(mediaSessionID))
@@ -1215,9 +1298,9 @@ func TestWebRTCOperation_EmitsNegotiationLifecycleEvents(t *testing.T) {
 	offerMessage, ok := (<-s.OutputCh).(*protos.ServerSignaling)
 	require.True(t, ok)
 	require.NotNil(t, offerMessage.GetSdp())
-	offerSentEvent := requireLowConversationEvent(t, s, webrtc_internal.EventNegotiationOfferSent)
-	assert.Equal(t, webrtc_internal.WebRTCOperationSendOffer.String(), offerSentEvent.GetData()[webrtc_internal.DataOperation])
-	assert.Equal(t, "false", offerSentEvent.GetData()[webrtc_internal.DataICERestart])
+	offerSentEvent := requireObservabilityEvent(t, collector, webrtc_internal.EventNegotiationOfferSent)
+	assert.Equal(t, webrtc_internal.WebRTCOperationSendOffer.String(), offerSentEvent.Attributes[webrtc_internal.DataOperation])
+	assert.Equal(t, "false", offerSentEvent.Attributes[webrtc_internal.DataICERestart])
 
 	remoteMediaEngine := &pionwebrtc.MediaEngine{}
 	require.NoError(t, remoteMediaEngine.RegisterDefaultCodecs())
@@ -1240,9 +1323,9 @@ func TestWebRTCOperation_EmitsNegotiationLifecycleEvents(t *testing.T) {
 		RemoteAnswerSDP: answer.SDP,
 	})
 
-	answerEvent := requireLowConversationEvent(t, s, webrtc_internal.EventNegotiationAnswerReceived)
-	assert.Equal(t, webrtc_internal.WebRTCOperationApplyRemoteAnswer.String(), answerEvent.GetData()[webrtc_internal.DataOperation])
-	assert.Equal(t, "false", answerEvent.GetData()[webrtc_internal.DataRetryPending])
+	answerEvent := requireObservabilityEvent(t, collector, webrtc_internal.EventNegotiationAnswerReceived)
+	assert.Equal(t, webrtc_internal.WebRTCOperationApplyRemoteAnswer.String(), answerEvent.Attributes[webrtc_internal.DataOperation])
+	assert.Equal(t, "false", answerEvent.Attributes[webrtc_internal.DataRetryPending])
 }
 
 func TestWebRTCOperation_IgnoresStaleMediaSession(t *testing.T) {
@@ -1266,6 +1349,11 @@ func TestWebRTCOperation_IgnoresStaleMediaSession(t *testing.T) {
 func TestWebRTCOperation_ICEFailedDuringPendingOfferQueuesRetry(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
+	collector := &testObservabilityCollector{}
+	s.observer = observability.New(
+		observability.WithGlobalScope(observability.GlobalScope{OrganizationID: 1, ProjectID: 1}),
+		observability.WithCollector(collector),
+	)
 	mediaSessionID := s.sessionState.StartMediaSession()
 	require.NoError(t, s.createPeer(mediaSessionID))
 	t.Cleanup(func() { s.stopMediaSession() })
@@ -1275,9 +1363,9 @@ func TestWebRTCOperation_ICEFailedDuringPendingOfferQueuesRetry(t *testing.T) {
 
 	assert.Equal(t, webrtc_internal.NegotiationStateRetryPending, s.sessionState.NegotiationState())
 	assert.True(t, s.sessionState.NegotiationRetryICE())
-	event := requireLowConversationEvent(t, s, webrtc_internal.EventNegotiationRetryQueued)
-	assert.Equal(t, webrtc_internal.WebRTCOperationRestartICE.String(), event.GetData()[webrtc_internal.DataOperation])
-	assert.Equal(t, "true", event.GetData()[webrtc_internal.DataICERestart])
+	event := requireObservabilityEvent(t, collector, webrtc_internal.EventNegotiationRetryQueued)
+	assert.Equal(t, webrtc_internal.WebRTCOperationRestartICE.String(), event.Attributes[webrtc_internal.DataOperation])
+	assert.Equal(t, "true", event.Attributes[webrtc_internal.DataICERestart])
 }
 
 func TestWebRTCOperation_QueuesICERestartRetryWhenOfferPending(t *testing.T) {
@@ -1429,6 +1517,11 @@ func TestHandlePeerState_DisconnectedQueuesRecovery(t *testing.T) {
 func TestHandlePeerICEConnectionState_RecordsSeparateICEState(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
+	collector := &testObservabilityCollector{}
+	s.observer = observability.New(
+		observability.WithGlobalScope(observability.GlobalScope{OrganizationID: 1, ProjectID: 1}),
+		observability.WithCollector(collector),
+	)
 	mediaSessionID := s.sessionState.StartMediaSession()
 	changedAt := time.Now()
 
@@ -1440,20 +1533,18 @@ func TestHandlePeerICEConnectionState_RecordsSeparateICEState(t *testing.T) {
 	assert.Equal(t, changedAt, s.mediaHealthState.ICECheckingStartedAt)
 	s.Mu.Unlock()
 
-	select {
-	case msg := <-s.LowCh:
-		event, ok := msg.(*protos.ConversationEvent)
-		require.True(t, ok, "expected ConversationEvent, got %T", msg)
-		assert.Equal(t, webrtc_internal.EventICEConnectionState, event.GetData()[webrtc_internal.DataType])
-		assert.Equal(t, webrtc_internal.ICEStateChecking, event.GetData()[webrtc_internal.DataICEConnectionState])
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ICE state event")
-	}
+	event := requireObservabilityEvent(t, collector, webrtc_internal.EventICEConnectionState)
+	assert.Equal(t, webrtc_internal.ICEStateChecking, event.Attributes[webrtc_internal.DataICEConnectionState])
 }
 
 func TestHandlePeerICEConnectionState_FailedQueuesRecovery(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
+	collector := &testObservabilityCollector{}
+	s.observer = observability.New(
+		observability.WithGlobalScope(observability.GlobalScope{OrganizationID: 1, ProjectID: 1}),
+		observability.WithCollector(collector),
+	)
 	s.mediaLifecycleCh = make(chan webrtc_internal.MediaLifecycleEvent, 1)
 	mediaSessionID := s.sessionState.StartMediaSession()
 	s.sessionState.SetPeerConnected(true)
@@ -1467,15 +1558,8 @@ func TestHandlePeerICEConnectionState_FailedQueuesRecovery(t *testing.T) {
 	assert.Equal(t, failedAt, s.mediaHealthState.ICEFailedAt)
 	s.Mu.Unlock()
 
-	select {
-	case msg := <-s.LowCh:
-		event, ok := msg.(*protos.ConversationEvent)
-		require.True(t, ok, "expected ConversationEvent, got %T", msg)
-		assert.Equal(t, observe.EventICEFailed, event.GetData()[webrtc_internal.DataType])
-		assert.Equal(t, webrtc_internal.ICEStateFailed, event.GetData()[webrtc_internal.DataICEConnectionState])
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ICE failed event")
-	}
+	event := requireObservabilityEvent(t, collector, "ice_failed")
+	assert.Equal(t, webrtc_internal.ICEStateFailed, event.Attributes[webrtc_internal.DataICEConnectionState])
 
 	select {
 	case event := <-s.mediaLifecycleCh:
@@ -1900,6 +1984,11 @@ func TestSend_AudioBuffersWebRTCOutputPCM16kFrame(t *testing.T) {
 func TestSend_Interruption(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
+	collector := &testObservabilityCollector{}
+	s.observer = observability.New(
+		observability.WithGlobalScope(observability.GlobalScope{OrganizationID: 1, ProjectID: 1}),
+		observability.WithCollector(collector),
+	)
 	s.enqueueOutputAudio([]byte{0x10})
 	s.enqueueOutputAudio([]byte{0x20})
 
@@ -1913,18 +2002,15 @@ func TestSend_Interruption(t *testing.T) {
 	assert.Empty(t, s.outputAudioQueue)
 	s.outputAudioQueueMu.Unlock()
 
-	select {
-	case msg := <-s.LowCh:
-		eventMsg, ok := msg.(*protos.ConversationEvent)
-		require.True(t, ok, "expected ConversationEvent, got %T", msg)
-		assert.Equal(t, observe.ComponentWebRTC, eventMsg.GetName())
-		assert.Equal(t, webrtc_internal.EventOutputQueueCleared, eventMsg.GetData()[webrtc_internal.DataType])
-		assert.Equal(t, webrtc_internal.OutputQueueClearReasonInterruption, eventMsg.GetData()[webrtc_internal.DataReason])
-		assert.Equal(t, "2", eventMsg.GetData()[webrtc_internal.DataClearedFrames])
-		assert.Equal(t, fmt.Sprintf("%d", webrtc_internal.OutputAudioQueueEmptySize), eventMsg.GetData()[webrtc_internal.DataRemainingQueueFrames])
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for outputAudioBuffer queue cleared event")
-	}
+	require.NoError(t, s.observer.Close(context.Background()))
+	require.Len(t, collector.logs, 1)
+	assert.Equal(t, observability.LevelInfo, collector.logs[0].Level)
+	assert.Contains(t, collector.logs[0].Message, "user interruption")
+	assert.Equal(t, webrtc_internal.EventOutputQueueCleared, collector.logs[0].Attributes[webrtc_internal.DataType])
+	assert.Equal(t, webrtc_internal.OutputQueueClearReasonInterruption, collector.logs[0].Attributes[webrtc_internal.DataReason])
+	assert.Equal(t, "2", collector.logs[0].Attributes[webrtc_internal.DataClearedFrames])
+	assert.Equal(t, fmt.Sprintf("%d", webrtc_internal.OutputAudioQueueEmptySize), collector.logs[0].Attributes[webrtc_internal.DataRemainingQueueFrames])
+	assert.Empty(t, collector.metrics)
 }
 
 func TestSend_EndConversation(t *testing.T) {
@@ -2161,6 +2247,11 @@ func TestApplyAmbientToFrame_NoneLeavesPrimaryUntouched(t *testing.T) {
 func TestEnqueueOutputAudio_BoundedDropOldest_EmitsOverflowEvent(t *testing.T) {
 	t.Parallel()
 	s := newTestStreamer(t)
+	collector := &testObservabilityCollector{}
+	s.observer = observability.New(
+		observability.WithGlobalScope(observability.GlobalScope{OrganizationID: 1, ProjectID: 1}),
+		observability.WithCollector(collector),
+	)
 
 	limit := webrtc_internal.OutputAudioQueueMaxFrames
 	for i := 0; i < limit+1; i++ {
@@ -2175,19 +2266,16 @@ func TestEnqueueOutputAudio_BoundedDropOldest_EmitsOverflowEvent(t *testing.T) {
 	assert.False(t, s.outputAudioQueue[0].QueuedAt.IsZero())
 	s.outputAudioQueueMu.Unlock()
 
-	select {
-	case msg := <-s.LowCh:
-		eventMsg, ok := msg.(*protos.ConversationEvent)
-		require.True(t, ok, "expected ConversationEvent, got %T", msg)
-		assert.Equal(t, "webrtc", eventMsg.GetName())
-		assert.Equal(t, webrtc_internal.EventOutputQueueOverflow, eventMsg.GetData()[webrtc_internal.DataType])
-		assert.Equal(t, webrtc_internal.OutputQueuePolicyDropOldest, eventMsg.GetData()[webrtc_internal.DataPolicy])
-		assert.Equal(t, "1", eventMsg.GetData()[webrtc_internal.DataDroppedFrames])
-		assert.Equal(t, fmt.Sprintf("%d", limit), eventMsg.GetData()[webrtc_internal.DataLimitFrames])
-		assert.Equal(t, fmt.Sprintf("%d", limit), eventMsg.GetData()[webrtc_internal.DataQueueDepthFrames])
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for overflow event")
-	}
+	require.NoError(t, s.observer.Close(context.Background()))
+	require.Len(t, collector.logs, 1)
+	assert.Equal(t, observability.LevelInfo, collector.logs[0].Level)
+	assert.Contains(t, collector.logs[0].Message, "queue overflow")
+	assert.Equal(t, webrtc_internal.EventOutputQueueOverflow, collector.logs[0].Attributes[webrtc_internal.DataType])
+	assert.Equal(t, webrtc_internal.OutputQueuePolicyDropOldest, collector.logs[0].Attributes[webrtc_internal.DataPolicy])
+	assert.Equal(t, "1", collector.logs[0].Attributes[webrtc_internal.DataDroppedFrames])
+	assert.Equal(t, fmt.Sprintf("%d", limit), collector.logs[0].Attributes[webrtc_internal.DataLimitFrames])
+	assert.Equal(t, fmt.Sprintf("%d", limit), collector.logs[0].Attributes[webrtc_internal.DataQueueDepthFrames])
+	assert.Empty(t, collector.metrics)
 }
 
 func TestClearOutputAudio_ReturnsClearedFrameCount(t *testing.T) {

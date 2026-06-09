@@ -438,7 +438,7 @@ func TestSend_EndConversation_PushesToolCallResult(t *testing.T) {
 	cc := &callcontext.CallContext{} // empty ChannelUUID
 	logger, _ := commons.NewApplicationLogger()
 	vng := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, cc, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, cc, nil, nil),
 		connection:            conn,
 	}
 
@@ -481,7 +481,7 @@ func TestSend_EndConversation_NilConnection(t *testing.T) {
 	cc := &callcontext.CallContext{}
 	logger, _ := commons.NewApplicationLogger()
 	vng := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, cc, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, cc, nil, nil),
 		connection:            nil,
 	}
 
@@ -535,13 +535,14 @@ func TestSend_Disconnection_LogsVonageAuthError(t *testing.T) {
 	require.NoError(t, err)
 
 	vng := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
+		BaseTelephonyStreamer: internal_telephony_base.New(
 			logger,
 			&callcontext.CallContext{
 				AssistantID:    1,
 				ConversationID: 2,
 				ChannelUUID:    "vonage-call-id",
 			},
+			nil,
 			nil,
 		),
 		connection: conn,
@@ -587,7 +588,7 @@ func TestSend_TransferConversation_PushesFailedResult(t *testing.T) {
 	cc := &callcontext.CallContext{}
 	logger, _ := commons.NewApplicationLogger()
 	vng := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, cc, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, cc, nil, nil),
 		connection:            conn,
 	}
 

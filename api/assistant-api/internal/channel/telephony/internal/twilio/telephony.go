@@ -75,6 +75,7 @@ func twilioClientParams(vaultCredential *protos.VaultCredential) (*twilio.Client
 
 func (tpc *twilioTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_type.StatusInfo, error) {
 	eventDetails := utils.Option{}
+	rawCallbackPayload := ctx.Request.URL.RawQuery
 	if len(ctx.Request.URL.Query()) > 0 {
 		for key, values := range ctx.Request.URL.Query() {
 			if len(values) > 0 {
@@ -89,6 +90,7 @@ func (tpc *twilioTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 			tpc.logger.Errorf("failed to read event body with error %+v", err)
 			return nil, fmt.Errorf("%w: %w", internal_twilio.ErrRequestBodyReadFailed, err)
 		}
+		rawCallbackPayload = string(body)
 		values, err := url.ParseQuery(string(body))
 		if err != nil {
 			tpc.logger.Errorf("failed to parse body with error %+v", err)
@@ -103,7 +105,7 @@ func (tpc *twilioTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 		}
 	}
 
-	callback, err := internal_twilio.NewStatusCallback(eventDetails)
+	callback, err := internal_twilio.NewStatusCallback(eventDetails, rawCallbackPayload)
 	if err != nil {
 		tpc.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err
@@ -117,6 +119,7 @@ func (tpc *twilioTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 
 func (tpc *twilioTelephony) StatusCallback(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_type.StatusInfo, error) {
 	eventDetails := utils.Option{}
+	rawCallbackPayload := c.Request.URL.RawQuery
 	if len(c.Request.URL.Query()) > 0 {
 		for key, values := range c.Request.URL.Query() {
 			if len(values) > 0 {
@@ -131,6 +134,7 @@ func (tpc *twilioTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 			tpc.logger.Errorf("failed to read event body with error %+v", err)
 			return nil, fmt.Errorf("%w: %w", internal_twilio.ErrRequestBodyReadFailed, err)
 		}
+		rawCallbackPayload = string(body)
 		values, err := url.ParseQuery(string(body))
 		if err != nil {
 			tpc.logger.Errorf("failed to parse body with error %+v", err)
@@ -145,7 +149,7 @@ func (tpc *twilioTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 		}
 	}
 
-	callback, err := internal_twilio.NewStatusCallback(eventDetails)
+	callback, err := internal_twilio.NewStatusCallback(eventDetails, rawCallbackPayload)
 	if err != nil {
 		tpc.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err

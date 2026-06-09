@@ -8,6 +8,7 @@ package internal_transformer_google
 import (
 	"context"
 	"fmt"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"io"
 	"strings"
 	"sync"
@@ -119,14 +120,18 @@ func (google *googleTextToSpeech) Initialize() error {
 
 	go google.recvLoop(stream, currentContextId)
 	google.logger.Debugf("google-tts: connection established")
-	google.onPacket(internal_type.ConversationEventPacket{
-		Name: "tts",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": google.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+	google.onPacket(internal_type.ObservabilityEventRecordPacket{
+		Scope: internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentTTS,
+			Event:     observability.TTSInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": google.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -158,10 +163,16 @@ func (google *googleTextToSpeech) Transform(ctx context.Context, in internal_typ
 			google.ttsStartedAt = time.Time{}
 			google.ttsMetricSent = false
 			google.mu.Unlock()
-			google.onPacket(internal_type.ConversationEventPacket{
-				Name: "tts",
-				Data: map[string]string{"type": "interrupted"},
-				Time: time.Now(),
+			google.onPacket(internal_type.ObservabilityEventRecordPacket{
+				ContextID:   input.ContextID,
+				Scope:       internal_type.ObservabilityRecordScopeMessage,
+				MessageRole: observability.MessageRoleAssistant,
+				Record: observability.RecordEvent{
+					Component:  observability.ComponentTTS,
+					Event:      observability.TTSInterrupted,
+					Attributes: observability.Attributes{"type": "interrupted"},
+					OccurredAt: time.Now(),
+				},
 			})
 			if err := google.Initialize(); err != nil {
 				google.onPacket(internal_type.TextToSpeechErrorPacket{
@@ -198,13 +209,19 @@ func (google *googleTextToSpeech) Transform(ctx context.Context, in internal_typ
 			})
 			return nil
 		}
-		google.onPacket(internal_type.ConversationEventPacket{
-			Name: "tts",
-			Data: map[string]string{
-				"type": "speaking",
-				"text": input.Text,
+		google.onPacket(internal_type.ObservabilityEventRecordPacket{
+			ContextID:   input.ContextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleAssistant,
+			Record: observability.RecordEvent{
+				Component: observability.ComponentTTS,
+				Event:     observability.TTSSpeaking,
+				Attributes: observability.Attributes{
+					"type": "speaking",
+					"text": input.Text,
+				},
+				OccurredAt: time.Now(),
 			},
-			Time: time.Now(),
 		})
 		return nil
 	case internal_type.TextToSpeechDonePacket:
@@ -246,10 +263,16 @@ func (g *googleTextToSpeech) recvLoop(streamClient texttospeechpb.TextToSpeech_S
 				g.mu.Unlock()
 				g.onPacket(
 					internal_type.TextToSpeechEndPacket{ContextID: effectiveCtx},
-					internal_type.ConversationEventPacket{
-						Name: "tts",
-						Data: map[string]string{"type": "completed"},
-						Time: time.Now(),
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   effectiveCtx,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleAssistant,
+						Record: observability.RecordEvent{
+							Component:  observability.ComponentTTS,
+							Event:      observability.TTSCompleted,
+							Attributes: observability.Attributes{"type": "completed"},
+							OccurredAt: time.Now(),
+						},
 					},
 				)
 				return
@@ -305,12 +328,17 @@ func (g *googleTextToSpeech) recvLoop(streamClient texttospeechpb.TextToSpeech_S
 		}
 		g.mu.Unlock()
 		if !metricSent && !startedAt.IsZero() {
-			g.onPacket(internal_type.AssistantMessageMetricPacket{
-				ContextID: effectiveContextId,
-				Metrics: []*protos.Metric{{
-					Name:  "tts_latency_ms",
-					Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
-				}},
+			g.onPacket(internal_type.ObservabilityMetricRecordPacket{
+				ContextID:   effectiveContextId,
+				Scope:       internal_type.ObservabilityRecordScopeMessage,
+				MessageRole: observability.MessageRoleAssistant,
+				Record: observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:  "tts_latency_ms",
+						Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
+					}},
+					Attributes: observability.Attributes{"provider": g.Name()},
+				},
 			})
 		}
 		if err := g.onPacket(internal_type.TextToSpeechAudioPacket{ContextID: effectiveContextId, AudioChunk: audioContent}); err != nil {
@@ -348,23 +376,42 @@ func (g *googleTextToSpeech) Close(ctx context.Context) error {
 	g.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		g.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "tts",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": g.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentTTS,
+					Event:     observability.TTSClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": g.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_TTS_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total TTS connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentTTS,
+					Provider:  g.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   g.Name(),
+						"metric":     type_enums.CONVERSATION_TTS_DURATION.String(),
+					},
+				},
 			},
 		)
 	}

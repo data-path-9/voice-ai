@@ -96,26 +96,3 @@ type CallFailedPipeline struct {
 }
 
 func (p CallFailedPipeline) CallID() string { return p.ID }
-
-type EventEmittedPipeline struct {
-	ID    string
-	Event string
-	Data  map[string]string
-}
-
-func (p EventEmittedPipeline) CallID() string { return p.ID }
-
-type MetricEmittedPipeline struct {
-	ID      string
-	Metrics []*protos.Metric
-}
-
-func (p MetricEmittedPipeline) CallID() string { return p.ID }
-
-type DTMFReceivedPipeline struct {
-	ID       string
-	Digit    string
-	Duration int
-}
-
-func (p DTMFReceivedPipeline) CallID() string { return p.ID }

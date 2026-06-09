@@ -12,7 +12,7 @@ import (
 	"time"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
-	observe "github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
@@ -59,17 +59,18 @@ func (r *genericRequestor) initializeGreeting(ctx context.Context, behavior *int
 	if strings.TrimSpace(greetingContent) == "" {
 		return
 	}
-	if err := r.OnPacket(ctx,
+	_ = r.OnPacket(ctx,
 		internal_type.InjectMessagePacket{ContextID: r.GetID(), Text: greetingContent},
-		internal_type.ConversationEventPacket{
-			Name: "behavior",
-			Data: map[string]string{"type": "greeting", "text_chars": fmt.Sprintf("%d", len(greetingContent))},
-			Time: time.Now(),
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID: r.GetID(),
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewConversationEventRecord(observability.ConversationAgentStateChanged, observability.Attributes{
+				"type":       "greeting",
+				"text_chars": fmt.Sprintf("%d", len(greetingContent)),
+			}),
 		},
 		internal_type.StartIdleTimeoutPacket{ContextID: r.GetID()},
-	); err != nil {
-		r.logger.Errorf("error while sending greeting message: %v", err)
-	}
+	)
 }
 
 // initializeIdleTimeout starts the idle timeout timer if configured.
@@ -79,9 +80,7 @@ func (r *genericRequestor) initializeIdleTimeout(ctx context.Context, behavior *
 	if behavior.IdleTimeout == nil || *behavior.IdleTimeout <= 0 {
 		return
 	}
-	if err := r.OnPacket(ctx, internal_type.StartIdleTimeoutPacket{ContextID: r.GetID()}); err != nil {
-		r.logger.Errorf("error enqueueing start idle timeout packet: %v", err)
-	}
+	_ = r.OnPacket(ctx, internal_type.StartIdleTimeoutPacket{ContextID: r.GetID()})
 }
 
 // initializeMaxSessionDuration sets up the max session duration timer if configured.
@@ -93,20 +92,20 @@ func (r *genericRequestor) initializeMaxSessionDuration(ctx context.Context, beh
 	r.maxSessionTimer = time.AfterFunc(timeoutDuration, func() {
 		if r.Ready() {
 			r.OnPacket(r.sessionCtx,
-				internal_type.ConversationEventPacket{
+				internal_type.ObservabilityEventRecordPacket{
 					ContextID: r.GetID(),
-					Name:      observe.ComponentSession,
-					Data: map[string]string{
-						observe.DataType:   observe.EventDisconnectRequested,
-						observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String()},
-					Time: time.Now(),
+					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Record: observability.NewConversationEventRecord(observability.ConversationCompleted, observability.Attributes{
+						"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
+					}),
 				},
-				internal_type.ConversationMetadataPacket{
-					ContextID: r.Conversation().Id,
-					Metadata: []*protos.Metadata{{
+				internal_type.ObservabilityMetadataRecordPacket{
+					ContextID: r.GetID(),
+					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
 						Key:   "disconnect_reason",
 						Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
-					}},
+					}}),
 				},
 			)
 		}
@@ -120,7 +119,6 @@ func (r *genericRequestor) initializeMaxSessionDuration(ctx context.Context, beh
 func (r *genericRequestor) OnError(ctx context.Context) error {
 	behavior, err := r.GetBehavior()
 	if err != nil {
-		r.logger.Warnf("no error message configured for assistant")
 		return nil
 	}
 
@@ -132,18 +130,19 @@ func (r *genericRequestor) OnError(ctx context.Context) error {
 	}
 
 	r.Transition(Interrupted)
-	if err := r.OnPacket(ctx,
+	_ = r.OnPacket(ctx,
 		internal_type.TextToSpeechInterruptPacket{ContextID: r.GetID()},
 		internal_type.InjectMessagePacket{ContextID: r.GetID(), Text: mistakeContent},
-		internal_type.ConversationEventPacket{
-			Name: "behavior",
-			Data: map[string]string{"type": "error", "text_chars": fmt.Sprintf("%d", len(mistakeContent))},
-			Time: time.Now(),
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID: r.GetID(),
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewConversationEventRecord(observability.ConversationAgentStateChanged, observability.Attributes{
+				"type":       "error",
+				"text_chars": fmt.Sprintf("%d", len(mistakeContent)),
+			}),
 		},
 		internal_type.StartIdleTimeoutPacket{ContextID: r.GetID()},
-	); err != nil {
-		r.logger.Errorf("error while sending error message: %v", err)
-	}
+	)
 
 	return nil
 }
@@ -154,7 +153,6 @@ func (r *genericRequestor) OnError(ctx context.Context) error {
 func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 	behavior, err := r.GetBehavior()
 	if err != nil {
-		r.logger.Debugf("no idle timeout behavior configured for assistant")
 		return nil
 	}
 
@@ -167,20 +165,20 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 		if r.idleTimeoutCount >= *behavior.IdleTimeoutBackoff {
 			if r.Ready() {
 				r.OnPacket(r.sessionCtx,
-					internal_type.ConversationEventPacket{
+					internal_type.ObservabilityEventRecordPacket{
 						ContextID: r.GetID(),
-						Name:      observe.ComponentSession,
-						Data: map[string]string{
-							observe.DataType:   observe.EventDisconnectRequested,
-							observe.DataReason: protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT.String()},
-						Time: time.Now(),
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
+						Record: observability.NewConversationEventRecord(observability.ConversationCompleted, observability.Attributes{
+							"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT.String(),
+						}),
 					},
-					internal_type.ConversationMetadataPacket{
-						ContextID: r.Conversation().Id,
-						Metadata: []*protos.Metadata{{
+					internal_type.ObservabilityMetadataRecordPacket{
+						ContextID: r.GetID(),
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
+						Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
 							Key:   "disconnect_reason",
 							Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT.String(),
-						}},
+						}}),
 					},
 				)
 			}
@@ -195,7 +193,6 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 	r.idleTimeoutCount++
 	timeoutContent := r.getIdleTimeoutMessage(behavior)
 	if timeoutContent == "" {
-		r.logger.Warnf("empty idle timeout message")
 		return nil
 	}
 
@@ -209,22 +206,20 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 	r.Transition(Interrupted)
 	contextID := r.GetID()
 
-	if err := r.OnPacket(ctx,
+	_ = r.OnPacket(ctx,
 		internal_type.TextToSpeechInterruptPacket{ContextID: contextID},
 		internal_type.InjectMessagePacket{ContextID: contextID, Text: timeoutContent},
-		internal_type.ConversationEventPacket{
-			Name: "behavior",
-			Data: map[string]string{
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID: contextID,
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewConversationEventRecord(observability.ConversationAgentStateChanged, observability.Attributes{
 				"type":      "idle_timeout",
 				"count":     fmt.Sprintf("%d", r.idleTimeoutCount),
 				"max_count": fmt.Sprintf("%d", maxCount),
-			},
-			Time: time.Now(),
+			}),
 		},
 		internal_type.StartIdleTimeoutPacket{ContextID: contextID},
-	); err != nil {
-		r.logger.Errorf("error while sending idle timeout message: %v", err)
-	}
+	)
 
 	return nil
 }

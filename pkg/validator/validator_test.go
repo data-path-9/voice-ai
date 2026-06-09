@@ -34,8 +34,16 @@ func TestNonNil(t *testing.T) {
 	if !NonNil(&value) {
 		t.Fatal("expected non-nil pointer to pass validation")
 	}
-	if NonNil[string](nil) {
+	var valuePtr *string
+	if NonNil(valuePtr) {
 		t.Fatal("expected nil pointer to fail validation")
+	}
+	var iface interface{} = valuePtr
+	if NonNil(iface) {
+		t.Fatal("expected typed nil interface value to fail validation")
+	}
+	if !NonNil("value") {
+		t.Fatal("expected non-pointer value to pass validation")
 	}
 }
 

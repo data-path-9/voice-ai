@@ -30,6 +30,16 @@ const (
 	StatusCancelled = "cancelled" // Provider reported terminal cancellation before media claim
 )
 
+const (
+	CallStatusNew       = "new"
+	CallStatusInitiated = "initiated"
+	CallStatusRinging   = "ringing"
+	CallStatusAnswered  = "answered"
+	CallStatusFailed    = "failed"
+	CallStatusCompleted = "completed"
+	CallStatusCancelled = "cancelled"
+)
+
 // CallContext holds all the information needed to resolve a call session.
 // It bridges the gap between the HTTP call-setup request (inbound webhook or outbound gRPC)
 // and the AudioSocket/WebSocket connection that follows.

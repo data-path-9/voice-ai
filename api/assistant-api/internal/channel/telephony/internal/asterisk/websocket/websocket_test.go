@@ -95,7 +95,12 @@ func TestNewAsteriskWebsocketStreamer_WiresMediaSession(t *testing.T) {
 		Provider:       "asterisk_ws",
 	}
 
-	streamer, err := NewAsteriskWebsocketStreamer(logger, nil, callContext, nil)
+	streamer, err := New(
+		WithLogger(logger),
+		WithConnection(nil),
+		WithCallContext(callContext),
+		WithVaultCredential(nil),
+	)
 	require.NoError(t, err)
 	asteriskStreamer, ok := streamer.(*asteriskWebsocketStreamer)
 	require.True(t, ok, "expected asterisk websocket streamer")
@@ -114,7 +119,7 @@ func TestHandleAudioData_EmitsBridgeUserAudio(t *testing.T) {
 	}
 	mediaEngine := &fakeAsteriskMediaEngine{}
 	asteriskStreamer := &asteriskWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	asteriskStreamer.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     asteriskStreamer.Ctx,
@@ -150,7 +155,7 @@ func TestHandleAudioData_ReturnsMediaProcessingError(t *testing.T) {
 	}
 	mediaEngine := &fakeAsteriskMediaEngine{processError: errors.New("media process failed")}
 	asteriskStreamer := &asteriskWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, callContext, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
 	}
 	asteriskStreamer.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
 		Context:     asteriskStreamer.Ctx,
@@ -261,9 +266,8 @@ func TestSend_TextAssistantMessage_NoError(t *testing.T) {
 func TestSend_UnhandledType_NoError(t *testing.T) {
 	aws := newTestStreamer(t)
 
-	// An unrecognised message type (e.g. ConversationEvent) falls through the
-	// switch and should return nil without error.
-	msg := &protos.ConversationEvent{Name: "test"}
+	// An unrecognised message type falls through the switch and returns nil.
+	msg := &protos.ConversationUserMessage{}
 
 	err := aws.Send(msg)
 	assert.NoError(t, err)

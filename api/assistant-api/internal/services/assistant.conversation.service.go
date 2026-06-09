@@ -160,13 +160,6 @@ type AssistantConversationService interface {
 		*workflow_api.Paginate,
 		*workflow_api.Ordering, *GetMessageOption) (int64, []*internal_message_gorm.AssistantConversationMessage, error)
 
-	GetAllMessageActions(context.Context,
-		types.SimplePrinciple,
-		uint64,
-		[]*workflow_api.Criteria,
-		*workflow_api.Paginate,
-		*workflow_api.Ordering) (int64, []*internal_conversation_entity.AssistantConversationAction, error)
-
 	GetAllAssistantMessage(
 		ctx context.Context,
 		auth types.SimplePrinciple,
@@ -181,14 +174,6 @@ type AssistantConversationService interface {
 		criterias []*workflow_api.Criteria,
 		paginate *workflow_api.Paginate,
 		ordering *workflow_api.Ordering, opts *GetMessageOption) (int64, []*internal_message_gorm.AssistantConversationMessage, error)
-
-	CreateConversationMetric(
-		ctx context.Context,
-		auth types.SimplePrinciple,
-		assistantId uint64,
-		assistantConversationId uint64,
-		name, description, value string,
-	) (*internal_conversation_entity.AssistantConversationMetric, error)
 
 	CreateCustomConversationMetric(
 		ctx context.Context,
@@ -209,16 +194,7 @@ type AssistantConversationService interface {
 		message string,
 	) (*internal_message_gorm.AssistantConversationMessage, error)
 
-	//
-	// UpdateConversationMessage(ctx context.Context,
-	// 	auth types.SimplePrinciple,
-	// 	assistantConversationId uint64,
-	// 	assistantConversationMessageId string,
-	// 	message *types.Message,
-	// 	status type_enums.RecordState,
-	// ) (*internal_message_gorm.AssistantConversationMessage, error)
-
-	ApplyMessageMetadata(
+	CreateOrUpdateMessageMetadata(
 		ctx context.Context,
 		auth types.SimplePrinciple,
 		assistantConversationId uint64,
@@ -226,7 +202,7 @@ type AssistantConversationService interface {
 		metadata []*protos.Metadata,
 	) ([]*internal_message_gorm.AssistantConversationMessageMetadata, error)
 
-	ApplyMessageMetrics(ctx context.Context,
+	CreateOrUpdateMessageMetrics(ctx context.Context,
 		auth types.SimplePrinciple,
 		assistantConversationId uint64,
 		assistantConversationMessageId string,
@@ -242,32 +218,9 @@ type AssistantConversationService interface {
 		assistantProviderModelId uint64,
 		direction type_enums.ConversationDirection, source utils.RapidaSource) (*internal_conversation_entity.AssistantConversation, error)
 
-	CreateLLMAction(ctx context.Context,
-		auth types.SimplePrinciple,
-		assistantId uint64,
-		conversationId uint64,
-		assistantConversationMessageId string,
-		in, out *protos.Message, metrics []*protos.Metric) (*internal_conversation_entity.AssistantConversationAction, error)
-
-	CreateToolAction(ctx context.Context,
-		auth types.SimplePrinciple,
-		assistantId uint64,
-		conversationId uint64,
-		assistantConversationMessageId string,
-		in, out map[string]interface{},
-		metrics []*protos.Metric) (
-		*internal_conversation_entity.AssistantConversationAction, error)
-
 	// all about conversation
-	ApplyConversationMetadata(
-		ctx context.Context,
-		auth types.SimplePrinciple,
-		assistantId uint64,
-		assistantConversationId uint64,
-		metadata []*types.Metadata,
-	) ([]*internal_conversation_entity.AssistantConversationMetadata, error)
 
-	ApplyConversationArgument(
+	CreateOrUpdateConversationArgument(
 		ctx context.Context,
 		auth types.SimplePrinciple,
 		assistantId uint64,
@@ -275,24 +228,28 @@ type AssistantConversationService interface {
 		arguments map[string]interface{},
 	) ([]*internal_conversation_entity.AssistantConversationArgument, error)
 
-	ApplyConversationOption(ctx context.Context,
+	CreateOrUpdateConversationOption(ctx context.Context,
 		auth types.SimplePrinciple,
 		assistantId uint64,
 		assistantConversationId uint64,
 		opts map[string]interface{}) ([]*internal_conversation_entity.AssistantConversationOption, error)
 
-	ApplyConversationMetrics(
+	//
+	CreateOrUpdateConversationMetrics(
 		ctx context.Context,
 		auth types.SimplePrinciple,
 		assistantId uint64,
 		assistantConversationId uint64,
-		metrics []*types.Metric,
+		metrics []*protos.Metric,
 	) ([]*internal_conversation_entity.AssistantConversationMetric, error)
 
-	// PersistMetrics/PersistMetadata satisfy observe.ConversationPersister so the
-	// service can be passed directly to the observer without closure wrappers.
-	PersistMetrics(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, metrics []*types.Metric) error
-	PersistMetadata(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, metadata []*types.Metadata) error
+	CreateOrUpdateConversationMetadata(
+		ctx context.Context,
+		auth types.SimplePrinciple,
+		assistantId uint64,
+		assistantConversationId uint64,
+		metadata []*protos.Metadata,
+	) ([]*internal_conversation_entity.AssistantConversationMetadata, error)
 
 	CreateConversationRecording(
 		ctx context.Context,

@@ -5,49 +5,49 @@
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
 package telemetry
 
-import (
-	"time"
+import "time"
 
-	"github.com/rapidaai/protos"
-)
-
-// SessionMeta holds stable per-session identifiers passed to every exporter.
-type SessionMeta struct {
-	AssistantID             uint64
-	AssistantConversationID uint64
-	ProjectID               uint64
-	OrganizationID          uint64
+type Record interface {
+	isTelemetryRecord()
 }
 
-// EventRecord represents a named event fired during a voice session.
-// MessageID identifies the interaction turn (context ID) in which the event occurred.
+type Scope struct {
+	ProjectID       uint64
+	OrganizationID  uint64
+	Name            string
+	ScopeAttributes map[string]string
+}
+
+type LogRecord struct {
+	ID         string
+	Context    map[string]string
+	Level      string
+	Message    string
+	Attributes map[string]string
+	OccurredAt time.Time
+}
+
+func (LogRecord) isTelemetryRecord() {}
+
 type EventRecord struct {
-	ConversationID uint64 // assistant conversation ID
-	MessageID      string // turn/interaction context ID
-	Name           string
-	Data           map[string]string
-	Time           time.Time
+	ID         string
+	Context    map[string]string
+	Event      string
+	Component  string
+	Attributes map[string]string
+	OccurredAt time.Time
 }
 
-// MetricRecord is a sealed interface for typed metrics.
-// Implementations: ConversationMetricRecord, MessageMetricRecord.
-type MetricRecord interface{ isMetricRecord() }
+func (EventRecord) isTelemetryRecord() {}
 
-// ConversationMetricRecord carries metrics scoped to an entire conversation.
-type ConversationMetricRecord struct {
-	ConversationID string
-	Metrics        []*protos.Metric
-	Time           time.Time
+type MetricRecord struct {
+	ID          string
+	Context     map[string]string
+	Name        string
+	Value       string
+	Description string
+	Attributes  map[string]string
+	OccurredAt  time.Time
 }
 
-func (ConversationMetricRecord) isMetricRecord() {}
-
-// MessageMetricRecord carries metrics scoped to a single message/turn.
-type MessageMetricRecord struct {
-	MessageID      string // turn context ID
-	ConversationID string // for correlation
-	Metrics        []*protos.Metric
-	Time           time.Time
-}
-
-func (MessageMetricRecord) isMetricRecord() {}
+func (MetricRecord) isTelemetryRecord() {}
