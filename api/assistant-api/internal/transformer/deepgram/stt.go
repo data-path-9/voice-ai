@@ -83,7 +83,6 @@ func (dg *deepgramSTT) Initialize() error {
 			internal_type.ObservabilityLogRecordPacket{
 				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
-					ID:      dg.getContextID(),
 					Level:   observability.LevelError,
 					Message: fmt.Sprintf("deepgram-stt: error while initialization %s", err.Error()),
 					Attributes: observability.Attributes{
@@ -101,9 +100,8 @@ func (dg *deepgramSTT) Initialize() error {
 			internal_type.ObservabilityLogRecordPacket{
 				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
-					ID:      dg.getContextID(),
 					Level:   observability.LevelError,
-					Message: fmt.Sprintf("deepgram-stt: error while performing connect"),
+					Message: "deepgram-stt: error while performing connect",
 					Attributes: observability.Attributes{
 						"component": observability.ComponentSTT.String(),
 						"provider":  dg.Name(),
@@ -127,7 +125,6 @@ func (dg *deepgramSTT) Initialize() error {
 		internal_type.ObservabilityLogRecordPacket{
 			Scope: internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.RecordLog{
-				ID:      dg.getContextID(),
 				Level:   observability.LevelInfo,
 				Message: "deepgram-stt: initialization completed",
 				Attributes: observability.Attributes{

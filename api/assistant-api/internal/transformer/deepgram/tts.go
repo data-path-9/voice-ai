@@ -242,8 +242,7 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 		}
 		t.onPacket(internal_type.ObservabilityEventRecordPacket{
 			ContextID: input.ContextID,
-			Scope:     internal_type.ObservabilityRecordScopeAssistant,
-
+			Scope:     internal_type.ObservabilityRecordScopeAssistantMessage,
 			Record: observability.RecordEvent{
 				Component:  observability.ComponentTTS,
 				Event:      observability.TTSInterrupted,
@@ -294,8 +293,7 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 		}
 		t.onPacket(internal_type.ObservabilityEventRecordPacket{
 			ContextID: input.ContextID,
-			Scope:     internal_type.ObservabilityRecordScopeAssistant,
-
+			Scope:     internal_type.ObservabilityRecordScopeAssistantMessage,
 			Record: observability.RecordEvent{
 				Component: observability.ComponentTTS,
 				Event:     observability.TTSSpeaking,
