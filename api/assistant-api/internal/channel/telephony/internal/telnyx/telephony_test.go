@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telnyx "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -541,7 +542,7 @@ func TestOutboundCall_MissingCredentials(t *testing.T) {
 	if info.Status != "FAILED" {
 		t.Errorf("expected FAILED status, got %s", info.Status)
 	}
-	if statusUpdate.CallStatus != internal_telephony_base.OutboundCallStatusFailed {
+	if statusUpdate.CallStatus != callcontext.CallStatusFailed {
 		t.Errorf("expected outbound status failed, got %s", statusUpdate.CallStatus)
 	}
 	if statusUpdate.FailureClass != internal_telephony_base.OutboundFailureClassAuthentication {

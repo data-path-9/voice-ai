@@ -76,6 +76,15 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 		},
 	})
 	if statusInfo.Error != nil {
+		if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+			CallStatus:       callcontext.CallStatusFailed,
+			CallError:        statusInfo.Error.Error,
+			FailureClass:     "provider_response",
+			FailureReason:    statusInfo.Error.Reason,
+			DisconnectReason: statusInfo.Error.Reason,
+		}); err != nil {
+			cApi.logger.Warnf("failed to update call context %s from failed callback: %v", cc.ContextID, err)
+		}
 		_ = observer.Record(c, scope, observability.RecordMetric{
 			Metrics: observability.CallStatusMetric("FAILED", statusInfo.Error.Reason),
 		})
@@ -83,6 +92,19 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 			_ = observer.Record(c, scope, observability.RecordMetadata{
 				Metadata: observability.DisconnectMetadata(statusInfo.Error.Reason, "", ""),
 			})
+		}
+	} else if statusInfo.Completed {
+		if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+			CallStatus:       callcontext.CallStatusCompleted,
+			DisconnectReason: statusInfo.Event,
+		}); err != nil {
+			cApi.logger.Warnf("failed to update call context %s from completed callback: %v", cc.ContextID, err)
+		}
+	} else if validator.NotBlank(statusInfo.Event) {
+		if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+			CallStatus: statusInfo.Event,
+		}); err != nil {
+			cApi.logger.Warnf("failed to update call context %s from callback event %s: %v", cc.ContextID, statusInfo.Event, err)
 		}
 	}
 	metrics := make([]*protos.Metric, 0, 2)
@@ -94,11 +116,6 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 	}
 	if len(metrics) > 0 {
 		_ = observer.Record(c, scope, observability.RecordMetric{Metrics: metrics})
-	}
-	if statusInfo.Completed {
-		if err := cApi.callContextStore.UpdateField(c, cc.ContextID, "status", callcontext.StatusCompleted); err != nil {
-			cApi.logger.Warnf("failed to mark call context %s completed: %v", cc.ContextID, err)
-		}
 	}
 	if err := observer.Close(context.Background()); err != nil {
 		cApi.logger.Warnf("failed to close callback observability recorder: %v", err)
@@ -158,6 +175,15 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 			},
 		})
 		if statusInfo.Error != nil {
+			if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+				CallStatus:       callcontext.CallStatusFailed,
+				CallError:        statusInfo.Error.Error,
+				FailureClass:     "provider_response",
+				FailureReason:    statusInfo.Error.Reason,
+				DisconnectReason: statusInfo.Error.Reason,
+			}); err != nil {
+				cApi.logger.Warnf("failed to update call context %s from failed callback: %v", cc.ContextID, err)
+			}
 			_ = observer.Record(c, scope, observability.RecordMetric{
 				Metrics: observability.CallStatusMetric("FAILED", statusInfo.Error.Reason),
 			})
@@ -165,6 +191,19 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 				_ = observer.Record(c, scope, observability.RecordMetadata{
 					Metadata: observability.DisconnectMetadata(statusInfo.Error.Reason, "", ""),
 				})
+			}
+		} else if statusInfo.Completed {
+			if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+				CallStatus:       callcontext.CallStatusCompleted,
+				DisconnectReason: statusInfo.Event,
+			}); err != nil {
+				cApi.logger.Warnf("failed to update call context %s from completed callback: %v", cc.ContextID, err)
+			}
+		} else if validator.NotBlank(statusInfo.Event) {
+			if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+				CallStatus: statusInfo.Event,
+			}); err != nil {
+				cApi.logger.Warnf("failed to update call context %s from callback event %s: %v", cc.ContextID, statusInfo.Event, err)
 			}
 		}
 		metrics := make([]*protos.Metric, 0, 2)
@@ -176,11 +215,6 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 		}
 		if len(metrics) > 0 {
 			_ = observer.Record(c, scope, observability.RecordMetric{Metrics: metrics})
-		}
-		if statusInfo.Completed {
-			if err := cApi.callContextStore.UpdateField(c, cc.ContextID, "status", callcontext.StatusCompleted); err != nil {
-				cApi.logger.Warnf("failed to mark call context %s completed: %v", cc.ContextID, err)
-			}
 		}
 		if err := observer.Close(context.Background()); err != nil {
 			cApi.logger.Warnf("failed to close callback observability recorder: %v", err)

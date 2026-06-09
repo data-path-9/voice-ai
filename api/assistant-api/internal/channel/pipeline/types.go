@@ -7,8 +7,6 @@
 package channel_pipeline
 
 import (
-	"time"
-
 	"github.com/gin-gonic/gin"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
@@ -16,7 +14,6 @@ import (
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/validator"
-	"github.com/rapidaai/protos"
 )
 
 type Pipeline interface {
@@ -177,44 +174,6 @@ func (p CallActivePipeline) Validate() bool {
 	return validator.NotBlank(p.ID)
 }
 
-type DisconnectRequestedPipeline struct {
-	ID     string
-	Reason string
-}
-
-func (p DisconnectRequestedPipeline) CallID() string { return p.ID }
-func (p DisconnectRequestedPipeline) Validate() bool {
-	return validator.NotBlank(p.ID) &&
-		validator.NotBlank(p.Reason)
-}
-
-type CallCompletedPipeline struct {
-	ID       string
-	Duration time.Duration
-	Messages int
-	Reason   string
-}
-
-func (p CallCompletedPipeline) CallID() string { return p.ID }
-func (p CallCompletedPipeline) Validate() bool {
-	return validator.NotBlank(p.ID) &&
-		p.Duration > 0 &&
-		validator.NotBlank(p.Reason)
-}
-
-type CallFailedPipeline struct {
-	ID    string
-	Stage string
-	Error error
-}
-
-func (p CallFailedPipeline) CallID() string { return p.ID }
-func (p CallFailedPipeline) Validate() bool {
-	return validator.NotBlank(p.ID) &&
-		validator.NotBlank(p.Stage) &&
-		validator.NonNil(p.Error)
-}
-
 type OutboundRequestedPipeline struct {
 	ID          string
 	Auth        types.SimplePrinciple
@@ -246,28 +205,4 @@ func (p OutboundDialedPipeline) CallID() string { return p.ID }
 func (p OutboundDialedPipeline) Validate() bool {
 	return validator.NotBlank(p.ID) &&
 		validator.NonNil(p.CallInfo)
-}
-
-type EventEmittedPipeline struct {
-	ID    string
-	Event string
-	Data  map[string]string
-}
-
-func (p EventEmittedPipeline) CallID() string { return p.ID }
-func (p EventEmittedPipeline) Validate() bool {
-	return validator.NotBlank(p.ID) &&
-		validator.NotBlank(p.Event) &&
-		validator.NonNil(p.Data)
-}
-
-type MetricEmittedPipeline struct {
-	ID      string
-	Metrics []*protos.Metric
-}
-
-func (p MetricEmittedPipeline) CallID() string { return p.ID }
-func (p MetricEmittedPipeline) Validate() bool {
-	return validator.NotBlank(p.ID) &&
-		validator.NotEmpty(p.Metrics)
 }

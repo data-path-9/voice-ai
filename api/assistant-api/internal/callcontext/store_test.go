@@ -88,7 +88,7 @@ func TestStoreUpdateCallStatus(t *testing.T) {
 	}
 
 	err = store.UpdateCallStatus(ctx, contextID, CallStatusUpdate{
-		CallStatus:         StatusFailed,
+		CallStatus:         CallStatusFailed,
 		CallError:          "Provider 486 Busy Here",
 		FailureClass:       "busy",
 		FailureReason:      "Busy Here",
@@ -107,7 +107,7 @@ func TestStoreUpdateCallStatus(t *testing.T) {
 	if got.Status != StatusFailed {
 		t.Fatalf("expected context status failed, got %q", got.Status)
 	}
-	if got.CallStatus != StatusFailed {
+	if got.CallStatus != CallStatusFailed {
 		t.Fatalf("expected call status failed, got %q", got.CallStatus)
 	}
 	if got.CallError != "Provider 486 Busy Here" {
@@ -260,7 +260,7 @@ func TestStoreUpdateCallStatus_CancelledMarksContextFailed(t *testing.T) {
 	}
 
 	err = store.UpdateCallStatus(ctx, contextID, CallStatusUpdate{
-		CallStatus:       "cancelled",
+		CallStatus:       CallStatusCancelled,
 		FailureClass:     "cancelled",
 		DisconnectReason: "outbound_cancelled_before_answer",
 	})
@@ -275,7 +275,7 @@ func TestStoreUpdateCallStatus_CancelledMarksContextFailed(t *testing.T) {
 	if got.Status != StatusFailed {
 		t.Fatalf("expected cancelled outbound context to be failed, got %q", got.Status)
 	}
-	if got.CallStatus != "cancelled" {
+	if got.CallStatus != CallStatusCancelled {
 		t.Fatalf("expected call status cancelled, got %q", got.CallStatus)
 	}
 }
@@ -295,7 +295,7 @@ func TestStoreUpdateCallStatus_CompletedMarksContextCompleted(t *testing.T) {
 	}
 
 	err = store.UpdateCallStatus(ctx, contextID, CallStatusUpdate{
-		CallStatus:         StatusCompleted,
+		CallStatus:         CallStatusCompleted,
 		DisconnectReason:   "normal_clearing",
 		ProviderStatusCode: 16,
 	})
@@ -310,7 +310,7 @@ func TestStoreUpdateCallStatus_CompletedMarksContextCompleted(t *testing.T) {
 	if got.Status != StatusCompleted {
 		t.Fatalf("expected context status completed, got %q", got.Status)
 	}
-	if got.CallStatus != StatusCompleted {
+	if got.CallStatus != CallStatusCompleted {
 		t.Fatalf("expected call status completed, got %q", got.CallStatus)
 	}
 	if got.DisconnectReason != "normal_clearing" {
@@ -318,6 +318,45 @@ func TestStoreUpdateCallStatus_CompletedMarksContextCompleted(t *testing.T) {
 	}
 	if got.ProviderStatusCode != 16 {
 		t.Fatalf("expected provider status 16, got %d", got.ProviderStatusCode)
+	}
+}
+
+func TestStoreUpdateCallStatus_ExpectedCallStatus(t *testing.T) {
+	store, ctx := newTestStore(t)
+
+	contextID, err := store.Save(ctx, &CallContext{
+		ContextID:      "expected-call-status-context",
+		AssistantID:    77,
+		ConversationID: 1001,
+		Provider:       "sip",
+		Direction:      "outbound",
+		CallStatus:     CallStatusNew,
+	})
+	if err != nil {
+		t.Fatalf("failed to save call context: %v", err)
+	}
+	if err := store.UpdateCallStatus(ctx, contextID, CallStatusUpdate{
+		CallStatus: CallStatusRinging,
+	}); err != nil {
+		t.Fatalf("UpdateCallStatus returned error: %v", err)
+	}
+	if err := store.UpdateCallStatus(ctx, contextID, CallStatusUpdate{
+		ExpectedCallStatus: CallStatusNew,
+		CallStatus:         CallStatusFailed,
+		FailureClass:       "no_answer",
+	}); err != nil {
+		t.Fatalf("conditional UpdateCallStatus returned error: %v", err)
+	}
+
+	got, err := store.Get(ctx, contextID)
+	if err != nil {
+		t.Fatalf("Get returned error: %v", err)
+	}
+	if got.CallStatus != CallStatusRinging {
+		t.Fatalf("expected call status ringing to be preserved, got %q", got.CallStatus)
+	}
+	if got.Status != StatusPending {
+		t.Fatalf("expected context status pending, got %q", got.Status)
 	}
 }
 
@@ -330,12 +369,12 @@ func TestStoreUpdateField_DoesNotClaimTerminalContexts(t *testing.T) {
 	}{
 		{
 			name:           "failed",
-			callStatus:     StatusFailed,
+			callStatus:     CallStatusFailed,
 			expectedStatus: StatusFailed,
 		},
 		{
 			name:           "completed",
-			callStatus:     StatusCompleted,
+			callStatus:     CallStatusCompleted,
 			expectedStatus: StatusCompleted,
 		},
 		{
@@ -406,7 +445,7 @@ func TestStoreUpdateField_DoesNotClaimFailedContext(t *testing.T) {
 	}
 
 	err = store.UpdateCallStatus(ctx, contextID, CallStatusUpdate{
-		CallStatus:       StatusFailed,
+		CallStatus:       CallStatusFailed,
 		FailureClass:     "setup",
 		DisconnectReason: "outbound_setup_failed",
 	})

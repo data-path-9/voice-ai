@@ -37,7 +37,35 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 		}, errors.New(pkg_errors.CreatePhoneCallUnauthenticated.Error)
 	}
 
+	observer := cApi.Observability(ctx, auth, observability.WithGracePeriod())
+	defer observer.Close(context.Background())
+	_ = observer.Record(ctx, observability.Scope(observability.ProjectScope{}), observability.RecordLog{
+		Level:   observability.LevelInfo,
+		Message: "CreatePhoneCall request received",
+		Attributes: observability.Attributes{
+			"assistantId":      fmt.Sprintf("%d", ir.Assistant.GetAssistantId()),
+			"assistantVersion": ir.GetAssistant().GetVersion(),
+			"FromNumber":       ir.GetFromNumber(),
+			"ToNumber":         ir.GetToNumber(),
+		},
+	})
+
 	if utils.IsEmpty(ir.GetToNumber()) {
+		scope := observability.Scope(observability.ProjectScope{})
+		if ir.GetAssistant().GetAssistantId() > 0 {
+			scope = observability.AssistantScope{AssistantID: ir.GetAssistant().GetAssistantId()}
+		}
+		_ = observer.Record(ctx, scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall validation failed: missing to_number",
+			Attributes: observability.Attributes{
+				"failure_stage": "validation",
+				"field":         "to_number",
+				"error_code":    pkg_errors.CreatePhoneCallMissingToNumber.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallMissingToNumber.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallMissingToNumber.HTTPStatusCode),
+			},
+		})
 		return &protos.CreatePhoneCallResponse{
 			Code:    pkg_errors.CreatePhoneCallMissingToNumber.HTTPStatusCodeInt32(),
 			Success: false,
@@ -51,6 +79,21 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 
 	preset.AssistantDefinition(ir.GetAssistant())
 	if !validator.OfAssistantDefinition(ir.GetAssistant()) {
+		scope := observability.Scope(observability.ProjectScope{})
+		if ir.GetAssistant().GetAssistantId() > 0 {
+			scope = observability.AssistantScope{AssistantID: ir.GetAssistant().GetAssistantId()}
+		}
+		_ = observer.Record(ctx, scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall validation failed: invalid assistant",
+			Attributes: observability.Attributes{
+				"failure_stage": "validation",
+				"field":         "assistant",
+				"error_code":    pkg_errors.CreatePhoneCallInvalidAssistant.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallInvalidAssistant.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallInvalidAssistant.HTTPStatusCode),
+			},
+		})
 		return &protos.CreatePhoneCallResponse{
 			Code:    pkg_errors.CreatePhoneCallInvalidAssistant.HTTPStatusCodeInt32(),
 			Success: false,
@@ -65,6 +108,19 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 	mtd, err := utils.AnyMapToInterfaceMap(ir.GetMetadata())
 	if err != nil {
 		cApi.logger.Errorf("create phone call invalid metadata: %v", err)
+		scope := observability.AssistantScope{AssistantID: ir.GetAssistant().GetAssistantId()}
+		_ = observer.Record(ctx, scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall validation failed: invalid metadata",
+			Attributes: observability.Attributes{
+				"failure_stage": "validation",
+				"field":         "metadata",
+				"error_code":    pkg_errors.CreatePhoneCallInvalidMetadata.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallInvalidMetadata.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallInvalidMetadata.HTTPStatusCode),
+				"detail":        err.Error(),
+			},
+		})
 		return &protos.CreatePhoneCallResponse{
 			Code:    pkg_errors.CreatePhoneCallInvalidMetadata.HTTPStatusCodeInt32(),
 			Success: false,
@@ -77,7 +133,18 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 	}
 	args, err := utils.AnyMapToInterfaceMap(ir.GetArgs())
 	if err != nil {
-		cApi.logger.Errorf("create phone call invalid arguments: %v", err)
+		_ = observer.Record(ctx, observability.AssistantScope{AssistantID: ir.GetAssistant().GetAssistantId()}, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall validation failed: invalid arguments",
+			Attributes: observability.Attributes{
+				"failure_stage": "validation",
+				"field":         "args",
+				"error_code":    pkg_errors.CreatePhoneCallInvalidArguments.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallInvalidArguments.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallInvalidArguments.HTTPStatusCode),
+				"detail":        err.Error(),
+			},
+		})
 		return &protos.CreatePhoneCallResponse{
 			Code:    pkg_errors.CreatePhoneCallInvalidArguments.HTTPStatusCodeInt32(),
 			Success: false,
@@ -90,7 +157,18 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 	}
 	opts, err := utils.AnyMapToInterfaceMap(ir.GetOptions())
 	if err != nil {
-		cApi.logger.Errorf("create phone call invalid options: %v", err)
+		_ = observer.Record(ctx, observability.AssistantScope{AssistantID: ir.GetAssistant().GetAssistantId()}, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall validation failed: invalid options",
+			Attributes: observability.Attributes{
+				"failure_stage": "validation",
+				"field":         "options",
+				"error_code":    pkg_errors.CreatePhoneCallInvalidOptions.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallInvalidOptions.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallInvalidOptions.HTTPStatusCode),
+				"detail":        err.Error(),
+			},
+		})
 		return &protos.CreatePhoneCallResponse{
 			Code:    pkg_errors.CreatePhoneCallInvalidOptions.HTTPStatusCodeInt32(),
 			Success: false,
@@ -101,9 +179,6 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 			},
 		}, errors.New(pkg_errors.CreatePhoneCallInvalidOptions.Error)
 	}
-
-	observer := cApi.Observability(ctx, auth, observability.WithGracePeriod())
-	defer observer.Close(context.Background())
 
 	// Pipeline handles the full outbound flow
 	result := cApi.channelPipeline.Run(ctx, channel_pipeline.OutboundRequestedPipeline{
@@ -121,6 +196,25 @@ func (cApi *ConversationGrpcApi) CreatePhoneCall(ctx context.Context, ir *protos
 
 	if result.Error != nil {
 		cApi.logger.Errorf("outbound call failed: %v", result.Error)
+		scope := observability.Scope(observability.AssistantScope{AssistantID: ir.GetAssistant().GetAssistantId()})
+		if result.ConversationID > 0 {
+			scope = observability.ConversationScope{
+				AssistantScope: observability.AssistantScope{AssistantID: ir.GetAssistant().GetAssistantId()},
+				ConversationID: result.ConversationID,
+			}
+		}
+		_ = observer.Record(ctx, scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall outbound dispatch failed",
+			Attributes: observability.Attributes{
+				"failure_stage": "dispatch",
+				"context_id":    result.ContextID,
+				"error_code":    pkg_errors.CreatePhoneCallInitiateOutbound.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallInitiateOutbound.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallInitiateOutbound.HTTPStatusCode),
+				"detail":        result.Error.Error(),
+			},
+		})
 		return &protos.CreatePhoneCallResponse{
 			Code:    pkg_errors.CreatePhoneCallInitiateOutbound.HTTPStatusCodeInt32(),
 			Success: false,

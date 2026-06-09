@@ -199,6 +199,7 @@ func (r *recorder) Record(ctx context.Context, scope Scope, records ...Record) e
 			return err
 		}
 		item.context = r.context
+		item.context.Auth = r.auth
 		if traceID, ok := ctx.Value(types.REQUEST_ID_KEY).(string); ok && traceID != "" {
 			item.context.TraceID = traceID
 		}
@@ -333,9 +334,6 @@ func (r *recorder) run() {
 	defer close(r.done)
 	for item := range r.queue {
 		ctx := context.Background()
-		if validator.NonNil(r.auth) {
-			ctx = context.WithValue(ctx, types.CTX_, r.auth)
-		}
 		err := r.fanout.Collect(ctx, item.scope, item.context, item.record)
 		if err != nil {
 			r.addError(err)

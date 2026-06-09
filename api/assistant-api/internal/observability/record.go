@@ -7,11 +7,14 @@
 package observability
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/rapidaai/pkg/types"
+	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
@@ -43,6 +46,37 @@ const (
 
 type Attributes map[string]string
 
+func AttributeValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	if typed, ok := value.(string); ok {
+		return typed
+	}
+
+	serialized, err := utils.Serialize(map[string]interface{}{
+		"attribute": value,
+	})
+	if err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(serialized, &payload); err != nil {
+		return string(serialized)
+	}
+	raw, ok := payload["attribute"]
+	if !ok {
+		return ""
+	}
+
+	var stringValue string
+	if err := json.Unmarshal(raw, &stringValue); err == nil {
+		return stringValue
+	}
+	return string(raw)
+}
+
 func (a Attributes) Clone() Attributes {
 	if len(a) == 0 {
 		return nil
@@ -56,6 +90,7 @@ func (a Attributes) Clone() Attributes {
 
 type Context struct {
 	TraceID string
+	Auth    types.SimplePrinciple
 }
 
 type GlobalScope struct {

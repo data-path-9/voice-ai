@@ -7,14 +7,11 @@
 package internal_telephony_base
 
 import (
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 )
 
 const (
-	OutboundCallStatusInitiated = "initiated"
-	OutboundCallStatusFailed    = "failed"
-	OutboundCallStatusCancelled = "cancelled"
-
 	OutboundFailureClassAuthentication   = "authentication"
 	OutboundFailureClassConfiguration    = "configuration"
 	OutboundFailureClassProviderAPI      = "provider_api"
@@ -40,7 +37,7 @@ func ReportOutboundInitiated(statusReporter internal_type.ProviderCallStatusRepo
 	}
 	statusReporter(internal_type.ProviderCallStatusUpdate{
 		ChannelUUID: channelUUID,
-		CallStatus:  OutboundCallStatusInitiated,
+		CallStatus:  callcontext.CallStatusNew,
 	})
 }
 
@@ -60,7 +57,7 @@ func ReportOutboundFailure(
 		errorMessage = err.Error()
 	}
 	statusReporter(internal_type.ProviderCallStatusUpdate{
-		CallStatus:         OutboundCallStatusFailed,
+		CallStatus:         callcontext.CallStatusFailed,
 		ErrorMessage:       errorMessage,
 		FailureClass:       failureClass,
 		FailureReason:      failureReason,

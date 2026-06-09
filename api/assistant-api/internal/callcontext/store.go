@@ -33,6 +33,7 @@ type Store interface {
 }
 
 type CallStatusUpdate struct {
+	ExpectedCallStatus string
 	CallStatus         string
 	CallError          string
 	FailureClass       string
@@ -166,16 +167,18 @@ func (s *postgresStore) UpdateCallStatus(ctx context.Context, contextID string, 
 		"provider_status_code": status.ProviderStatusCode,
 		"updated_date":         time.Now(),
 	}
-	if status.CallStatus == StatusFailed || status.CallStatus == StatusCancelled {
+	if status.CallStatus == CallStatusFailed || status.CallStatus == CallStatusCancelled {
 		updates["status"] = StatusFailed
 	}
-	if status.CallStatus == StatusCompleted {
+	if status.CallStatus == CallStatusCompleted {
 		updates["status"] = StatusCompleted
 	}
 
-	result := db.Model(&CallContext{}).
-		Where("context_id = ?", contextID).
-		Updates(updates)
+	query := db.Model(&CallContext{}).Where("context_id = ?", contextID)
+	if status.ExpectedCallStatus != "" {
+		query = query.Where("call_status = ?", status.ExpectedCallStatus)
+	}
+	result := query.Updates(updates)
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to update call status on call context %s: %w", contextID, result.Error)

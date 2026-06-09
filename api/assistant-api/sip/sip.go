@@ -409,7 +409,7 @@ func (m *SIPEngine) persistRemoteByeCallStatus(session *sip_infra.Session, metad
 		metadata.Reason = sip_infra.DisconnectReasonRemoteHangup
 	}
 	if err := m.callContextStore.UpdateCallStatus(context.Background(), contextID, callcontext.CallStatusUpdate{
-		CallStatus:         callcontext.StatusCompleted,
+		CallStatus:         callcontext.CallStatusCompleted,
 		DisconnectReason:   metadata.Reason,
 		ProviderStatusCode: metadata.ProviderStatusCode,
 	}); err != nil {

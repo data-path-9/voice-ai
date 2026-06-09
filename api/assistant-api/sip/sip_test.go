@@ -22,7 +22,7 @@ func TestPersistRemoteByeCallStatus_UpdatesCompletedDisconnectMetadata(t *testin
 	store := newSIPCallStatusTestStore(&callcontext.CallContext{
 		ContextID:  "ctx-bye",
 		Status:     callcontext.StatusClaimed,
-		CallStatus: "answered",
+		CallStatus: callcontext.CallStatusAnswered,
 	})
 	engine := &SIPEngine{
 		logger:           newSIPTestLogger(t),
@@ -37,7 +37,7 @@ func TestPersistRemoteByeCallStatus_UpdatesCompletedDisconnectMetadata(t *testin
 
 	require.NotNil(t, store.lastStatus)
 	assert.Equal(t, callcontext.StatusCompleted, store.callContext.Status)
-	assert.Equal(t, callcontext.StatusCompleted, store.lastStatus.CallStatus)
+	assert.Equal(t, callcontext.CallStatusCompleted, store.lastStatus.CallStatus)
 	assert.Equal(t, sip_infra.DisconnectReasonNormalClearing, store.lastStatus.DisconnectReason)
 	assert.Equal(t, 16, store.lastStatus.ProviderStatusCode)
 }
@@ -46,7 +46,7 @@ func TestPersistRemoteByeCallStatus_DoesNotDowngradeFailure(t *testing.T) {
 	store := newSIPCallStatusTestStore(&callcontext.CallContext{
 		ContextID:  "ctx-failed",
 		Status:     callcontext.StatusFailed,
-		CallStatus: callcontext.StatusFailed,
+		CallStatus: callcontext.CallStatusFailed,
 	})
 	engine := &SIPEngine{
 		logger:           newSIPTestLogger(t),
@@ -112,10 +112,10 @@ func (s *sipCallStatusTestStore) UpdateCallStatus(_ context.Context, contextID s
 	s.callContext.CallStatus = status.CallStatus
 	s.callContext.DisconnectReason = status.DisconnectReason
 	s.callContext.ProviderStatusCode = status.ProviderStatusCode
-	if status.CallStatus == callcontext.StatusCompleted {
+	if status.CallStatus == callcontext.CallStatusCompleted {
 		s.callContext.Status = callcontext.StatusCompleted
 	}
-	if status.CallStatus == callcontext.StatusFailed || status.CallStatus == "cancelled" {
+	if status.CallStatus == callcontext.CallStatusFailed || status.CallStatus == callcontext.CallStatusCancelled {
 		s.callContext.Status = callcontext.StatusFailed
 	}
 	return nil

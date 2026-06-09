@@ -10,6 +10,7 @@ import (
 	"errors"
 	"testing"
 
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +23,7 @@ func TestReportOutboundInitiated(t *testing.T) {
 	}, "provider-call-id")
 
 	require.Equal(t, "provider-call-id", got.ChannelUUID)
-	require.Equal(t, OutboundCallStatusInitiated, got.CallStatus)
+	require.Equal(t, callcontext.CallStatusNew, got.CallStatus)
 }
 
 func TestReportOutboundFailure(t *testing.T) {
@@ -39,7 +40,7 @@ func TestReportOutboundFailure(t *testing.T) {
 		503,
 	)
 
-	require.Equal(t, OutboundCallStatusFailed, got.CallStatus)
+	require.Equal(t, callcontext.CallStatusFailed, got.CallStatus)
 	require.Equal(t, OutboundFailureClassProviderAPI, got.FailureClass)
 	require.Equal(t, "provider rejected request", got.FailureReason)
 	require.Equal(t, OutboundDisconnectReasonSetupFailed, got.DisconnectReason)

@@ -46,6 +46,9 @@ func (s *outboundDispatcherTestStore) UpdateField(ctx context.Context, contextID
 }
 
 func (s *outboundDispatcherTestStore) UpdateCallStatus(ctx context.Context, contextID string, status callcontext.CallStatusUpdate) error {
+	if status.ExpectedCallStatus != "" && s.callContext.CallStatus != status.ExpectedCallStatus {
+		return nil
+	}
 	s.lastStatus = status
 	s.updateCount++
 	s.callContext.CallStatus = status.CallStatus
@@ -55,7 +58,7 @@ func (s *outboundDispatcherTestStore) UpdateCallStatus(ctx context.Context, cont
 	s.callContext.DisconnectReason = status.DisconnectReason
 	s.callContext.Retryable = status.Retryable
 	s.callContext.ProviderStatusCode = status.ProviderStatusCode
-	if status.CallStatus == callcontext.StatusFailed || status.CallStatus == "cancelled" {
+	if status.CallStatus == callcontext.CallStatusFailed || status.CallStatus == callcontext.CallStatusCancelled {
 		s.callContext.Status = callcontext.StatusFailed
 	}
 	return nil
@@ -78,8 +81,9 @@ func TestOutboundDispatcher_PersistSetupFailureDoesNotOverwriteTerminalProviderS
 	store := &outboundDispatcherTestStore{
 		callContext: &callcontext.CallContext{
 			ContextID:    "ctx-terminal",
+			Provider:     "unknown",
 			Status:       callcontext.StatusFailed,
-			CallStatus:   internal_telephony_base.OutboundCallStatusFailed,
+			CallStatus:   callcontext.CallStatusFailed,
 			FailureClass: internal_telephony_base.OutboundFailureClassProviderAPI,
 		},
 	}
@@ -88,7 +92,7 @@ func TestOutboundDispatcher_PersistSetupFailureDoesNotOverwriteTerminalProviderS
 		logger: newOutboundDispatcherTestLogger(t),
 	}
 
-	dispatcher.persistOutboundSetupFailure(context.Background(), store.callContext, assertOutboundError{})
+	_, _ = dispatcher.Dispatch(context.Background(), store.callContext.ContextID)
 
 	if store.updateCount != 0 {
 		t.Fatalf("expected terminal provider status to be preserved, got %d updates", store.updateCount)
@@ -102,8 +106,9 @@ func TestOutboundDispatcher_PersistSetupFailureDoesNotOverwriteCancelledProvider
 	store := &outboundDispatcherTestStore{
 		callContext: &callcontext.CallContext{
 			ContextID:        "ctx-cancelled",
+			Provider:         "unknown",
 			Status:           callcontext.StatusFailed,
-			CallStatus:       internal_telephony_base.OutboundCallStatusCancelled,
+			CallStatus:       callcontext.CallStatusCancelled,
 			FailureClass:     internal_telephony_base.OutboundFailureClassRequestCancelled,
 			DisconnectReason: internal_telephony_base.OutboundDisconnectReasonRequestCancelled,
 		},
@@ -113,12 +118,12 @@ func TestOutboundDispatcher_PersistSetupFailureDoesNotOverwriteCancelledProvider
 		logger: newOutboundDispatcherTestLogger(t),
 	}
 
-	dispatcher.persistOutboundSetupFailure(context.Background(), store.callContext, assertOutboundError{})
+	_, _ = dispatcher.Dispatch(context.Background(), store.callContext.ContextID)
 
 	if store.updateCount != 0 {
 		t.Fatalf("expected cancelled provider status to be preserved, got %d updates", store.updateCount)
 	}
-	if store.callContext.CallStatus != internal_telephony_base.OutboundCallStatusCancelled {
+	if store.callContext.CallStatus != callcontext.CallStatusCancelled {
 		t.Fatalf("expected cancelled call status preserved, got %q", store.callContext.CallStatus)
 	}
 	if store.callContext.DisconnectReason != internal_telephony_base.OutboundDisconnectReasonRequestCancelled {
@@ -130,6 +135,7 @@ func TestOutboundDispatcher_PersistSetupFailureUsesProviderNeutralStatus(t *test
 	store := &outboundDispatcherTestStore{
 		callContext: &callcontext.CallContext{
 			ContextID: "ctx-setup",
+			Provider:  "unknown",
 			Status:    callcontext.StatusPending,
 		},
 	}
@@ -138,7 +144,7 @@ func TestOutboundDispatcher_PersistSetupFailureUsesProviderNeutralStatus(t *test
 		logger: newOutboundDispatcherTestLogger(t),
 	}
 
-	dispatcher.persistOutboundSetupFailure(context.Background(), store.callContext, assertOutboundError{})
+	_, _ = dispatcher.Dispatch(context.Background(), store.callContext.ContextID)
 
 	if store.callContext.Status != callcontext.StatusFailed {
 		t.Fatalf("expected context failed, got %q", store.callContext.Status)
@@ -166,7 +172,7 @@ func TestOutboundDispatcher_StatusReporterPersistsFailureDetails(t *testing.T) {
 
 	statusReporter(internal_type.ProviderCallStatusUpdate{
 		ChannelUUID:        "call-486",
-		CallStatus:         internal_telephony_base.OutboundCallStatusFailed,
+		CallStatus:         callcontext.CallStatusFailed,
 		ErrorMessage:       "486 Busy Here",
 		FailureClass:       "busy",
 		FailureReason:      "Busy Here",
@@ -188,40 +194,110 @@ func TestOutboundDispatcher_StatusReporterPersistsFailureDetails(t *testing.T) {
 	}
 }
 
-func TestOutboundDispatcher_PersistConnectTimeoutUsesDurableFailureStatus(t *testing.T) {
+func TestOutboundDispatcher_StatusReporterDoesNotRewriteNewCallStatus(t *testing.T) {
 	store := &outboundDispatcherTestStore{
 		callContext: &callcontext.CallContext{
-			ContextID: "ctx-timeout",
-			Status:    callcontext.StatusPending,
+			ContextID:  "ctx-new-status",
+			Status:     callcontext.StatusPending,
+			CallStatus: callcontext.CallStatusRinging,
 		},
 	}
 	dispatcher := &OutboundDispatcher{
 		store:  store,
 		logger: newOutboundDispatcherTestLogger(t),
 	}
+	statusReporter := dispatcher.newProviderCallStatusReporter(store.callContext.ContextID)
 
-	dispatcher.persistOutboundConnectTimeout(context.Background(), store.callContext)
+	statusReporter(internal_type.ProviderCallStatusUpdate{
+		ChannelUUID: "call-123",
+		CallStatus:  callcontext.CallStatusNew,
+	})
 
-	if store.callContext.Status != callcontext.StatusFailed {
-		t.Fatalf("expected context failed, got %q", store.callContext.Status)
+	if store.callContext.ChannelUUID != "call-123" {
+		t.Fatalf("expected channel UUID persisted, got %q", store.callContext.ChannelUUID)
 	}
-	if store.lastStatus.FailureClass != internal_telephony_base.OutboundFailureClassNoAnswer {
-		t.Fatalf("expected no_answer failure class, got %q", store.lastStatus.FailureClass)
+	if store.callContext.CallStatus != callcontext.CallStatusRinging {
+		t.Fatalf("expected call status to remain ringing, got %q", store.callContext.CallStatus)
 	}
-	if store.lastStatus.DisconnectReason != internal_telephony_base.OutboundDisconnectReasonNoAnswer {
-		t.Fatalf("expected connect timeout disconnect reason, got %q", store.lastStatus.DisconnectReason)
+}
+
+func TestOutboundDispatcher_MonitorConnectTimeoutUsesDurableFailureStatus(t *testing.T) {
+	store := &outboundDispatcherTestStore{
+		callContext: &callcontext.CallContext{
+			ContextID:  "ctx-timeout",
+			Provider:   SIP.String(),
+			Status:     callcontext.StatusPending,
+			CallStatus: callcontext.CallStatusNew,
+		},
 	}
-	if !store.lastStatus.Retryable {
-		t.Fatal("expected connect timeout to be retryable")
+	dispatcher := &OutboundDispatcher{
+		store:                  store,
+		logger:                 newOutboundDispatcherTestLogger(t),
+		outboundConnectTimeout: 10 * time.Millisecond,
+	}
+
+	go dispatcher.monitorCallConnect(context.Background(), store.callContext.ContextID, store.callContext)
+
+	deadline := time.After(250 * time.Millisecond)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("expected answer monitor to persist no-answer after timeout")
+		case <-ticker.C:
+			if store.updateCount == 0 {
+				continue
+			}
+			if store.callContext.Status != callcontext.StatusFailed {
+				t.Fatalf("expected context failed, got %q", store.callContext.Status)
+			}
+			if store.lastStatus.FailureClass != internal_telephony_base.OutboundFailureClassNoAnswer {
+				t.Fatalf("expected no_answer failure class, got %q", store.lastStatus.FailureClass)
+			}
+			if store.lastStatus.DisconnectReason != internal_telephony_base.OutboundDisconnectReasonNoAnswer {
+				t.Fatalf("expected connect timeout disconnect reason, got %q", store.lastStatus.DisconnectReason)
+			}
+			if !store.lastStatus.Retryable {
+				t.Fatal("expected connect timeout to be retryable")
+			}
+			return
+		}
+	}
+}
+
+func TestOutboundDispatcher_MonitorConnectTimeoutSkipsCallbackUpdatedCallStatus(t *testing.T) {
+	store := &outboundDispatcherTestStore{
+		callContext: &callcontext.CallContext{
+			ContextID:  "ctx-callback-updated",
+			Provider:   SIP.String(),
+			Status:     callcontext.StatusPending,
+			CallStatus: callcontext.CallStatusRinging,
+		},
+	}
+	dispatcher := &OutboundDispatcher{
+		store:                  store,
+		logger:                 newOutboundDispatcherTestLogger(t),
+		outboundConnectTimeout: 10 * time.Millisecond,
+	}
+
+	dispatcher.monitorCallConnect(context.Background(), store.callContext.ContextID, store.callContext)
+
+	if store.updateCount != 0 {
+		t.Fatalf("expected callback-updated call status to skip watchdog failure, got %d updates", store.updateCount)
+	}
+	if store.callContext.Status != callcontext.StatusPending {
+		t.Fatalf("expected context status to remain pending for media claim, got %q", store.callContext.Status)
 	}
 }
 
 func TestOutboundDispatcher_MonitorConnectTimeoutSurvivesRequestCancellation(t *testing.T) {
 	store := &outboundDispatcherTestStore{
 		callContext: &callcontext.CallContext{
-			ContextID: "ctx-monitor",
-			Provider:  SIP.String(),
-			Status:    callcontext.StatusPending,
+			ContextID:  "ctx-monitor",
+			Provider:   SIP.String(),
+			Status:     callcontext.StatusPending,
+			CallStatus: callcontext.CallStatusNew,
 		},
 	}
 	dispatcher := &OutboundDispatcher{
@@ -270,10 +346,4 @@ func TestOutboundDispatcher_SIPConnectTimeoutDerivesFromInviteTimeout(t *testing
 	if got != 45*time.Second {
 		t.Fatalf("expected SIP connect timeout 45s, got %s", got)
 	}
-}
-
-type assertOutboundError struct{}
-
-func (assertOutboundError) Error() string {
-	return "outbound setup failed"
 }

@@ -121,9 +121,9 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 			channel_pipeline.WithInboundDispatcher(inbound),
 			channel_pipeline.WithOutboundDispatcher(outbound),
 			channel_pipeline.WithConversationService(conversationService),
+			channel_pipeline.WithAssistantService(assistantService),
 		),
 	}
-	cApi.channelPipeline.Start(context.Background())
 	return cApi
 }
 

@@ -14,7 +14,6 @@ import (
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	"github.com/rapidaai/pkg/commons"
-	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/validator"
 )
 
@@ -48,12 +47,12 @@ func (c *Collector) Key() string {
 	return "conversationdb"
 }
 
-func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ observability.Context, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, scope observability.Scope, observationContext observability.Context, record observability.Record) error {
 	switch typed := record.(type) {
 	case observability.RecordMetric:
-		return c.collectMetrics(ctx, scope, typed)
+		return c.collectMetrics(ctx, scope, observationContext, typed)
 	case observability.RecordMetadata:
-		return c.collectMetadata(ctx, scope, typed)
+		return c.collectMetadata(ctx, scope, observationContext, typed)
 	default:
 		return nil
 	}
@@ -63,16 +62,15 @@ func (c *Collector) Close(context.Context) error {
 	return nil
 }
 
-func (c *Collector) collectMetrics(ctx context.Context, scope observability.Scope, record observability.RecordMetric) error {
+func (c *Collector) collectMetrics(ctx context.Context, scope observability.Scope, observationContext observability.Context, record observability.RecordMetric) error {
 	if !validator.NotEmpty(record.Metrics) {
 		return nil
 	}
 	if err := validateCollector(c); err != nil {
 		return err
 	}
-	auth, err := authFromContext(ctx)
-	if err != nil {
-		return err
+	if !validator.NonNil(observationContext.Auth) {
+		return ErrAuthRequired
 	}
 
 	switch scope := scope.(type) {
@@ -82,7 +80,7 @@ func (c *Collector) collectMetrics(ctx context.Context, scope observability.Scop
 		}
 		_, err := c.service.CreateOrUpdateMessageMetrics(
 			ctx,
-			auth,
+			observationContext.Auth,
 			scope.ConversationScopeID(),
 			scope.MessageScopeID(),
 			record.Metrics,
@@ -94,7 +92,7 @@ func (c *Collector) collectMetrics(ctx context.Context, scope observability.Scop
 		}
 		_, err := c.service.CreateOrUpdateConversationMetrics(
 			ctx,
-			auth,
+			observationContext.Auth,
 			scope.AssistantScopeID(),
 			scope.ConversationScopeID(),
 			record.Metrics,
@@ -107,16 +105,15 @@ func (c *Collector) collectMetrics(ctx context.Context, scope observability.Scop
 	}
 }
 
-func (c *Collector) collectMetadata(ctx context.Context, scope observability.Scope, record observability.RecordMetadata) error {
+func (c *Collector) collectMetadata(ctx context.Context, scope observability.Scope, observationContext observability.Context, record observability.RecordMetadata) error {
 	if !validator.NotEmpty(record.Metadata) {
 		return nil
 	}
 	if err := validateCollector(c); err != nil {
 		return err
 	}
-	auth, err := authFromContext(ctx)
-	if err != nil {
-		return err
+	if !validator.NonNil(observationContext.Auth) {
+		return ErrAuthRequired
 	}
 
 	switch scope := scope.(type) {
@@ -126,7 +123,7 @@ func (c *Collector) collectMetadata(ctx context.Context, scope observability.Sco
 		}
 		_, err := c.service.CreateOrUpdateMessageMetadata(
 			ctx,
-			auth,
+			observationContext.Auth,
 			scope.ConversationScopeID(),
 			scope.MessageScopeID(),
 			record.Metadata,
@@ -138,7 +135,7 @@ func (c *Collector) collectMetadata(ctx context.Context, scope observability.Sco
 		}
 		_, err := c.service.CreateOrUpdateConversationMetadata(
 			ctx,
-			auth,
+			observationContext.Auth,
 			scope.AssistantScopeID(),
 			scope.ConversationScopeID(),
 			record.Metadata,
@@ -149,14 +146,6 @@ func (c *Collector) collectMetadata(ctx context.Context, scope observability.Sco
 	default:
 		return fmt.Errorf("%w: %T", ErrScopeUnsupported, scope)
 	}
-}
-
-func authFromContext(ctx context.Context) (types.SimplePrinciple, error) {
-	auth, ok := types.GetSimplePrincipleGRPC(ctx)
-	if !ok || !validator.NonNil(auth) {
-		return nil, ErrAuthRequired
-	}
-	return auth, nil
 }
 func validateCollector(collector *Collector) error {
 	if !validator.NonNil(collector) || !validator.NonNil(collector.service) {

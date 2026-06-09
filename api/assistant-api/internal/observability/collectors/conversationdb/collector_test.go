@@ -103,11 +103,11 @@ func TestCollectMetric_RequiresValidConversationScope(t *testing.T) {
 	collector := New(Config{ConversationService: &conversationServiceStub{}})
 	auth := testAuth()
 
-	err := collector.Collect(contextWithAuth(context.Background(), auth), observability.ConversationScope{
+	err := collector.Collect(context.Background(), observability.ConversationScope{
 		AssistantScope: observability.AssistantScope{
 			AssistantID: 10,
 		},
-	}, observability.Context{}, observability.RecordMetric{
+	}, observability.Context{Auth: auth}, observability.RecordMetric{
 		Metrics: []*protos.Metric{{Name: observability.MetricConversationDuration, Value: "1000"}},
 	})
 	if !errors.Is(err, ErrScopeRequired) {
@@ -131,7 +131,7 @@ func TestCollectMetric_ForwardsConversationScopedRecords(t *testing.T) {
 		ConversationID: 20,
 	}
 
-	err := collector.Collect(contextWithAuth(context.Background(), auth), scope, observability.Context{}, observability.RecordMetric{
+	err := collector.Collect(context.Background(), scope, observability.Context{Auth: auth}, observability.RecordMetric{
 		Metrics: []*protos.Metric{{
 			Name:        observability.MetricConversationDuration,
 			Value:       "1000",
@@ -162,7 +162,7 @@ func TestCollectMetadata_ForwardsMessageScopedRecords(t *testing.T) {
 		Role:      observability.MessageRoleUser,
 	}
 
-	err := collector.Collect(contextWithAuth(context.Background(), auth), scope, observability.Context{}, observability.RecordMetadata{
+	err := collector.Collect(context.Background(), scope, observability.Context{Auth: auth}, observability.RecordMetadata{
 		Metadata: []*protos.Metadata{{
 			Key:   observability.MetadataLanguage,
 			Value: "en",
@@ -179,7 +179,7 @@ func TestCollectMetadata_ForwardsMessageScopedRecords(t *testing.T) {
 func TestCollectMetadata_AssistantScopeUnsupported(t *testing.T) {
 	collector := New(Config{ConversationService: &conversationServiceStub{}})
 	auth := testAuth()
-	err := collector.Collect(contextWithAuth(context.Background(), auth), observability.AssistantScope{AssistantID: 10}, observability.Context{}, observability.RecordMetadata{
+	err := collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 10}, observability.Context{Auth: auth}, observability.RecordMetadata{
 		Metadata: []*protos.Metadata{{Key: observability.MetadataLanguage, Value: "en"}},
 	})
 	if !errors.Is(err, ErrScopeUnsupported) {
@@ -215,8 +215,4 @@ func testAuth() *types.ServiceScope {
 		OrganizationId: &organizationID,
 		ProjectId:      &projectID,
 	}
-}
-
-func contextWithAuth(ctx context.Context, auth *types.ServiceScope) context.Context {
-	return context.WithValue(ctx, types.CTX_, &types.PlainClaimPrinciple[*types.ServiceScope]{Info: auth})
 }

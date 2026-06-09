@@ -19,6 +19,7 @@ import (
 
 	"github.com/rapidaai/api/assistant-api/config"
 	internal_adapter "github.com/rapidaai/api/assistant-api/internal/adapters"
+	internal_callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
 	channel_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
@@ -26,6 +27,7 @@ import (
 	observability_collector_conversationdb "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationdb"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
+	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/connectors"
 	"github.com/rapidaai/pkg/storages"
@@ -45,6 +47,8 @@ type audioSocketEngine struct {
 	inbound    *channel_telephony.InboundDispatcher
 	mu         sync.RWMutex
 
+	vaultClient                  web_client.VaultClient
+	callcontext                  internal_callcontext.Store
 	assistantConversationService internal_services.AssistantConversationService
 }
 
@@ -61,12 +65,28 @@ func NewAudioSocketEngine(cfg *config.AssistantConfig, logger commons.Logger,
 		redis:                        redis,
 		opensearch:                   opensearch,
 		storage:                      fileStorage,
+		callcontext:                  internal_callcontext.NewStore(postgres, logger),
+		vaultClient:                  web_client.NewVaultClientGRPC(&cfg.AppConfig, logger, redis),
 		assistantConversationService: internal_assistant_service.NewAssistantConversationService(logger, postgres, fileStorage),
 	}
 }
 
 func (m *audioSocketEngine) Connect(ctx context.Context) error {
-	m.pipeline, m.inbound = newSessionPipeline(ctx, m.cfg, m.logger, m.postgres, m.redis, m.opensearch, m.storage)
+	m.inbound = channel_telephony.NewInboundDispatcher(
+		channel_telephony.WithConfig(m.cfg),
+		channel_telephony.WithLogger(m.logger),
+		channel_telephony.WithStore(m.callcontext),
+		channel_telephony.WithVaultClient(m.vaultClient),
+		channel_telephony.WithAssistantService(internal_assistant_service.NewAssistantService(m.cfg, m.logger, m.postgres, m.opensearch)),
+		channel_telephony.WithConversationService(m.assistantConversationService),
+		channel_telephony.WithTelephonyOption(channel_telephony.TelephonyOption{}),
+	)
+
+	m.pipeline = channel_pipeline.NewDispatcher(
+		channel_pipeline.WithLogger(m.logger),
+		channel_pipeline.WithConversationService(m.assistantConversationService),
+		channel_pipeline.WithAssistantService(internal_assistant_service.NewAssistantService(m.cfg, m.logger, m.postgres, m.opensearch)),
+	)
 
 	addr := fmt.Sprintf("%s:%d", m.cfg.AudioSocketConfig.Host, m.cfg.AudioSocketConfig.Port)
 	listener, err := net.Listen("tcp", addr)

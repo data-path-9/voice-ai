@@ -39,9 +39,24 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 		return
 	}
 
+	observer := cApi.Observability(c, auth, observability.WithGracePeriod())
+	defer observer.Close(context.Background())
+
 	var ir openapi.CreatePhoneCallRequest
 	if err := c.ShouldBindJSON(&ir); err != nil {
 		cApi.logger.Errorf("create phone call invalid request: %v", err)
+		_ = observer.Record(c, observability.ProjectScope{}, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall REST validation failed: invalid request body",
+			Attributes: observability.Attributes{
+				"failure_stage": "validation",
+				"field":         "request",
+				"error_code":    pkg_errors.CreatePhoneCallInvalidRequest.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallInvalidRequest.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallInvalidRequest.HTTPStatusCode),
+				"detail":        err.Error(),
+			},
+		})
 		c.JSON(pkg_errors.CreatePhoneCallInvalidRequest.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(pkg_errors.CreatePhoneCallInvalidRequest.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
@@ -54,7 +69,28 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 		return
 	}
 
+	_ = observer.Record(c, observability.ProjectScope{}, observability.RecordLog{
+		Level:   observability.LevelInfo,
+		Message: "CreatePhoneCall REST request received",
+		Attributes: observability.Attributes{
+			"assistantId":      fmt.Sprintf("%d", ir.Assistant.AssistantId),
+			"assistantVersion": *ir.Assistant.Version,
+			"FromNumber":       *ir.FromNumber,
+			"ToNumber":         *ir.ToNumber,
+		},
+	})
 	if !validator.NonNil(ir.ToNumber) || !validator.NotBlank(*ir.ToNumber) {
+		_ = observer.Record(c, observability.ProjectScope{}, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall REST validation failed: missing to_number",
+			Attributes: observability.Attributes{
+				"failure_stage": "validation",
+				"field":         "to_number",
+				"error_code":    pkg_errors.CreatePhoneCallMissingToNumber.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallMissingToNumber.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallMissingToNumber.HTTPStatusCode),
+			},
+		})
 		c.JSON(pkg_errors.CreatePhoneCallMissingToNumber.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(pkg_errors.CreatePhoneCallMissingToNumber.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
@@ -83,6 +119,21 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 	}
 	preset.AssistantDefinition(assistant)
 	if !validator.OfAssistantDefinition(assistant) {
+		scope := observability.Scope(observability.ProjectScope{})
+		if assistant.GetAssistantId() > 0 {
+			scope = observability.AssistantScope{AssistantID: assistant.GetAssistantId()}
+		}
+		_ = observer.Record(c, scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall REST validation failed: invalid assistant",
+			Attributes: observability.Attributes{
+				"failure_stage": "validation",
+				"field":         "assistant",
+				"error_code":    pkg_errors.CreatePhoneCallInvalidAssistant.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallInvalidAssistant.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallInvalidAssistant.HTTPStatusCode),
+			},
+		})
 		c.JSON(pkg_errors.CreatePhoneCallInvalidAssistant.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(pkg_errors.CreatePhoneCallInvalidAssistant.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
@@ -112,13 +163,6 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 		opts = *ir.Options
 	}
 
-	observer := cApi.Observability(c, auth, observability.WithGracePeriod())
-	defer func() {
-		if err := observer.Close(context.Background()); err != nil {
-			cApi.logger.Errorf("failed to close outbound observability recorder: %v", err)
-		}
-	}()
-
 	result := cApi.channelPipeline.Run(c, channel_pipeline.OutboundRequestedPipeline{
 		ID:          fmt.Sprintf("%d", assistant.GetAssistantId()),
 		Auth:        auth,
@@ -133,6 +177,25 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 	})
 	if result.Error != nil {
 		cApi.logger.Errorf("outbound call failed: %v", result.Error)
+		scope := observability.Scope(observability.AssistantScope{AssistantID: assistant.GetAssistantId()})
+		if result.ConversationID > 0 {
+			scope = observability.ConversationScope{
+				AssistantScope: observability.AssistantScope{AssistantID: assistant.GetAssistantId()},
+				ConversationID: result.ConversationID,
+			}
+		}
+		_ = observer.Record(c, scope, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "CreatePhoneCall REST outbound dispatch failed",
+			Attributes: observability.Attributes{
+				"failure_stage": "dispatch",
+				"context_id":    result.ContextID,
+				"error_code":    pkg_errors.CreatePhoneCallInitiateOutbound.CodeString(),
+				"error":         pkg_errors.CreatePhoneCallInitiateOutbound.Error,
+				"http_status":   fmt.Sprintf("%d", pkg_errors.CreatePhoneCallInitiateOutbound.HTTPStatusCode),
+				"detail":        result.Error.Error(),
+			},
+		})
 		c.JSON(pkg_errors.CreatePhoneCallInitiateOutbound.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(pkg_errors.CreatePhoneCallInitiateOutbound.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),

@@ -130,6 +130,42 @@ func TestRecorder_RecordMetric_FansOutAndInjectsGlobalScope(t *testing.T) {
 	}
 }
 
+func TestRecorder_RecordInjectsAuthIntoObservationContext(t *testing.T) {
+	organizationID := uint64(7)
+	projectID := uint64(8)
+	userID := uint64(9)
+	auth := &types.ServiceScope{
+		UserId:         &userID,
+		OrganizationId: &organizationID,
+		ProjectId:      &projectID,
+	}
+	collector := &recordingCollector{key: "collector"}
+	recorder := New(
+		WithAuth(auth),
+		WithCollector(collector),
+	)
+
+	err := recorder.Record(context.Background(), ConversationScope{
+		AssistantScope: AssistantScope{AssistantID: 10},
+		ConversationID: 20,
+	}, RecordMetric{
+		Metrics: []*protos.Metric{{Name: MetricConversationStatus, Value: "FAILED"}},
+	})
+	if err != nil {
+		t.Fatalf("Record returned error: %v", err)
+	}
+	if err := recorder.Close(context.Background()); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	if len(collector.contexts) != 1 || collector.contexts[0].Auth != auth {
+		t.Fatalf("expected recorder auth in observation context, got %+v", collector.contexts)
+	}
+	if observabilityGlobal := collector.scopes[0].GlobalScopeValue(); observabilityGlobal.OrganizationID != organizationID || observabilityGlobal.ProjectID != projectID {
+		t.Fatalf("unexpected global scope: %+v", observabilityGlobal)
+	}
+}
+
 func TestRecorder_RecordUsesRequestIDFromRecordContext(t *testing.T) {
 	collector := &recordingCollector{key: "collector"}
 	recorder := New(

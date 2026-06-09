@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -19,17 +20,11 @@ import (
 )
 
 func (d *Dispatcher) runOutbound(ctx context.Context, v OutboundRequestedPipeline) *PipelineResult {
-	d.logger.Infow("Pipeline: OutboundRequested",
-		"to", v.ToPhone,
-		"from", v.FromPhone,
-		"assistant_id", v.AssistantID)
-
-	assistantScope := observability.AssistantScope{AssistantID: v.AssistantID}
 	assistant, err := d.assistantService.Get(ctx, v.Auth, v.AssistantID, utils.GetVersionDefinition("latest"), &internal_services.GetAssistantOption{InjectPhoneDeployment: true, InjectWebhook: true})
 	if err != nil {
-		_ = v.Observer.Record(ctx, assistantScope, observability.RecordLog{
+		_ = v.Observer.Record(ctx, observability.AssistantScope{AssistantID: v.AssistantID}, observability.RecordLog{
 			Level:   observability.LevelError,
-			Message: "outbound assistant load failed",
+			Message: "Outbound call pipeline failed to load assistant",
 			Attributes: observability.Attributes{
 				"assistant_id": fmt.Sprintf("%d", v.AssistantID),
 				"to":           v.ToPhone,
@@ -39,11 +34,10 @@ func (d *Dispatcher) runOutbound(ctx context.Context, v OutboundRequestedPipelin
 		})
 		return &PipelineResult{Error: fmt.Errorf("invalid assistant: %w", err)}
 	}
-	assistantScope.AssistantID = assistant.Id
 	if assistant.AssistantPhoneDeployment == nil {
-		_ = v.Observer.Record(ctx, assistantScope, observability.RecordLog{
+		_ = v.Observer.Record(ctx, observability.AssistantScope{AssistantID: v.AssistantID}, observability.RecordLog{
 			Level:   observability.LevelError,
-			Message: "outbound phone deployment not enabled",
+			Message: "Outbound call pipeline failed because phone deployment is not enabled",
 			Attributes: observability.Attributes{
 				"assistant_id": fmt.Sprintf("%d", assistant.Id),
 				"to":           v.ToPhone,
@@ -57,9 +51,9 @@ func (d *Dispatcher) runOutbound(ctx context.Context, v OutboundRequestedPipelin
 	if fromPhone == "" {
 		fn, err := assistant.AssistantPhoneDeployment.GetOptions().GetString("phone")
 		if err != nil {
-			_ = v.Observer.Record(ctx, assistantScope, observability.RecordLog{
+			_ = v.Observer.Record(ctx, observability.AssistantScope{AssistantID: v.AssistantID}, observability.RecordLog{
 				Level:   observability.LevelError,
-				Message: "outbound from phone resolution failed",
+				Message: "Outbound call pipeline failed to resolve from phone number",
 				Attributes: observability.Attributes{
 					"assistant_id": fmt.Sprintf("%d", assistant.Id),
 					"to":           v.ToPhone,
@@ -71,14 +65,15 @@ func (d *Dispatcher) runOutbound(ctx context.Context, v OutboundRequestedPipelin
 		fromPhone = fn
 	}
 	provider := assistant.AssistantPhoneDeployment.TelephonyProvider
+
 	conversation, err := d.conversationService.CreateConversation(ctx, v.Auth, v.ToPhone, assistant.Id, assistant.AssistantProviderId, type_enums.DIRECTION_OUTBOUND, utils.PhoneCall)
 	if err != nil {
-		_ = v.Observer.Record(ctx, assistantScope, observability.RecordLog{
+		_ = v.Observer.Record(ctx, observability.AssistantScope{AssistantID: v.AssistantID}, observability.RecordLog{
 			Level:   observability.LevelError,
-			Message: "outbound conversation create failed",
+			Message: "Outbound call pipeline failed to create conversation",
 			Attributes: observability.Attributes{
 				"assistant_id": fmt.Sprintf("%d", assistant.Id),
-				"provider":     provider,
+				"provider":     assistant.AssistantPhoneDeployment.TelephonyProvider,
 				"to":           v.ToPhone,
 				"from":         fromPhone,
 				"error":        err.Error(),
@@ -87,14 +82,13 @@ func (d *Dispatcher) runOutbound(ctx context.Context, v OutboundRequestedPipelin
 		return &PipelineResult{Error: fmt.Errorf("failed to create conversation: %w", err)}
 	}
 
-	conversationScope := observability.ConversationScope{
-		AssistantScope: assistantScope,
+	_ = v.Observer.Record(ctx, observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: v.AssistantID},
 		ConversationID: conversation.Id,
-	}
-	_ = v.Observer.Record(ctx, conversationScope, observability.RecordEvent{
+	}, observability.RecordEvent{
 		Event: observability.CallConversationCreated,
 		Attributes: observability.Attributes{
-			"provider": provider,
+			"provider": assistant.AssistantPhoneDeployment.TelephonyProvider,
 			"to":       v.ToPhone,
 			"from":     fromPhone,
 		},
@@ -115,18 +109,24 @@ func (d *Dispatcher) runOutbound(ctx context.Context, v OutboundRequestedPipelin
 		for key, value := range v.Metadata {
 			conversationMetadata = append(conversationMetadata, &protos.Metadata{Key: key, Value: fmt.Sprintf("%v", value)})
 		}
-		_ = v.Observer.Record(ctx, conversationScope, observability.RecordMetadata{
+		_ = v.Observer.Record(ctx, observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: v.AssistantID},
+			ConversationID: conversation.Id,
+		}, observability.RecordMetadata{
 			Metadata: conversationMetadata,
 		})
 	}
-	callInfo := &internal_type.CallInfo{CallerNumber: v.ToPhone, FromNumber: fromPhone, Direction: "outbound", Provider: provider, Status: "queued"}
+	callInfo := &internal_type.CallInfo{CallerNumber: v.ToPhone, FromNumber: fromPhone, Direction: "outbound", Provider: provider, Status: callcontext.CallStatusNew}
 	contextID, err := d.inboundDispatcher.SaveCallContext(ctx, v.Auth, assistant, conversation.Id, callInfo, provider)
 	if err != nil {
-		_ = v.Observer.Record(ctx, conversationScope, observability.RecordLog{
+		_ = v.Observer.Record(ctx, observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: v.AssistantID},
+			ConversationID: conversation.Id,
+		}, observability.RecordLog{
 			Level:   observability.LevelError,
-			Message: "outbound call context save failed",
+			Message: "Outbound call pipeline failed to save call context",
 			Attributes: observability.Attributes{
-				"provider": provider,
+				"provider": assistant.AssistantPhoneDeployment.TelephonyProvider,
 				"to":       v.ToPhone,
 				"from":     fromPhone,
 				"error":    err.Error(),
@@ -134,63 +134,78 @@ func (d *Dispatcher) runOutbound(ctx context.Context, v OutboundRequestedPipelin
 		})
 		return &PipelineResult{Error: fmt.Errorf("failed to save call context: %w", err)}
 	}
-	_ = v.Observer.Record(ctx, conversationScope, observability.RecordEvent{
-		Event: observability.CallContextSaved,
-		Attributes: observability.Attributes{
-			"provider":   provider,
-			"to":         v.ToPhone,
-			"from":       fromPhone,
-			"context_id": contextID,
-		},
-	})
-	_ = v.Observer.Record(ctx, conversationScope, observability.RecordMetadata{
-		Metadata: observability.ClientMetadata(
-			v.ToPhone, fromPhone, "outbound", provider,
-			"", contextID, "", "",
-		),
-	})
-	_ = v.Observer.Record(ctx, conversationScope, observability.RecordEvent{
-		Event: observability.CallOutboundRequested,
-		Attributes: observability.Attributes{
-			"provider":   provider,
-			"to":         v.ToPhone,
-			"from":       fromPhone,
-			"context_id": contextID,
-		},
-	})
-
-	if err := d.outboundDispatcher.Dispatch(ctx, contextID); err != nil {
-		d.logger.Error("Pipeline: outbound dispatch failed", "error", err)
-		_ = v.Observer.Record(ctx, conversationScope, observability.RecordLog{
-			Level:   observability.LevelError,
-			Message: "outbound dispatch failed",
+	_ = v.Observer.Record(ctx, observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: v.AssistantID},
+		ConversationID: conversation.Id,
+	},
+		observability.RecordEvent{
+			Event: observability.CallContextSaved,
 			Attributes: observability.Attributes{
-				"provider":   provider,
+				"provider":   assistant.AssistantPhoneDeployment.TelephonyProvider,
+				"to":         v.ToPhone,
+				"from":       fromPhone,
+				"context_id": contextID,
+			},
+		},
+		observability.RecordMetadata{
+			Metadata: observability.ClientMetadata(
+				v.ToPhone, fromPhone, "outbound", assistant.AssistantPhoneDeployment.TelephonyProvider,
+				"", contextID, "", "",
+			),
+		},
+		observability.RecordEvent{
+			Event: observability.CallOutboundRequested,
+			Attributes: observability.Attributes{
+				"provider":   assistant.AssistantPhoneDeployment.TelephonyProvider,
+				"to":         v.ToPhone,
+				"from":       fromPhone,
+				"context_id": contextID,
+			},
+		})
+
+	callInfo, err = d.outboundDispatcher.Dispatch(ctx, contextID)
+	if err != nil {
+		_ = v.Observer.Record(ctx, observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: v.AssistantID},
+			ConversationID: conversation.Id,
+		}, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Outbound call pipeline failed to dispatch provider call",
+			Attributes: observability.Attributes{
+				"provider":   assistant.AssistantPhoneDeployment.TelephonyProvider,
 				"to":         v.ToPhone,
 				"from":       fromPhone,
 				"context_id": contextID,
 				"error":      err.Error(),
 			},
-		})
-		_ = v.Observer.Record(ctx, conversationScope, observability.RecordEvent{
+		}, observability.RecordEvent{
 			Event: observability.CallOutboundDispatchFailed,
 			Attributes: observability.Attributes{
-				"provider":   provider,
+				"provider":   assistant.AssistantPhoneDeployment.TelephonyProvider,
 				"context_id": contextID,
 				"error":      err.Error(),
 			},
 		})
-		_ = v.Observer.Record(ctx, conversationScope, observability.RecordMetric{
+		_ = v.Observer.Record(ctx, observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: v.AssistantID},
+			ConversationID: conversation.Id,
+		}, observability.RecordMetric{
 			Metrics: observability.CallStatusMetric("FAILED", err.Error()),
 		})
 		return &PipelineResult{ContextID: contextID, ConversationID: conversation.Id, Error: err}
 	}
 
-	_ = v.Observer.Record(ctx, conversationScope, observability.RecordEvent{
+	_ = v.Observer.Record(ctx, observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: v.AssistantID},
+		ConversationID: conversation.Id,
+	}, observability.RecordEvent{
 		Event: observability.CallOutboundDispatched,
 		Attributes: observability.Attributes{
-			"provider":   provider,
-			"context_id": contextID,
+			"provider":          assistant.AssistantPhoneDeployment.TelephonyProvider,
+			"context_id":        contextID,
+			"channel_uuid":      callInfo.ChannelUUID,
+			"status_event":      callInfo.StatusInfo.Event,
+			"provider_response": observability.AttributeValue(callInfo.StatusInfo.Payload),
 		},
 	})
 

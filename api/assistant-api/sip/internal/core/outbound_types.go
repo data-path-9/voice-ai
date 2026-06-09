@@ -9,6 +9,7 @@ package core
 import (
 	"time"
 
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/types"
@@ -49,11 +50,11 @@ const (
 type OutboundCallStatus string
 
 const (
-	OutboundCallStatusInitiated OutboundCallStatus = "initiated"
-	OutboundCallStatusRinging   OutboundCallStatus = "ringing"
-	OutboundCallStatusAnswered  OutboundCallStatus = "answered"
-	OutboundCallStatusFailed    OutboundCallStatus = "failed"
-	OutboundCallStatusCancelled OutboundCallStatus = "cancelled"
+	OutboundCallStatusInitiated OutboundCallStatus = callcontext.CallStatusInitiated
+	OutboundCallStatusRinging   OutboundCallStatus = callcontext.CallStatusRinging
+	OutboundCallStatusAnswered  OutboundCallStatus = callcontext.CallStatusAnswered
+	OutboundCallStatusFailed    OutboundCallStatus = callcontext.CallStatusFailed
+	OutboundCallStatusCancelled OutboundCallStatus = callcontext.CallStatusCancelled
 )
 
 type SIPAuthConfig struct {
