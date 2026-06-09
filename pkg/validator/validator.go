@@ -9,6 +9,7 @@ package validator
 
 import (
 	"net/mail"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -31,13 +32,27 @@ func NotEmpty[T any](values []T) bool {
 }
 
 // NonNil returns true when value is not nil.
-func NonNil[T any](value *T) bool {
-	return value != nil
+func NonNil(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return !v.IsNil()
+	default:
+		return true
+	}
 }
 
 // NotBlank returns true when value has non-whitespace content.
 func NotBlank(value string) bool {
 	return strings.TrimSpace(value) != ""
+}
+
+// Between returns true when value is within the inclusive min/max range.
+func Between(value, min, max int) bool {
+	return value >= min && value <= max
 }
 
 // Email returns true when value is a valid mailbox exactly as provided.

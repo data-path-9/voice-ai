@@ -7,6 +7,7 @@
 package internal_type
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -30,6 +31,9 @@ type StatusInfo struct {
 	// Error is set when the provider callback represents a failed terminal state.
 	Error *StatusError
 
+	// Completed is set by the provider parser when the callback represents a successful terminal state.
+	Completed bool
+
 	// Duration is the provider-reported call duration, when present.
 	// A pointer keeps explicit zero-duration callbacks distinguishable from
 	// callbacks that did not include a duration.
@@ -37,6 +41,9 @@ type StatusInfo struct {
 
 	// Price is the provider-reported call price, when present.
 	Price string
+
+	// RawPayload is the provider callback payload before parsing.
+	RawPayload string
 
 	// Payload is the raw event payload from the provider (parsed body, form data, etc.).
 	Payload interface{}
@@ -86,20 +93,43 @@ type CallInfo struct {
 	Extra map[string]string
 }
 
+// ProviderCallStatusUpdate is the provider-neutral status payload persisted for telephony call setup.
+type ProviderCallStatusUpdate struct {
+	// ChannelUUID is the provider-owned call identifier persisted on the call context.
+	ChannelUUID string
+	// CallStatus is the normalized provider call state, such as initiated, failed, or cancelled.
+	CallStatus string
+	// ExpectedCallStatus is an optional compare-and-set guard for watchdog/race-sensitive updates.
+	ExpectedCallStatus string
+	// ErrorMessage is the operator-facing error detail for failed setup or terminal failure.
+	ErrorMessage string
+	// FailureClass is the normalized failure category used for filtering and alerting.
+	FailureClass string
+	// FailureReason is the provider or lifecycle reason that explains the failure class.
+	FailureReason string
+	// DisconnectReason is the normalized terminal reason persisted with call metadata.
+	DisconnectReason string
+	// Retryable indicates whether the provider failure may succeed on a later attempt.
+	Retryable bool
+	// ProviderStatusCode is the provider protocol or HTTP status code when one exists.
+	ProviderStatusCode int
+}
+
+// ProviderCallStatusReporter receives provider-neutral call status updates from telephony implementations.
+type ProviderCallStatusReporter func(update ProviderCallStatusUpdate)
+
 // Telephony defines the interface that all telephony providers must implement.
 // Providers return structured data — they never construct telemetry.
 // The dispatcher is responsible for converting CallInfo/StatusInfo into telemetry.
 type Telephony interface {
-
 	// StatusCallback handles a status/event callback for a conversation.
 	StatusCallback(ctx *gin.Context, auth types.SimplePrinciple, assistantId, assistantConversationId uint64) (*StatusInfo, error)
 	// CatchAllStatusCallback handles a catch-all event callback.
 	CatchAllStatusCallback(ctx *gin.Context) (*StatusInfo, error)
-
 	// ReceiveCall processes an incoming call webhook and returns structured call info.
 	ReceiveCall(c *gin.Context) (*CallInfo, error)
 	// OutboundCall places an outbound call and returns structured call info.
-	OutboundCall(auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, opts utils.Option) (*CallInfo, error)
+	OutboundCall(ctx context.Context, auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, statusReporter ProviderCallStatusReporter, opts utils.Option) (*CallInfo, error)
 	// InboundCall instructs the provider to answer/connect the inbound call.
 	InboundCall(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, clientNumber string, assistantConversationId uint64) error
 }

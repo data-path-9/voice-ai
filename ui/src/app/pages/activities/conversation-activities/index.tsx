@@ -2,7 +2,7 @@ import { FC, useEffect, useState } from 'react';
 import { useCredential } from '@/hooks/use-credential';
 import { useRapidaStore } from '@/hooks/use-rapida-store';
 import toast from 'react-hot-toast/headless';
-import { AssistantConversationMessage, Criteria } from '@rapidaai/react';
+import { AssistantConversationMessage } from '@rapidaai/react';
 import {
   formatNanoToReadableMilli,
   toDate,
@@ -19,7 +19,6 @@ import { useConversationLogPageStore } from '@/hooks/use-conversation-log-page-s
 import { Helmet } from '@/app/components/helmet';
 import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
 import { PageTitleWithCount } from '@/app/components/blocks/page-title-with-count';
-import { ConversationTelemetryDialog } from '@/app/components/base/modal/conversation-telemetry-modal';
 import { CONFIG } from '@/configs';
 import { CarbonStatusIndicator } from '@/app/components/carbon/status-indicator';
 import SourceIndicator from '@/app/components/indicators/source';
@@ -65,26 +64,6 @@ export const ListingPage: FC<{}> = () => {
   const [currentActivity, setCurrentActivity] =
     useState<AssistantConversationMessage | null>(null);
   const [showLogModal, setShowLogModal] = useState(false);
-  const [criterias, setCriterias] = useState<Criteria[]>([]);
-  const [telemetryAssistantId, setTelemetryAssistantId] = useState('');
-  const [isTelemetryDialogOpen, setTelemetryDialogOpen] = useState(false);
-
-  const handleTraceClick = (trace: AssistantConversationMessage) => {
-    const stripPrefix = (id?: string): string =>
-      id?.replace(/^(user-|assistant-)/, '') || '';
-
-    const convCtr = new Criteria();
-    convCtr.setKey('conversationId');
-    convCtr.setLogic('match');
-    convCtr.setValue(trace.getAssistantconversationid());
-    const msgCtr = new Criteria();
-    msgCtr.setKey('contextId');
-    msgCtr.setLogic('match');
-    msgCtr.setValue(stripPrefix(trace.getMessageid()));
-    setCriterias([convCtr, msgCtr]);
-    setTelemetryAssistantId(trace.getAssistantid());
-    setTelemetryDialogOpen(true);
-  };
 
   const [searchValue, setSearchValue] = useState('');
 
@@ -228,15 +207,6 @@ export const ListingPage: FC<{}> = () => {
 
   return (
     <>
-      {isTelemetryDialogOpen && (
-        <ConversationTelemetryDialog
-          modalOpen={isTelemetryDialogOpen}
-          setModalOpen={setTelemetryDialogOpen}
-          assistantId={telemetryAssistantId}
-          criterias={criterias}
-        />
-      )}
-
       {currentActivity && (
         <ConversationLogDialog
           modalOpen={showLogModal}
@@ -293,190 +263,196 @@ export const ListingPage: FC<{}> = () => {
         ) : conversationLogAction.assistantMessages.length > 0 ? (
           <ScrollableTableSection>
             <Table className="min-w-max">
-            <TableHead>
-              <TableRow>
-                {visibleColumns.map(col => (
-                  <TableHeader key={col.key}>{col.name}</TableHeader>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {conversationLogAction.assistantMessages.map((row, idx) => (
-                <TableRow key={idx}>
-                  {conversationLogAction.visibleColumn('id') && (
-                    <TableCell className="font-mono text-[13px]">
-                      {row.getMessageid().split('-').pop()}
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('version') && (
-                    <TableCell className="text-sm">
-                      vrsn_{row.getAssistantprovidermodelid()}
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn(
-                    'assistant_conversation_id',
-                  ) && (
-                    <TableCell className="text-sm">
-                      <Link
-                        href={`/deployment/assistant/${row.getAssistantid()}/sessions/${row.getAssistantconversationid()}`}
-                        className="!text-sm !inline-flex !items-center !gap-1"
-                      >
-                        <span>{row.getAssistantconversationid()}</span>
-                        <Launch size={12} />
-                      </Link>
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('assistant_id') && (
-                    <TableCell className="text-sm">
-                      <Link
-                        href={`/deployment/assistant/${row.getAssistantid()}`}
-                        className="!text-sm !inline-flex !items-center !gap-1"
-                      >
-                        <span>{row.getAssistantid()}</span>
-                        <Launch size={12} />
-                      </Link>
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('source') && (
-                    <TableCell className="text-sm">
-                      <SourceIndicator source={row.getSource()} />
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('role') && (
-                    <TableCell className="text-sm">
-                      {row.getRole() ? (
-                        <Tag
-                          size="md"
-                          type={
-                            row.getRole().toLowerCase() === 'assistant'
-                              ? 'teal'
-                              : 'cool-gray'
-                          }
+              <TableHead>
+                <TableRow>
+                  {visibleColumns.map(col => (
+                    <TableHeader key={col.key}>{col.name}</TableHeader>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {conversationLogAction.assistantMessages.map((row, idx) => (
+                  <TableRow key={idx}>
+                    {conversationLogAction.visibleColumn('id') && (
+                      <TableCell className="font-mono text-[13px]">
+                        {row.getMessageid().split('-').pop()}
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('version') && (
+                      <TableCell className="text-sm">
+                        vrsn_{row.getAssistantprovidermodelid()}
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn(
+                      'assistant_conversation_id',
+                    ) && (
+                      <TableCell className="text-sm">
+                        <Link
+                          href={`/deployment/assistant/${row.getAssistantid()}/sessions/${row.getAssistantconversationid()}`}
+                          className="text-sm inline-flex! items-center gap-1"
                         >
-                          <span className="flex items-center gap-1.5 leading-none">
-                            {row.getRole().toLowerCase() === 'assistant' ? (
-                              <Bot size={16} />
-                            ) : (
-                              <UserIcon size={16} />
-                            )}
-                            {row.getRole().toLowerCase() === 'assistant'
-                              ? 'Assistant'
-                              : 'User'}
-                          </span>
-                        </Tag>
-                      ) : (
-                        <span className="text-gray-400 text-sm">N/A</span>
-                      )}
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('message') && (
-                    <TableCell className="max-w-[300px] text-sm">
-                      {row.getBody() ? (
-                        <p className="line-clamp-2 text-sm">{row.getBody()}</p>
-                      ) : (
-                        <span className="text-gray-400 text-sm">N/A</span>
-                      )}
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('created_date') && (
-                    <TableCell className="text-[13px] whitespace-nowrap">
-                      {row.getCreateddate() &&
-                        toHumanReadableDateTime(row.getCreateddate()!)}
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('action') && (
-                    <TableCell className="text-sm">
-                      <div className="flex items-center gap-0">
-                        <IconOnlyButton
-                          kind="ghost"
-                          size="md"
-                          renderIcon={View}
-                          iconDescription="View detail"
-                          onClick={() => {
-                            setCurrentActivity(row);
-                            setShowLogModal(true);
-                          }}
-                        />
-                        {CONFIG.workspace.features?.telemetry !== false && (
+                          <span>{row.getAssistantconversationid()}</span>
+                          <Launch size={12} />
+                        </Link>
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('assistant_id') && (
+                      <TableCell className="text-sm">
+                        <Link
+                          href={`/deployment/assistant/${row.getAssistantid()}`}
+                          className="text-sm inline-flex! items-center gap-1"
+                        >
+                          <span>{row.getAssistantid()}</span>
+                          <Launch size={12} />
+                        </Link>
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('source') && (
+                      <TableCell className="text-sm">
+                        <SourceIndicator source={row.getSource()} />
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('role') && (
+                      <TableCell className="text-sm">
+                        {row.getRole() ? (
+                          <Tag
+                            size="md"
+                            type={
+                              row.getRole().toLowerCase() === 'assistant'
+                                ? 'blue'
+                                : 'cool-gray'
+                            }
+                          >
+                            <span className="flex items-center gap-1.5 leading-none">
+                              {row.getRole().toLowerCase() === 'assistant' ? (
+                                <Bot size={16} />
+                              ) : (
+                                <UserIcon size={16} />
+                              )}
+                              {row.getRole().toLowerCase() === 'assistant'
+                                ? 'Assistant'
+                                : 'User'}
+                            </span>
+                          </Tag>
+                        ) : (
+                          <span className="text-gray-400 text-sm">N/A</span>
+                        )}
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('message') && (
+                      <TableCell className="max-w-75 text-sm">
+                        {row.getBody() ? (
+                          <p className="line-clamp-2 text-sm">
+                            {row.getBody()}
+                          </p>
+                        ) : (
+                          <span className="text-gray-400 text-sm">N/A</span>
+                        )}
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('created_date') && (
+                      <TableCell className="text-[13px] whitespace-nowrap">
+                        {row.getCreateddate() &&
+                          toHumanReadableDateTime(row.getCreateddate()!)}
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('action') && (
+                      <TableCell className="text-sm">
+                        <div className="flex items-center gap-0">
                           <IconOnlyButton
                             kind="ghost"
                             size="md"
-                            renderIcon={DataCheck}
-                            iconDescription="View telemetry"
-                            onClick={() => handleTraceClick(row)}
+                            renderIcon={View}
+                            iconDescription="View detail"
+                            onClick={() => {
+                              setCurrentActivity(row);
+                              setShowLogModal(true);
+                            }}
                           />
-                        )}
-                        <IconOnlyButton
-                          kind="ghost"
-                          size="md"
-                          renderIcon={Launch}
-                          iconDescription="View conversation"
-                          onClick={() => {
-                            navigation.goToAssistantSession(
-                              row.getAssistantid(),
-                              row.getAssistantconversationid(),
-                            );
-                          }}
-                        />
-                      </div>
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('status') && (
-                    <TableCell className="text-sm">
-                      <CarbonStatusIndicator
-                        state={
-                          row.getRole()?.toLowerCase() === 'assistant'
-                            ? getMetricValueOrDefault(
-                                row.getMetricsList(),
-                                'assistant_turn',
-                                row.getStatus(),
-                              )
-                            : row.getRole()?.toLowerCase() === 'user'
+                          {CONFIG.workspace.features?.telemetry !== false && (
+                            <IconOnlyButton
+                              kind="ghost"
+                              size="md"
+                              renderIcon={DataCheck}
+                              iconDescription="View telemetry"
+                              onClick={() =>
+                                navigation.goToMessageTelemetry(
+                                  row.getMessageid(),
+                                )
+                              }
+                            />
+                          )}
+                          <IconOnlyButton
+                            kind="ghost"
+                            size="md"
+                            renderIcon={Launch}
+                            iconDescription="View conversation"
+                            onClick={() => {
+                              navigation.goToAssistantSession(
+                                row.getAssistantid(),
+                                row.getAssistantconversationid(),
+                              );
+                            }}
+                          />
+                        </div>
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('status') && (
+                      <TableCell className="text-sm">
+                        <CarbonStatusIndicator
+                          state={
+                            row.getRole()?.toLowerCase() === 'assistant'
                               ? getMetricValueOrDefault(
                                   row.getMetricsList(),
-                                  'user_turn',
+                                  'assistant_turn',
                                   row.getStatus(),
                                 )
-                              : row.getStatus()
-                        }
-                      />
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('time_taken') && (
-                    <TableCell className="font-mono text-[13px]">
-                      {formatNanoToReadableMilli(
-                        getTimeTakenMetric(row.getMetricsList()),
-                      )}
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('total_token') && (
-                    <TableCell className="text-sm tabular-nums">
-                      {getTotalTokenMetric(row.getMetricsList())}
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn('user_feedback') && (
-                    <TableCell className="text-sm">
-                      {getMetricValueOrDefault(
-                        row.getMetricsList(),
-                        'custom.feedback',
-                        '__',
-                      )}
-                    </TableCell>
-                  )}
-                  {conversationLogAction.visibleColumn(
-                    'user_text_feedback',
-                  ) && (
-                    <TableCell className="text-sm">
-                      {getMetricValueOrDefault(
-                        row.getMetricsList(),
-                        'custom.feedback_text',
-                        '--',
-                      )}
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
+                              : row.getRole()?.toLowerCase() === 'user'
+                                ? getMetricValueOrDefault(
+                                    row.getMetricsList(),
+                                    'user_turn',
+                                    row.getStatus(),
+                                  )
+                                : row.getStatus()
+                          }
+                        />
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('time_taken') && (
+                      <TableCell className="font-mono text-[13px]">
+                        {formatNanoToReadableMilli(
+                          getTimeTakenMetric(row.getMetricsList()),
+                        )}
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('total_token') && (
+                      <TableCell className="text-sm tabular-nums">
+                        {getTotalTokenMetric(row.getMetricsList())}
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn('user_feedback') && (
+                      <TableCell className="text-sm">
+                        {getMetricValueOrDefault(
+                          row.getMetricsList(),
+                          'custom.feedback',
+                          '__',
+                        )}
+                      </TableCell>
+                    )}
+                    {conversationLogAction.visibleColumn(
+                      'user_text_feedback',
+                    ) && (
+                      <TableCell className="text-sm">
+                        {getMetricValueOrDefault(
+                          row.getMetricsList(),
+                          'custom.feedback_text',
+                          '--',
+                        )}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
             </Table>
           </ScrollableTableSection>
         ) : (

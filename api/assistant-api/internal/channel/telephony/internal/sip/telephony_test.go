@@ -1,11 +1,16 @@
 package internal_sip_telephony
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_sip "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/sip/internal"
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -30,6 +35,9 @@ func newSIPTelephonyForTest() *sipTelephony {
 				Transport:         "udp",
 				RTPPortRangeStart: 10000,
 				RTPPortRangeEnd:   10100,
+				RegisterTimeout:   5 * time.Second,
+				InviteTimeout:     30 * time.Second,
+				SessionTimeout:    45 * time.Minute,
 			},
 		},
 	}
@@ -85,8 +93,95 @@ func TestParseConfig_DefaultsOutboundTo5060WhenVaultPortMissing(t *testing.T) {
 		t.Fatalf("parseConfig() error = %v", err)
 	}
 
-	if cfg.Port != defaultOutboundSIPPort {
-		t.Fatalf("expected default outbound SIP port %d, got %d", defaultOutboundSIPPort, cfg.Port)
+	if cfg.Port != internal_sip.DefaultOutboundSIPPort {
+		t.Fatalf("expected default outbound SIP port %d, got %d", internal_sip.DefaultOutboundSIPPort, cfg.Port)
+	}
+}
+
+func TestParseConfig_AllowsOutboundWithoutAuth(t *testing.T) {
+	telephony := newSIPTelephonyForTest()
+	cred := vaultCredential(t, map[string]interface{}{
+		"host": "example.org:5060",
+	})
+
+	cfg, err := telephony.parseConfig(cred)
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+
+	if cfg.Server != "example.org" {
+		t.Fatalf("expected server example.org, got %q", cfg.Server)
+	}
+	if cfg.Username != "" || cfg.Password != "" {
+		t.Fatalf("expected empty auth, got username=%q password=%q", cfg.Username, cfg.Password)
+	}
+}
+
+func TestParseConfig_AppliesPlatformTimeouts(t *testing.T) {
+	telephony := newSIPTelephonyForTest()
+	cred := vaultCredential(t, map[string]interface{}{
+		"host": "example.org:5060",
+	})
+
+	cfg, err := telephony.parseConfig(cred)
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+
+	if cfg.RegisterTimeout != 5*time.Second {
+		t.Fatalf("expected register timeout 5s, got %s", cfg.RegisterTimeout)
+	}
+	if cfg.InviteTimeout != 30*time.Second {
+		t.Fatalf("expected invite timeout 30s, got %s", cfg.InviteTimeout)
+	}
+	if cfg.SessionTimeout != 45*time.Minute {
+		t.Fatalf("expected session timeout 45m, got %s", cfg.SessionTimeout)
+	}
+}
+
+func TestParseConfig_AppliesInboundAnswerPolicyDefaults(t *testing.T) {
+	telephony := newSIPTelephonyForTest()
+	telephony.appCfg.SIPConfig.Inbound = config.SIPInboundConfig{
+		AnswerMode:      string(sip_infra.InboundAnswerModeAfterMinRingDuration),
+		MinRingDuration: 50 * time.Millisecond,
+		MaxRingDuration: 5 * time.Second,
+		ACKTimeout:      2 * time.Second,
+	}
+	cred := vaultCredential(t, map[string]interface{}{
+		"host": "example.org:5060",
+	})
+
+	cfg, err := telephony.parseConfig(cred)
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+
+	if cfg.InboundAnswerMode != sip_infra.InboundAnswerModeAfterMinRingDuration {
+		t.Fatalf("expected inbound answer mode from app config, got %q", cfg.InboundAnswerMode)
+	}
+	if cfg.InboundMinRingDuration != 50*time.Millisecond ||
+		cfg.InboundMaxRingDuration != 5*time.Second ||
+		cfg.InboundACKTimeout != 2*time.Second {
+		t.Fatalf("expected inbound answer policy defaults from app config, got %#v", cfg)
+	}
+}
+
+func TestOutboundHealthGateEnabled_DefaultsOn(t *testing.T) {
+	if !outboundHealthGateEnabled(nil) {
+		t.Fatal("expected health gate enabled for nil app config")
+	}
+	if !outboundHealthGateEnabled(&config.AssistantConfig{}) {
+		t.Fatal("expected health gate enabled without SIP config")
+	}
+}
+
+func TestOutboundHealthGateEnabled_AllowsExplicitDisable(t *testing.T) {
+	disabled := false
+	appCfg := &config.AssistantConfig{
+		SIPConfig: &config.SIPConfig{OutboundHealthGate: &disabled},
+	}
+	if outboundHealthGateEnabled(appCfg) {
+		t.Fatal("expected health gate disabled")
 	}
 }
 
@@ -130,6 +225,50 @@ func TestParseConfig_NoCustomHeadersWhenMissing(t *testing.T) {
 
 	if cfg.CustomHeaders != nil {
 		t.Fatalf("expected nil custom headers, got %v", cfg.CustomHeaders)
+	}
+}
+
+func TestNewOutboundInitiatedCallInfo_UsesInitiatedStatus(t *testing.T) {
+	session, err := sip_infra.NewSession(context.Background(), &sip_infra.SessionConfig{
+		Config: &sip_infra.Config{
+			Server:            "trunk.example.org",
+			Port:              5060,
+			Transport:         sip_infra.TransportUDP,
+			RTPPortRangeStart: 10000,
+			RTPPortRangeEnd:   10100,
+		},
+		Direction: sip_infra.CallDirectionOutbound,
+		CallID:    "sip-call-1",
+		Codec:     &sip_infra.CodecPCMU,
+	})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	info := newOutboundInitiatedCallInfo(session, "+15551234567", "+15557654321", 42, 99)
+
+	if info.Status != string(sip_infra.OutboundCallStatusInitiated) {
+		t.Fatalf("expected initiated status, got %q", info.Status)
+	}
+	if info.Status == "SUCCESS" {
+		t.Fatal("outbound call must not report SUCCESS before answer")
+	}
+	if info.StatusInfo.Event != string(sip_infra.OutboundCallStatusInitiated) {
+		t.Fatalf("expected initiated event, got %q", info.StatusInfo.Event)
+	}
+	if info.Extra["telephony.status"] != string(sip_infra.OutboundCallStatusInitiated) {
+		t.Fatalf("expected telephony.status initiated, got %q", info.Extra["telephony.status"])
+	}
+}
+
+func TestOutboundAssistantID_AllowsNilAssistant(t *testing.T) {
+	if got := outboundAssistantID(nil); got != 0 {
+		t.Fatalf("expected nil assistant ID 0, got %d", got)
+	}
+	assistant := &internal_assistant_entity.Assistant{}
+	assistant.Id = 42
+	if got := outboundAssistantID(assistant); got != 42 {
+		t.Fatalf("expected assistant ID 42, got %d", got)
 	}
 }
 

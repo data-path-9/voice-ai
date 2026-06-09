@@ -54,8 +54,8 @@ func newTestStreamer(t *testing.T) (*Streamer, net.Conn) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	as := &Streamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, nil,
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			logger, cc, nil, nil,
 		),
 		conn:           local,
 		reader:         reader,
@@ -65,7 +65,12 @@ func newTestStreamer(t *testing.T) (*Streamer, net.Conn) {
 		cancel:         cancel,
 		initialUUID:    "test-uuid",
 	}
-	as.mediaSession = internal_telephony_media.NewMediaSession(ctx, logger, audioProcessor, nil)
+	as.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     ctx,
+		Logger:      logger,
+		MediaEngine: audioProcessor,
+		OutputSink:  as.sendOutputFrame,
+	})
 
 	t.Cleanup(func() {
 		cancel()

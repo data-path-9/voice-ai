@@ -16,9 +16,9 @@ import {
   validateWebsocketDslResponseRules,
 } from '../websocket-dsl/core';
 
-export const CUSTOM_TTS_QUERY_PARAMS_KEY = 'speak.ws.query_params';
-export const CUSTOM_TTS_REQUEST_RULES_KEY = 'speak.ws.request_rules';
-export const CUSTOM_TTS_RESPONSE_RULES_KEY = 'speak.ws.response_rules';
+export const CUSTOM_TTS_QUERY_PARAMS_KEY = 'speak.query_params';
+export const CUSTOM_TTS_REQUEST_RULES_KEY = 'speak.request_rules';
+export const CUSTOM_TTS_RESPONSE_RULES_KEY = 'speak.response_rules';
 
 export const CUSTOM_TTS_DSL_VARIABLES = [
   'message_id',
@@ -212,10 +212,10 @@ export const CUSTOM_TTS_DEFAULT_REQUEST_RULES_EXAMPLE = `[
       "frame": "json",
       "body": {
         "text": { "$path": "packet.text" },
-        "voice_id": { "$path": "config.voice.id" },
+        "voice_id": "narrator-1",
         "message_id": { "$path": "packet.message_id" },
-        "model": { "$path": "config.model" },
-        "language": { "$path": "config.language" },
+        "model": "sonic-2",
+        "language": "en-US",
         "audio": {
           "encoding": { "$path": "config.audio.encoding" },
           "sample_rate": {

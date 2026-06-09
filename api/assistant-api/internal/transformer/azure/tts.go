@@ -15,6 +15,7 @@ import (
 	"github.com/Microsoft/cognitive-services-speech-sdk-go/audio"
 	"github.com/Microsoft/cognitive-services-speech-sdk-go/common"
 	"github.com/Microsoft/cognitive-services-speech-sdk-go/speech"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -91,23 +92,43 @@ func (azure *azureTextToSpeech) Close(ctx context.Context) error {
 	azure.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		azure.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "tts",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": azure.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentTTS,
+					Event:     observability.TTSClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": azure.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_TTS_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total TTS connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentTTS,
+					Provider:  azure.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   azure.Name(),
+						"metric":     type_enums.CONVERSATION_TTS_DURATION.String(),
+					},
+				},
 			},
 		)
 	}
@@ -159,14 +180,18 @@ func (azure *azureTextToSpeech) Initialize() (err error) {
 	azure.client.Synthesizing(azure.OnSpeech)
 	azure.client.SynthesisCompleted(azure.OnComplete)
 	azure.client.SynthesisCanceled(azure.OnCancel)
-	azure.onPacket(internal_type.ConversationEventPacket{
-		Name: "tts",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": azure.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+	azure.onPacket(internal_type.ObservabilityEventRecordPacket{
+		Scope: internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentTTS,
+			Event:     observability.TTSInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": azure.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -193,10 +218,16 @@ func (azure *azureTextToSpeech) Transform(ctx context.Context, in internal_type.
 			azure.ttsStartedAt = time.Time{}
 			azure.ttsMetricSent = false
 			azure.mu.Unlock()
-			azure.onPacket(internal_type.ConversationEventPacket{
-				Name: "tts",
-				Data: map[string]string{"type": "interrupted"},
-				Time: time.Now(),
+			azure.onPacket(internal_type.ObservabilityEventRecordPacket{
+				ContextID:   currentCtx,
+				Scope:       internal_type.ObservabilityRecordScopeMessage,
+				MessageRole: observability.MessageRoleAssistant,
+				Record: observability.RecordEvent{
+					Component:  observability.ComponentTTS,
+					Event:      observability.TTSInterrupted,
+					Attributes: observability.Attributes{"type": "interrupted"},
+					OccurredAt: time.Now(),
+				},
 			})
 		}
 		return nil
@@ -215,13 +246,19 @@ func (azure *azureTextToSpeech) Transform(ctx context.Context, in internal_type.
 			})
 			return nil
 		}
-		azure.onPacket(internal_type.ConversationEventPacket{
-			Name: "tts",
-			Data: map[string]string{
-				"type": "speaking",
-				"text": input.Text,
+		azure.onPacket(internal_type.ObservabilityEventRecordPacket{
+			ContextID:   input.ContextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleAssistant,
+			Record: observability.RecordEvent{
+				Component: observability.ComponentTTS,
+				Event:     observability.TTSSpeaking,
+				Attributes: observability.Attributes{
+					"type": "speaking",
+					"text": input.Text,
+				},
+				OccurredAt: time.Now(),
 			},
-			Time: time.Now(),
 		})
 		return nil
 	case internal_type.TextToSpeechDonePacket:
@@ -247,12 +284,17 @@ func (azCallback *azureTextToSpeech) OnSpeech(event speech.SpeechSynthesisEventA
 	}
 	azCallback.mu.Unlock()
 	if !metricSent && !startedAt.IsZero() {
-		azCallback.onPacket(internal_type.AssistantMessageMetricPacket{
-			ContextID: ctxId,
-			Metrics: []*protos.Metric{{
-				Name:  "tts_latency_ms",
-				Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
-			}},
+		azCallback.onPacket(internal_type.ObservabilityMetricRecordPacket{
+			ContextID:   ctxId,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleAssistant,
+			Record: observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:  "tts_latency_ms",
+					Value: fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()),
+				}},
+				Attributes: observability.Attributes{"provider": azCallback.Name()},
+			},
 		})
 	}
 	azCallback.onPacket(internal_type.TextToSpeechAudioPacket{ContextID: ctxId, AudioChunk: event.Result.AudioData})
@@ -265,10 +307,16 @@ func (azCallback *azureTextToSpeech) OnComplete(event speech.SpeechSynthesisEven
 	azCallback.mu.Unlock()
 	azCallback.onPacket(
 		internal_type.TextToSpeechEndPacket{ContextID: ctxId},
-		internal_type.ConversationEventPacket{
-			Name: "tts",
-			Data: map[string]string{"type": "completed"},
-			Time: time.Now(),
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID:   ctxId,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleAssistant,
+			Record: observability.RecordEvent{
+				Component:  observability.ComponentTTS,
+				Event:      observability.TTSCompleted,
+				Attributes: observability.Attributes{"type": "completed"},
+				OccurredAt: time.Now(),
+			},
 		},
 	)
 }

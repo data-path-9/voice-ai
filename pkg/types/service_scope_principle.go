@@ -38,7 +38,6 @@ func (ss *ServiceScope) HasProject() bool {
 }
 
 func (ss *ServiceScope) IsAuthenticated() bool {
-	// org scope is already to have only org
 	return (ss.HasUser() || ss.HasProject()) && ss.HasOrganization()
 }
 
@@ -46,6 +45,6 @@ func (ss *ServiceScope) GetCurrentToken() string {
 	return ss.CurrentToken
 }
 
-func (ss *ServiceScope) Type() string {
-	return "service"
+func (ss *ServiceScope) Type() AuthType {
+	return AuthTypeService
 }

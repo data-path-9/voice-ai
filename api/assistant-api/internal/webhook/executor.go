@@ -24,11 +24,10 @@ func NewExecutor(
 	ctx context.Context,
 	webhook *internal_assistant_entity.AssistantWebhook,
 	callback internal_type.Callback,
-	caller internal_type.InternalCaller,
 ) (internal_type.WebhookExecutor, error) {
 	switch webhook.Provider {
 	case internal_assistant_entity.AssistantWebhookProviderHTTP:
-		return internal_webhook_http.NewExecutor(logger, ctx, webhook, callback, caller)
+		return internal_webhook_http.NewExecutor(logger, ctx, webhook, callback)
 	default:
 		return nil, fmt.Errorf("webhook: unsupported executor type %q", webhook.Provider)
 	}

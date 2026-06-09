@@ -41,8 +41,7 @@ type runtimeExecutor struct {
 // NewExecutor creates a fully wired HTTP webhook executor.
 func NewExecutor(logger commons.Logger, _ context.Context,
 	webhook *internal_assistant_entity.AssistantWebhook,
-	callback internal_type.Callback,
-	_ internal_type.InternalCaller) (internal_type.WebhookExecutor, error) {
+	callback internal_type.Callback) (internal_type.WebhookExecutor, error) {
 	return &runtimeExecutor{
 		logger:   logger,
 		callback: callback,

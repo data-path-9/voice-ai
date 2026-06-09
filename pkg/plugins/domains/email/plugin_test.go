@@ -8,6 +8,7 @@ import (
 	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
 	plugins_types "github.com/rapidaai/pkg/plugins/types"
+	"github.com/rapidaai/pkg/types"
 	rapida_types "github.com/rapidaai/pkg/types"
 	vault_api "github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
@@ -25,7 +26,7 @@ func (m *mockAuth) HasOrganization() bool             { return true }
 func (m *mockAuth) HasProject() bool                  { return true }
 func (m *mockAuth) IsAuthenticated() bool             { return true }
 func (m *mockAuth) GetCurrentToken() string           { return "t" }
-func (m *mockAuth) Type() string                      { return "test" }
+func (m *mockAuth) Type() types.AuthType              { return types.AuthTypeUser }
 
 var _ rapida_types.SimplePrinciple = (*mockAuth)(nil)
 

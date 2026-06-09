@@ -3,6 +3,7 @@ import { loadProviderConfig } from '../config-loader';
 import { getDefaultsFromConfig, validateFromConfig } from '../config-defaults';
 import {
   CUSTOM_STT_DEFAULT_REQUEST_RULES_EXAMPLE,
+  CUSTOM_STT_QUERY_PARAMS_KEY,
   CUSTOM_STT_REQUEST_RULES_KEY,
   CUSTOM_STT_RESPONSE_RULES_KEY,
 } from '../custom-stt/contract';
@@ -57,7 +58,7 @@ describe('Custom STT provider catalog', () => {
       );
       expect(
         compatibilityConfig?.choices?.map((choice: any) => choice.value),
-      ).toEqual(['websocket_v1']);
+      ).toEqual(['websocket_v1', 'http_v1']);
     }
   });
 });
@@ -82,7 +83,7 @@ describe('Custom STT config contract', () => {
     );
 
     return upsertMetadata(
-      upsertMetadata(defaults, 'listen.ws.query_params', validQueryParams),
+      upsertMetadata(defaults, CUSTOM_STT_QUERY_PARAMS_KEY, validQueryParams),
       CUSTOM_STT_RESPONSE_RULES_KEY,
       validResponseRules,
     );
@@ -93,17 +94,17 @@ describe('Custom STT config contract', () => {
     const keys = config.stt?.parameters.map(param => param.key) ?? [];
     expect(keys).toEqual(
       expect.arrayContaining([
-        'listen.model',
-        'listen.language',
         'listen.audio.encoding',
         'listen.audio.sample_rate',
-        'listen.ws.query_params',
+        CUSTOM_STT_QUERY_PARAMS_KEY,
         CUSTOM_STT_REQUEST_RULES_KEY,
         CUSTOM_STT_RESPONSE_RULES_KEY,
       ]),
     );
     expect(keys).not.toContain('listen.ws.audio_request');
     expect(keys).not.toContain('listen.ws.response_parser');
+    expect(keys).not.toContain('listen.model');
+    expect(keys).not.toContain('listen.language');
   });
 
   it('applies encoding, sample-rate, and request-rule defaults', () => {
@@ -171,12 +172,9 @@ describe('Custom STT config contract', () => {
     ).toBeUndefined();
   });
 
-  it('allows model, language, and query params to be omitted', () => {
+  it('allows query params to be omitted', () => {
     const options = buildValidOptions().filter(
-      item =>
-        !['listen.model', 'listen.language', 'listen.ws.query_params'].includes(
-          item.getKey(),
-        ),
+      item => item.getKey() !== CUSTOM_STT_QUERY_PARAMS_KEY,
     );
 
     expect(
@@ -186,8 +184,8 @@ describe('Custom STT config contract', () => {
 
   it('rejects invalid JSON in optional query params', () => {
     const options = upsertMetadata(
-      removeMetadata(buildValidOptions(), 'listen.ws.query_params'),
-      'listen.ws.query_params',
+      removeMetadata(buildValidOptions(), CUSTOM_STT_QUERY_PARAMS_KEY),
+      CUSTOM_STT_QUERY_PARAMS_KEY,
       '{"language":{"$var":"language"',
     );
 

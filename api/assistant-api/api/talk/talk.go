@@ -6,14 +6,9 @@
 package assistant_talk_api
 
 import (
-	"bufio"
 	"context"
 	"errors"
-	"fmt"
-	"net"
 
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 	"github.com/rapidaai/api/assistant-api/config"
 	internal_adapter "github.com/rapidaai/api/assistant-api/internal/adapters"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
@@ -21,11 +16,11 @@ import (
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
 	channel_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
 	internal_webrtc "github.com/rapidaai/api/assistant-api/internal/channel/webrtc"
-	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
-	observe "github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
+	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
+	observability_collector_conversationdb "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationdb"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
-	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
@@ -34,7 +29,6 @@ import (
 	storage_files "github.com/rapidaai/pkg/storages/file-storage"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
-	"github.com/rapidaai/protos"
 	assistant_api "github.com/rapidaai/protos"
 )
 
@@ -50,7 +44,6 @@ type ConversationApi struct {
 	outboundDispatcher           *channel_telephony.OutboundDispatcher
 	inboundDispatcher            *channel_telephony.InboundDispatcher
 	channelPipeline              *channel_pipeline.Dispatcher
-	conversationObserver         *conversationObserver
 	assistantConversationService internal_services.AssistantConversationService
 	assistantService             internal_services.AssistantService
 	vaultClient                  web_client.VaultClient
@@ -59,6 +52,23 @@ type ConversationApi struct {
 
 type ConversationGrpcApi struct {
 	ConversationApi
+}
+
+func (cApi *ConversationApi) Observability(ctx context.Context, auth types.SimplePrinciple, options ...observability.Option) observability.Recorder {
+	otelCollectors := make([]observability.Collector, 0)
+	otelCollectors = append(otelCollectors, observability_collector_conversationdb.New(observability_collector_conversationdb.Config{
+		Logger:              cApi.logger,
+		ConversationService: cApi.assistantConversationService,
+	}))
+	otelCollectors = append(otelCollectors, collectors.NewWithEnv(ctx, cApi.logger, cApi.cfg)...)
+	recorderOptions := []observability.Option{
+		observability.WithLogger(cApi.logger),
+		observability.WithAuth(auth),
+		observability.WithContext(ctx),
+		observability.WithCollectors(otelCollectors...),
+	}
+	recorderOptions = append(recorderOptions, options...)
+	return observability.New(recorderOptions...)
 }
 
 // newConversationApiCore builds the shared ConversationApi. All three public
@@ -74,20 +84,24 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 	assistantService := internal_assistant_service.NewAssistantService(cfg, logger, postgres, opensearch)
 	fileStorage := storage_files.NewStorage(cfg.AssetStoreConfig, logger)
 	conversationService := internal_assistant_service.NewAssistantConversationService(logger, postgres, fileStorage)
-
-	telephonyDeps := channel_telephony.TelephonyDispatcherDeps{
-		Cfg:                 cfg,
-		Logger:              logger,
-		Store:               store,
-		VaultClient:         vaultClient,
-		AssistantService:    assistantService,
-		ConversationService: conversationService,
-		TelephonyOpt:        channel_telephony.TelephonyOption{SIPServer: sipServer},
-	}
-
-	inbound := channel_telephony.NewInboundDispatcher(telephonyDeps)
-	outboundDisp := channel_telephony.NewOutboundDispatcher(telephonyDeps)
-	conversationObserver := NewConversationObserver(cfg, logger, opensearch, conversationService)
+	inbound := channel_telephony.NewInboundDispatcher(
+		channel_telephony.WithConfig(cfg),
+		channel_telephony.WithLogger(logger),
+		channel_telephony.WithStore(store),
+		channel_telephony.WithVaultClient(vaultClient),
+		channel_telephony.WithAssistantService(assistantService),
+		channel_telephony.WithConversationService(conversationService),
+		channel_telephony.WithTelephonyOption(channel_telephony.TelephonyOption{SIPServer: sipServer}),
+	)
+	outbound := channel_telephony.NewOutboundDispatcher(
+		channel_telephony.WithOutboundConfig(cfg),
+		channel_telephony.WithOutboundLogger(logger),
+		channel_telephony.WithOutboundStore(store),
+		channel_telephony.WithOutboundVaultClient(vaultClient),
+		channel_telephony.WithOutboundAssistantService(assistantService),
+		channel_telephony.WithOutboundConversationService(conversationService),
+		channel_telephony.WithOutboundTelephonyOption(channel_telephony.TelephonyOption{SIPServer: sipServer}),
+	)
 	cApi := &ConversationApi{
 		cfg:                          cfg,
 		logger:                       logger,
@@ -95,83 +109,21 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 		redis:                        redis,
 		opensearch:                   opensearch,
 		callContextStore:             store,
-		outboundDispatcher:           outboundDisp,
+		outboundDispatcher:           outbound,
 		inboundDispatcher:            inbound,
-		conversationObserver:         conversationObserver,
 		assistantConversationService: conversationService,
 		assistantService:             assistantService,
 		storage:                      fileStorage,
 		vaultClient:                  vaultClient,
 		authClient:                   web_client.NewAuthenticator(&cfg.AppConfig, logger, redis),
-		channelPipeline: channel_pipeline.NewDispatcher(&channel_pipeline.DispatcherConfig{
-			Logger: logger,
-			OnReceiveCall: func(ctx context.Context, provider string, ginCtx *gin.Context) (*internal_type.CallInfo, error) {
-				return inbound.ReceiveCall(ginCtx, provider)
-			},
-			OnLoadAssistant: func(ctx context.Context, auth types.SimplePrinciple, assistantID uint64) (*internal_assistant_entity.Assistant, error) {
-				return inbound.LoadAssistant(ctx, auth, assistantID)
-			},
-			OnCreateConversation: func(ctx context.Context, auth types.SimplePrinciple, callerNumber string, assistantID, assistantProviderID uint64, direction string) (uint64, error) {
-				return inbound.CreateConversation(ctx, auth, callerNumber, assistantID, assistantProviderID, direction)
-			},
-			OnSaveCallContext: func(ctx context.Context, auth types.SimplePrinciple, assistant *internal_assistant_entity.Assistant, conversationID uint64, callInfo *internal_type.CallInfo, provider string) (string, error) {
-				return inbound.SaveCallContext(ctx, auth, assistant, conversationID, callInfo, provider)
-			},
-			OnAnswerProvider: func(ctx context.Context, ginCtx *gin.Context, auth types.SimplePrinciple, provider string, assistantID uint64, callerNumber string, conversationID uint64) error {
-				return inbound.AnswerProvider(ginCtx, auth, provider, assistantID, callerNumber, conversationID)
-			},
-			OnDispatchOutbound: func(ctx context.Context, contextID string) error {
-				return outboundDisp.Dispatch(ctx, contextID)
-			},
-			OnApplyConversationExtras: func(ctx context.Context, auth types.SimplePrinciple, assistantID, conversationID uint64, opts, args, metadata map[string]interface{}) error {
-				if len(opts) > 0 {
-					if _, err := conversationService.ApplyConversationOption(ctx, auth, assistantID, conversationID, opts); err != nil {
-						return err
-					}
-				}
-				if len(args) > 0 {
-					if _, err := conversationService.ApplyConversationArgument(ctx, auth, assistantID, conversationID, args); err != nil {
-						return err
-					}
-				}
-				if len(metadata) > 0 {
-					md := make([]*types.Metadata, 0, len(metadata))
-					for k, v := range metadata {
-						md = append(md, types.NewMetadata(k, fmt.Sprintf("%v", v)))
-					}
-					if _, err := conversationService.ApplyConversationMetadata(ctx, auth, assistantID, conversationID, md); err != nil {
-						return err
-					}
-				}
-				return nil
-			},
-			OnResolveSession: func(ctx context.Context, contextID string) (*callcontext.CallContext, *protos.VaultCredential, error) {
-				return inbound.ResolveCallSessionByContext(ctx, contextID)
-			},
-			OnCreateStreamer: func(ctx context.Context, cc *callcontext.CallContext, vc *protos.VaultCredential, ws *websocket.Conn, conn net.Conn, reader *bufio.Reader, writer *bufio.Writer) (internal_type.Streamer, error) {
-				return channel_telephony.Telephony(cc.Provider).NewStreamer(logger, cc, vc, channel_telephony.StreamerOption{
-					WebSocketConn:     ws,
-					AudioSocketConn:   conn,
-					AudioSocketReader: reader,
-					AudioSocketWriter: writer,
-				})
-			},
-			OnCreateTalker: func(ctx context.Context, streamer internal_type.Streamer) (internal_type.Talking, error) {
-				return internal_adapter.GetTalker(utils.PhoneCall, ctx, cfg, logger, postgres, opensearch, redis, fileStorage, streamer)
-			},
-			OnRunTalk: func(ctx context.Context, talker internal_type.Talking, auth types.SimplePrinciple) error {
-				return talker.Talk(ctx, auth)
-			},
-			OnCreateObserver: func(ctx context.Context, callID string, auth types.SimplePrinciple, assistantID, conversationID uint64) *observe.ConversationObserver {
-				return conversationObserver.ConversationObserver(auth, assistantID, conversationID)
-			},
-			OnCompleteSession: func(ctx context.Context, contextID string) {
-				// No state transition needed — CLAIMED is the terminal state.
-				logger.Debugf("session completed: contextId=%s", contextID)
-			},
-		}),
+		channelPipeline: channel_pipeline.NewDispatcher(
+			channel_pipeline.WithLogger(logger),
+			channel_pipeline.WithInboundDispatcher(inbound),
+			channel_pipeline.WithOutboundDispatcher(outbound),
+			channel_pipeline.WithConversationService(conversationService),
+			channel_pipeline.WithAssistantService(assistantService),
+		),
 	}
-	cApi.channelPipeline.Start(context.Background())
 	return cApi
 }
 
@@ -230,21 +182,34 @@ func (cApi *ConversationGrpcApi) AssistantTalk(stream assistant_api.TalkService_
 		cApi.logger.Errorf("unable to resolve the source from the context")
 		return errors.New("illegal source")
 	}
-	streamer, err := internal_grpc.NewGrpcStreamer(stream.Context(), cApi.logger, stream)
+	observabilityRecorder := cApi.Observability(
+		stream.Context(),
+		auth,
+		observability.WithGracePeriod(),
+	)
+	defer observabilityRecorder.Close(context.Background())
+
+	streamer, err := internal_grpc.New(
+		internal_grpc.WithContext(stream.Context()),
+		internal_grpc.WithLogger(cApi.logger),
+		internal_grpc.WithServer(stream),
+		internal_grpc.WithObserver(observabilityRecorder),
+	)
 	if err != nil {
 		cApi.logger.Errorf("failed to create grpc streamer: %v", err)
 		return err
 	}
-	talker, err := internal_adapter.GetTalker(
-		source,
-		stream.Context(),
-		cApi.cfg,
-		cApi.logger,
-		cApi.postgres,
-		cApi.opensearch,
-		cApi.redis,
-		cApi.storage,
-		streamer,
+	talker, err := internal_adapter.New(
+		internal_adapter.WithSource(source),
+		internal_adapter.WithContext(stream.Context()),
+		internal_adapter.WithConfig(cApi.cfg),
+		internal_adapter.WithLogger(cApi.logger),
+		internal_adapter.WithPostgres(cApi.postgres),
+		internal_adapter.WithOpenSearch(cApi.opensearch),
+		internal_adapter.WithRedis(cApi.redis),
+		internal_adapter.WithStorage(cApi.storage),
+		internal_adapter.WithStreamer(streamer),
+		internal_adapter.WithObserver(observabilityRecorder),
 	)
 	if err != nil {
 		cApi.logger.Errorf("failed to setup talker: %v", err)
@@ -266,21 +231,35 @@ func (cApi *ConversationGrpcApi) WebTalk(stream assistant_api.WebRTC_WebTalkServ
 		cApi.logger.Errorf("unable to resolve the source from the context")
 		return errors.New("illegal source")
 	}
-	streamer, err := internal_webrtc.NewWebRTCStreamer(stream.Context(), cApi.logger, stream, cApi.cfg.WebRTCConfig)
+	observabilityRecorder := cApi.Observability(
+		stream.Context(),
+		auth,
+		observability.WithGracePeriod(),
+	)
+	defer observabilityRecorder.Close(context.Background())
+
+	streamer, err := internal_webrtc.New(
+		internal_webrtc.WithContext(stream.Context()),
+		internal_webrtc.WithLogger(cApi.logger),
+		internal_webrtc.WithServer(stream),
+		internal_webrtc.WithServerConfig(cApi.cfg.WebRTCConfig),
+		internal_webrtc.WithObserver(observabilityRecorder),
+	)
 	if err != nil {
 		cApi.logger.Errorf("failed to create grpc streamer: %v", err)
 		return err
 	}
-	talker, err := internal_adapter.GetTalker(
-		source,
-		stream.Context(),
-		cApi.cfg,
-		cApi.logger,
-		cApi.postgres,
-		cApi.opensearch,
-		cApi.redis,
-		cApi.storage,
-		streamer,
+	talker, err := internal_adapter.New(
+		internal_adapter.WithSource(source),
+		internal_adapter.WithContext(stream.Context()),
+		internal_adapter.WithConfig(cApi.cfg),
+		internal_adapter.WithLogger(cApi.logger),
+		internal_adapter.WithPostgres(cApi.postgres),
+		internal_adapter.WithOpenSearch(cApi.opensearch),
+		internal_adapter.WithRedis(cApi.redis),
+		internal_adapter.WithStorage(cApi.storage),
+		internal_adapter.WithStreamer(streamer),
+		internal_adapter.WithObserver(observabilityRecorder),
 	)
 	if err != nil {
 		cApi.logger.Errorf("failed to setup talker: %v", err)

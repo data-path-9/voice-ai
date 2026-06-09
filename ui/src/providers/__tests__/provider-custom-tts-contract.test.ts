@@ -3,6 +3,7 @@ import { loadProviderConfig } from '../config-loader';
 import { getDefaultsFromConfig, validateFromConfig } from '../config-defaults';
 import {
   CUSTOM_TTS_DEFAULT_REQUEST_RULES_EXAMPLE,
+  CUSTOM_TTS_QUERY_PARAMS_KEY,
   CUSTOM_TTS_REQUEST_RULES_KEY,
   CUSTOM_TTS_RESPONSE_RULES_KEY,
 } from '../custom-tts/contract';
@@ -82,11 +83,7 @@ describe('Custom TTS config contract', () => {
     );
 
     return upsertMetadata(
-      upsertMetadata(
-        upsertMetadata(defaults, 'speak.voice.id', 'narrator-1'),
-        'speak.ws.query_params',
-        validQueryParams,
-      ),
+      upsertMetadata(defaults, CUSTOM_TTS_QUERY_PARAMS_KEY, validQueryParams),
       CUSTOM_TTS_RESPONSE_RULES_KEY,
       validResponseRules,
     );
@@ -97,12 +94,9 @@ describe('Custom TTS config contract', () => {
     const keys = config.tts?.parameters.map(param => param.key) ?? [];
     expect(keys).toEqual(
       expect.arrayContaining([
-        'speak.model',
-        'speak.language',
-        'speak.voice.id',
         'speak.audio.encoding',
         'speak.audio.sample_rate',
-        'speak.ws.query_params',
+        CUSTOM_TTS_QUERY_PARAMS_KEY,
         CUSTOM_TTS_REQUEST_RULES_KEY,
         CUSTOM_TTS_RESPONSE_RULES_KEY,
       ]),
@@ -110,6 +104,9 @@ describe('Custom TTS config contract', () => {
     expect(keys).not.toContain('speak.ws.text_request');
     expect(keys).not.toContain('speak.ws.done_request');
     expect(keys).not.toContain('speak.ws.response_parser');
+    expect(keys).not.toContain('speak.model');
+    expect(keys).not.toContain('speak.language');
+    expect(keys).not.toContain('speak.voice.id');
   });
 
   it('applies encoding, sample-rate, and request-rule defaults', () => {
@@ -128,7 +125,6 @@ describe('Custom TTS config contract', () => {
   });
 
   it.each([
-    ['speak.voice.id', 'Please provide a valid voice ID for custom TTS.'],
     [
       'speak.audio.encoding',
       'Please select a valid audio encoding for custom TTS.',
@@ -178,12 +174,9 @@ describe('Custom TTS config contract', () => {
     ).toBeUndefined();
   });
 
-  it('allows model, language, and query params to be omitted', () => {
+  it('allows query params to be omitted', () => {
     const options = buildValidOptions().filter(
-      item =>
-        !['speak.model', 'speak.language', 'speak.ws.query_params'].includes(
-          item.getKey(),
-        ),
+      item => item.getKey() !== CUSTOM_TTS_QUERY_PARAMS_KEY,
     );
 
     expect(
@@ -193,8 +186,8 @@ describe('Custom TTS config contract', () => {
 
   it('rejects invalid JSON in optional query params', () => {
     const options = upsertMetadata(
-      removeMetadata(buildValidOptions(), 'speak.ws.query_params'),
-      'speak.ws.query_params',
+      removeMetadata(buildValidOptions(), CUSTOM_TTS_QUERY_PARAMS_KEY),
+      CUSTOM_TTS_QUERY_PARAMS_KEY,
       '{"language":{"$var":"language"',
     );
 
@@ -205,8 +198,8 @@ describe('Custom TTS config contract', () => {
 
   it('rejects query params that use removed text variable', () => {
     const options = upsertMetadata(
-      removeMetadata(buildValidOptions(), 'speak.ws.query_params'),
-      'speak.ws.query_params',
+      removeMetadata(buildValidOptions(), CUSTOM_TTS_QUERY_PARAMS_KEY),
+      CUSTOM_TTS_QUERY_PARAMS_KEY,
       '{"text":{"$var":"text"}}',
     );
 

@@ -9,9 +9,8 @@ import "context"
 
 // Exporter writes telemetry records to an external backend.
 type Exporter interface {
-	ExportEvent(ctx context.Context, meta SessionMeta, rec EventRecord) error
-	ExportMetric(ctx context.Context, meta SessionMeta, rec MetricRecord) error
-	Shutdown(ctx context.Context) error
+	Export(ctx context.Context, scope Scope, rec Record) error
+	Close(ctx context.Context) error
 }
 
 // ExporterType enumerates supported telemetry exporter backends.

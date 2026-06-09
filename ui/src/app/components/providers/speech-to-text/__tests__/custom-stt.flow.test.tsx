@@ -189,8 +189,8 @@ describe('custom-stt speech-to-text flow', () => {
       target: { value: 'custom-stt' },
     });
 
-    expect(screen.getByText('Model')).toBeInTheDocument();
-    expect(screen.getByText('Language')).toBeInTheDocument();
+    expect(screen.queryByText('Model')).not.toBeInTheDocument();
+    expect(screen.queryByText('Language')).not.toBeInTheDocument();
     expect(
       (screen.getByLabelText('Audio Encoding') as HTMLSelectElement).value,
     ).toBe('LINEAR16');

@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 
+	internal_transformer_custom_stt_http_v1 "github.com/rapidaai/api/assistant-api/internal/transformer/custom/stt_http_v1"
 	internal_transformer_custom_stt_websocket_v1 "github.com/rapidaai/api/assistant-api/internal/transformer/custom/stt_websocket_v1"
 	internal_transformer_custom_tts_websocket_v1 "github.com/rapidaai/api/assistant-api/internal/transformer/custom/tts_websocket_v1"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -22,6 +23,7 @@ type Compatibility string
 
 const (
 	CompatibilityWebSocketV1 Compatibility = "websocket_v1"
+	CompatibilityHTTPV1      Compatibility = "http_v1"
 	DefaultCompatibility                   = CompatibilityWebSocketV1
 )
 
@@ -76,6 +78,8 @@ func NewSpeechToText(
 	switch compatibility {
 	case CompatibilityWebSocketV1:
 		return internal_transformer_custom_stt_websocket_v1.NewSpeechToText(ctx, logger, credential, onPacket, opts)
+	case CompatibilityHTTPV1:
+		return internal_transformer_custom_stt_http_v1.NewSpeechToText(ctx, logger, credential, onPacket, opts)
 	default:
 		return nil, fmt.Errorf("custom-stt: unsupported api compatibility %q", compatibility)
 	}

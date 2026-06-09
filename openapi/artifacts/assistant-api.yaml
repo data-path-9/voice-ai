@@ -1,0 +1,382 @@
+openapi: 3.0.3
+info:
+  title: Rapida Assistant API
+  version: 0.1.0
+paths:
+  /v1/assistant/create-assistant:
+    post:
+      operationId: createAssistant
+      summary: Create an assistant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssistantRequest"
+      responses:
+        "200":
+          description: Assistant created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to create assistant
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    CreateAssistantRequest:
+      type: object
+      required:
+        - assistantProvider
+        - name
+      properties:
+        assistantProvider:
+          $ref: "#/components/schemas/CreateAssistantProviderRequest"
+        assistantKnowledges:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateAssistantKnowledgeRequest"
+        assistantTools:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateAssistantToolRequest"
+        description:
+          type: string
+        visibility:
+          type: string
+        language:
+          type: string
+        source:
+          type: string
+        sourceIdentifier:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        tags:
+          type: array
+          items:
+            type: string
+        name:
+          type: string
+    CreateAssistantProviderRequest:
+      type: object
+      properties:
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        description:
+          type: string
+        model:
+          $ref: "#/components/schemas/CreateAssistantProviderModel"
+        agentkit:
+          $ref: "#/components/schemas/CreateAssistantProviderAgentkit"
+        websocket:
+          $ref: "#/components/schemas/CreateAssistantProviderWebsocket"
+    CreateAssistantProviderModel:
+      type: object
+      required:
+        - modelProviderName
+      properties:
+        template:
+          $ref: "#/components/schemas/TextChatCompletePrompt"
+        modelProviderName:
+          type: string
+        assistantModelOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+    CreateAssistantProviderAgentkit:
+      type: object
+      required:
+        - agentKitUrl
+      properties:
+        agentKitUrl:
+          type: string
+        certificate:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    CreateAssistantProviderWebsocket:
+      type: object
+      required:
+        - websocketUrl
+      properties:
+        websocketUrl:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        connectionParameters:
+          type: object
+          additionalProperties:
+            type: string
+    CreateAssistantKnowledgeRequest:
+      type: object
+      properties:
+        knowledgeId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        rerankerModelProviderId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        rerankerModelProviderName:
+          type: string
+        assistantKnowledgeRerankerOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+        topK:
+          type: integer
+          format: uint32
+        scoreThreshold:
+          type: number
+          format: float
+        retrievalMethod:
+          type: string
+        rerankerEnable:
+          type: boolean
+    CreateAssistantToolRequest:
+      type: object
+      properties:
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        name:
+          type: string
+        description:
+          type: string
+        fields:
+          type: object
+          additionalProperties: true
+        executionMethod:
+          type: string
+        executionOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+    TextChatCompletePrompt:
+      type: object
+      properties:
+        prompt:
+          type: array
+          items:
+            $ref: "#/components/schemas/TextPrompt"
+        promptVariables:
+          type: array
+          items:
+            $ref: "#/components/schemas/Variable"
+    TextPrompt:
+      type: object
+      properties:
+        role:
+          type: string
+        content:
+          type: string
+    Variable:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        name:
+          type: string
+        type:
+          type: string
+        defaultValue:
+          type: string
+    GetAssistantResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/Assistant"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+    Assistant:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        status:
+          type: string
+        visibility:
+          type: string
+        source:
+          type: string
+        sourceIdentifier:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        projectId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        organizationId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        assistantProvider:
+          type: string
+        assistantProviderId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        name:
+          type: string
+        description:
+          type: string
+        assistantProviderModel:
+          $ref: "#/components/schemas/AssistantProviderModel"
+        assistantProviderAgentkit:
+          $ref: "#/components/schemas/AssistantProviderAgentkit"
+        assistantProviderWebsocket:
+          $ref: "#/components/schemas/AssistantProviderWebsocket"
+        assistantTag:
+          $ref: "#/components/schemas/AssistantTag"
+        createdBy:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        updatedBy:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        createdDate:
+          type: string
+          format: date-time
+        updatedDate:
+          type: string
+          format: date-time
+        assistantTools:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantTool"
+        assistantKnowledges:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantKnowledge"
+    AssistantTag:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        tag:
+          type: array
+          items:
+            type: string
+    AssistantProviderModel:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        template:
+          $ref: "#/components/schemas/TextChatCompletePrompt"
+        description:
+          type: string
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        modelProviderName:
+          type: string
+        assistantModelOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+        status:
+          type: string
+    AssistantProviderAgentkit:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        description:
+          type: string
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        status:
+          type: string
+        url:
+          type: string
+        certificate:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    AssistantProviderWebsocket:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        description:
+          type: string
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        url:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        parameters:
+          type: object
+          additionalProperties:
+            type: string
+        status:
+          type: string
+    AssistantTool:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        name:
+          type: string
+        description:
+          type: string
+        fields:
+          type: object
+          additionalProperties: true
+        executionMethod:
+          type: string
+        executionOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+        status:
+          type: string
+    AssistantKnowledge:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        knowledgeId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        rerankerEnable:
+          type: boolean
+        topK:
+          type: integer
+          format: uint32
+        scoreThreshold:
+          type: number
+          format: float
+        retrievalMethod:
+          type: string
+        rerankerModelProviderId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        rerankerModelProviderName:
+          type: string
+        assistantKnowledgeRerankerOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+        status:
+          type: string

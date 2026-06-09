@@ -8,31 +8,58 @@ package config
 import (
 	"log"
 	"os"
+	"time"
 
-	"github.com/go-playground/validator/v10"
+	validator "github.com/go-playground/validator/v10"
 	"github.com/rapidaai/config"
 	"github.com/rapidaai/pkg/configs"
 	"github.com/spf13/viper"
 )
 
-// SIPConfig holds the SIP server configuration
+type SIPInboundConfig struct {
+	// Supported answer modes:
+	// - answer_immediately: no mode-specific argument is needed.
+	// - answer_after_min_ring_ms: requires min_ring_duration.
+	// max_ring_duration bounds pre-answer runtime readiness independently of answer_mode.
+	// ack_timeout bounds the ACK wait after 200 OK independently of answer_mode.
+	AnswerMode      string        `mapstructure:"answer_mode"`
+	MinRingDuration time.Duration `mapstructure:"min_ring_duration"`
+	MaxRingDuration time.Duration `mapstructure:"max_ring_duration"`
+	ACKTimeout      time.Duration `mapstructure:"ack_timeout"`
+}
+
+// SIPConfig holds the SIP server configuration.
 type SIPConfig struct {
-	Server            string `mapstructure:"server"`
-	InstanceID        string `mapstructure:"instance_id"` // Unique identifier for this SIP server instance (defaults to external_ip)
-	ExternalIP        string `mapstructure:"external_ip"` // Public/reachable IP for SDP and SIP Contact headers (defaults to Server if empty)
-	Port              int    `mapstructure:"port"`
-	Transport         string `mapstructure:"transport"`
-	RTPPortRangeStart int    `mapstructure:"rtp_port_range_start"`
-	RTPPortRangeEnd   int    `mapstructure:"rtp_port_range_end"`
+	Server                  string           `mapstructure:"server"`
+	InstanceID              string           `mapstructure:"instance_id"` // Unique identifier for this SIP server instance (defaults to external_ip)
+	ExternalIP              string           `mapstructure:"external_ip"` // Public/reachable IP for outbound SDP and SIP Contact headers
+	AllowLoopbackExternalIP bool             `mapstructure:"allow_loopback_external_ip"`
+	Port                    int              `mapstructure:"port"`
+	Transport               string           `mapstructure:"transport"`
+	RTPPortRangeStart       int              `mapstructure:"rtp_port_range_start"`
+	RTPPortRangeEnd         int              `mapstructure:"rtp_port_range_end"`
+	RegisterTimeout         time.Duration    `mapstructure:"register_timeout"`
+	InviteTimeout           time.Duration    `mapstructure:"invite_timeout"`
+	SessionTimeout          time.Duration    `mapstructure:"session_timeout"`
+	OutboundHealthGate      *bool            `mapstructure:"outbound_health_gate"`
+	Inbound                 SIPInboundConfig `mapstructure:"inbound"`
 }
 
 // WebRTCConfig holds WebRTC ICE configuration for production cloud deployments.
-// On EC2, Pion only sees the private IP; set PublicIP to the instance's public/elastic IP
+// On EC2, Pion only sees the private IP; set ExternalIP to the public/elastic IP
 // so Pion advertises it in host candidates instead of the unreachable private IP.
 type WebRTCConfig struct {
-	ExternalIP        string `mapstructure:"external_ip"`
-	UDPPortRangeStart int    `mapstructure:"udp_port_range_start"`
-	UDPPortRangeEnd   int    `mapstructure:"udp_port_range_end"`
+	ExternalIP         string            `mapstructure:"external_ip"`
+	UDPPortRangeStart  int               `mapstructure:"udp_port_range_start"`
+	UDPPortRangeEnd    int               `mapstructure:"udp_port_range_end"`
+	ICEServers         []WebRTCICEServer `mapstructure:"ice_servers"`
+	ICETransportPolicy string            `mapstructure:"ice_transport_policy"`
+}
+
+type WebRTCICEServer struct {
+	URLs       []string `mapstructure:"urls"`
+	Username   string   `mapstructure:"username"`
+	Credential string   `mapstructure:"credential"`
 }
 
 type AudioSocketConfig struct {
@@ -85,11 +112,6 @@ func GetApplicationConfig(v *viper.Viper) (*AssistantConfig, error) {
 		return nil, err
 	}
 
-	// If OpenSearch config is missing any required connection field, treat as not configured
-	if config.OpenSearchConfig != nil &&
-		(config.OpenSearchConfig.Host == "" || config.OpenSearchConfig.Schema == "") {
-		config.OpenSearchConfig = nil
-	}
 	// valdating the app config
 	validate := validator.New()
 	err = validate.Struct(&config)

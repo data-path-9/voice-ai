@@ -3,6 +3,7 @@ package sip_registration
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,15 +26,29 @@ func (t *testPostgresConnector) Query(ctx context.Context, qry string, dest inte
 }
 func (t *testPostgresConnector) DB(ctx context.Context) *gorm.DB { return t.db.WithContext(ctx) }
 
-func newTestManager(t *testing.T) (*Manager, *gorm.DB, context.Context) {
+func newTestManager(t *testing.T) (*manager, *gorm.DB, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "registration.db")), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("failed to create sqlite db: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("failed to get sqlite db handle: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		_ = sqlDB.Close()
+	})
+
 	schema := []string{
+		`CREATE TABLE assistants (
+			id INTEGER PRIMARY KEY,
+			project_id BIGINT,
+			organization_id BIGINT
+		)`,
 		`CREATE TABLE assistant_phone_deployments (
 			id INTEGER PRIMARY KEY,
 			assistant_id BIGINT,
@@ -69,13 +84,29 @@ func newTestManager(t *testing.T) (*Manager, *gorm.DB, context.Context) {
 		t.Fatalf("failed to create logger: %v", err)
 	}
 
-	return &Manager{
+	return &manager{
 		logger:   logger,
 		postgres: &testPostgresConnector{db: db},
 	}, db, ctx
 }
 
-func insertSIPDeployment(t *testing.T, db *gorm.DB, deploymentID, assistantID uint64, phone, sipStatus string) {
+func insertSIPDeployment(t *testing.T, db *gorm.DB, deploymentID, assistantID uint64, phone string, sipStatus RegistrationStatus) {
+	t.Helper()
+
+	options := map[string]string{
+		OptKeySIPInbound:   "true",
+		OptKeyCredentialID: "101",
+	}
+	if phone != "" {
+		options[OptKeyPhone] = phone
+	}
+	if sipStatus != "" {
+		options[OptKeySIPStatus] = string(sipStatus)
+	}
+	insertSIPDeploymentWithOptions(t, db, deploymentID, assistantID, options)
+}
+
+func insertSIPDeploymentWithOptions(t *testing.T, db *gorm.DB, deploymentID, assistantID uint64, options map[string]string) {
 	t.Helper()
 
 	if err := db.Exec(
@@ -86,14 +117,6 @@ func insertSIPDeployment(t *testing.T, db *gorm.DB, deploymentID, assistantID ui
 		t.Fatalf("failed creating deployment: %v", err)
 	}
 
-	options := map[string]string{
-		"phone":                phone,
-		"rapida.credential_id": "101",
-		"rapida.sip_inbound":   "true",
-	}
-	if sipStatus != "" {
-		options["rapida.sip_status"] = sipStatus
-	}
 	for k, v := range options {
 		if err := db.Exec(
 			`INSERT INTO assistant_deployment_telephony_options
@@ -134,8 +157,16 @@ func TestLoadRecords_PrePipelineDedupe_PrefersActiveAndMarksDropped(t *testing.T
 	}
 
 	status := getOptionValue(t, db, 1002, OptKeySIPStatus)
-	if status != StatusConfigError {
+	if status != string(StatusConfigError) {
 		t.Fatalf("expected loser status=%s, got %s", StatusConfigError, status)
+	}
+	failureClass := getOptionValue(t, db, 1002, OptKeySIPFailureClass)
+	if failureClass != string(RegistrationFailureClassDuplicate) {
+		t.Fatalf("expected loser failure_class=%s, got %s", RegistrationFailureClassDuplicate, failureClass)
+	}
+	failureReason := getOptionValue(t, db, 1002, OptKeySIPFailureReason)
+	if failureReason != string(RegistrationFailureReasonDuplicateDID) {
+		t.Fatalf("expected loser failure_reason=%s, got %s", RegistrationFailureReasonDuplicateDID, failureReason)
 	}
 	reason := getOptionValue(t, db, 1002, OptKeySIPError)
 	if !strings.Contains(reason, "Duplicate DID +15551234567") || !strings.Contains(reason, fmt.Sprintf("deployment=%d", uint64(1001))) {
@@ -162,5 +193,85 @@ func TestLoadRecords_PrePipelineDedupe_PrefersLatestWhenNoActive(t *testing.T) {
 	}
 	if records[0].DeploymentID != 2002 {
 		t.Fatalf("expected latest deployment 2002 to win, got %d", records[0].DeploymentID)
+	}
+}
+
+func TestLoadRecords_MissingPhoneMarksConfigError(t *testing.T) {
+	m, db, ctx := newTestManager(t)
+
+	insertSIPDeploymentWithOptions(t, db, 3001, 701, map[string]string{
+		OptKeyCredentialID: "101",
+		OptKeySIPInbound:   "true",
+	})
+
+	records, err := m.loadRecords(ctx)
+	if err != nil {
+		t.Fatalf("loadRecords returned error: %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected no registration record, got %d", len(records))
+	}
+
+	if status := getOptionValue(t, db, 3001, OptKeySIPStatus); status != string(StatusConfigError) {
+		t.Fatalf("expected status=%s, got %s", StatusConfigError, status)
+	}
+	if failureClass := getOptionValue(t, db, 3001, OptKeySIPFailureClass); failureClass != string(RegistrationFailureClassConfig) {
+		t.Fatalf("expected failure_class=%s, got %s", RegistrationFailureClassConfig, failureClass)
+	}
+	if failureReason := getOptionValue(t, db, 3001, OptKeySIPFailureReason); failureReason != string(RegistrationFailureReasonMissingDID) {
+		t.Fatalf("expected failure_reason=%s, got %s", RegistrationFailureReasonMissingDID, failureReason)
+	}
+}
+
+func TestLoadRecords_MissingCredentialMarksConfigError(t *testing.T) {
+	m, db, ctx := newTestManager(t)
+
+	insertSIPDeploymentWithOptions(t, db, 3002, 702, map[string]string{
+		OptKeyPhone:      "+14155550101",
+		OptKeySIPInbound: "true",
+	})
+
+	records, err := m.loadRecords(ctx)
+	if err != nil {
+		t.Fatalf("loadRecords returned error: %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("expected no registration record, got %d", len(records))
+	}
+
+	if status := getOptionValue(t, db, 3002, OptKeySIPStatus); status != string(StatusConfigError) {
+		t.Fatalf("expected status=%s, got %s", StatusConfigError, status)
+	}
+	if failureClass := getOptionValue(t, db, 3002, OptKeySIPFailureClass); failureClass != string(RegistrationFailureClassConfig) {
+		t.Fatalf("expected failure_class=%s, got %s", RegistrationFailureClassConfig, failureClass)
+	}
+	if failureReason := getOptionValue(t, db, 3002, OptKeySIPFailureReason); failureReason != string(RegistrationFailureReasonMissingCredentialID) {
+		t.Fatalf("expected failure_reason=%s, got %s", RegistrationFailureReasonMissingCredentialID, failureReason)
+	}
+}
+
+func TestLoadRecords_SkipsTerminalStatuses(t *testing.T) {
+	m, db, ctx := newTestManager(t)
+
+	terminalStatuses := []RegistrationStatus{
+		StatusDisabled,
+		StatusRejected,
+		StatusConfigError,
+		StatusUnreachable,
+	}
+	for index, status := range terminalStatuses {
+		insertSIPDeployment(t, db, uint64(4001+index), uint64(801+index), fmt.Sprintf("+1415555020%d", index), status)
+	}
+	insertSIPDeployment(t, db, 4010, 810, "+14155550210", StatusFailed)
+
+	records, err := m.loadRecords(ctx)
+	if err != nil {
+		t.Fatalf("loadRecords returned error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected only non-terminal failed status to be retried, got %d records", len(records))
+	}
+	if records[0].DeploymentID != 4010 {
+		t.Fatalf("expected failed deployment 4010 to remain retryable, got %d", records[0].DeploymentID)
 	}
 }

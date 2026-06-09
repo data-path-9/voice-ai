@@ -13,8 +13,9 @@ import (
 	"io"
 	"strings"
 
-	internal_transformer_custom_websocketdsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/websocketdsl"
+	internal_transformer_custom_dsl "github.com/rapidaai/api/assistant-api/internal/transformer/custom/internal/dsl"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
 
@@ -34,9 +35,9 @@ const (
 	optionKeyLanguage      = "listen.language"
 	optionKeyEncoding      = "listen.audio.encoding"
 	optionKeySampleRate    = "listen.audio.sample_rate"
-	optionKeyQueryParams   = "listen.ws.query_params"
-	optionKeyRequestRules  = "listen.ws.request_rules"
-	optionKeyResponseRules = "listen.ws.response_rules"
+	optionKeyQueryParams   = "listen.query_params"
+	optionKeyRequestRules  = "listen.request_rules"
+	optionKeyResponseRules = "listen.response_rules"
 )
 
 const (
@@ -51,7 +52,7 @@ const (
 	requestPacketInterrupt  = "interrupt"
 )
 
-var queryContract = internal_transformer_custom_websocketdsl.Contract{
+var queryContract = internal_transformer_custom_dsl.Contract{
 	SupportedVariables: []string{
 		"model",
 		"language",
@@ -60,7 +61,7 @@ var queryContract = internal_transformer_custom_websocketdsl.Contract{
 	},
 }
 
-var requestRuleContract = internal_transformer_custom_websocketdsl.Contract{
+var requestRuleContract = internal_transformer_custom_dsl.Contract{
 	SupportedRequestPackets: []string{
 		requestPacketTurnChange,
 		requestPacketAudio,
@@ -103,8 +104,10 @@ var requestRuleContract = internal_transformer_custom_websocketdsl.Contract{
 				"kind":       requestPacketAudio,
 				"context_id": "ctx_123",
 				"audio": map[string]any{
-					"bytes":  []byte{0x00, 0x01},
-					"base64": "AAE=",
+					"bytes":      []byte{0x00, 0x01},
+					"base64":     "AAE=",
+					"pcm_base64": "AAE=",
+					"wav_base64": "UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAQ==",
 				},
 			},
 		},
@@ -125,7 +128,7 @@ var requestRuleContract = internal_transformer_custom_websocketdsl.Contract{
 	},
 }
 
-var responseContract = internal_transformer_custom_websocketdsl.Contract{
+var responseContract = internal_transformer_custom_dsl.Contract{
 	SupportedResponseFrames: []string{
 		frameTypeJSON,
 		frameTypeText,
@@ -156,11 +159,11 @@ type Config struct {
 	ResponseRules []ResponseRule
 }
 
-type RequestRule = internal_transformer_custom_websocketdsl.RequestRule
-type RequestWhen = internal_transformer_custom_websocketdsl.RequestWhen
-type RequestSend = internal_transformer_custom_websocketdsl.Send
-type ResponseRule = internal_transformer_custom_websocketdsl.ResponseRule
-type ResponseWhen = internal_transformer_custom_websocketdsl.When
+type RequestRule = internal_transformer_custom_dsl.RequestRule
+type RequestWhen = internal_transformer_custom_dsl.RequestWhen
+type RequestSend = internal_transformer_custom_dsl.Send
+type ResponseRule = internal_transformer_custom_dsl.ResponseRule
+type ResponseWhen = internal_transformer_custom_dsl.When
 
 type configParser struct {
 	credential *protos.VaultCredential
@@ -268,6 +271,12 @@ func (parser *configParser) decodeJSONObject(key string, required bool, destinat
 		}
 		return false, nil
 	}
+	if !required {
+		rawString, ok := raw.(string)
+		if !ok || !validator.NotBlank(rawString) {
+			return false, nil
+		}
+	}
 
 	payload, err := parser.toJSONBytes(raw, key)
 	if err != nil {
@@ -338,7 +347,7 @@ func (parser *configParser) decodeJSON(payload []byte, destination any, key stri
 }
 
 func (config *Config) validate() error {
-	core := internal_transformer_custom_websocketdsl.NewCore("custom-stt websocket_v1")
+	core := internal_transformer_custom_dsl.NewCore("custom-stt websocket_v1")
 	if strings.TrimSpace(config.BaseURL) == "" {
 		return fmt.Errorf("custom-stt websocket_v1: base url must be specified in credentials")
 	}

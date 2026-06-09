@@ -31,7 +31,8 @@ type DispatchHandler interface {
 
 	HandleTextToSpeechInterrupt(context.Context, internal_type.TextToSpeechInterruptPacket)
 	HandleLLMInterrupt(context.Context, internal_type.LLMInterruptPacket)
-	HandleSpeechToTextInterrupt(context.Context, internal_type.SpeechToTextInterruptPacket)
+	HandleSpeechToTextEnd(context.Context, internal_type.SpeechToTextEndPacket)
+	HandleSpeechToTextStart(context.Context, internal_type.SpeechToTextStartPacket)
 	HandleTurnChange(context.Context, internal_type.TurnChangePacket)
 	HandleLLMResponseDelta(context.Context, internal_type.LLMResponseDeltaPacket)
 	HandleLLMResponseDone(context.Context, internal_type.LLMResponseDonePacket)
@@ -47,17 +48,11 @@ type DispatchHandler interface {
 	HandleLLMToolResult(context.Context, internal_type.LLMToolResultPacket)
 	HandleRecordUserAudio(context.Context, internal_type.RecordUserAudioPacket)
 	HandleRecordAssistantAudio(context.Context, internal_type.RecordAssistantAudioPacket)
+	HandleConversationRecordingCompleted(context.Context, internal_type.ConversationRecordingCompletedPacket)
 	HandleMessageCreate(context.Context, internal_type.MessageCreatePacket)
-	HandleConversationMetric(context.Context, internal_type.ConversationMetricPacket)
-	HandleConversationMetadata(context.Context, internal_type.ConversationMetadataPacket)
-	HandleUserMessageMetric(context.Context, internal_type.UserMessageMetricPacket)
-	HandleAssistantMessageMetric(context.Context, internal_type.AssistantMessageMetricPacket)
-	HandleUserMessageMetadata(context.Context, internal_type.UserMessageMetadataPacket)
-	HandleAssistantMessageMetadata(context.Context, internal_type.AssistantMessageMetadataPacket)
 	HandleToolLogCreate(context.Context, internal_type.ToolLogCreatePacket)
 	HandleToolLogUpdate(context.Context, internal_type.ToolLogUpdatePacket)
 	HandleHTTPLogCreate(context.Context, internal_type.HTTPLogCreatePacket)
-	HandleConversationEvent(context.Context, internal_type.ConversationEventPacket)
 	HandleInitializeAssistant(context.Context, internal_type.InitializeAssistantPacket)
 	HandleInitializeConversation(context.Context, internal_type.InitializeConversationPacket)
 	HandleInitializeSessionRuntime(context.Context, internal_type.InitializeSessionRuntimePacket)
@@ -73,7 +68,6 @@ type DispatchHandler interface {
 	HandleInitializeBehavior(context.Context, internal_type.InitializeBehaviorPacket)
 	HandleInitializationCompleted(context.Context, internal_type.InitializationCompletedPacket)
 	HandleInitializeTelemetry(context.Context, internal_type.InitializeTelemetryPacket)
-	HandleInitializeOutboundDispatcher(context.Context, internal_type.InitializeOutboundDispatcherPacket)
 	HandleInitializeInboundDispatcher(context.Context, internal_type.InitializeInboundDispatcherPacket)
 	HandleModeSwitchRequested(context.Context, internal_type.ModeSwitchRequestedPacket)
 	HandleModeSwitchCompleted(context.Context, internal_type.ModeSwitchCompletedPacket)
@@ -99,6 +93,7 @@ type DispatchHandler interface {
 	HandleFinalizationCompleted(context.Context, internal_type.FinalizationCompletedPacket)
 	HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket)
 	HandleExecuteWebhook(context.Context, internal_type.ExecuteWebhookPacket)
+	HandleObservabilityRecordPacket(context.Context, internal_type.ObservabilityRecordPacket)
 }
 
 // DispatchPacket routes a packet to the matching typed method on handler.
@@ -133,8 +128,10 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleTextToSpeechInterrupt(ctx, vl)
 	case internal_type.LLMInterruptPacket:
 		handler.HandleLLMInterrupt(ctx, vl)
-	case internal_type.SpeechToTextInterruptPacket:
-		handler.HandleSpeechToTextInterrupt(ctx, vl)
+	case internal_type.SpeechToTextEndPacket:
+		handler.HandleSpeechToTextEnd(ctx, vl)
+	case internal_type.SpeechToTextStartPacket:
+		handler.HandleSpeechToTextStart(ctx, vl)
 	case internal_type.TurnChangePacket:
 		handler.HandleTurnChange(ctx, vl)
 	case internal_type.LLMResponseDeltaPacket:
@@ -165,28 +162,19 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleRecordUserAudio(ctx, vl)
 	case internal_type.RecordAssistantAudioPacket:
 		handler.HandleRecordAssistantAudio(ctx, vl)
+	case internal_type.ConversationRecordingCompletedPacket:
+		handler.HandleConversationRecordingCompleted(ctx, vl)
+	case internal_type.InitializeDenoisePacket:
+		handler.HandleInitializeDenoise(ctx, vl)
 	case internal_type.MessageCreatePacket:
 		handler.HandleMessageCreate(ctx, vl)
-	case internal_type.ConversationMetricPacket:
-		handler.HandleConversationMetric(ctx, vl)
-	case internal_type.ConversationMetadataPacket:
-		handler.HandleConversationMetadata(ctx, vl)
-	case internal_type.UserMessageMetricPacket:
-		handler.HandleUserMessageMetric(ctx, vl)
-	case internal_type.AssistantMessageMetricPacket:
-		handler.HandleAssistantMessageMetric(ctx, vl)
-	case internal_type.UserMessageMetadataPacket:
-		handler.HandleUserMessageMetadata(ctx, vl)
-	case internal_type.AssistantMessageMetadataPacket:
-		handler.HandleAssistantMessageMetadata(ctx, vl)
+
 	case internal_type.ToolLogCreatePacket:
 		handler.HandleToolLogCreate(ctx, vl)
 	case internal_type.ToolLogUpdatePacket:
 		handler.HandleToolLogUpdate(ctx, vl)
 	case internal_type.HTTPLogCreatePacket:
 		handler.HandleHTTPLogCreate(ctx, vl)
-	case internal_type.ConversationEventPacket:
-		handler.HandleConversationEvent(ctx, vl)
 	case internal_type.InitializeAssistantPacket:
 		handler.HandleInitializeAssistant(ctx, vl)
 	case internal_type.InitializeConversationPacket:
@@ -215,8 +203,6 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleInitializationCompleted(ctx, vl)
 	case internal_type.InitializeTelemetryPacket:
 		handler.HandleInitializeTelemetry(ctx, vl)
-	case internal_type.InitializeOutboundDispatcherPacket:
-		handler.HandleInitializeOutboundDispatcher(ctx, vl)
 	case internal_type.InitializeInboundDispatcherPacket:
 		handler.HandleInitializeInboundDispatcher(ctx, vl)
 	case internal_type.ModeSwitchRequestedPacket:
@@ -267,7 +253,8 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleExecuteAnalysis(ctx, vl)
 	case internal_type.ExecuteWebhookPacket:
 		handler.HandleExecuteWebhook(ctx, vl)
-
+	case internal_type.ObservabilityRecordPacket:
+		handler.HandleObservabilityRecordPacket(ctx, vl)
 	case internal_type.EndOfSpeechInterruptionPacket:
 		handler.HandleEndOfSpeechInterruption(ctx, vl)
 	case internal_type.EndOfSpeechAudioPacket:

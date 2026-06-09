@@ -1,11 +1,15 @@
 package internal_sip_telephony
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
+	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
@@ -18,8 +22,106 @@ func newTestSIPStreamer(t *testing.T) *Streamer {
 	require.NoError(t, err)
 
 	return &Streamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, &callcontext.CallContext{}, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, &callcontext.CallContext{}, nil, nil),
 	}
+}
+
+type testSIPCollector struct {
+	mu      sync.Mutex
+	events  []observability.RecordEvent
+	metrics []observability.RecordMetric
+}
+
+func (c *testSIPCollector) Key() string {
+	return "test-sip"
+}
+
+func (c *testSIPCollector) Collect(_ context.Context, _ observability.Scope, _ observability.Context, record observability.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch typed := record.(type) {
+	case observability.RecordEvent:
+		c.events = append(c.events, typed)
+	case observability.RecordMetric:
+		c.metrics = append(c.metrics, typed)
+	}
+	return nil
+}
+
+func (c *testSIPCollector) Close(context.Context) error {
+	return nil
+}
+
+func (c *testSIPCollector) hasEvent(event observability.EventName, reason string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, recorded := range c.events {
+		if recorded.Event == event && recorded.Attributes["reason"] == reason {
+			return true
+		}
+	}
+	return false
+}
+
+func newTestSIPStreamerWithCollector(t *testing.T) (*Streamer, *testSIPCollector) {
+	t.Helper()
+	logger, err := commons.NewApplicationLogger()
+	require.NoError(t, err)
+	collector := &testSIPCollector{}
+	observer := observability.New(
+		observability.WithGlobalScope(observability.GlobalScope{OrganizationID: 1, ProjectID: 1}),
+		observability.WithCollector(collector),
+	)
+	t.Cleanup(func() { _ = observer.Close(context.Background()) })
+	return &Streamer{
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, &callcontext.CallContext{
+			AssistantID:    1,
+			ConversationID: 1,
+		}, nil, observer),
+	}, collector
+}
+
+func newTestInboundSIPSession(t *testing.T, callID string) *sip_infra.Session {
+	t.Helper()
+	session, err := sip_infra.NewSession(context.Background(), &sip_infra.SessionConfig{
+		Config: &sip_infra.Config{
+			Server:            "127.0.0.1",
+			Port:              5060,
+			RTPPortRangeStart: 10000,
+			RTPPortRangeEnd:   10100,
+		},
+		Direction: sip_infra.CallDirectionInbound,
+		CallID:    callID,
+	})
+	require.NoError(t, err)
+	return session
+}
+
+type fakeSIPLifecycleController struct {
+	endReasons []sip_infra.LifecycleReason
+}
+
+func (f *fakeSIPLifecycleController) TransitionCall(session *sip_infra.Session, next sip_infra.CallState, _ sip_infra.LifecycleReason) bool {
+	session.SetState(next)
+	return true
+}
+
+func (f *fakeSIPLifecycleController) EndCallWithReason(session *sip_infra.Session, reason sip_infra.LifecycleReason) error {
+	f.endReasons = append(f.endReasons, reason)
+	session.SetState(sip_infra.CallStateEnded)
+	session.ClearOnDisconnect()
+	session.End()
+	return nil
+}
+
+func (f *fakeSIPLifecycleController) FailCall(session *sip_infra.Session, reason sip_infra.LifecycleReason, _ error) error {
+	session.SetState(sip_infra.CallStateFailed)
+	return f.EndCallWithReason(session, reason)
+}
+
+func (f *fakeSIPLifecycleController) CancelCall(session *sip_infra.Session, reason sip_infra.LifecycleReason) error {
+	session.SetState(sip_infra.CallStateCancelled)
+	return f.EndCallWithReason(session, reason)
 }
 
 func TestSend_EndConversation_PushesToolResult(t *testing.T) {
@@ -44,7 +146,6 @@ func TestSend_EndConversation_PushesToolResult(t *testing.T) {
 		t.Fatal("timed out waiting for ConversationToolCallResult")
 	}
 
-	// Context should remain open; disconnect is owned by handleToolResult in adapter layer.
 	select {
 	case <-s.Context().Done():
 		t.Fatal("streamer context should remain open; teardown is owned by Talk loop")
@@ -52,29 +153,56 @@ func TestSend_EndConversation_PushesToolResult(t *testing.T) {
 	}
 }
 
-// drainLowChForEvent reads from LowCh until it finds a ConversationEvent whose
-// "type" matches wantType, or the timeout expires.
-func drainLowChForEvent(t *testing.T, s *Streamer, wantType string, timeout time.Duration) *protos.ConversationEvent {
-	t.Helper()
-	deadline := time.After(timeout)
-	for {
-		select {
-		case msg := <-s.LowCh:
-			event, ok := msg.(*protos.ConversationEvent)
-			if !ok {
-				continue
-			}
-			if event.GetData()["type"] == wantType {
-				return event
-			}
-		case <-deadline:
-			return nil
-		}
-	}
+func TestSend_AssistantAudioQueuesUntilOutputActivated(t *testing.T) {
+	s := newTestSIPStreamer(t)
+
+	err := s.Send(&protos.ConversationAssistantMessage{
+		Message: &protos.ConversationAssistantMessage_Audio{
+			Audio: []byte{1, 2, 3},
+		},
+		Completed: true,
+	})
+	require.NoError(t, err)
+
+	require.Len(t, s.pendingAssistantAudioFrames, 1)
+	assert.Equal(t, []byte{1, 2, 3}, s.pendingAssistantAudioFrames[0].audio)
+	assert.True(t, s.pendingAssistantAudioFrames[0].completed)
+
+	s.StartAssistantOutput()
+	assert.True(t, s.assistantOutputActive.Load())
+	assert.Empty(t, s.pendingAssistantAudioFrames)
 }
 
-func TestSend_ConversationDisconnection_EmitsEventAndClosesStreamer(t *testing.T) {
+func TestSend_InboundAssistantAudioMarksReadyBeforeOutputActivated(t *testing.T) {
 	s := newTestSIPStreamer(t)
+	session := newTestInboundSIPSession(t, "sip-audio-ready")
+	s.session = session
+
+	err := s.Send(&protos.ConversationAssistantMessage{
+		Message: &protos.ConversationAssistantMessage_Audio{
+			Audio: []byte{1, 2, 3},
+		},
+	})
+	require.NoError(t, err)
+
+	timings := session.GetInboundSetupTimings()
+	assert.False(t, timings.FirstAssistantAudioReadyAt.IsZero())
+	assert.True(t, timings.FirstAssistantAudioSentAt.IsZero())
+	require.Len(t, s.pendingAssistantAudioFrames, 1)
+}
+
+func TestShouldEndSessionOnClose_SkipsPreAnswerStates(t *testing.T) {
+	assert.False(t, shouldEndSessionOnClose(sip_infra.CallStateInitializing))
+	assert.False(t, shouldEndSessionOnClose(sip_infra.CallStateRinging))
+	assert.True(t, shouldEndSessionOnClose(sip_infra.CallStateConnected))
+}
+
+func TestSend_ConversationDisconnection_RecordsEventAndClosesStreamer(t *testing.T) {
+	s, collector := newTestSIPStreamerWithCollector(t)
+	session := newTestInboundSIPSession(t, "sip-streamer-disconnect")
+	lifecycle := &fakeSIPLifecycleController{}
+	s.session = session
+	s.lifecycle = lifecycle
 
 	err := s.Send(&protos.ConversationDisconnection{
 		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT,
@@ -90,10 +218,9 @@ func TestSend_ConversationDisconnection_EmitsEventAndClosesStreamer(t *testing.T
 	default:
 	}
 
-	// Verify a "disconnected" channel event carrying the reason was emitted.
-	event := drainLowChForEvent(t, s, "disconnected", time.Second)
-	require.NotNil(t, event, "expected a 'disconnected' channel event")
-	assert.Equal(t, protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT.String(), event.GetData()["reason"])
+	require.Eventually(t, func() bool {
+		return collector.hasEvent(observability.CallHangup, protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT.String())
+	}, time.Second, 10*time.Millisecond)
 
 	// Streamer should be closed: s.Ctx cancelled so Talker.Recv returns EOF.
 	select {
@@ -101,19 +228,21 @@ func TestSend_ConversationDisconnection_EmitsEventAndClosesStreamer(t *testing.T
 	case <-time.After(time.Second):
 		t.Fatal("expected streamer context to be cancelled after disconnect")
 	}
+
+	require.Equal(t, []sip_infra.LifecycleReason{sip_infra.LifecycleReasonStreamerEndSession}, lifecycle.endReasons)
 }
 
 func TestSend_ConversationDisconnection_PreservesExplicitReason(t *testing.T) {
-	s := newTestSIPStreamer(t)
+	s, collector := newTestSIPStreamerWithCollector(t)
 
 	err := s.Send(&protos.ConversationDisconnection{
 		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION,
 	})
 	require.NoError(t, err)
 
-	event := drainLowChForEvent(t, s, "disconnected", time.Second)
-	require.NotNil(t, event, "expected a 'disconnected' channel event")
-	assert.Equal(t, protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(), event.GetData()["reason"])
+	require.Eventually(t, func() bool {
+		return collector.hasEvent(observability.CallHangup, protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String())
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestSend_ConversationDisconnection_SubsequentSendErrors(t *testing.T) {
@@ -143,7 +272,7 @@ func TestSend_TransferConversation_UsesTransferToKey(t *testing.T) {
 
 	var gotTargets []string
 	var gotPostTransferAction string
-	s.SetOnTransferInitiated(func(targets []string, postTransferAction string) {
+	s.SetTransferRequestHandler(func(targets []string, postTransferAction string) {
 		gotTargets = append([]string(nil), targets...)
 		gotPostTransferAction = postTransferAction
 	})

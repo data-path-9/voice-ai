@@ -26,6 +26,18 @@ const (
 	StatusPending   = "pending"   // Context created, awaiting media-path consumption
 	StatusClaimed   = "claimed"   // Context consumed (media-path bound, or call ended unclaimed)
 	StatusCompleted = "completed" // Provider reported a terminal completed state
+	StatusFailed    = "failed"    // Provider reported terminal failure before media claim
+	StatusCancelled = "cancelled" // Provider reported terminal cancellation before media claim
+)
+
+const (
+	CallStatusNew       = "new"
+	CallStatusInitiated = "initiated"
+	CallStatusRinging   = "ringing"
+	CallStatusAnswered  = "answered"
+	CallStatusFailed    = "failed"
+	CallStatusCompleted = "completed"
+	CallStatusCancelled = "cancelled"
 )
 
 // CallContext holds all the information needed to resolve a call session.
@@ -56,7 +68,14 @@ type CallContext struct {
 
 	// ChannelUUID is the provider-specific call identifier (Twilio CallSid, Vonage UUID,
 	// Asterisk channel ID, SIP Call-ID, etc.).
-	ChannelUUID string `json:"channelUuid" gorm:"column:channel_uuid;type:varchar(200);not null;default:''"`
+	ChannelUUID        string `json:"channelUuid" gorm:"column:channel_uuid;type:varchar(200);not null;default:''"`
+	CallStatus         string `json:"callStatus" gorm:"column:call_status;type:varchar(30);not null;default:''"`
+	CallError          string `json:"callError" gorm:"column:call_error;type:text;not null;default:''"`
+	FailureClass       string `json:"failureClass" gorm:"column:failure_class;type:varchar(80);not null;default:''"`
+	FailureReason      string `json:"failureReason" gorm:"column:failure_reason;type:text;not null;default:''"`
+	DisconnectReason   string `json:"disconnectReason" gorm:"column:disconnect_reason;type:varchar(120);not null;default:''"`
+	Retryable          bool   `json:"retryable" gorm:"column:retryable;type:boolean;not null;default:false"`
+	ProviderStatusCode int    `json:"providerStatusCode" gorm:"column:provider_status_code;type:int;not null;default:0"`
 }
 
 func (CallContext) TableName() string {

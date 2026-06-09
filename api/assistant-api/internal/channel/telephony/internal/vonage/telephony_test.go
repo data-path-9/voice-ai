@@ -8,9 +8,12 @@ package internal_vonage_telephony
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/rapidaai/api/assistant-api/config"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	internal_vonage "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -57,6 +61,7 @@ func TestVonageAuth_NilVaultValue(t *testing.T) {
 
 	_, err := vonageAuth(cred)
 	assert.Error(t, err)
+	assert.True(t, errors.Is(err, internal_vonage.ErrVaultCredentialValueMissing))
 	assert.Contains(t, err.Error(), "vault credential value is nil")
 }
 
@@ -67,6 +72,7 @@ func TestVonageAuth_MissingPrivateKey(t *testing.T) {
 
 	_, err := vonageAuth(cred)
 	assert.Error(t, err)
+	assert.True(t, errors.Is(err, internal_vonage.ErrVaultPrivateKeyMissing))
 	assert.Contains(t, err.Error(), "privateKey")
 }
 
@@ -77,6 +83,7 @@ func TestVonageAuth_MissingApplicationId(t *testing.T) {
 
 	_, err := vonageAuth(cred)
 	assert.Error(t, err)
+	assert.True(t, errors.Is(err, internal_vonage.ErrVaultApplicationIDMissing))
 	assert.Contains(t, err.Error(), "application_id")
 }
 
@@ -286,13 +293,13 @@ func TestReceiveCall(t *testing.T) {
 			expectedPhone: "15703768754",
 			checkCallInfo: func(t *testing.T, info *internal_type.CallInfo) {
 				require.NotNil(t, info)
-				assert.Equal(t, "vonage", info.Provider)
+				assert.Equal(t, internal_vonage.Provider, info.Provider)
 				assert.Equal(t, "SUCCESS", info.Status)
 				assert.Equal(t, "15703768754", info.CallerNumber)
 				assert.Equal(t, "bccbc3faaf864e1641fe0cdb1921b6aa", info.ChannelUUID)
 
 				// Check StatusInfo
-				assert.Equal(t, "webhook", info.StatusInfo.Event)
+				assert.Equal(t, internal_vonage.WebhookEvent, info.StatusInfo.Event)
 				assert.NotNil(t, info.StatusInfo.Payload)
 				payload, ok := info.StatusInfo.Payload.(map[string]string)
 				require.True(t, ok, "Payload should be map[string]string")
@@ -313,9 +320,9 @@ func TestReceiveCall(t *testing.T) {
 			expectedPhone: "15703768754",
 			checkCallInfo: func(t *testing.T, info *internal_type.CallInfo) {
 				require.NotNil(t, info)
-				assert.Equal(t, "vonage", info.Provider)
+				assert.Equal(t, internal_vonage.Provider, info.Provider)
 				assert.Equal(t, "SUCCESS", info.Status)
-				assert.Equal(t, "webhook", info.StatusInfo.Event)
+				assert.Equal(t, internal_vonage.WebhookEvent, info.StatusInfo.Event)
 				assert.NotNil(t, info.StatusInfo.Payload)
 				assert.Empty(t, info.ChannelUUID, "ChannelUUID should be empty without uuid param")
 			},
@@ -431,7 +438,7 @@ func TestSend_EndConversation_PushesToolCallResult(t *testing.T) {
 	cc := &callcontext.CallContext{} // empty ChannelUUID
 	logger, _ := commons.NewApplicationLogger()
 	vng := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, cc, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, cc, nil, nil),
 		connection:            conn,
 	}
 
@@ -474,7 +481,7 @@ func TestSend_EndConversation_NilConnection(t *testing.T) {
 	cc := &callcontext.CallContext{}
 	logger, _ := commons.NewApplicationLogger()
 	vng := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, cc, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, cc, nil, nil),
 		connection:            nil,
 	}
 
@@ -495,6 +502,64 @@ func TestSend_EndConversation_NilConnection(t *testing.T) {
 	default:
 		// expected
 	}
+}
+
+func TestSend_Disconnection_LogsVonageAuthError(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[len("http"):]
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	logDirectory := t.TempDir()
+	logger, err := commons.NewApplicationLogger(
+		commons.EnableConsole(false),
+		commons.EnableFile(true),
+		commons.Path(logDirectory),
+		commons.Name("vonage-disconnection"),
+	)
+	require.NoError(t, err)
+
+	vng := &vonageWebsocketStreamer{
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			logger,
+			&callcontext.CallContext{
+				AssistantID:    1,
+				ConversationID: 2,
+				ChannelUUID:    "vonage-call-id",
+			},
+			nil,
+			nil,
+		),
+		connection: conn,
+	}
+
+	err = vng.Send(&protos.ConversationDisconnection{
+		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_USER,
+	})
+	require.NoError(t, err)
+	require.NoError(t, logger.Sync())
+
+	logBytes, err := os.ReadFile(filepath.Join(logDirectory, "vonage-disconnection.log"))
+	require.NoError(t, err)
+	logContent := string(logBytes)
+	assert.Contains(t, logContent, "Failed to create Vonage client for server-side disconnect")
+	assert.Contains(t, logContent, "vonage-call-id")
+	assert.Contains(t, logContent, protos.ConversationDisconnection_DISCONNECTION_TYPE_USER.String())
 }
 
 // TestSend_TransferConversation_PushesFailedResult verifies that the
@@ -523,7 +588,7 @@ func TestSend_TransferConversation_PushesFailedResult(t *testing.T) {
 	cc := &callcontext.CallContext{}
 	logger, _ := commons.NewApplicationLogger()
 	vng := &vonageWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(logger, cc, nil),
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, cc, nil, nil),
 		connection:            conn,
 	}
 
@@ -585,7 +650,7 @@ func TestReceiveCall_QueryParameterExtraction(t *testing.T) {
 	require.NotNil(t, callInfo)
 
 	// Verify StatusInfo contains webhook event with all query parameters as payload
-	assert.Equal(t, "webhook", callInfo.StatusInfo.Event)
+	assert.Equal(t, internal_vonage.WebhookEvent, callInfo.StatusInfo.Event)
 	require.NotNil(t, callInfo.StatusInfo.Payload, "StatusInfo payload should not be nil")
 
 	payloadMap, ok := callInfo.StatusInfo.Payload.(map[string]string)
@@ -596,4 +661,18 @@ func TestReceiveCall_QueryParameterExtraction(t *testing.T) {
 		assert.True(t, exists, "Query param '%s' should be in payload", key)
 		assert.Equal(t, expectedValue, actualValue, "Value for '%s' should match", key)
 	}
+}
+
+func TestReceiveCall_MissingFromUsesTypedError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/?to=12019868532", nil)
+
+	callInfo, err := (&vonageTelephony{}).ReceiveCall(c)
+
+	require.Nil(t, callInfo)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, internal_vonage.ErrInboundFromMissing))
 }

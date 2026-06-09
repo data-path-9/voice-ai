@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/utils"
@@ -82,13 +83,6 @@ func newTestEOS(onPacket func(context.Context, ...internal_type.Packet) error, o
 	if v, err := opts.GetFloat64("microphone.eos.threshold"); err == nil {
 		threshold = v
 	}
-	eventLevel := eventLevelStandard
-	if v, err := opts.GetString("microphone.eos.events"); err == nil {
-		switch v {
-		case eventLevelOff, eventLevelStandard, eventLevelDebug:
-			eventLevel = v
-		}
-	}
 
 	eos := &pipecatEndOfSpeech{
 		onPacket:        onPacket,
@@ -97,7 +91,6 @@ func newTestEOS(onPacket func(context.Context, ...internal_type.Packet) error, o
 		quickTimeout:    quickTimeout,
 		extendedTimeout: extendedTimeout,
 		fallbackTimeout: fallbackTimeout,
-		eventLevel:      eventLevel,
 		audioBuffer:     make([]float32, 0, maxAudioSamples),
 		commandCh:       make(chan workerCommand, 32),
 		stopCh:          make(chan struct{}),
@@ -1006,12 +999,12 @@ func TestEOS_Name(t *testing.T) {
 	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", eos.Name())
 }
 
-func TestEOS_ConversationEvent_Initialized(t *testing.T) {
+func TestEOS_ObservabilityEvent_Initialized(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
-	events := make(chan internal_type.ConversationEventPacket, 1)
+	events := make(chan internal_type.ObservabilityEventRecordPacket, 1)
 	callback := func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
-			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
+			if event, ok := packet.(internal_type.ObservabilityEventRecordPacket); ok {
 				select {
 				case events <- event:
 				default:
@@ -1021,31 +1014,29 @@ func TestEOS_ConversationEvent_Initialized(t *testing.T) {
 		return nil
 	}
 
-	eos, err := NewPipecatEndOfSpeech(logger, callback, utils.Option{
-		"microphone.eos.events": "debug",
-	})
+	eos, err := NewPipecatEndOfSpeech(logger, callback, utils.Option{})
 	require.NoError(t, err)
 	defer func() { _ = eos.Close(context.Background()) }()
 
 	select {
 	case event := <-events:
-		assert.Equal(t, "eos", event.Name)
-		assert.Equal(t, "initialized", event.Data["type"])
-		assert.Equal(t, pipecatEndOfSpeechName, event.Data["provider"])
-		assert.NotEmpty(t, event.Data["init_ms"])
-		assert.False(t, event.Time.IsZero())
-		_, parseErr := strconv.Atoi(event.Data["init_ms"])
+		assert.Equal(t, internal_type.ObservabilityRecordScopeConversation, event.Scope)
+		assert.Equal(t, observability.ComponentEOS, event.Record.Component)
+		assert.Equal(t, observability.EOSStarted, event.Record.Event)
+		assert.Equal(t, pipecatEndOfSpeechName, event.Record.Attributes["provider"])
+		assert.NotEmpty(t, event.Record.Attributes["init_ms"])
+		_, parseErr := strconv.Atoi(event.Record.Attributes["init_ms"])
 		assert.NoError(t, parseErr)
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timeout waiting for initialized conversation event")
+		t.Fatal("timeout waiting for initialized observability event")
 	}
 }
 
-func TestEOS_ConversationEvent_UserTextDetected(t *testing.T) {
-	events := make(chan internal_type.ConversationEventPacket, 2)
+func TestEOS_ObservabilityEvent_UserTextDetected(t *testing.T) {
+	events := make(chan internal_type.ObservabilityEventRecordPacket, 2)
 	eos := newTestEOS(func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
-			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
+			if event, ok := packet.(internal_type.ObservabilityEventRecordPacket); ok && event.Record.Event == observability.EOSCompleted {
 				select {
 				case events <- event:
 				default:
@@ -1063,30 +1054,32 @@ func TestEOS_ConversationEvent_UserTextDetected(t *testing.T) {
 
 	select {
 	case event := <-events:
-		assert.Equal(t, "eos", event.Name)
 		assert.Equal(t, "ctx-interim", event.ContextID)
-		assert.Equal(t, "detected", event.Data["type"])
-		assert.Equal(t, pipecatEndOfSpeechName, event.Data["provider"])
-		assert.Equal(t, "ctx-interim", event.Data["context_id"])
-		assert.Equal(t, "hello", event.Data["speech"])
-		assert.False(t, event.Time.IsZero())
+		assert.Equal(t, internal_type.ObservabilityRecordScopeMessage, event.Scope)
+		assert.Equal(t, observability.MessageRoleUser, event.MessageRole)
+		assert.Equal(t, observability.ComponentEOS, event.Record.Component)
+		assert.Equal(t, observability.EOSCompleted, event.Record.Event)
+		assert.Equal(t, pipecatEndOfSpeechName, event.Record.Attributes["provider"])
+		assert.Equal(t, "ctx-interim", event.Record.Attributes["context_id"])
+		assert.Equal(t, "hello", event.Record.Attributes["speech"])
+		assert.False(t, event.Record.OccurredAt.IsZero())
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timeout waiting for detected conversation event")
+		t.Fatal("timeout waiting for detected observability event")
 	}
 }
 
-func TestEOS_ConversationEvent_Detected(t *testing.T) {
-	events := make(chan internal_type.ConversationEventPacket, 4)
-	metrics := make(chan internal_type.UserMessageMetricPacket, 2)
+func TestEOS_ObservabilityEvent_Detected(t *testing.T) {
+	events := make(chan internal_type.ObservabilityEventRecordPacket, 4)
+	metrics := make(chan internal_type.ObservabilityMetricRecordPacket, 2)
 	eos := newTestEOS(func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
-			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
+			if event, ok := packet.(internal_type.ObservabilityEventRecordPacket); ok && event.Record.Event == observability.EOSCompleted {
 				select {
 				case events <- event:
 				default:
 				}
 			}
-			if metric, ok := packet.(internal_type.UserMessageMetricPacket); ok {
+			if metric, ok := packet.(internal_type.ObservabilityMetricRecordPacket); ok {
 				select {
 				case metrics <- metric:
 				default:
@@ -1094,9 +1087,7 @@ func TestEOS_ConversationEvent_Detected(t *testing.T) {
 			}
 		}
 		return nil
-	}, newTestOpts(map[string]any{
-		"microphone.eos.events": "standard",
-	}))
+	}, newTestOpts(map[string]any{}))
 	defer closeTestEndOfSpeech(eos)
 
 	require.NoError(t, eos.Execute(context.Background(), internal_type.UserTextReceivedPacket{
@@ -1105,52 +1096,45 @@ func TestEOS_ConversationEvent_Detected(t *testing.T) {
 	}))
 
 	timeout := time.After(500 * time.Millisecond)
-	var sawMetric bool
-	for {
+	var sawDetected, sawMetric bool
+	for !sawDetected || !sawMetric {
 		select {
 		case event := <-events:
-			if event.Data["type"] != "detected" {
-				t.Fatalf("unexpected eos event in standard mode: %+v", event)
-			}
-
-			assert.Equal(t, "eos", event.Name)
 			assert.Equal(t, "ctx-detected", event.ContextID)
-			assert.Equal(t, pipecatEndOfSpeechName, event.Data["provider"])
-			assert.Equal(t, "ctx-detected", event.Data["context_id"])
-			assert.Equal(t, "hello world", event.Data["speech"])
-			assert.Equal(t, "0.0000", event.Data["confidence"])
-			assert.Equal(t, "2", event.Data["word_count"])
-			assert.Equal(t, "11", event.Data["char_count"])
-			assert.NotEmpty(t, event.Data["text_to_trigger_ms"])
-			assert.NotEmpty(t, event.Data["wait_to_trigger_ms"])
-			assert.False(t, event.Time.IsZero())
-			_, parseErr := strconv.Atoi(event.Data["text_to_trigger_ms"])
+			assert.Equal(t, pipecatEndOfSpeechName, event.Record.Attributes["provider"])
+			assert.Equal(t, "ctx-detected", event.Record.Attributes["context_id"])
+			assert.Equal(t, "hello world", event.Record.Attributes["speech"])
+			assert.Equal(t, "0.0000", event.Record.Attributes["confidence"])
+			assert.Equal(t, "2", event.Record.Attributes["word_count"])
+			assert.Equal(t, "11", event.Record.Attributes["char_count"])
+			assert.NotEmpty(t, event.Record.Attributes["text_to_trigger_ms"])
+			assert.NotEmpty(t, event.Record.Attributes["wait_to_trigger_ms"])
+			assert.False(t, event.Record.OccurredAt.IsZero())
+			_, parseErr := strconv.Atoi(event.Record.Attributes["text_to_trigger_ms"])
 			assert.NoError(t, parseErr)
-			_, parseErr = strconv.Atoi(event.Data["wait_to_trigger_ms"])
+			_, parseErr = strconv.Atoi(event.Record.Attributes["wait_to_trigger_ms"])
 			assert.NoError(t, parseErr)
-			if sawMetric {
-				return
-			}
+			sawDetected = true
 		case metric := <-metrics:
-			require.Len(t, metric.Metrics, 1)
-			if metric.Metrics[0].Name != "eos_latency_ms" {
+			require.NotEmpty(t, metric.Record.Metrics)
+			if metric.Record.Metrics[0].Name != observability.MetricEOSLatencyMs {
 				continue
 			}
-			_, parseErr := strconv.Atoi(metric.Metrics[0].Value)
+			_, parseErr := strconv.Atoi(metric.Record.Metrics[0].Value)
 			assert.NoError(t, parseErr)
 			sawMetric = true
 		case <-timeout:
-			t.Fatal("timeout waiting for detected conversation event")
+			t.Fatal("timeout waiting for detected observability event")
 		}
 	}
 }
 
-func TestEOS_ConversationEvent_DebugLifecycle(t *testing.T) {
+func TestEOS_ObservabilityEvent_Lifecycle(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
-	events := make(chan internal_type.ConversationEventPacket, 8)
+	events := make(chan internal_type.ObservabilityEventRecordPacket, 8)
 	callback := func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
-			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
+			if event, ok := packet.(internal_type.ObservabilityEventRecordPacket); ok {
 				select {
 				case events <- event:
 				default:
@@ -1160,9 +1144,7 @@ func TestEOS_ConversationEvent_DebugLifecycle(t *testing.T) {
 		return nil
 	}
 
-	eos, err := NewPipecatEndOfSpeech(logger, callback, utils.Option{
-		"microphone.eos.events": "debug",
-	})
+	eos, err := NewPipecatEndOfSpeech(logger, callback, utils.Option{})
 	require.NoError(t, err)
 
 	require.NoError(t, eos.Execute(context.Background(), internal_type.UserTextReceivedPacket{
@@ -1171,24 +1153,21 @@ func TestEOS_ConversationEvent_DebugLifecycle(t *testing.T) {
 	}))
 
 	sawInitialized := false
-	sawInterim := false
 	sawDetected := false
 	timeout := time.After(500 * time.Millisecond)
-	for !sawInitialized || !sawInterim || !sawDetected {
+	for !sawInitialized || !sawDetected {
 		select {
 		case event := <-events:
-			switch event.Data["type"] {
-			case "initialized":
+			switch event.Record.Event {
+			case observability.EOSStarted:
 				sawInitialized = true
-			case "interim":
-				sawInterim = true
-			case "detected":
+			case observability.EOSCompleted:
 				sawDetected = true
 			default:
-				t.Fatalf("unexpected debug event: %+v", event)
+				t.Fatalf("unexpected eos event: %+v", event)
 			}
 		case <-timeout:
-			t.Fatal("timeout waiting for debug eos events")
+			t.Fatal("timeout waiting for eos lifecycle events")
 		}
 	}
 
@@ -1198,7 +1177,7 @@ func TestEOS_ConversationEvent_DebugLifecycle(t *testing.T) {
 	for {
 		select {
 		case event := <-events:
-			if event.Data["type"] != "closed" {
+			if event.Record.Event != observability.EOSClosed {
 				continue
 			}
 			return
@@ -1208,18 +1187,11 @@ func TestEOS_ConversationEvent_DebugLifecycle(t *testing.T) {
 	}
 }
 
-func TestEOS_EventLevelOffKeepsMetrics(t *testing.T) {
-	events := make(chan internal_type.ConversationEventPacket, 4)
-	metrics := make(chan internal_type.UserMessageMetricPacket, 2)
+func TestEOS_KeepsMetrics(t *testing.T) {
+	metrics := make(chan internal_type.ObservabilityMetricRecordPacket, 2)
 	eos := newTestEOS(func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
-			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
-				select {
-				case events <- event:
-				default:
-				}
-			}
-			if metric, ok := packet.(internal_type.UserMessageMetricPacket); ok {
+			if metric, ok := packet.(internal_type.ObservabilityMetricRecordPacket); ok {
 				select {
 				case metrics <- metric:
 				default:
@@ -1227,9 +1199,7 @@ func TestEOS_EventLevelOffKeepsMetrics(t *testing.T) {
 			}
 		}
 		return nil
-	}, newTestOpts(map[string]any{
-		"microphone.eos.events": "off",
-	}))
+	}, newTestOpts(map[string]any{}))
 	defer closeTestEndOfSpeech(eos)
 
 	require.NoError(t, eos.Execute(context.Background(), internal_type.UserTextReceivedPacket{
@@ -1239,34 +1209,28 @@ func TestEOS_EventLevelOffKeepsMetrics(t *testing.T) {
 
 	select {
 	case metric := <-metrics:
-		require.Len(t, metric.Metrics, 1)
-		assert.Equal(t, "eos_latency_ms", metric.Metrics[0].Name)
+		require.NotEmpty(t, metric.Record.Metrics)
+		assert.Equal(t, observability.MetricEOSLatencyMs, metric.Record.Metrics[0].Name)
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timeout waiting for eos metric")
-	}
-
-	select {
-	case event := <-events:
-		t.Fatalf("unexpected eos event in off mode: %+v", event)
-	case <-time.After(100 * time.Millisecond):
 	}
 }
 
 func TestEOS_MetricUsesLastTimerArm(t *testing.T) {
-	events := make(chan internal_type.ConversationEventPacket, 2)
-	metrics := make(chan internal_type.UserMessageMetricPacket, 1)
+	events := make(chan internal_type.ObservabilityEventRecordPacket, 2)
+	metrics := make(chan internal_type.ObservabilityMetricRecordPacket, 1)
 	eos := newTestEOS(func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
 			switch typed := packet.(type) {
-			case internal_type.ConversationEventPacket:
-				if typed.Data["type"] != "detected" {
+			case internal_type.ObservabilityEventRecordPacket:
+				if typed.Record.Event != observability.EOSCompleted {
 					continue
 				}
 				select {
 				case events <- typed:
 				default:
 				}
-			case internal_type.UserMessageMetricPacket:
+			case internal_type.ObservabilityMetricRecordPacket:
 				select {
 				case metrics <- typed:
 				default:
@@ -1286,9 +1250,9 @@ func TestEOS_MetricUsesLastTimerArm(t *testing.T) {
 	require.NoError(t, eos.Execute(ctx, sttInput("...", false)))
 
 	timeout := time.After(800 * time.Millisecond)
-	var detected internal_type.ConversationEventPacket
-	var metric internal_type.UserMessageMetricPacket
-	for detected.Name == "" || len(metric.Metrics) == 0 {
+	var detected internal_type.ObservabilityEventRecordPacket
+	var metric internal_type.ObservabilityMetricRecordPacket
+	for detected.Record.Event == "" || len(metric.Record.Metrics) == 0 {
 		select {
 		case detected = <-events:
 		case metric = <-metrics:
@@ -1297,13 +1261,13 @@ func TestEOS_MetricUsesLastTimerArm(t *testing.T) {
 		}
 	}
 
-	textMs, err := strconv.Atoi(detected.Data["text_to_trigger_ms"])
+	textMs, err := strconv.Atoi(detected.Record.Attributes["text_to_trigger_ms"])
 	require.NoError(t, err)
-	waitMs, err := strconv.Atoi(detected.Data["wait_to_trigger_ms"])
+	waitMs, err := strconv.Atoi(detected.Record.Attributes["wait_to_trigger_ms"])
 	require.NoError(t, err)
-	require.Len(t, metric.Metrics, 1)
-	assert.Equal(t, "eos_latency_ms", metric.Metrics[0].Name)
-	metricMs, err := strconv.Atoi(metric.Metrics[0].Value)
+	require.NotEmpty(t, metric.Record.Metrics)
+	assert.Equal(t, observability.MetricEOSLatencyMs, metric.Record.Metrics[0].Name)
+	metricMs, err := strconv.Atoi(metric.Record.Metrics[0].Value)
 	require.NoError(t, err)
 
 	assert.InDelta(t, waitMs, metricMs, 30)
@@ -1323,7 +1287,6 @@ func TestEOS_RespectsExplicitEmptyConcat(t *testing.T) {
 		}
 		return nil
 	}, newTestOpts(map[string]any{
-		"microphone.eos.events":           "off",
 		"microphone.eos.fallback_timeout": 80.0,
 	}))
 	defer closeTestEndOfSpeech(eos)
@@ -1347,11 +1310,11 @@ func TestEOS_RespectsExplicitEmptyConcat(t *testing.T) {
 	}
 }
 
-func TestEOS_ConversationEvent_DetectedConfidence(t *testing.T) {
-	events := make(chan internal_type.ConversationEventPacket, 4)
+func TestEOS_ObservabilityEvent_DetectedConfidence(t *testing.T) {
+	events := make(chan internal_type.ObservabilityEventRecordPacket, 4)
 	eos := newTestEOSWithPredictor(func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
-			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
+			if event, ok := packet.(internal_type.ObservabilityEventRecordPacket); ok && event.Record.Event == observability.EOSCompleted {
 				select {
 				case events <- event:
 				default:
@@ -1378,24 +1341,20 @@ func TestEOS_ConversationEvent_DetectedConfidence(t *testing.T) {
 	for {
 		select {
 		case event := <-events:
-			if event.Data["type"] != "detected" {
-				continue
-			}
-
 			assert.Equal(t, "ctx-confidence", event.ContextID)
-			assert.Equal(t, "0.7345", event.Data["confidence"])
+			assert.Equal(t, "0.7345", event.Record.Attributes["confidence"])
 			return
 		case <-timeout:
-			t.Fatal("timeout waiting for detected confidence conversation event")
+			t.Fatal("timeout waiting for detected confidence observability event")
 		}
 	}
 }
 
-func TestEOS_ConversationEvent_DetectedConfidenceAfterExtend(t *testing.T) {
-	events := make(chan internal_type.ConversationEventPacket, 4)
+func TestEOS_ObservabilityEvent_DetectedConfidenceAfterExtend(t *testing.T) {
+	events := make(chan internal_type.ObservabilityEventRecordPacket, 4)
 	eos := newTestEOSWithPredictor(func(ctx context.Context, packets ...internal_type.Packet) error {
 		for _, packet := range packets {
-			if event, ok := packet.(internal_type.ConversationEventPacket); ok {
+			if event, ok := packet.(internal_type.ObservabilityEventRecordPacket); ok && event.Record.Event == observability.EOSCompleted {
 				select {
 				case events <- event:
 				default:
@@ -1423,15 +1382,11 @@ func TestEOS_ConversationEvent_DetectedConfidenceAfterExtend(t *testing.T) {
 	for {
 		select {
 		case event := <-events:
-			if event.Data["type"] != "detected" {
-				continue
-			}
-
 			assert.Equal(t, "ctx-extend-confidence", event.ContextID)
-			assert.Equal(t, "0.3125", event.Data["confidence"])
+			assert.Equal(t, "0.3125", event.Record.Attributes["confidence"])
 			return
 		case <-timeout:
-			t.Fatal("timeout waiting for extended detected confidence conversation event")
+			t.Fatal("timeout waiting for extended detected confidence observability event")
 		}
 	}
 }

@@ -123,6 +123,35 @@ describe('custom-stt websocket DSL helpers', () => {
     });
   });
 
+  it('validates and renders WAV base64 request paths', () => {
+    const rules = parseCustomSttRequestRules(
+      '[{"when":{"packet":"audio"},"send":{"frame":"json","body":{"audio":{"$path":"packet.audio.wav_base64"}}}}]',
+    );
+
+    expect(
+      renderCustomSttRequestRuleBody(rules[0], {
+        config: {
+          model: 'nova-3',
+          language: 'en-US',
+          audio: {
+            encoding: 'LINEAR16',
+            sample_rate: '16000',
+          },
+        },
+        packet: {
+          kind: 'audio',
+          context_id: 'ctx_123',
+          audio: {
+            bytes: 'AAEC',
+            base64: 'AAEC',
+            pcm_base64: 'AAEC',
+            wav_base64: 'UklGRg==',
+          },
+        },
+      }),
+    ).toEqual({ audio: 'UklGRg==' });
+  });
+
   it('rejects request rules that use unsupported $path roots', () => {
     expect(
       validateCustomSttRequestRules(

@@ -9,7 +9,12 @@ package sip_registration
 import (
 	"context"
 	"errors"
+	"strconv"
 
+	"github.com/rapidaai/api/assistant-api/internal/observability"
+	"github.com/rapidaai/pkg/types"
+	type_enums "github.com/rapidaai/pkg/types/enums"
+	"github.com/rapidaai/protos"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -17,7 +22,7 @@ import (
 // owner". On a fresh claim or self-owned refresh returns RegisterPipeline; on
 // peer-owned or claim error returns nil to stop the chain. Mirrors the
 // per-type handler signature of sip/pipeline/registration.go.
-func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipeline) Pipeline {
+func (m *manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipeline) Pipeline {
 	rec := s.Record
 	key := OwnerKeyPrefix + rec.DID
 
@@ -25,6 +30,49 @@ func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipe
 	if err != nil {
 		rec.Outcome = OutcomeClaimError
 		m.logger.Warnw("Ownership claim failed", "did", rec.DID, "error", err)
+		auth := &types.ProjectScope{
+			ProjectId:      &rec.ProjectID,
+			OrganizationId: &rec.OrganizationID,
+			Status:         type_enums.RECORD_ACTIVE.String(),
+		}
+		observer := m.observer(ctx, auth)
+		defer observer.Close(context.Background())
+		attributes := observability.Attributes{
+			"did":            rec.DID,
+			"assistant_id":   strconv.FormatUint(rec.AssistantID, 10),
+			"deployment_id":  strconv.FormatUint(rec.DeploymentID, 10),
+			"credential_id":  strconv.FormatUint(rec.CredentialID, 10),
+			"owner":          m.instanceID,
+			"failure_class":  string(RegistrationFailureClassOwnership),
+			"failure_reason": string(RegistrationFailureReasonOwnershipClaimFailed),
+			"error":          err.Error(),
+		}
+		_ = observer.Record(ctx, observability.AssistantScope{AssistantID: rec.AssistantID},
+			observability.RecordLog{
+				Level:      observability.LevelError,
+				Message:    "SIP registration ownership claim failed",
+				Attributes: attributes,
+			},
+			observability.RecordEvent{
+				Component:  observability.ComponentSIP,
+				Event:      observability.SIPRegisterFailed,
+				Attributes: attributes,
+			},
+			observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricSIPRegistrationStatus,
+					Value:       type_enums.RECORD_FAILED.String(),
+					Description: "SIP registration ownership claim failed",
+				}},
+				Attributes: attributes,
+			},
+		)
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, RegistrationStatusUpdate{
+			Error:         err.Error(),
+			FailureClass:  RegistrationFailureClassOwnership,
+			FailureReason: RegistrationFailureReasonOwnershipClaimFailed,
+			OwnerInstance: m.instanceID,
+		})
 		return nil
 	}
 	if claimed {
@@ -48,6 +96,49 @@ func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipe
 	if err != nil {
 		rec.Outcome = OutcomeClaimError
 		m.logger.Warnw("Ownership claim failed", "did", rec.DID, "error", err)
+		auth := &types.ProjectScope{
+			ProjectId:      &rec.ProjectID,
+			OrganizationId: &rec.OrganizationID,
+			Status:         type_enums.RECORD_ACTIVE.String(),
+		}
+		observer := m.observer(ctx, auth)
+		defer observer.Close(context.Background())
+		attributes := observability.Attributes{
+			"did":            rec.DID,
+			"assistant_id":   strconv.FormatUint(rec.AssistantID, 10),
+			"deployment_id":  strconv.FormatUint(rec.DeploymentID, 10),
+			"credential_id":  strconv.FormatUint(rec.CredentialID, 10),
+			"owner":          m.instanceID,
+			"failure_class":  string(RegistrationFailureClassOwnership),
+			"failure_reason": string(RegistrationFailureReasonOwnershipClaimFailed),
+			"error":          err.Error(),
+		}
+		_ = observer.Record(ctx, observability.AssistantScope{AssistantID: rec.AssistantID},
+			observability.RecordLog{
+				Level:      observability.LevelError,
+				Message:    "SIP registration ownership claim failed",
+				Attributes: attributes,
+			},
+			observability.RecordEvent{
+				Component:  observability.ComponentSIP,
+				Event:      observability.SIPRegisterFailed,
+				Attributes: attributes,
+			},
+			observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricSIPRegistrationStatus,
+					Value:       type_enums.RECORD_FAILED.String(),
+					Description: "SIP registration ownership claim failed",
+				}},
+				Attributes: attributes,
+			},
+		)
+		m.writeRegistrationStatus(ctx, rec.DeploymentID, RegistrationStatusUpdate{
+			Error:         err.Error(),
+			FailureClass:  RegistrationFailureClassOwnership,
+			FailureReason: RegistrationFailureReasonOwnershipClaimFailed,
+			OwnerInstance: m.instanceID,
+		})
 		return nil
 	}
 	if cur == m.instanceID {
@@ -66,7 +157,10 @@ func (m *Manager) handleClaimOwnership(ctx context.Context, s ClaimOwnershipPipe
 // releaseOwner deletes the ownership key if (and only if) we still own it.
 // Used by the reconcile cleanup branch and by ReleaseAll on graceful
 // shutdown so a peer can claim immediately rather than waiting for the TTL.
-func (m *Manager) releaseOwner(ctx context.Context, did string) {
+func (m *manager) releaseOwner(ctx context.Context, did string) {
+	if m.redis == nil {
+		return
+	}
 	key := OwnerKeyPrefix + did
 	cur, err := m.redis.Get(ctx, key).Result()
 	if err != nil {

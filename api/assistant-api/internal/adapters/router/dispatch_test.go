@@ -8,7 +8,8 @@ import (
 )
 
 type dispatchHandlerStub struct {
-	calledUserText bool
+	calledUserText                  bool
+	calledConversationRecordingDone bool
 }
 
 func (s *dispatchHandlerStub) HandleUserText(context.Context, internal_type.UserTextReceivedPacket) {
@@ -32,7 +33,9 @@ func (s *dispatchHandlerStub) HandleInterruptionDetected(context.Context, intern
 func (s *dispatchHandlerStub) HandleTextToSpeechInterrupt(context.Context, internal_type.TextToSpeechInterruptPacket) {
 }
 func (s *dispatchHandlerStub) HandleLLMInterrupt(context.Context, internal_type.LLMInterruptPacket) {}
-func (s *dispatchHandlerStub) HandleSpeechToTextInterrupt(context.Context, internal_type.SpeechToTextInterruptPacket) {
+func (s *dispatchHandlerStub) HandleSpeechToTextEnd(context.Context, internal_type.SpeechToTextEndPacket) {
+}
+func (s *dispatchHandlerStub) HandleSpeechToTextStart(context.Context, internal_type.SpeechToTextStartPacket) {
 }
 func (s *dispatchHandlerStub) HandleTurnChange(context.Context, internal_type.TurnChangePacket) {}
 func (s *dispatchHandlerStub) HandleLLMResponseDelta(context.Context, internal_type.LLMResponseDeltaPacket) {
@@ -61,27 +64,16 @@ func (s *dispatchHandlerStub) HandleRecordUserAudio(context.Context, internal_ty
 }
 func (s *dispatchHandlerStub) HandleRecordAssistantAudio(context.Context, internal_type.RecordAssistantAudioPacket) {
 }
+func (s *dispatchHandlerStub) HandleConversationRecordingCompleted(context.Context, internal_type.ConversationRecordingCompletedPacket) {
+	s.calledConversationRecordingDone = true
+}
 func (s *dispatchHandlerStub) HandleMessageCreate(context.Context, internal_type.MessageCreatePacket) {
-}
-func (s *dispatchHandlerStub) HandleConversationMetric(context.Context, internal_type.ConversationMetricPacket) {
-}
-func (s *dispatchHandlerStub) HandleConversationMetadata(context.Context, internal_type.ConversationMetadataPacket) {
-}
-func (s *dispatchHandlerStub) HandleUserMessageMetric(context.Context, internal_type.UserMessageMetricPacket) {
-}
-func (s *dispatchHandlerStub) HandleAssistantMessageMetric(context.Context, internal_type.AssistantMessageMetricPacket) {
-}
-func (s *dispatchHandlerStub) HandleUserMessageMetadata(context.Context, internal_type.UserMessageMetadataPacket) {
-}
-func (s *dispatchHandlerStub) HandleAssistantMessageMetadata(context.Context, internal_type.AssistantMessageMetadataPacket) {
 }
 func (s *dispatchHandlerStub) HandleToolLogCreate(context.Context, internal_type.ToolLogCreatePacket) {
 }
 func (s *dispatchHandlerStub) HandleToolLogUpdate(context.Context, internal_type.ToolLogUpdatePacket) {
 }
 func (s *dispatchHandlerStub) HandleHTTPLogCreate(context.Context, internal_type.HTTPLogCreatePacket) {
-}
-func (s *dispatchHandlerStub) HandleConversationEvent(context.Context, internal_type.ConversationEventPacket) {
 }
 func (s *dispatchHandlerStub) HandleInitializeAssistant(context.Context, internal_type.InitializeAssistantPacket) {
 }
@@ -114,8 +106,6 @@ func (s *dispatchHandlerStub) HandleInitializeBehavior(context.Context, internal
 func (s *dispatchHandlerStub) HandleInitializationCompleted(context.Context, internal_type.InitializationCompletedPacket) {
 }
 func (s *dispatchHandlerStub) HandleInitializeTelemetry(context.Context, internal_type.InitializeTelemetryPacket) {
-}
-func (s *dispatchHandlerStub) HandleInitializeOutboundDispatcher(context.Context, internal_type.InitializeOutboundDispatcherPacket) {
 }
 func (s *dispatchHandlerStub) HandleInitializeInboundDispatcher(context.Context, internal_type.InitializeInboundDispatcherPacket) {
 }
@@ -165,15 +155,15 @@ func (s *dispatchHandlerStub) HandleFinalizationCompleted(context.Context, inter
 }
 func (s *dispatchHandlerStub) HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket) {
 }
-
 func (s *dispatchHandlerStub) HandleExecuteWebhook(context.Context, internal_type.ExecuteWebhookPacket) {
 }
-
 func (s *dispatchHandlerStub) HandleSpeechToTextAudio(context.Context, internal_type.SpeechToTextAudioPacket) {
 }
 func (s *dispatchHandlerStub) HandleEndOfSpeechInterruption(context.Context, internal_type.EndOfSpeechInterruptionPacket) {
 }
 func (s *dispatchHandlerStub) HandleEndOfSpeechAudio(context.Context, internal_type.EndOfSpeechAudioPacket) {
+}
+func (s *dispatchHandlerStub) HandleObservabilityRecordPacket(context.Context, internal_type.ObservabilityRecordPacket) {
 }
 
 func TestDispatchPacket_DispatchesKnownPacket(t *testing.T) {
@@ -185,6 +175,18 @@ func TestDispatchPacket_DispatchesKnownPacket(t *testing.T) {
 	}
 	if !handler.calledUserText {
 		t.Fatalf("expected HandleUserText to be called")
+	}
+}
+
+func TestDispatchPacket_DispatchesConversationRecordingCompleted(t *testing.T) {
+	handler := &dispatchHandlerStub{}
+
+	err := DispatchPacket(context.Background(), internal_type.ConversationRecordingCompletedPacket{ContextID: "c"}, handler)
+	if err != nil {
+		t.Fatalf("expected known packet to not return an error, got: %v", err)
+	}
+	if !handler.calledConversationRecordingDone {
+		t.Fatalf("expected HandleConversationRecordingCompleted to be called")
 	}
 }
 

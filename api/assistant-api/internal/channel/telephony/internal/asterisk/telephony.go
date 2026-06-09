@@ -8,6 +8,7 @@ package internal_asterisk_telephony
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
@@ -63,63 +65,106 @@ func (apt *asteriskTelephony) CatchAllStatusCallback(ctx *gin.Context) (*interna
 }
 
 func (apt *asteriskTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo, error) {
-	clientNumber := c.Query("from")
-	if clientNumber == "" {
-		clientNumber = c.Query("callerid")
+	queryParams := make(map[string]string, len(c.Request.URL.Query()))
+	for key, values := range c.Request.URL.Query() {
+		if len(values) > 0 {
+			queryParams[key] = values[0]
+		}
 	}
-	if clientNumber == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing caller information — provide 'from' query parameter"})
+
+	callerNumber := queryParams["from"]
+	if callerNumber == "" {
+		callerNumber = queryParams["caller"]
+	}
+	if callerNumber == "" {
+		callerNumber = queryParams["callerid"]
+	}
+	if callerNumber == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing caller information; provide 'from' or 'caller' query parameter"})
 		return nil, fmt.Errorf("missing caller information in query params")
 	}
 
-	dialedNumber := c.Query("to")
+	dialedNumber := queryParams["to"]
 	if dialedNumber == "" {
-		dialedNumber = c.Query("extension")
+		dialedNumber = queryParams["extension"]
 	}
 	if dialedNumber == "" {
-		dialedNumber = c.Query("dnid")
+		dialedNumber = queryParams["dnid"]
 	}
-
-	payload := map[string]string{"from": clientNumber}
+	queryParams["from"] = callerNumber
 	if dialedNumber != "" {
-		payload["to"] = dialedNumber
+		queryParams["to"] = dialedNumber
 	}
 
 	info := &internal_type.CallInfo{
-		CallerNumber: clientNumber,
+		CallerNumber: callerNumber,
 		FromNumber:   dialedNumber,
 		Provider:     asteriskProvider,
 		Status:       "SUCCESS",
-		StatusInfo:   internal_type.StatusInfo{Event: "webhook", Payload: payload},
+		StatusInfo:   internal_type.StatusInfo{Event: "webhook", Payload: queryParams},
 	}
-	if channelID := c.Query("channel_id"); channelID != "" {
+	if channelID := queryParams["channel_id"]; channelID != "" {
 		info.ChannelUUID = channelID
 	}
 	return info, nil
 }
 
 func (apt *asteriskTelephony) OutboundCall(
+	ctx context.Context,
 	auth types.SimplePrinciple,
 	toPhone string,
 	fromPhone string,
 	assistant *internal_assistant_entity.Assistant, assistantConversationId uint64,
 	vaultCredential *protos.VaultCredential,
+	statusReporter internal_type.ProviderCallStatusReporter,
 	opts utils.Option,
 ) (*internal_type.CallInfo, error) {
 	info := &internal_type.CallInfo{Provider: asteriskProvider}
 
+	if err := ctx.Err(); err != nil {
+		info.Status = "FAILED"
+		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCancelled,
+			"request cancelled",
+			internal_telephony_base.OutboundDisconnectReasonRequestCancelled,
+			err,
+			0,
+		)
+		return info, err
+	}
+
 	if vaultCredential == nil || vaultCredential.GetValue() == nil {
+		err := fmt.Errorf("missing vault credential for Asterisk ARI")
 		info.Status = "FAILED"
 		info.ErrorMessage = "Missing vault credential for Asterisk ARI"
-		return info, fmt.Errorf("missing vault credential for Asterisk ARI")
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassConfiguration,
+			"missing vault credential",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
+		return info, err
 	}
 
 	credMap := vaultCredential.GetValue().AsMap()
 	ariBaseURL, _ := credMap["ari_url"].(string)
 	if ariBaseURL == "" {
+		err := fmt.Errorf("missing ari_url in vault credential")
 		info.Status = "FAILED"
 		info.ErrorMessage = "Missing ari_url in vault credential"
-		return info, fmt.Errorf("missing ari_url in vault credential")
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassConfiguration,
+			"missing ARI URL",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
+		return info, err
 	}
 
 	endpointTech := "PJSIP"
@@ -184,6 +229,14 @@ func (apt *asteriskTelephony) OutboundCall(
 		if err != nil {
 			info.Status = "FAILED"
 			info.ErrorMessage = fmt.Sprintf("failed to marshal channel variables: %s", err.Error())
+			internal_telephony_base.ReportOutboundFailure(
+				statusReporter,
+				internal_telephony_base.OutboundFailureClassRequestPayload,
+				"failed to build provider request payload",
+				internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+				err,
+				0,
+			)
 			return info, err
 		}
 	}
@@ -192,16 +245,24 @@ func (apt *asteriskTelephony) OutboundCall(
 	var req *http.Request
 	var err error
 	if bodyBytes != nil {
-		req, err = http.NewRequest("POST", ariURL, bytes.NewReader(bodyBytes))
+		req, err = http.NewRequestWithContext(ctx, "POST", ariURL, bytes.NewReader(bodyBytes))
 		if err == nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
 	} else {
-		req, err = http.NewRequest("POST", ariURL, nil)
+		req, err = http.NewRequestWithContext(ctx, "POST", ariURL, nil)
 	}
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("request creation error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCreation,
+			"failed to create provider request",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -216,6 +277,14 @@ func (apt *asteriskTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("ARI request error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			"provider API error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 	defer resp.Body.Close()
@@ -233,7 +302,16 @@ func (apt *asteriskTelephony) OutboundCall(
 		info.Status = "FAILED"
 		info.ErrorMessage = errMsg
 		apt.logger.Errorf("ARI outbound call failed: %s, response: %+v", errMsg, ariResp)
-		return info, fmt.Errorf("%s", errMsg)
+		err := fmt.Errorf("%s", errMsg)
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			errMsg,
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
+		return info, err
 	}
 
 	if id, ok := ariResp["id"]; ok {
@@ -243,6 +321,7 @@ func (apt *asteriskTelephony) OutboundCall(
 	info.Status = "SUCCESS"
 	info.StatusInfo = internal_type.StatusInfo{Event: "channel_created", Payload: ariResp}
 	apt.logger.Infof("ARI outbound call succeeded: channelId=%s, endpoint=%s", info.ChannelUUID, endpoint)
+	internal_telephony_base.ReportOutboundInitiated(statusReporter, info.ChannelUUID)
 	return info, nil
 }
 

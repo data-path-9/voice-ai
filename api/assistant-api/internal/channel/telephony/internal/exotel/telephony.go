@@ -6,6 +6,8 @@
 package internal_exotel_telephony
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,18 +18,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_exotel "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/exotel/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
-
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
-
-const exotelProvider = "exotel"
 
 type exotelTelephony struct {
 	logger commons.Logger
@@ -43,6 +43,7 @@ func NewExotelTelephony(config *config.AssistantConfig, logger commons.Logger) (
 
 func (exo *exotelTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_type.StatusInfo, error) {
 	eventDetails := utils.Option{}
+	rawCallbackPayload := ctx.Request.URL.RawQuery
 	if len(ctx.Request.URL.Query()) > 0 {
 		for key, values := range ctx.Request.URL.Query() {
 			if len(values) > 0 {
@@ -52,6 +53,13 @@ func (exo *exotelTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 			}
 		}
 	} else {
+		body, err := io.ReadAll(ctx.Request.Body)
+		if err != nil {
+			exo.logger.Errorf("failed to read callback body with error %+v", err)
+			return nil, fmt.Errorf("%w: %w", internal_exotel.ErrCallbackFormParseFailed, err)
+		}
+		rawCallbackPayload = string(body)
+		ctx.Request.Body = io.NopCloser(bytes.NewReader(body))
 		if err := ctx.Request.ParseForm(); err == nil && len(ctx.Request.PostForm) > 0 {
 			for key, values := range ctx.Request.PostForm {
 				if len(values) > 0 {
@@ -64,7 +72,7 @@ func (exo *exotelTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 			form, err := ctx.MultipartForm()
 			if err != nil {
 				exo.logger.Errorf("failed to parse callback form-data with error %+v", err)
-				return nil, fmt.Errorf("failed to parse callback form-data")
+				return nil, fmt.Errorf("%w: %w", internal_exotel.ErrCallbackFormParseFailed, err)
 			}
 			for key, values := range form.Value {
 				if len(values) > 0 {
@@ -76,20 +84,21 @@ func (exo *exotelTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 		}
 	}
 
-	callback, err := internal_exotel.NewStatusCallback(eventDetails)
+	callback, err := internal_exotel.NewStatusCallback(eventDetails, rawCallbackPayload)
 	if err != nil {
 		exo.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err
 	}
 	if !validator.NotBlank(callback.ChannelUUID) {
 		exo.logger.Errorf("call sid not found or invalid in catch-all payload")
-		return nil, fmt.Errorf("call sid not found in callback")
+		return nil, internal_exotel.ErrCatchAllCallSIDMissing
 	}
 	return callback.StatusInfo(), nil
 }
 
 func (exo *exotelTelephony) StatusCallback(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_type.StatusInfo, error) {
 	eventDetails := utils.Option{}
+	rawCallbackPayload := c.Request.URL.RawQuery
 	if len(c.Request.URL.Query()) > 0 {
 		for key, values := range c.Request.URL.Query() {
 			if len(values) > 0 {
@@ -99,6 +108,13 @@ func (exo *exotelTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 			}
 		}
 	} else {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			exo.logger.Errorf("failed to read callback body with error %+v", err)
+			return nil, fmt.Errorf("%w: %w", internal_exotel.ErrCallbackFormParseFailed, err)
+		}
+		rawCallbackPayload = string(body)
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
 		if err := c.Request.ParseForm(); err == nil && len(c.Request.PostForm) > 0 {
 			for key, values := range c.Request.PostForm {
 				if len(values) > 0 {
@@ -111,7 +127,7 @@ func (exo *exotelTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 			form, err := c.MultipartForm()
 			if err != nil {
 				exo.logger.Errorf("failed to parse callback form-data with error %+v", err)
-				return nil, fmt.Errorf("failed to parse callback form-data")
+				return nil, fmt.Errorf("%w: %w", internal_exotel.ErrCallbackFormParseFailed, err)
 			}
 			for key, values := range form.Value {
 				if len(values) > 0 {
@@ -122,7 +138,7 @@ func (exo *exotelTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 			}
 		}
 	}
-	callback, err := internal_exotel.NewStatusCallback(eventDetails)
+	callback, err := internal_exotel.NewStatusCallback(eventDetails, rawCallbackPayload)
 	if err != nil {
 		exo.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err
@@ -132,26 +148,26 @@ func (exo *exotelTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 
 func (exo *exotelTelephony) ClientUrl(vaultCredential *protos.VaultCredential, opts utils.Option) (*string, error) {
 	if vaultCredential.GetValue() == nil {
-		return nil, fmt.Errorf("vault credential value is nil")
+		return nil, internal_exotel.ErrVaultCredentialValueMissing
 	}
 	vaultMap := vaultCredential.GetValue().AsMap()
 	accountSid, ok := vaultMap["account_sid"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config accountSid is not found")
+		return nil, internal_exotel.ErrVaultAccountSIDMissing
 	}
 	clientId, ok := vaultMap["client_id"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config client_id not found")
+		return nil, internal_exotel.ErrVaultClientIDMissing
 	}
 	authToken, ok := vaultMap["client_secret"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config client_secret not found")
+		return nil, internal_exotel.ErrVaultClientSecretMissing
 	}
 	sid, _ := accountSid.(string)
 	cid, _ := clientId.(string)
 	token, _ := authToken.(string)
 	if sid == "" || cid == "" || token == "" {
-		return nil, fmt.Errorf("illegal vault config: credentials must be non-empty strings")
+		return nil, internal_exotel.ErrVaultCredentialInvalid
 	}
 	return utils.Ptr(fmt.Sprintf("https://%s:%s@api.exotel.com/v1/Accounts/%s/Calls/connect.json",
 		cid, token, sid)), nil
@@ -159,37 +175,61 @@ func (exo *exotelTelephony) ClientUrl(vaultCredential *protos.VaultCredential, o
 
 func (exo *exotelTelephony) AppUrl(vaultCredential *protos.VaultCredential, opts utils.Option) (*string, error) {
 	if vaultCredential.GetValue() == nil {
-		return nil, fmt.Errorf("vault credential value is nil")
+		return nil, internal_exotel.ErrVaultCredentialValueMissing
 	}
 	vaultMap := vaultCredential.GetValue().AsMap()
 	accountSid, ok := vaultMap["account_sid"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config accountSid is not found")
+		return nil, internal_exotel.ErrVaultAccountSIDMissing
 	}
 	app_id, err := opts.GetString("app_id")
 	if err != nil {
-		return nil, fmt.Errorf("illegal app_id option is not found")
+		return nil, internal_exotel.ErrAppIDMissing
 	}
 	sid, _ := accountSid.(string)
 	if sid == "" {
-		return nil, fmt.Errorf("illegal vault config account_sid must be a non-empty string")
+		return nil, internal_exotel.ErrVaultAccountSIDInvalid
 	}
 	return utils.Ptr(fmt.Sprintf("http://my.exotel.com/%s/exoml/start_voice/%s", sid, app_id)), nil
 }
 
 func (exo *exotelTelephony) OutboundCall(
+	ctx context.Context,
 	auth types.SimplePrinciple,
 	toPhone string,
 	fromPhone string,
 	assistant *internal_assistant_entity.Assistant, assistantConversationId uint64,
 	vaultCredential *protos.VaultCredential,
+	statusReporter internal_type.ProviderCallStatusReporter,
 	opts utils.Option) (*internal_type.CallInfo, error) {
-	info := &internal_type.CallInfo{Provider: exotelProvider}
+	info := &internal_type.CallInfo{Provider: internal_exotel.Provider}
+
+	if err := ctx.Err(); err != nil {
+		info.Status = "FAILED"
+		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCancelled,
+			"request cancelled",
+			internal_telephony_base.OutboundDisconnectReasonRequestCancelled,
+			err,
+			0,
+		)
+		return info, err
+	}
 
 	clientUrl, err := exo.ClientUrl(vaultCredential, opts)
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("Failed to build url, check credentials: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassConfiguration,
+			"failed to build provider URL",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -197,6 +237,14 @@ func (exo *exotelTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("Failed to build app url: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassConfiguration,
+			"failed to build application URL",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -207,14 +255,22 @@ func (exo *exotelTelephony) OutboundCall(
 	formData.Set("CallerId", fromPhone)
 	formData.Set("To", fromPhone)
 	formData.Set("Url", *appUrl)
-	formData.Set("StatusCallback", fmt.Sprintf("https://%s/%s", exo.appCfg.Assistant.Public, internal_type.GetContextEventPath(exotelProvider, contextID)))
-	formData.Set("CustomField", internal_type.GetContextAnswerPath(exotelProvider, contextID))
+	formData.Set("StatusCallback", fmt.Sprintf("https://%s/%s", exo.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_exotel.Provider, contextID)))
+	formData.Set("CustomField", internal_type.GetContextAnswerPath(internal_exotel.Provider, contextID))
 
 	client := &http.Client{Timeout: 60 * time.Second}
-	req, err := http.NewRequest("POST", *clientUrl, strings.NewReader(formData.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", *clientUrl, strings.NewReader(formData.Encode()))
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("request creation error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCreation,
+			"failed to create provider request",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -223,6 +279,14 @@ func (exo *exotelTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("API error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			"provider API error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 	defer resp.Body.Close()
@@ -230,6 +294,14 @@ func (exo *exotelTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to read response: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			"failed to read provider response",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
 		return info, err
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -237,7 +309,16 @@ func (exo *exotelTelephony) OutboundCall(
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(bodyBytes))
 		info.StatusInfo = internal_type.StatusInfo{Event: "Failed", Payload: string(bodyBytes)}
-		return info, fmt.Errorf("status code %d: %s", resp.StatusCode, string(bodyBytes))
+		err := fmt.Errorf("status code %d: %s", resp.StatusCode, string(bodyBytes))
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			fmt.Sprintf("provider returned HTTP %d", resp.StatusCode),
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
+		return info, err
 	}
 
 	var jsonResponse internal_exotel.MakeCallResponse
@@ -245,12 +326,21 @@ func (exo *exotelTelephony) OutboundCall(
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to decode response: %s", err.Error())
 		info.StatusInfo = internal_type.StatusInfo{Event: jsonResponse.Call.Status, Payload: "Failed to decode response"}
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			"failed to decode provider response",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
 		return info, err
 	}
 
 	info.ChannelUUID = jsonResponse.Call.Sid
 	info.Status = "SUCCESS"
 	info.StatusInfo = internal_type.StatusInfo{Event: jsonResponse.Call.Status, Payload: jsonResponse}
+	internal_telephony_base.ReportOutboundInitiated(statusReporter, info.ChannelUUID)
 	return info, nil
 }
 
@@ -261,7 +351,7 @@ func (exo *exotelTelephony) InboundCall(c *gin.Context, auth types.SimplePrincip
 	response := map[string]string{
 		"url": fmt.Sprintf("wss://%s/%s",
 			exo.appCfg.Assistant.Public,
-			internal_type.GetContextAnswerPath("exotel", ctxID)),
+			internal_type.GetContextAnswerPath(internal_exotel.Provider, ctxID)),
 	}
 	c.JSON(http.StatusOK, response)
 	return nil
@@ -289,14 +379,14 @@ func (exo *exotelTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo
 	clientNumber, ok := queryParams["CallFrom"]
 	if !ok || clientNumber == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid caller"})
-		return nil, fmt.Errorf("missing or empty 'from' query parameter")
+		return nil, internal_exotel.ErrInboundFromMissing
 	}
 
 	info := &internal_type.CallInfo{
 		CallerNumber: clientNumber,
-		Provider:     exotelProvider,
+		Provider:     internal_exotel.Provider,
 		Status:       "SUCCESS",
-		StatusInfo:   internal_type.StatusInfo{Event: "webhook", Payload: queryParams},
+		StatusInfo:   internal_type.StatusInfo{Event: internal_exotel.WebhookEvent, Payload: queryParams},
 	}
 	if v, ok := queryParams["CallTo"]; ok && v != "" {
 		info.FromNumber = v

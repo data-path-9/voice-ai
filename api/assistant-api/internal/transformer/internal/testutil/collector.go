@@ -115,26 +115,26 @@ func (pc *PacketCollector) InterimTranscripts() []internal_type.SpeechToTextPack
 	return out
 }
 
-// EventPackets returns only ConversationEventPacket packets.
-func (pc *PacketCollector) EventPackets() []internal_type.ConversationEventPacket {
+// EventPackets returns only ObservabilityEventRecordPacket packets.
+func (pc *PacketCollector) EventPackets() []internal_type.ObservabilityEventRecordPacket {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	var out []internal_type.ConversationEventPacket
+	var out []internal_type.ObservabilityEventRecordPacket
 	for _, p := range pc.packets {
-		if e, ok := p.(internal_type.ConversationEventPacket); ok {
+		if e, ok := p.(internal_type.ObservabilityEventRecordPacket); ok {
 			out = append(out, e)
 		}
 	}
 	return out
 }
 
-// MetricPackets returns only MessageMetricPacket packets.
-func (pc *PacketCollector) MetricPackets() []internal_type.AssistantMessageMetricPacket {
+// MetricPackets returns only ObservabilityMetricRecordPacket packets.
+func (pc *PacketCollector) MetricPackets() []internal_type.ObservabilityMetricRecordPacket {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	var out []internal_type.AssistantMessageMetricPacket
+	var out []internal_type.ObservabilityMetricRecordPacket
 	for _, p := range pc.packets {
-		if m, ok := p.(internal_type.AssistantMessageMetricPacket); ok {
+		if m, ok := p.(internal_type.ObservabilityMetricRecordPacket); ok {
 			out = append(out, m)
 		}
 	}

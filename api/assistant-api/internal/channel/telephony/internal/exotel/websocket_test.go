@@ -6,16 +6,66 @@
 package internal_exotel_telephony
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
+	internal_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	internal_exotel "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/exotel/internal"
+	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeExotelMediaEngine struct {
+	providerFrame internal_telephony_media.ProviderAudioFrame
+	processError  error
+}
+
+func (engine *fakeExotelMediaEngine) ProcessProviderAudioFrame(frame internal_telephony_media.ProviderAudioFrame) (internal_telephony_media.InputAudioFrame, error) {
+	engine.providerFrame = frame
+	if engine.processError != nil {
+		return internal_telephony_media.InputAudioFrame{}, engine.processError
+	}
+	return internal_telephony_media.InputAudioFrame{
+		BridgeAudio:   []byte{1},
+		PipelineAudio: []byte{2},
+		ReceivedAt:    frame.ReceivedAt,
+	}, nil
+}
+
+func (engine *fakeExotelMediaEngine) ProcessAssistantAudio(_ []byte, _ bool) error {
+	return nil
+}
+
+func (engine *fakeExotelMediaEngine) NextOutputFrame() (internal_telephony_media.AssistantOutputFrame, bool) {
+	return internal_telephony_media.AssistantOutputFrame{}, false
+}
+
+func (engine *fakeExotelMediaEngine) IdleOutputFrame() (internal_telephony_media.AssistantOutputFrame, bool) {
+	return internal_telephony_media.AssistantOutputFrame{}, false
+}
+
+func (engine *fakeExotelMediaEngine) ClearOutputBuffer() {}
+
+func (engine *fakeExotelMediaEngine) ConfigureAmbient(_ internal_ambient.Config) error {
+	return nil
+}
+
+func (engine *fakeExotelMediaEngine) OutputFrameDuration() time.Duration {
+	return 20 * time.Millisecond
+}
+
+func (engine *fakeExotelMediaEngine) OutputHealthSnapshot() internal_output.HealthSnapshot {
+	return internal_output.HealthSnapshot{}
+}
+
+func (engine *fakeExotelMediaEngine) OnTickHealth(_ internal_output.TickHealth) {}
 
 // newTestExotelStreamer creates an exotelWebsocketStreamer without starting
 // the background WebSocket reader goroutine. The connection is nil so Cancel()
@@ -29,9 +79,8 @@ func newTestExotelStreamer(t *testing.T) *exotelWebsocketStreamer {
 		ChannelUUID:    "test-channel-uuid",
 	}
 	return &exotelWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, nil,
-			internal_telephony_base.WithSourceAudioConfig(exotelLinear8kConfig),
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			logger, cc, nil, nil,
 		),
 		streamID:   "test-stream",
 		connection: nil, // nil so Cancel() skips conn.Close()
@@ -124,6 +173,102 @@ func TestSend_TransferConversation_PushesFailedResult(t *testing.T) {
 	default:
 		// expected - context is still alive
 	}
+}
+
+func TestNewExotelWebsocketStreamer_WiresMediaSession(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	callContext := &callcontext.CallContext{
+		AssistantID:    1,
+		ConversationID: 2,
+		Provider:       "exotel",
+	}
+
+	streamer, err := New(
+		WithLogger(logger),
+		WithConnection(nil),
+		WithCallContext(callContext),
+		WithVaultCredential(nil),
+	)
+	require.NoError(t, err)
+	exotel, ok := streamer.(*exotelWebsocketStreamer)
+	require.True(t, ok, "expected exotel websocket streamer")
+	defer exotel.Cancel()
+
+	require.NotNil(t, exotel.mediaSession)
+}
+
+func TestHandleMediaEvent_EmitsBridgeUserAudio(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	callContext := &callcontext.CallContext{
+		AssistantID:    1,
+		ConversationID: 2,
+		Provider:       "exotel",
+	}
+	mediaEngine := &fakeExotelMediaEngine{}
+	exotel := &exotelWebsocketStreamer{
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
+	}
+	exotel.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     exotel.Ctx,
+		Logger:      logger,
+		MediaEngine: mediaEngine,
+		StreamSink:  exotel.Input,
+	})
+
+	providerAudio := []byte{9, 8, 7}
+	mediaEvent := internal_exotel.ExotelMediaEvent{
+		Media: &internal_exotel.ExotelMedia{
+			Payload: exotel.Encoder().EncodeToString(providerAudio),
+		},
+	}
+	err := exotel.handleMediaEvent(mediaEvent)
+	require.NoError(t, err)
+
+	select {
+	case stream := <-exotel.InputCh:
+		bridgeAudio, ok := stream.(*protos.ConversationBridgeUserAudio)
+		require.True(t, ok, "expected bridge user audio, got %T", stream)
+		assert.NotEmpty(t, bridgeAudio.GetAudio())
+		assert.NotNil(t, bridgeAudio.GetTime())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for bridge user audio")
+	}
+	assert.Equal(t, providerAudio, mediaEngine.providerFrame.Audio)
+	assert.False(t, mediaEngine.providerFrame.ReceivedAt.IsZero())
+}
+
+func TestHandleMediaEvent_ReturnsMediaProcessingError(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	callContext := &callcontext.CallContext{
+		AssistantID:    1,
+		ConversationID: 2,
+		Provider:       "exotel",
+	}
+	mediaEngine := &fakeExotelMediaEngine{processError: errors.New("media process failed")}
+	exotel := &exotelWebsocketStreamer{
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
+	}
+	exotel.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     exotel.Ctx,
+		Logger:      logger,
+		MediaEngine: mediaEngine,
+		StreamSink:  exotel.Input,
+	})
+
+	mediaEvent := internal_exotel.ExotelMediaEvent{
+		Media: &internal_exotel.ExotelMedia{
+			Payload: exotel.Encoder().EncodeToString([]byte{9, 8, 7}),
+		},
+	}
+	err := exotel.handleMediaEvent(mediaEvent)
+	require.ErrorContains(t, err, "media process failed")
+}
+
+func TestHandleMediaEvent_MissingMediaPayloadDoesNotPanic(t *testing.T) {
+	exotel := newTestExotelStreamer(t)
+
+	err := exotel.handleMediaEvent(internal_exotel.ExotelMediaEvent{})
+	require.NoError(t, err)
 }
 
 func TestSend_TransferConversation_NoToolId_StillPushesFailedResult(t *testing.T) {

@@ -57,7 +57,7 @@ describe('websocket DSL editor suggestions', () => {
     const suggestions = getWebsocketDslEditorSuggestions(
       'custom-stt',
       'request_rules',
-      '"body":{"$path":"packet.audio.ba',
+      '"body":{"$path":"packet.audio.',
     );
 
     expect(
@@ -65,6 +65,13 @@ describe('websocket DSL editor suggestions', () => {
         item =>
           item.label === 'packet.audio.base64' &&
           item.insertText === 'packet.audio.base64',
+      ),
+    ).toBe(true);
+    expect(
+      suggestions.some(
+        item =>
+          item.label === 'packet.audio.wav_base64' &&
+          item.insertText === 'packet.audio.wav_base64',
       ),
     ).toBe(true);
   });

@@ -6,21 +6,72 @@
 package internal_twilio_telephony
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
-	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
+	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
+	internal_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
+	internal_twilio "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio/internal"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeTwilioMediaEngine struct {
+	providerFrame internal_telephony_media.ProviderAudioFrame
+	processError  error
+}
+
+func (engine *fakeTwilioMediaEngine) ProcessProviderAudioFrame(frame internal_telephony_media.ProviderAudioFrame) (internal_telephony_media.InputAudioFrame, error) {
+	engine.providerFrame = frame
+	if engine.processError != nil {
+		return internal_telephony_media.InputAudioFrame{}, engine.processError
+	}
+	return internal_telephony_media.InputAudioFrame{
+		BridgeAudio:   []byte{1},
+		PipelineAudio: []byte{2},
+		ReceivedAt:    frame.ReceivedAt,
+	}, nil
+}
+
+func (engine *fakeTwilioMediaEngine) ProcessAssistantAudio(_ []byte, _ bool) error {
+	return nil
+}
+
+func (engine *fakeTwilioMediaEngine) NextOutputFrame() (internal_telephony_media.AssistantOutputFrame, bool) {
+	return internal_telephony_media.AssistantOutputFrame{}, false
+}
+
+func (engine *fakeTwilioMediaEngine) IdleOutputFrame() (internal_telephony_media.AssistantOutputFrame, bool) {
+	return internal_telephony_media.AssistantOutputFrame{}, false
+}
+
+func (engine *fakeTwilioMediaEngine) ClearOutputBuffer() {}
+
+func (engine *fakeTwilioMediaEngine) ConfigureAmbient(_ internal_ambient.Config) error {
+	return nil
+}
+
+func (engine *fakeTwilioMediaEngine) OutputFrameDuration() time.Duration {
+	return 20 * time.Millisecond
+}
+
+func (engine *fakeTwilioMediaEngine) OutputHealthSnapshot() internal_output.HealthSnapshot {
+	return internal_output.HealthSnapshot{}
+}
+
+func (engine *fakeTwilioMediaEngine) OnTickHealth(_ internal_output.TickHealth) {}
 
 // testWSPair creates a connected WebSocket client/server pair for unit tests.
 // The server side is discarded; only the client *websocket.Conn is returned.
@@ -71,15 +122,124 @@ func newTestTwilioStreamer(t *testing.T) (*twilioWebsocketStreamer, func()) {
 	conn, cleanup := testWSPair(t)
 
 	tws := &twilioWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, nil,
-			internal_telephony_base.WithSourceAudioConfig(internal_audio.NewMulaw8khzMonoAudioConfig()),
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			logger, cc, nil, nil,
 		),
 		streamID:   "test-stream",
 		connection: conn,
 	}
 	// Note: we do NOT start runWebSocketReader — tests exercise Send only.
 	return tws, cleanup
+}
+
+func TestNewTwilioWebsocketStreamer_WiresMediaSession(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	callContext := &callcontext.CallContext{
+		AssistantID:    1,
+		ConversationID: 2,
+		Provider:       "twilio",
+	}
+	streamer, err := New(
+		WithLogger(logger),
+		WithConnection(nil),
+		WithCallContext(callContext),
+		WithVaultCredential(nil),
+	)
+	require.NoError(t, err)
+	tws, ok := streamer.(*twilioWebsocketStreamer)
+	require.True(t, ok, "expected twilio websocket streamer")
+	defer tws.Cancel()
+
+	require.NotNil(t, tws.mediaSession)
+}
+
+func TestHandleMediaEvent_EmitsBridgeUserAudio(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	callContext := &callcontext.CallContext{
+		AssistantID:    1,
+		ConversationID: 2,
+		Provider:       "twilio",
+	}
+	mediaEngine := &fakeTwilioMediaEngine{}
+	tws := &twilioWebsocketStreamer{
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
+	}
+	tws.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     tws.Ctx,
+		Logger:      logger,
+		MediaEngine: mediaEngine,
+		StreamSink:  tws.Input,
+	})
+
+	providerAudio := make([]byte, internal_twilio.OutputChunkSize)
+	for i := range providerAudio {
+		providerAudio[i] = internal_twilio.MulawSilence
+	}
+	mediaEvent := internal_twilio.TwilioMediaEvent{
+		Media: &internal_twilio.TwilioMedia{
+			Payload: tws.Encoder().EncodeToString(providerAudio),
+		},
+	}
+	err := tws.handleMediaEvent(mediaEvent)
+	require.NoError(t, err)
+
+	select {
+	case stream := <-tws.InputCh:
+		bridgeAudio, ok := stream.(*protos.ConversationBridgeUserAudio)
+		require.True(t, ok, "expected bridge user audio, got %T", stream)
+		assert.NotEmpty(t, bridgeAudio.GetAudio())
+		assert.NotNil(t, bridgeAudio.GetTime())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for bridge user audio")
+	}
+	assert.Equal(t, providerAudio, mediaEngine.providerFrame.Audio)
+	assert.False(t, mediaEngine.providerFrame.ReceivedAt.IsZero())
+}
+
+func TestHandleMediaEvent_ReturnsMediaProcessingError(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	callContext := &callcontext.CallContext{
+		AssistantID:    1,
+		ConversationID: 2,
+		Provider:       "twilio",
+	}
+	mediaEngine := &fakeTwilioMediaEngine{processError: errors.New("media process failed")}
+	tws := &twilioWebsocketStreamer{
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
+	}
+	tws.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     tws.Ctx,
+		Logger:      logger,
+		MediaEngine: mediaEngine,
+		StreamSink:  tws.Input,
+	})
+
+	providerAudio := make([]byte, internal_twilio.OutputChunkSize)
+	for i := range providerAudio {
+		providerAudio[i] = internal_twilio.MulawSilence
+	}
+	mediaEvent := internal_twilio.TwilioMediaEvent{
+		Media: &internal_twilio.TwilioMedia{
+			Payload: tws.Encoder().EncodeToString(providerAudio),
+		},
+	}
+	err := tws.handleMediaEvent(mediaEvent)
+	require.ErrorContains(t, err, "media process failed")
+}
+
+func TestHandleMediaEvent_MissingMediaPayloadDoesNotPanic(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	callContext := &callcontext.CallContext{
+		AssistantID:    1,
+		ConversationID: 2,
+		Provider:       "twilio",
+	}
+	tws := &twilioWebsocketStreamer{
+		BaseTelephonyStreamer: internal_telephony_base.New(logger, callContext, nil, nil),
+	}
+
+	err := tws.handleMediaEvent(internal_twilio.TwilioMediaEvent{})
+	require.NoError(t, err)
 }
 
 func TestSend_EndConversation_PushesToolCallResult(t *testing.T) {
@@ -105,6 +265,41 @@ func TestSend_EndConversation_PushesToolCallResult(t *testing.T) {
 		assert.Equal(t, "end_conversation", result.GetName())
 		assert.Equal(t, protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION, result.GetAction())
 		assert.Equal(t, map[string]string{"status": "completed"}, result.GetResult())
+	case <-time.After(time.Second):
+		t.Fatal("Expected ConversationToolCallResult in CriticalCh but timed out")
+	}
+}
+
+func TestSend_EndConversation_NilConnectionStillPushesToolCallResult(t *testing.T) {
+	logger, _ := commons.NewApplicationLogger()
+	tws := &twilioWebsocketStreamer{
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			logger,
+			&callcontext.CallContext{
+				AssistantID:    1,
+				ConversationID: 2,
+			},
+			nil,
+			nil,
+		),
+		connection: nil,
+	}
+
+	toolCall := &protos.ConversationToolCall{
+		Id:     "tool-call-id-123",
+		ToolId: "tool-id-456",
+		Name:   "end_conversation",
+		Action: protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION,
+	}
+
+	err := tws.Send(toolCall)
+	require.NoError(t, err)
+
+	select {
+	case msg := <-tws.CriticalCh:
+		result, ok := msg.(*protos.ConversationToolCallResult)
+		require.True(t, ok, "Expected ConversationToolCallResult, got %T", msg)
+		assert.Equal(t, "completed", result.GetResult()["status"])
 	case <-time.After(time.Second):
 		t.Fatal("Expected ConversationToolCallResult in CriticalCh but timed out")
 	}
@@ -137,6 +332,47 @@ func TestSend_EndConversation_DoesNotCancelStreamer(t *testing.T) {
 	default:
 	}
 	assert.False(t, tws.closed.Load(), "streamer should remain open")
+}
+
+func TestSend_Disconnection_LogsTwilioClientError(t *testing.T) {
+	logDirectory := t.TempDir()
+	logger, err := commons.NewApplicationLogger(
+		commons.EnableConsole(false),
+		commons.EnableFile(true),
+		commons.Path(logDirectory),
+		commons.Name("twilio-disconnection"),
+	)
+	require.NoError(t, err)
+
+	conn, cleanup := testWSPair(t)
+	defer cleanup()
+
+	tws := &twilioWebsocketStreamer{
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			logger,
+			&callcontext.CallContext{
+				AssistantID:    1,
+				ConversationID: 2,
+				ChannelUUID:    "CA123",
+			},
+			nil,
+			nil,
+		),
+		connection: conn,
+	}
+
+	err = tws.Send(&protos.ConversationDisconnection{
+		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_USER,
+	})
+	require.NoError(t, err)
+	require.NoError(t, logger.Sync())
+
+	logBytes, err := os.ReadFile(filepath.Join(logDirectory, "twilio-disconnection.log"))
+	require.NoError(t, err)
+	logContent := string(logBytes)
+	assert.Contains(t, logContent, "Failed to create Twilio client for server-side disconnect")
+	assert.Contains(t, logContent, "CA123")
+	assert.Contains(t, logContent, protos.ConversationDisconnection_DISCONNECTION_TYPE_USER.String())
 }
 
 func TestSend_TransferConversation_MissingTarget(t *testing.T) {

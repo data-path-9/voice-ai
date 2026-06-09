@@ -12,6 +12,7 @@ import (
 	"time"
 
 	msginterfaces "github.com/deepgram/deepgram-go-sdk/v3/pkg/api/listen/v1/websocket/interfaces"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/utils"
@@ -20,11 +21,12 @@ import (
 
 // Implement the LiveMessageCallback interface
 type deepgramSttCallback struct {
-	logger      commons.Logger
-	onPacket    func(pkt ...internal_type.Packet) error
-	options     utils.Option
-	swapStarted func() time.Time
-	contextID   func() string
+	logger       commons.Logger
+	onPacket     func(pkt ...internal_type.Packet) error
+	options      utils.Option
+	swapStarted  func() time.Time
+	contextID    func() string
+	providerName string
 }
 
 func NewDeepgramSttCallback(
@@ -33,13 +35,15 @@ func NewDeepgramSttCallback(
 	options utils.Option,
 	swapStarted func() time.Time,
 	contextID func() string,
+	providerName string,
 ) msginterfaces.LiveMessageCallback {
 	return &deepgramSttCallback{
-		logger:      logger,
-		onPacket:    onPacket,
-		options:     options,
-		swapStarted: swapStarted,
-		contextID:   contextID,
+		logger:       logger,
+		onPacket:     onPacket,
+		options:      options,
+		swapStarted:  swapStarted,
+		contextID:    contextID,
+		providerName: providerName,
 	}
 }
 
@@ -62,16 +66,21 @@ func (d *deepgramSttCallback) Message(mr *msginterfaces.MessageResponse) error {
 				// confidence below threshold, emit event and skip stt processing
 				ctxID := d.contextID()
 				d.onPacket(
-					internal_type.ConversationEventPacket{
-						ContextID: ctxID,
-						Name:      "stt",
-						Data: map[string]string{
-							"type":       "low_confidence",
-							"script":     alternative.Transcript,
-							"confidence": confStr,
-							"threshold":  fmt.Sprintf("%.4f", v),
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID:   ctxID,
+						Scope:       internal_type.ObservabilityRecordScopeMessage,
+						MessageRole: observability.MessageRoleUser,
+						Record: observability.RecordEvent{
+							Component: observability.ComponentSTT,
+							Event:     observability.STTLowConfidence,
+							Attributes: observability.Attributes{
+								"type":       "low_confidence",
+								"script":     alternative.Transcript,
+								"confidence": confStr,
+								"threshold":  fmt.Sprintf("%.4f", v),
+							},
+							OccurredAt: time.Now(),
 						},
-						Time: time.Now(),
 					},
 				)
 				return nil
@@ -95,22 +104,32 @@ func (d *deepgramSttCallback) Message(mr *msginterfaces.MessageResponse) error {
 					Language:   lang,
 					Interim:    false,
 				},
-				internal_type.ConversationEventPacket{
-					ContextID: ctxID,
-					Name:      "stt",
-					Data: map[string]string{
-						"type":       "completed",
-						"script":     alternative.Transcript,
-						"confidence": confStr,
-						"language":   lang,
-						"word_count": fmt.Sprintf("%d", wordCount),
-						"char_count": fmt.Sprintf("%d", len(alternative.Transcript)),
+				internal_type.ObservabilityEventRecordPacket{
+					ContextID:   ctxID,
+					Scope:       internal_type.ObservabilityRecordScopeMessage,
+					MessageRole: observability.MessageRoleUser,
+					Record: observability.RecordEvent{
+						Component: observability.ComponentSTT,
+						Event:     observability.STTCompleted,
+						Attributes: observability.Attributes{
+							"type":       "completed",
+							"script":     alternative.Transcript,
+							"confidence": confStr,
+							"language":   lang,
+							"word_count": fmt.Sprintf("%d", wordCount),
+							"char_count": fmt.Sprintf("%d", len(alternative.Transcript)),
+						},
+						OccurredAt: now,
 					},
-					Time: now,
 				},
-				internal_type.UserMessageMetricPacket{
-					ContextID: ctxID,
-					Metrics:   []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+				internal_type.ObservabilityMetricRecordPacket{
+					ContextID:   ctxID,
+					Scope:       internal_type.ObservabilityRecordScopeMessage,
+					MessageRole: observability.MessageRoleUser,
+					Record: observability.RecordMetric{
+						Metrics:    []*protos.Metric{{Name: "stt_latency_ms", Value: fmt.Sprintf("%d", latencyMs)}},
+						Attributes: observability.Attributes{"provider": d.providerName},
+					},
 				},
 			)
 		} else {
@@ -125,15 +144,20 @@ func (d *deepgramSttCallback) Message(mr *msginterfaces.MessageResponse) error {
 					Language:   lang,
 					Interim:    true,
 				},
-				internal_type.ConversationEventPacket{
-					ContextID: ctxID,
-					Name:      "stt",
-					Data: map[string]string{
-						"type":       "interim",
-						"script":     alternative.Transcript,
-						"confidence": confStr,
+				internal_type.ObservabilityEventRecordPacket{
+					ContextID:   ctxID,
+					Scope:       internal_type.ObservabilityRecordScopeMessage,
+					MessageRole: observability.MessageRoleUser,
+					Record: observability.RecordEvent{
+						Component: observability.ComponentSTT,
+						Event:     observability.STTInterim,
+						Attributes: observability.Attributes{
+							"type":       "interim",
+							"script":     alternative.Transcript,
+							"confidence": confStr,
+						},
+						OccurredAt: time.Now(),
 					},
-					Time: time.Now(),
 				},
 			)
 		}
@@ -166,11 +190,16 @@ func (d *deepgramSttCallback) Close(cr *msginterfaces.CloseResponse) error {
 // Handle errors from Deepgram
 func (d *deepgramSttCallback) Error(er *msginterfaces.ErrorResponse) error {
 	ctxID := d.contextID()
-	d.onPacket(internal_type.ConversationEventPacket{
-		ContextID: ctxID,
-		Name:      "stt",
-		Data:      map[string]string{"type": "error", "error": er.ErrMsg},
-		Time:      time.Now(),
+	d.onPacket(internal_type.ObservabilityEventRecordPacket{
+		ContextID:   ctxID,
+		Scope:       internal_type.ObservabilityRecordScopeMessage,
+		MessageRole: observability.MessageRoleUser,
+		Record: observability.RecordEvent{
+			Component:  observability.ComponentSTT,
+			Event:      observability.STTError,
+			Attributes: observability.Attributes{"type": "error", "error": er.ErrMsg},
+			OccurredAt: time.Now(),
+		},
 	})
 	return nil
 }

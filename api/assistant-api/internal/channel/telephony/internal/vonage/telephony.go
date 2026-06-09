@@ -6,12 +6,14 @@
 package internal_vonage_telephony
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_vonage "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -23,8 +25,6 @@ import (
 	"github.com/vonage/vonage-go-sdk"
 	"github.com/vonage/vonage-go-sdk/ncco"
 )
-
-const vonageProvider = "vonage"
 
 type vonageTelephony struct {
 	appCfg *config.AssistantConfig
@@ -40,24 +40,24 @@ func NewVonageTelephony(config *config.AssistantConfig, logger commons.Logger) (
 
 func vonageAuth(vaultCredential *protos.VaultCredential) (vonage.Auth, error) {
 	if vaultCredential.GetValue() == nil {
-		return nil, fmt.Errorf("vault credential value is nil")
+		return nil, internal_vonage.ErrVaultCredentialValueMissing
 	}
 	vaultMap := vaultCredential.GetValue().AsMap()
 	privateKey, ok := vaultMap["private_key"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config privateKey is not found")
+		return nil, internal_vonage.ErrVaultPrivateKeyMissing
 	}
 	applicationId, ok := vaultMap["application_id"]
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config application_id is not found")
+		return nil, internal_vonage.ErrVaultApplicationIDMissing
 	}
 	pk, ok := privateKey.(string)
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config private_key is not a string")
+		return nil, internal_vonage.ErrVaultPrivateKeyInvalid
 	}
 	appID, ok := applicationId.(string)
 	if !ok {
-		return nil, fmt.Errorf("illegal vault config application_id is not a string")
+		return nil, internal_vonage.ErrVaultApplicationIDInvalid
 	}
 	clientAuth, err := vonage.CreateAuthFromAppPrivateKey(appID, []byte(pk))
 	if err != nil {
@@ -68,6 +68,7 @@ func vonageAuth(vaultCredential *protos.VaultCredential) (vonage.Auth, error) {
 
 func (vng *vonageTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_type.StatusInfo, error) {
 	eventDetails := map[string]interface{}{}
+	rawCallbackPayload := ctx.Request.URL.RawQuery
 	for key, values := range ctx.Request.URL.Query() {
 		if len(values) > 0 {
 			eventDetails[key] = values[0]
@@ -76,14 +77,14 @@ func (vng *vonageTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 		}
 	}
 
-	callback, err := internal_vonage.NewStatusCallback(eventDetails)
+	callback, err := internal_vonage.NewStatusCallback(eventDetails, rawCallbackPayload)
 	if err != nil {
 		vng.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err
 	}
 	if !validator.NotBlank(callback.ChannelUUID) {
 		vng.logger.Errorf("uuid not found or invalid in catch-all payload")
-		return nil, fmt.Errorf("uuid not found in callback")
+		return nil, internal_vonage.ErrCatchAllChannelUUIDMissing
 	}
 
 	vng.logger.Debugf("catch-all event processed | status: %s, payload: %+v", callback.Status, eventDetails)
@@ -92,6 +93,7 @@ func (vng *vonageTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 
 func (vng *vonageTelephony) StatusCallback(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_type.StatusInfo, error) {
 	var payload map[string]interface{}
+	rawCallbackPayload := c.Request.URL.RawQuery
 	if len(c.Request.URL.Query()) > 0 {
 		payload = make(map[string]interface{})
 		for key, values := range c.Request.URL.Query() {
@@ -105,15 +107,16 @@ func (vng *vonageTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 		body, err := c.GetRawData()
 		if err != nil {
 			vng.logger.Errorf("failed to read request body with error %+v", err)
-			return nil, fmt.Errorf("failed to read request body")
+			return nil, fmt.Errorf("%w: %w", internal_vonage.ErrRequestBodyReadFailed, err)
 		}
+		rawCallbackPayload = string(body)
 		if err := json.Unmarshal(body, &payload); err != nil {
 			vng.logger.Errorf("failed to parse request body: %+v", err)
-			return nil, fmt.Errorf("failed to parse request body")
+			return nil, fmt.Errorf("%w: %w", internal_vonage.ErrRequestBodyParseFailed, err)
 		}
 	}
 
-	callback, err := internal_vonage.NewStatusCallback(payload)
+	callback, err := internal_vonage.NewStatusCallback(payload, rawCallbackPayload)
 	if err != nil {
 		vng.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err
@@ -123,19 +126,43 @@ func (vng *vonageTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 }
 
 func (vng *vonageTelephony) OutboundCall(
+	ctx context.Context,
 	auth types.SimplePrinciple,
 	toPhone string,
 	fromPhone string,
 	assistant *internal_assistant_entity.Assistant, assistantConversationId uint64,
 	vaultCredential *protos.VaultCredential,
+	statusReporter internal_type.ProviderCallStatusReporter,
 	opts utils.Option,
 ) (*internal_type.CallInfo, error) {
-	info := &internal_type.CallInfo{Provider: vonageProvider}
+	info := &internal_type.CallInfo{Provider: internal_vonage.Provider}
+
+	if err := ctx.Err(); err != nil {
+		info.Status = "FAILED"
+		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCancelled,
+			"request cancelled",
+			internal_telephony_base.OutboundDisconnectReasonRequestCancelled,
+			err,
+			0,
+		)
+		return info, err
+	}
 
 	cAuth, err := vonageAuth(vaultCredential)
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("authentication error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassAuthentication,
+			"authentication error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 	ct := vonage.NewVoiceClient(cAuth)
@@ -144,13 +171,13 @@ func (vng *vonageTelephony) OutboundCall(
 
 	connectAction := ncco.Ncco{}
 	nccoConnect := ncco.ConnectAction{
-		EventType: "synchronous",
-		EventUrl:  []string{fmt.Sprintf("https://%s/%s", vng.appCfg.Assistant.Public, internal_type.GetContextEventPath(vonageProvider, contextID))},
+		EventType: internal_vonage.NCCOEventTypeSync,
+		EventUrl:  []string{fmt.Sprintf("https://%s/%s", vng.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_vonage.Provider, contextID))},
 		Endpoint: []ncco.Endpoint{ncco.WebSocketEndpoint{
 			Uri: fmt.Sprintf("wss://%s/%s",
 				vng.appCfg.Assistant.Public,
-				internal_type.GetContextAnswerPath(vonageProvider, contextID)),
-			ContentType: "audio/l16;rate=16000",
+				internal_type.GetContextAnswerPath(internal_vonage.Provider, contextID)),
+			ContentType: internal_vonage.WebSocketContentType,
 		}},
 	}
 	connectAction.AddAction(nccoConnect)
@@ -159,20 +186,37 @@ func (vng *vonageTelephony) OutboundCall(
 			From:        vonage.CallFrom{Type: "phone", Number: fromPhone},
 			To:          vonage.CallTo{Type: "phone", Number: toPhone},
 			Ncco:        connectAction,
-			EventUrl:    []string{fmt.Sprintf("https://%s/%s", vng.appCfg.Assistant.Public, internal_type.GetContextEventPath(vonageProvider, contextID))},
+			EventUrl:    []string{fmt.Sprintf("https://%s/%s", vng.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_vonage.Provider, contextID))},
 			EventMethod: "GET",
 		})
 
 	if apiError != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("API error: %s", apiError.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			"provider API error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			apiError,
+			0,
+		)
 		return info, apiError
 	}
 
 	if vErr.Error != nil {
+		err := internal_vonage.ErrProviderCallCreateFailed
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("Calling error: %v", vErr.Error)
-		return info, fmt.Errorf("failed to create call")
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			fmt.Sprintf("%v", vErr.Error),
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
+		return info, err
 	}
 
 	info.ChannelUUID = result.Uuid
@@ -181,6 +225,7 @@ func (vng *vonageTelephony) OutboundCall(
 	info.Extra = map[string]string{
 		"conversation_uuid": result.ConversationUuid,
 	}
+	internal_telephony_base.ReportOutboundInitiated(statusReporter, info.ChannelUUID)
 	return info, nil
 }
 
@@ -191,15 +236,15 @@ func (vng *vonageTelephony) InboundCall(c *gin.Context, auth types.SimplePrincip
 	c.JSON(http.StatusOK, []gin.H{
 		{
 			"action":    "connect",
-			"eventType": "synchronous",
-			"eventUrl":  []string{fmt.Sprintf("https://%s/%s", vng.appCfg.Assistant.Public, internal_type.GetContextEventPath("vonage", ctxID))},
+			"eventType": internal_vonage.NCCOEventTypeSync,
+			"eventUrl":  []string{fmt.Sprintf("https://%s/%s", vng.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_vonage.Provider, ctxID))},
 			"endpoint": []gin.H{
 				{
-					"type": "websocket",
+					"type": internal_vonage.WebSocketEndpointType,
 					"uri": fmt.Sprintf("wss://%s/%s",
 						vng.appCfg.Assistant.Public,
-						internal_type.GetContextAnswerPath("vonage", ctxID)),
-					"content-type": "audio/l16;rate=16000",
+						internal_type.GetContextAnswerPath(internal_vonage.Provider, ctxID)),
+					"content-type": internal_vonage.WebSocketContentType,
 				},
 			},
 		},
@@ -218,14 +263,14 @@ func (vng *vonageTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo
 	clientNumber, ok := queryParams["from"]
 	if !ok || clientNumber == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assistant ID"})
-		return nil, fmt.Errorf("missing or empty 'from' query parameter")
+		return nil, internal_vonage.ErrInboundFromMissing
 	}
 
 	info := &internal_type.CallInfo{
 		CallerNumber: clientNumber,
-		Provider:     vonageProvider,
+		Provider:     internal_vonage.Provider,
 		Status:       "SUCCESS",
-		StatusInfo:   internal_type.StatusInfo{Event: "webhook", Payload: queryParams},
+		StatusInfo:   internal_type.StatusInfo{Event: internal_vonage.WebhookEvent, Payload: queryParams},
 		Extra:        make(map[string]string),
 	}
 

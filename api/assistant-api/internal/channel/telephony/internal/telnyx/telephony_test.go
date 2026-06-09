@@ -7,7 +7,9 @@
 package internal_telnyx_telephony
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,6 +19,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
+	internal_telnyx "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	configs "github.com/rapidaai/config"
 	"github.com/rapidaai/pkg/commons"
@@ -137,6 +142,7 @@ func TestStatusCallback(t *testing.T) {
 		payload     map[string]interface{}
 		expectErr   bool
 		expectEvent string
+		expectDone  bool
 	}{
 		{
 			name: "valid call.answered event",
@@ -151,6 +157,7 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.answered",
+			expectDone:  false,
 		},
 		{
 			name: "valid call.hangup failure event",
@@ -167,6 +174,7 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.hangup",
+			expectDone:  false,
 		},
 		{
 			name: "valid call.hangup event",
@@ -178,6 +186,7 @@ func TestStatusCallback(t *testing.T) {
 			},
 			expectErr:   false,
 			expectEvent: "call.hangup",
+			expectDone:  true,
 		},
 		{
 			name: "missing data field",
@@ -220,6 +229,12 @@ func TestStatusCallback(t *testing.T) {
 
 			if statusInfo.Event != tt.expectEvent {
 				t.Errorf("expected event %s, got %s", tt.expectEvent, statusInfo.Event)
+			}
+			if statusInfo.Completed != tt.expectDone {
+				t.Errorf("expected completed %t, got %t", tt.expectDone, statusInfo.Completed)
+			}
+			if statusInfo.RawPayload == "" {
+				t.Error("expected raw payload, got empty")
 			}
 			if tt.name == "valid call.answered event" && statusInfo.ChannelUUID != "call-control-123" {
 				t.Errorf("expected call-control-123, got %s", statusInfo.ChannelUUID)
@@ -315,8 +330,8 @@ func TestReceiveCall(t *testing.T) {
 				t.Errorf("expected caller number %s, got %s", tt.expectNumber, callInfo.CallerNumber)
 			}
 
-			if callInfo.Provider != telnyxProvider {
-				t.Errorf("expected provider %s, got %s", telnyxProvider, callInfo.Provider)
+			if callInfo.Provider != internal_telnyx.Provider {
+				t.Errorf("expected provider %s, got %s", internal_telnyx.Provider, callInfo.Provider)
 			}
 		})
 	}
@@ -350,8 +365,8 @@ func TestInboundCall(t *testing.T) {
 		t.Errorf("failed to parse response: %v", err)
 	}
 
-	if result, ok := response["result"].(string); !ok || result != "streaming.start" {
-		t.Errorf("expected result streaming.start, got %v", response["result"])
+	if result, ok := response["result"].(string); !ok || result != internal_telnyx.InboundStreamingStart {
+		t.Errorf("expected result %s, got %v", internal_telnyx.InboundStreamingStart, response["result"])
 	}
 }
 
@@ -359,17 +374,17 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 	tests := []struct {
 		name     string
 		jsonStr  string
-		expected TelnyxWebSocketEvent
+		expected internal_telnyx.TelnyxWebSocketEvent
 	}{
 		{
 			name:    "start event",
 			jsonStr: `{"event":"start","stream_id":"stream-123","start":{"call_control_id":"call-456","media_format":{"encoding":"PCMU","sample_rate":8000,"channels":1}}}`,
-			expected: TelnyxWebSocketEvent{
-				Event:    "start",
+			expected: internal_telnyx.TelnyxWebSocketEvent{
+				Event:    internal_telnyx.EventTypeStart,
 				StreamID: "stream-123",
-				Start: &TelnyxStartEvent{
+				Start: &internal_telnyx.TelnyxStartEvent{
 					CallControlID: "call-456",
-					MediaFormat: TelnyxMediaFormat{
+					MediaFormat: internal_telnyx.TelnyxMediaFormat{
 						Encoding:   "PCMU",
 						SampleRate: 8000,
 						Channels:   1,
@@ -380,10 +395,10 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 		{
 			name:    "media event",
 			jsonStr: `{"event":"media","stream_id":"stream-123","media":{"track":"inbound","payload":"dGVzdA=="}}`,
-			expected: TelnyxWebSocketEvent{
-				Event:    "media",
+			expected: internal_telnyx.TelnyxWebSocketEvent{
+				Event:    internal_telnyx.EventTypeMedia,
 				StreamID: "stream-123",
-				Media: &TelnyxMediaEvent{
+				Media: &internal_telnyx.TelnyxMediaEvent{
 					Track:   "inbound",
 					Payload: "dGVzdA==",
 				},
@@ -392,10 +407,10 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 		{
 			name:    "stop event",
 			jsonStr: `{"event":"stop","stream_id":"stream-123","stop":{"call_control_id":"call-456"}}`,
-			expected: TelnyxWebSocketEvent{
-				Event:    "stop",
+			expected: internal_telnyx.TelnyxWebSocketEvent{
+				Event:    internal_telnyx.EventTypeStop,
 				StreamID: "stream-123",
-				Stop: &TelnyxStopEvent{
+				Stop: &internal_telnyx.TelnyxStopEvent{
 					CallControlID: "call-456",
 				},
 			},
@@ -404,7 +419,7 @@ func TestTelnyxWebSocketEventParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var event TelnyxWebSocketEvent
+			var event internal_telnyx.TelnyxWebSocketEvent
 			if err := json.Unmarshal([]byte(tt.jsonStr), &event); err != nil {
 				t.Fatalf("failed to unmarshal: %v", err)
 			}
@@ -469,6 +484,16 @@ func TestGetCredentials(t *testing.T) {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
+				switch tt.name {
+				case "missing api_key":
+					if !errors.Is(err, internal_telnyx.ErrVaultAPIKeyMissing) {
+						t.Errorf("expected ErrVaultAPIKeyMissing, got %v", err)
+					}
+				case "missing connection_id":
+					if !errors.Is(err, internal_telnyx.ErrVaultConnectionIDMissing) {
+						t.Errorf("expected ErrVaultConnectionIDMissing, got %v", err)
+					}
+				}
 				return
 			}
 
@@ -495,6 +520,9 @@ func TestGetCredentials_NilVault(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for nil vault credential, got nil")
 	}
+	if !errors.Is(err, internal_telnyx.ErrVaultCredentialMissing) {
+		t.Errorf("expected ErrVaultCredentialMissing, got %v", err)
+	}
 }
 
 func TestOutboundCall_MissingCredentials(t *testing.T) {
@@ -503,13 +531,22 @@ func TestOutboundCall_MissingCredentials(t *testing.T) {
 	}
 	logger := newTelnyxTestLogger(t)
 	telephony, _ := NewTelnyxTelephony(cfg, logger)
+	var statusUpdate internal_type.ProviderCallStatusUpdate
 
-	info, err := telephony.OutboundCall(nil, "+15551234567", "+15559876543", nil, 1, nil, utils.Option{})
+	info, err := telephony.OutboundCall(context.Background(), nil, "+15551234567", "+15559876543", nil, 1, nil, func(update internal_type.ProviderCallStatusUpdate) {
+		statusUpdate = update
+	}, utils.Option{})
 	if err == nil {
 		t.Error("expected error for nil vault credential")
 	}
 	if info.Status != "FAILED" {
 		t.Errorf("expected FAILED status, got %s", info.Status)
+	}
+	if statusUpdate.CallStatus != callcontext.CallStatusFailed {
+		t.Errorf("expected outbound status failed, got %s", statusUpdate.CallStatus)
+	}
+	if statusUpdate.FailureClass != internal_telephony_base.OutboundFailureClassAuthentication {
+		t.Errorf("expected authentication failure class, got %s", statusUpdate.FailureClass)
 	}
 }
 

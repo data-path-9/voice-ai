@@ -20,6 +20,7 @@ import (
 
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_audio_resampler "github.com/rapidaai/api/assistant-api/internal/audio/resampler"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -33,7 +34,6 @@ type speechToText struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	dialWS func(ctx context.Context, urlStr string, requestHeader http.Header) (*websocket.Conn, *http.Response, error)
 
 	logger   commons.Logger
 	onPacket func(pkt ...internal_type.Packet) error
@@ -68,36 +68,43 @@ func NewSpeechToText(
 ) (internal_type.SpeechToTextTransformer, error) {
 	config, err := NewConfig(credential, opts)
 	if err != nil {
+		if packetErr := onPacket(internal_type.ObservabilityEventRecordPacket{
+			Scope: internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.RecordEvent{
+				Component: observability.ComponentSTT,
+				Event:     observability.STTError,
+				Attributes: observability.Attributes{
+					"provider":   "custom-stt-websocket-v1",
+					"operation":  "load_config",
+					"error":      err.Error(),
+					"error_type": fmt.Sprintf("%T", err),
+				},
+				OccurredAt: time.Now(),
+			},
+		}); packetErr != nil {
+			logger.Errorf("custom-stt websocket_v1: onPacket failed: %v", packetErr)
+		}
 		return nil, err
 	}
-
-	sourceConfig := cloneAudioConfig(internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG)
-	targetConfig := &protos.AudioConfig{
-		SampleRate:  uint32(config.SampleRate),
-		AudioFormat: parseAudioEncoding(config.Encoding),
-		Channels:    1,
+	resampler, err := internal_audio_resampler.GetResampler(logger)
+	if err != nil {
+		return nil, fmt.Errorf("custom-stt websocket_v1: failed to initialize audio resampler: %w", err)
 	}
-
-	var resampler internal_type.AudioResampler
-	if !isSameAudioConfig(sourceConfig, targetConfig) {
-		resampler, err = internal_audio_resampler.GetResampler(logger)
-		if err != nil {
-			return nil, fmt.Errorf("custom-stt websocket_v1: failed to initialize audio resampler: %w", err)
-		}
-	}
-
 	transformerContext, cancel := context.WithCancel(ctx)
 	return &speechToText{
 		config:            config,
 		engine:            config.newEngine(),
 		ctx:               transformerContext,
 		cancel:            cancel,
-		dialWS:            websocket.DefaultDialer.DialContext,
 		logger:            logger,
 		onPacket:          onPacket,
 		resampler:         resampler,
-		sourceAudioConfig: sourceConfig,
-		targetAudioConfig: targetConfig,
+		sourceAudioConfig: internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG,
+		targetAudioConfig: &protos.AudioConfig{
+			SampleRate:  uint32(config.SampleRate),
+			AudioFormat: parseAudioEncoding(config.Encoding),
+			Channels:    1,
+		},
 	}, nil
 }
 
@@ -111,15 +118,19 @@ func (transformer *speechToText) Initialize() error {
 		return fmt.Errorf("custom-stt websocket_v1: failed to connect: %w", err)
 	}
 
-	transformer.emitPackets(internal_type.ConversationEventPacket{
+	transformer.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: transformer.currentContextID(),
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": transformer.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": transformer.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -131,14 +142,14 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 		transformer.contextID = input.ContextID
 		transformer.mu.Unlock()
 		if err := transformer.handlePacketRequests(requestPacketTurnChange, input.ContextID, nil, true); err != nil {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     err,
 				Type:      internal_type.STTNetworkTimeout,
 			})
 		}
 		return nil
-	case internal_type.SpeechToTextInterruptPacket:
+	case internal_type.SpeechToTextStartPacket:
 		transformer.mu.Lock()
 		if transformer.interruptionStartedAt.IsZero() {
 			transformer.interruptionStartedAt = time.Now()
@@ -147,8 +158,15 @@ func (transformer *speechToText) Transform(_ context.Context, in internal_type.P
 			transformer.contextID = input.ContextID
 		}
 		transformer.mu.Unlock()
+		return nil
+	case internal_type.SpeechToTextEndPacket:
+		transformer.mu.Lock()
+		if input.ContextID != "" {
+			transformer.contextID = input.ContextID
+		}
+		transformer.mu.Unlock()
 		if err := transformer.handlePacketRequests(requestPacketInterrupt, input.ContextID, nil, false); err != nil {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     err,
 				Type:      internal_type.STTNetworkTimeout,
@@ -185,23 +203,42 @@ func (transformer *speechToText) Close(_ context.Context) error {
 	}
 
 	if !connectedAt.IsZero() {
-		transformer.emitPackets(
-			internal_type.ConversationEventPacket{
+		duration := time.Since(connectedAt)
+		transformer.onPacket(
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: contextID,
-				Name:      "stt",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": transformer.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentSTT,
+					Event:     observability.STTClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": transformer.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				ContextID: 0,
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				Scope: internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total STT connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: contextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentSTT,
+					Provider:  transformer.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": contextID,
+						"provider":   transformer.Name(),
+						"metric":     type_enums.CONVERSATION_STT_DURATION.String(),
+					},
+				},
 			},
 		)
 	}
@@ -214,12 +251,15 @@ func (transformer *speechToText) handleAudio(contextID string, audio []byte) err
 	if contextID != "" {
 		transformer.contextID = contextID
 	}
+	if transformer.interruptionStartedAt.IsZero() {
+		transformer.interruptionStartedAt = time.Now()
+	}
 	effectiveContextID := transformer.contextID
 	transformer.mu.Unlock()
 
 	chunk, err := transformer.prepareAudioChunk(audio)
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: effectiveContextID,
 			Error:     err,
 			Type:      internal_type.STTInvalidInput,
@@ -229,7 +269,7 @@ func (transformer *speechToText) handleAudio(contextID string, audio []byte) err
 
 	err = transformer.handlePacketRequests(requestPacketAudio, effectiveContextID, chunk, true)
 	if err != nil {
-		transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+		transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 			ContextID: effectiveContextID,
 			Error:     err,
 			Type:      internal_type.STTNetworkTimeout,
@@ -262,11 +302,7 @@ func (transformer *speechToText) getOrOpenConnection() (*websocket.Conn, error) 
 		headers.Set(key, value)
 	}
 
-	dialWS := transformer.dialWS
-	if dialWS == nil {
-		dialWS = websocket.DefaultDialer.DialContext
-	}
-	conn, response, err := dialWS(transformer.ctx, connectionURL, headers)
+	conn, response, err := websocket.DefaultDialer.DialContext(transformer.ctx, connectionURL, headers)
 	if response != nil && response.Body != nil {
 		_ = response.Body.Close()
 	}
@@ -302,7 +338,7 @@ func (transformer *speechToText) readLoop(conn *websocket.Conn) {
 		messageType, payload, err := conn.ReadMessage()
 		if err != nil {
 			if transformer.classifyReadError(conn, err) == readErrorFail {
-				transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+				transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 					ContextID: transformer.currentContextID(),
 					Error:     fmt.Errorf("custom-stt websocket_v1: read failed: %w", err),
 					Type:      internal_type.STTNetworkTimeout,
@@ -312,7 +348,7 @@ func (transformer *speechToText) readLoop(conn *websocket.Conn) {
 		}
 		frame, err := transformer.engine.ParseFrame(messageType, payload)
 		if err != nil {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     err,
 				Type:      internal_type.STTSystemPanic,
@@ -322,7 +358,7 @@ func (transformer *speechToText) readLoop(conn *websocket.Conn) {
 
 		outcome, err := transformer.engine.EvaluateResponse(frame)
 		if err != nil {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     err,
 				Type:      internal_type.STTSystemPanic,
@@ -333,7 +369,7 @@ func (transformer *speechToText) readLoop(conn *websocket.Conn) {
 			continue
 		}
 		if strings.TrimSpace(outcome.ErrorText) != "" {
-			transformer.emitPackets(internal_type.SpeechToTextErrorPacket{
+			transformer.onPacket(internal_type.SpeechToTextErrorPacket{
 				ContextID: transformer.currentContextID(),
 				Error:     errors.New(strings.TrimSpace(outcome.ErrorText)),
 				Type:      internal_type.STTSystemPanic,
@@ -411,7 +447,7 @@ func (transformer *speechToText) emitTranscript(outcome responseOutcome) {
 		eventData["char_count"] = fmt.Sprintf("%d", len(outcome.Script))
 	}
 
-	transformer.emitPackets(internal_type.InterruptionDetectedPacket{
+	transformer.onPacket(internal_type.InterruptionDetectedPacket{
 		ContextID: contextID,
 		Source:    internal_type.InterruptionSourceWord,
 	},
@@ -423,11 +459,16 @@ func (transformer *speechToText) emitTranscript(outcome responseOutcome) {
 			Language:   language,
 			Interim:    outcome.Interim,
 		},
-		internal_type.ConversationEventPacket{
-			ContextID: contextID,
-			Name:      "stt",
-			Data:      eventData,
-			Time:      now,
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID:   contextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordEvent{
+				Component:  observability.ComponentSTT,
+				Event:      observability.STTEvent,
+				Attributes: eventData,
+				OccurredAt: now,
+			},
 		})
 
 	var interruptionStartedAt time.Time
@@ -439,12 +480,17 @@ func (transformer *speechToText) emitTranscript(outcome responseOutcome) {
 	transformer.mu.Unlock()
 
 	if !interruptionStartedAt.IsZero() {
-		transformer.emitPackets(internal_type.UserMessageMetricPacket{
-			ContextID: contextID,
-			Metrics: []*protos.Metric{{
-				Name:  "stt_latency_ms",
-				Value: fmt.Sprintf("%d", now.Sub(interruptionStartedAt).Milliseconds()),
-			}},
+		transformer.onPacket(internal_type.ObservabilityMetricRecordPacket{
+			ContextID:   contextID,
+			Scope:       internal_type.ObservabilityRecordScopeMessage,
+			MessageRole: observability.MessageRoleUser,
+			Record: observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:  "stt_latency_ms",
+					Value: fmt.Sprintf("%d", now.Sub(interruptionStartedAt).Milliseconds()),
+				}},
+				Attributes: observability.Attributes{"provider": transformer.Name()},
+			},
 		})
 	}
 }
@@ -552,12 +598,6 @@ func (transformer *speechToText) currentContextID() string {
 	return transformer.contextID
 }
 
-func (transformer *speechToText) emitPackets(packets ...internal_type.Packet) {
-	if err := transformer.onPacket(packets...); err != nil {
-		transformer.logger.Errorf("custom-stt websocket_v1: onPacket failed: %v", err)
-	}
-}
-
 func parseAudioEncoding(encoding string) protos.AudioConfig_AudioFormat {
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "mulaw", "mu-law", "mulaw8", "mu_law", "ulaw", "u-law", "pcmu", "g711_ulaw":
@@ -565,24 +605,4 @@ func parseAudioEncoding(encoding string) protos.AudioConfig_AudioFormat {
 	default:
 		return protos.AudioConfig_LINEAR16
 	}
-}
-
-func cloneAudioConfig(config *protos.AudioConfig) *protos.AudioConfig {
-	if config == nil {
-		return &protos.AudioConfig{SampleRate: 16000, AudioFormat: protos.AudioConfig_LINEAR16, Channels: 1}
-	}
-	return &protos.AudioConfig{
-		SampleRate:  config.GetSampleRate(),
-		AudioFormat: config.GetAudioFormat(),
-		Channels:    config.GetChannels(),
-	}
-}
-
-func isSameAudioConfig(left, right *protos.AudioConfig) bool {
-	if left == nil || right == nil {
-		return false
-	}
-	return left.GetSampleRate() == right.GetSampleRate() &&
-		left.GetAudioFormat() == right.GetAudioFormat() &&
-		left.GetChannels() == right.GetChannels()
 }

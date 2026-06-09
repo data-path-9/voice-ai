@@ -24,7 +24,7 @@ func (cApi *ConversationApi) CreateMessageMetric(ctx context.Context, cer *assis
 			"Please provider valid service credentials to perfom invoke, read docs @ docs.rapida.ai",
 		)
 	}
-	val, err := cApi.assistantConversationService.ApplyMessageMetrics(
+	val, err := cApi.assistantConversationService.CreateOrUpdateMessageMetrics(
 		ctx,
 		iAuth,
 		cer.GetAssistantConversationId(),

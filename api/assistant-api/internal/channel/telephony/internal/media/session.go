@@ -9,218 +9,333 @@ package internal_telephony_media
 import (
 	"context"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	internal_ambient "github.com/rapidaai/api/assistant-api/internal/audio/ambient"
 	internal_output "github.com/rapidaai/api/assistant-api/internal/channel/output"
-	"github.com/rapidaai/api/assistant-api/internal/observe"
-	"github.com/rapidaai/pkg/commons"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
+	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/protos"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// MediaEngine defines shared telephony media semantics independent of transport.
-type MediaEngine interface {
-	SetInputAudioCallback(callback func(audio []byte))
-	ProcessInputAudio(audio []byte) error
-	ProcessOutputAudio(audio []byte) error
-	Complete()
-	ClearOutputBuffer()
-	RunOutputSender(ctx context.Context)
-	ConfigureAmbient(cfg internal_ambient.Config) error
-}
-
-// MediaSession owns telephony media lifecycle for a channel transport.
-// Transport implementations only need to feed provider audio in and send clear commands.
-type MediaSession struct {
-	logger commons.Logger
-	engine MediaEngine
-
-	sendClear func() error
-
-	inputSinkMu sync.RWMutex
-	inputSink   func([]byte)
-	eventSink   func(*protos.ConversationEvent)
-
-	started atomic.Bool
-	closed  atomic.Bool
-
-	startMu sync.Mutex
-	cancel  context.CancelFunc
-	ctx     context.Context
-}
-
-type outputHealthSnapshotter interface {
-	OutputHealthSnapshot() internal_output.HealthSnapshot
-}
-
-func NewMediaSession(parent context.Context, logger commons.Logger, engine MediaEngine, sendClear func() error) *MediaSession {
-	if parent == nil {
-		parent = context.Background()
+func NewMediaSession(config MediaSessionConfig) *MediaSession {
+	sessionContext := config.Context
+	if sessionContext == nil {
+		sessionContext = context.Background()
 	}
-	ctx, cancel := context.WithCancel(parent)
-	s := &MediaSession{
-		logger:    logger,
-		engine:    engine,
-		sendClear: sendClear,
-		ctx:       ctx,
-		cancel:    cancel,
+	ctx, cancel := context.WithCancel(sessionContext)
+	mediaSession := &MediaSession{
+		logger:            config.Logger,
+		mediaEngine:       config.MediaEngine,
+		sendProviderClear: config.SendProviderClear,
+		streamSink:        config.StreamSink,
+		outputSink:        config.OutputSink,
+		record:            config.Record,
+		ctx:               ctx,
+		cancel:            cancel,
 	}
-	if engine != nil {
-		engine.SetInputAudioCallback(s.onInputAudio)
+	if config.MediaEngine == nil {
+		return mediaSession
 	}
-	return s
+	return mediaSession
 }
 
-func (s *MediaSession) SetInputSink(fn func(audio []byte)) {
-	s.inputSinkMu.Lock()
-	s.inputSink = fn
-	s.inputSinkMu.Unlock()
-}
-
-func (s *MediaSession) SetEventSink(fn func(event *protos.ConversationEvent)) {
-	s.inputSinkMu.Lock()
-	s.eventSink = fn
-	s.inputSinkMu.Unlock()
-}
-
-func (s *MediaSession) Start() {
-	if s == nil || s.engine == nil || s.closed.Load() {
+func (mediaSession *MediaSession) Start() {
+	if mediaSession == nil || !mediaSession.hasMediaEngine() || mediaSession.closed.Load() {
 		return
 	}
-	s.startMu.Lock()
-	defer s.startMu.Unlock()
-	if !s.started.CompareAndSwap(false, true) {
+	mediaSession.startMu.Lock()
+	defer mediaSession.startMu.Unlock()
+	if !mediaSession.started.CompareAndSwap(false, true) {
 		return
 	}
-	go s.engine.RunOutputSender(s.ctx)
-	if hs, ok := s.engine.(outputHealthSnapshotter); ok {
-		go s.runOutputHealthReporter(hs)
+	mediaSession.sinkMu.RLock()
+	hasOutputSink := mediaSession.outputSink != nil
+	mediaSession.sinkMu.RUnlock()
+	if hasOutputSink {
+		go mediaSession.runFrameOutputSender()
+		go mediaSession.runOutputHealthReporter(mediaSession.mediaEngine)
 	}
 }
 
-func (s *MediaSession) HandleInitialization(init *protos.ConversationInitialization) {
-	if s == nil || s.engine == nil || init == nil {
+func (mediaSession *MediaSession) HandleInitialization(init *protos.ConversationInitialization) {
+	if mediaSession == nil || mediaSession.mediaEngine == nil || init == nil {
 		return
 	}
-	cfg, ok := internal_ambient.ParseFromInitialization(init)
+	ambientConfig, ok := internal_ambient.ParseFromInitialization(init)
 	if !ok {
 		return
 	}
-	if err := s.engine.ConfigureAmbient(cfg); err != nil && s.logger != nil {
-		s.logger.Warnw("Failed to configure ambient audio", "error", err.Error(), "profile", cfg.Profile)
+	if err := mediaSession.mediaEngine.ConfigureAmbient(ambientConfig); err != nil && mediaSession.logger != nil {
+		mediaSession.logger.Warnw("Failed to configure ambient audio", "error", err.Error(), "profile", ambientConfig.Profile)
 	}
 }
 
-func (s *MediaSession) HandleAssistantAudio(audio []byte, completed bool) error {
-	if s == nil || s.engine == nil {
+func (mediaSession *MediaSession) HandleAssistantAudio(audio []byte, completed bool) error {
+	if mediaSession == nil || !mediaSession.hasMediaEngine() {
 		return nil
 	}
-	if err := s.engine.ProcessOutputAudio(audio); err != nil {
+	return mediaSession.mediaEngine.ProcessAssistantAudio(audio, completed)
+}
+
+func (mediaSession *MediaSession) HandleProviderAudioFrame(frame ProviderAudioFrame) error {
+	if mediaSession == nil || !mediaSession.hasMediaEngine() {
+		return nil
+	}
+	if frame.ReceivedAt.IsZero() {
+		frame.ReceivedAt = time.Now()
+	}
+	inputFrame, err := mediaSession.mediaEngine.ProcessProviderAudioFrame(frame)
+	if err != nil {
 		return err
 	}
-	if completed {
-		s.engine.Complete()
-	}
+	mediaSession.emitInputAudioFrame(inputFrame, frame.ReceivedAt)
 	return nil
 }
 
-func (s *MediaSession) HandleProviderAudio(audio []byte) error {
-	if s == nil || s.engine == nil {
-		return nil
-	}
-	return s.engine.ProcessInputAudio(audio)
-}
-
-func (s *MediaSession) HandleInterrupt() {
-	if s == nil || s.engine == nil {
+func (mediaSession *MediaSession) HandleInterrupt() {
+	if mediaSession == nil || !mediaSession.hasMediaEngine() {
 		return
 	}
-	s.engine.ClearOutputBuffer()
-	if s.sendClear != nil {
-		if err := s.sendClear(); err != nil && s.logger != nil {
-			s.logger.Warn("Failed to send telephony clear command", "error", err.Error())
+	mediaSession.mediaEngine.ClearOutputBuffer()
+	mediaSession.outputFrameMu.Lock()
+	mediaSession.currentOutputFrame = AssistantOutputFrame{}
+	mediaSession.hasCurrentOutputFrame = false
+	mediaSession.outputFrameMu.Unlock()
+	if mediaSession.sendProviderClear != nil {
+		if err := mediaSession.sendProviderClear(); err != nil && mediaSession.record != nil {
+			_ = mediaSession.record(observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Failed to send telephony clear command",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentCall.String(),
+					"error":     err.Error(),
+				},
+			})
 		}
 	}
+	if mediaSession.record != nil {
+		_ = mediaSession.record(observability.RecordEvent{
+			Component: observability.ComponentCall,
+			Event:     observability.CallStatus,
+			Attributes: observability.Attributes{
+				"component": observability.ComponentCall.String(),
+				"status":    "output_queue_cleared",
+				"reason":    "interruption",
+			},
+		})
+	}
 }
 
-func (s *MediaSession) Shutdown() {
-	if s == nil {
+func (mediaSession *MediaSession) Shutdown() {
+	if mediaSession == nil {
 		return
 	}
-	if !s.closed.CompareAndSwap(false, true) {
+	if !mediaSession.closed.CompareAndSwap(false, true) {
 		return
 	}
-	if s.cancel != nil {
-		s.cancel()
+	if mediaSession.cancel != nil {
+		mediaSession.cancel()
 	}
 }
 
-func (s *MediaSession) onInputAudio(audio []byte) {
-	s.inputSinkMu.RLock()
-	fn := s.inputSink
-	s.inputSinkMu.RUnlock()
-	if fn == nil {
-		return
-	}
-	fn(audio)
+func (mediaSession *MediaSession) hasMediaEngine() bool {
+	return mediaSession.mediaEngine != nil
 }
 
-func (s *MediaSession) emitEvent(data map[string]string) {
-	s.inputSinkMu.RLock()
-	fn := s.eventSink
-	s.inputSinkMu.RUnlock()
-	if fn == nil {
-		return
-	}
-	fn(&protos.ConversationEvent{
-		Name: observe.ComponentTelephony,
-		Data: data,
-		Time: timestamppb.Now(),
-	})
-}
-
-func (s *MediaSession) runOutputHealthReporter(hs outputHealthSnapshotter) {
+func (mediaSession *MediaSession) runOutputHealthReporter(mediaEngine MediaEngine) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	var prev internal_output.HealthSnapshot
+	var previousSnapshot internal_output.HealthSnapshot
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-mediaSession.ctx.Done():
 			return
 		case <-ticker.C:
 		}
 
-		snap := hs.OutputHealthSnapshot()
-		if snap.Ticks == prev.Ticks {
+		healthSnapshot := mediaEngine.OutputHealthSnapshot()
+		if healthSnapshot.Ticks == previousSnapshot.Ticks {
 			continue
 		}
 
-		s.emitEvent(map[string]string{
-			"type":         "output_pacer_health",
-			"ticks":        fmt.Sprintf("%d", snap.Ticks),
-			"late_ticks":   fmt.Sprintf("%d", snap.LateTicks),
-			"active_ticks": fmt.Sprintf("%d", snap.ActiveTicks),
-			"idle_ticks":   fmt.Sprintf("%d", snap.IdleTicks),
-			"send_errors":  fmt.Sprintf("%d", snap.SendErrors),
-			"idle_ratio":   fmt.Sprintf("%.4f", snap.IdleRatio),
-		})
-
-		if snap.SendErrors > prev.SendErrors {
-			s.emitEvent(map[string]string{
-				"type":              "output_send_error",
-				"send_errors_delta": fmt.Sprintf("%d", snap.SendErrors-prev.SendErrors),
-				"total_send_errors": fmt.Sprintf("%d", snap.SendErrors),
-				"ticks":             fmt.Sprintf("%d", snap.Ticks),
-				"late_ticks":        fmt.Sprintf("%d", snap.LateTicks),
-				"active_ticks":      fmt.Sprintf("%d", snap.ActiveTicks),
-				"idle_ticks":        fmt.Sprintf("%d", snap.IdleTicks),
-				"idle_ratio":        fmt.Sprintf("%.4f", snap.IdleRatio),
+		if mediaSession.record != nil {
+			_ = mediaSession.record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Telephony output pacer health",
+				Attributes: observability.Attributes{
+					"component":     observability.ComponentCall.String(),
+					"ticks":         fmt.Sprintf("%d", healthSnapshot.Ticks),
+					"late_ticks":    fmt.Sprintf("%d", healthSnapshot.LateTicks),
+					"active_ticks":  fmt.Sprintf("%d", healthSnapshot.ActiveTicks),
+					"idle_ticks":    fmt.Sprintf("%d", healthSnapshot.IdleTicks),
+					"send_errors":   fmt.Sprintf("%d", healthSnapshot.SendErrors),
+					"idle_ratio":    fmt.Sprintf("%.4f", healthSnapshot.IdleRatio),
+					"health_status": "output_pacer_health",
+				},
 			})
 		}
-		prev = snap
+
+		if healthSnapshot.SendErrors > previousSnapshot.SendErrors {
+			if mediaSession.record != nil {
+				_ = mediaSession.record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Telephony output send error",
+					Attributes: observability.Attributes{
+						"component":          observability.ComponentCall.String(),
+						"send_errors_delta":  fmt.Sprintf("%d", healthSnapshot.SendErrors-previousSnapshot.SendErrors),
+						"total_send_errors":  fmt.Sprintf("%d", healthSnapshot.SendErrors),
+						"ticks":              fmt.Sprintf("%d", healthSnapshot.Ticks),
+						"late_ticks":         fmt.Sprintf("%d", healthSnapshot.LateTicks),
+						"active_ticks":       fmt.Sprintf("%d", healthSnapshot.ActiveTicks),
+						"idle_ticks":         fmt.Sprintf("%d", healthSnapshot.IdleTicks),
+						"idle_ratio":         fmt.Sprintf("%.4f", healthSnapshot.IdleRatio),
+						"output_error_state": "output_send_error",
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Telephony output send error",
+					}},
+				})
+			}
+		}
+		previousSnapshot = healthSnapshot
 	}
+}
+
+func (mediaSession *MediaSession) runFrameOutputSender() {
+	frameDuration := 20 * time.Millisecond
+	if duration := mediaSession.mediaEngine.OutputFrameDuration(); duration > 0 {
+		frameDuration = duration
+	}
+	(&internal_output.Pacer{
+		Logger:        mediaSession.logger,
+		FrameDuration: frameDuration,
+		Provider:      mediaSession,
+		Consumer:      mediaSession,
+		Health:        mediaSession.mediaEngine,
+	}).Run(mediaSession.ctx)
+}
+
+func (mediaSession *MediaSession) NextFrame() []byte {
+	if mediaSession.mediaEngine == nil {
+		return nil
+	}
+	outputFrame, ok := mediaSession.mediaEngine.NextOutputFrame()
+	if !ok || len(outputFrame.ProviderAudio) == 0 {
+		return nil
+	}
+	mediaSession.storeCurrentOutputFrame(outputFrame)
+	return outputFrame.ProviderAudio
+}
+
+func (mediaSession *MediaSession) IdleFrame() []byte {
+	if mediaSession.mediaEngine == nil {
+		return nil
+	}
+	outputFrame, ok := mediaSession.mediaEngine.IdleOutputFrame()
+	if !ok || len(outputFrame.ProviderAudio) == 0 {
+		return nil
+	}
+	outputFrame.Idle = true
+	mediaSession.storeCurrentOutputFrame(outputFrame)
+	return outputFrame.ProviderAudio
+}
+
+func (mediaSession *MediaSession) ConsumeFrame(providerAudio []byte) error {
+	mediaSession.outputFrameMu.Lock()
+	outputFrame := mediaSession.currentOutputFrame
+	hasCurrentOutputFrame := mediaSession.hasCurrentOutputFrame
+	mediaSession.currentOutputFrame = AssistantOutputFrame{}
+	mediaSession.hasCurrentOutputFrame = false
+	mediaSession.outputFrameMu.Unlock()
+
+	if !hasCurrentOutputFrame {
+		outputFrame = AssistantOutputFrame{ProviderAudio: providerAudio}
+	}
+	if len(outputFrame.ProviderAudio) == 0 {
+		outputFrame.ProviderAudio = providerAudio
+	}
+
+	mediaSession.sinkMu.RLock()
+	outputSink := mediaSession.outputSink
+	mediaSession.sinkMu.RUnlock()
+	if outputSink == nil {
+		return nil
+	}
+	if err := outputSink(outputFrame); err != nil {
+		if mediaSession.record != nil {
+			_ = mediaSession.record(observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Telephony output send failed",
+				Attributes: observability.Attributes{
+					"component": observability.ComponentCall.String(),
+					"error":     err.Error(),
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "FAILED",
+					Description: "Telephony output send failed",
+				}},
+			})
+		}
+		return err
+	}
+	if outputFrame.Idle || len(outputFrame.BridgeAudio) == 0 {
+		return nil
+	}
+	mediaSession.emitStream(&protos.ConversationBridgeOperatorAudio{
+		Audio: outputFrame.BridgeAudio,
+		Time:  timestamppb.Now(),
+	})
+	return nil
+}
+
+func (mediaSession *MediaSession) emitInputAudioFrame(inputFrame InputAudioFrame, fallbackReceivedAt time.Time) {
+	receivedAt := inputFrame.ReceivedAt
+	if receivedAt.IsZero() {
+		receivedAt = fallbackReceivedAt
+	}
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
+	if len(inputFrame.BridgeAudio) > 0 {
+		mediaSession.emitStream(&protos.ConversationBridgeUserAudio{
+			Audio: inputFrame.BridgeAudio,
+			Time:  timestamppb.New(receivedAt),
+		})
+	}
+	if len(inputFrame.PipelineAudio) == 0 {
+		return
+	}
+	userAudio := &protos.ConversationUserMessage{
+		Message: &protos.ConversationUserMessage_Audio{Audio: inputFrame.PipelineAudio},
+		Time:    timestamppb.New(receivedAt),
+	}
+	if mediaSession.emitStream(userAudio) {
+		return
+	}
+}
+
+func (mediaSession *MediaSession) emitStream(stream internal_type.Stream) bool {
+	mediaSession.sinkMu.RLock()
+	streamSink := mediaSession.streamSink
+	mediaSession.sinkMu.RUnlock()
+	if streamSink == nil {
+		return false
+	}
+	streamSink(stream)
+	return true
+}
+
+func (mediaSession *MediaSession) storeCurrentOutputFrame(outputFrame AssistantOutputFrame) {
+	mediaSession.outputFrameMu.Lock()
+	mediaSession.currentOutputFrame = outputFrame
+	mediaSession.hasCurrentOutputFrame = true
+	mediaSession.outputFrameMu.Unlock()
 }

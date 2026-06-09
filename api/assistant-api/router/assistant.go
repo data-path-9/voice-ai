@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	assistantApi "github.com/rapidaai/api/assistant-api/api/assistant"
 	assistantDeploymentApi "github.com/rapidaai/api/assistant-api/api/assistant-deployment"
+	observabilityApi "github.com/rapidaai/api/assistant-api/api/observability"
 	assistantTalkApi "github.com/rapidaai/api/assistant-api/api/talk"
 	"github.com/rapidaai/api/assistant-api/config"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
@@ -22,19 +23,31 @@ import (
 func AssistantApiRoute(
 	Cfg *config.AssistantConfig,
 	S *grpc.Server,
+	engine *gin.Engine,
 	Logger commons.Logger,
 	Postgres connectors.PostgresConnector,
 	Redis connectors.RedisConnector,
 	Opensearch connectors.OpenSearchConnector,
 ) {
-	workflow_api.RegisterAssistantServiceServer(S,
-		assistantApi.NewAssistantGRPCApi(Cfg,
+	assistantServiceServer := assistantApi.NewAssistantGRPCApi(Cfg,
+		Logger,
+		Postgres,
+		Redis,
+		Opensearch,
+		Opensearch,
+	)
+	workflow_api.RegisterAssistantServiceServer(S, assistantServiceServer)
+	workflow_api.RegisterObservabilityServiceServer(S,
+		observabilityApi.NewObservabilityGRPCApi(Cfg,
 			Logger,
-			Postgres,
-			Redis,
-			Opensearch,
 			Opensearch,
 		))
+
+	apiv1 := engine.Group("v1/assistant")
+	createAssistantRestHandler := assistantServiceServer.(interface {
+		CreateAssistantRest(*gin.Context)
+	})
+	apiv1.POST("/create-assistant", createAssistantRestHandler.CreateAssistantRest)
 }
 
 func AssistantDeploymentApiRoute(Cfg *config.AssistantConfig,

@@ -7,66 +7,99 @@
 package internal_twilio_telephony
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
-	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
 	internal_twilio "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio/internal"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
 	openapi "github.com/twilio/twilio-go/rest/api/v2010"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type twilioWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
-
 	mediaSession *internal_telephony_media.MediaSession
-
-	streamID   string
-	connection *websocket.Conn
-	writeMu    sync.Mutex
-	closed     atomic.Bool
+	streamID     string
+	connection   *websocket.Conn
+	writeMu      sync.Mutex
+	closed       atomic.Bool
 }
 
-func NewTwilioWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential) (internal_type.Streamer, error) {
-	audioProcessor, err := internal_twilio.NewAudioProcessor(logger)
+type StreamerOptions struct {
+	Logger          commons.Logger
+	Connection      *websocket.Conn
+	CallContext     *callcontext.CallContext
+	VaultCredential *protos.VaultCredential
+	Observer        observability.Recorder
+}
+
+type FuncOption func(*StreamerOptions)
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithConnection(connection *websocket.Conn) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Connection = connection
+	}
+}
+
+func WithCallContext(callContext *callcontext.CallContext) FuncOption {
+	return func(options *StreamerOptions) {
+		options.CallContext = callContext
+	}
+}
+
+func WithVaultCredential(vaultCredential *protos.VaultCredential) FuncOption {
+	return func(options *StreamerOptions) {
+		options.VaultCredential = vaultCredential
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.Streamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	audioProcessor, err := internal_twilio.NewAudioProcessor(options.Logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Twilio audio processor: %w", err)
+		return nil, fmt.Errorf("%w: %w", internal_twilio.ErrAudioProcessorInitFailed, err)
 	}
 	tws := &twilioWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, vaultCred,
-			internal_telephony_base.WithSourceAudioConfig(internal_audio.NewMulaw8khzMonoAudioConfig()),
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			options.Logger, options.CallContext, options.VaultCredential, options.Observer,
 		),
 		streamID:   "",
-		connection: connection,
+		connection: options.Connection,
 	}
-	audioProcessor.SetOutputChunkCallback(tws.sendAudioChunk)
-	tws.mediaSession = internal_telephony_media.NewMediaSession(context.Background(), logger, audioProcessor, func() error {
-		return tws.sendTwilioMessage("clear", nil)
-	})
-	tws.mediaSession.SetInputSink(func(audio []byte) {
-		tws.Input(&protos.ConversationUserMessage{
-			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
-		})
-	})
-	tws.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
-		if event != nil {
-			if event.Data == nil {
-				event.Data = map[string]string{}
-			}
-			event.Data["provider"] = "twilio"
-		}
-		tws.Input(event)
+	tws.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     tws.Ctx,
+		Logger:      options.Logger,
+		MediaEngine: audioProcessor,
+		SendProviderClear: func() error {
+			return tws.sendTwilioMessage(internal_twilio.EventTypeClear, nil)
+		},
+		StreamSink: tws.Input,
+		OutputSink: tws.sendOutputFrame,
+		Record:     tws.Record,
 	})
 	go tws.runWebSocketReader()
 	return tws, nil
@@ -80,55 +113,187 @@ func (tws *twilioWebsocketStreamer) runWebSocketReader() {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			tws.stopAudioProcessing()
+			_ = tws.Record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Twilio websocket reader closed",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_twilio.TwilioProvider,
+					"stream_id":         tws.streamID,
+					"conversation_uuid": tws.GetConversationUuid(),
+					"error":             err.Error(),
+				},
+			}, observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallEnded,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_twilio.TwilioProvider,
+					"stream_id":         tws.streamID,
+					"conversation_uuid": tws.GetConversationUuid(),
+					"reason":            "websocket_closed",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "websocket_closed"},
+					{Key: observability.MetadataDisconnectReason, Value: "websocket_closed"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "COMPLETE",
+					Description: "Twilio websocket reader closed",
+				}},
+			})
 			if msg := tws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				tws.Input(msg)
 			}
-			tws.BaseStreamer.Cancel()
+			tws.Cancel()
 			return
 		}
 		var mediaEvent internal_twilio.TwilioMediaEvent
 		if err := json.Unmarshal(message, &mediaEvent); err != nil {
-			tws.Logger.Error("Failed to unmarshal Twilio media event", "error", err.Error())
+			_ = tws.Record(observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Failed to unmarshal Twilio media event",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_twilio.TwilioProvider,
+					"stream_id":         tws.streamID,
+					"conversation_uuid": tws.GetConversationUuid(),
+					"error":             err.Error(),
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "FAILED",
+					Description: "Failed to unmarshal Twilio media event",
+				}},
+			})
 			continue
 		}
 		switch mediaEvent.Event {
-		case "connected":
-			tws.Input(&protos.ConversationEvent{
-				Name: "channel",
-				Data: map[string]string{"type": "connected", "provider": "twilio"},
-				Time: timestamppb.Now(),
+		case internal_twilio.EventTypeConnected:
+			_ = tws.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallSessionConnected,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_twilio.TwilioProvider,
+					"provider_event":    string(internal_twilio.EventTypeConnected),
+					"conversation_uuid": tws.GetConversationUuid(),
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataClientChannel, Value: internal_twilio.TwilioProvider},
+					{Key: observability.MetadataClientProviderCallID, Value: tws.GetConversationUuid()},
+					{Key: observability.MetadataCallStatus, Value: "connected"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "INPROGRESS",
+					Description: "Twilio websocket connected",
+				}},
 			})
-		case "start":
+		case internal_twilio.EventTypeStart:
 			tws.handleStartEvent(mediaEvent)
 			if tws.mediaSession != nil {
 				tws.mediaSession.Start()
 			}
-			tws.Input(tws.CreateConnectionRequest())
-			tws.Input(&protos.ConversationEvent{
-				Name: "channel",
-				Data: map[string]string{"type": "stream_started", "provider": "twilio", "stream_id": tws.streamID},
-				Time: timestamppb.Now(),
+			_ = tws.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallMediaStarted,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_twilio.TwilioProvider,
+					"provider_event":    string(internal_twilio.EventTypeStart),
+					"stream_id":         tws.streamID,
+					"conversation_uuid": tws.GetConversationUuid(),
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataClientChannel, Value: internal_twilio.TwilioProvider},
+					{Key: observability.MetadataClientProviderCallID, Value: tws.GetConversationUuid()},
+					{Key: observability.MetadataClientCodec, Value: "mulaw"},
+					{Key: observability.MetadataClientSampleRate, Value: "8000"},
+					{Key: observability.MetadataCallStatus, Value: "media_started"},
+					{Key: "twilio.stream_id", Value: tws.streamID},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "INPROGRESS",
+					Description: "Twilio media stream started",
+				}},
 			})
-		case "media":
-			_ = tws.handleMediaEvent(mediaEvent)
-		case "stop":
-			tws.Logger.Info("Twilio stream stopped")
+			tws.Input(tws.CreateConnectionRequest())
+		case internal_twilio.EventTypeMedia:
+			if err := tws.handleMediaEvent(mediaEvent); err != nil {
+				_ = tws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to process Twilio media frame",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_twilio.TwilioProvider,
+						"stream_id":         tws.streamID,
+						"conversation_uuid": tws.GetConversationUuid(),
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Twilio media frame processing failed",
+					}},
+				})
+			}
+		case internal_twilio.EventTypeStop:
+			_ = tws.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallHangup,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_twilio.TwilioProvider,
+					"provider_event":    string(internal_twilio.EventTypeStop),
+					"stream_id":         tws.streamID,
+					"conversation_uuid": tws.GetConversationUuid(),
+					"reason":            "provider_stop",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "provider_stop"},
+					{Key: observability.MetadataDisconnectReason, Value: "provider_stop"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "COMPLETE",
+					Description: "Twilio media stream stopped by provider",
+				}},
+			})
 			if msg := tws.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				tws.Input(msg)
 			}
 			tws.Cancel()
 			return
 		default:
-			tws.Logger.Warn("Unhandled Twilio event", "event", mediaEvent.Event)
+			_ = tws.Record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Unhandled Twilio event",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_twilio.TwilioProvider,
+					"provider_event":    string(mediaEvent.Event),
+					"stream_id":         tws.streamID,
+					"conversation_uuid": tws.GetConversationUuid(),
+				},
+			})
 		}
 	}
 }
 
 func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
-	if tws.connection == nil {
-		return nil
-	}
 	switch data := response.(type) {
 	case *protos.ConversationInitialization:
 		if tws.mediaSession != nil {
@@ -156,11 +321,72 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 		// (it called Notify with it). No need to round-trip back through
 		// CriticalCh — just notify the carrier via Hangup and clean up.
 		_ = tws.Disconnect(data.GetType())
-		if tws.GetConversationUuid() != "" {
-			if client, err := twilioClient(tws.VaultCredential()); err == nil {
-				params := &openapi.UpdateCallParams{}
-				params.SetStatus("completed")
-				client.Api.UpdateCall(tws.GetConversationUuid(), params)
+		conversationUUID := tws.GetConversationUuid()
+		if conversationUUID != "" {
+			twilioRestClient, err := twilioClient(tws.VaultCredential())
+			if err != nil {
+				_ = tws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to create Twilio client for server-side disconnect",
+					Attributes: observability.Attributes{
+						"component":          observability.ComponentCall.String(),
+						"provider":           internal_twilio.TwilioProvider,
+						"conversation_uuid":  conversationUUID,
+						"disconnection_type": data.GetType().String(),
+						"error":              err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Failed to create Twilio client for server-side disconnect",
+					}},
+				})
+			} else {
+				updateCallParams := &openapi.UpdateCallParams{}
+				updateCallParams.SetStatus("completed")
+				if _, err := twilioRestClient.Api.UpdateCall(conversationUUID, updateCallParams); err != nil {
+					_ = tws.Record(observability.RecordLog{
+						Level:   observability.LevelError,
+						Message: "Failed to end Twilio call on server-side disconnect",
+						Attributes: observability.Attributes{
+							"component":          observability.ComponentCall.String(),
+							"provider":           internal_twilio.TwilioProvider,
+							"conversation_uuid":  conversationUUID,
+							"disconnection_type": data.GetType().String(),
+							"error":              err.Error(),
+						},
+					}, observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallStatus,
+							Value:       "FAILED",
+							Description: "Failed to end Twilio call on server-side disconnect",
+						}},
+					})
+				} else {
+					_ = tws.Record(observability.RecordEvent{
+						Component: observability.ComponentCall,
+						Event:     observability.CallHangup,
+						Attributes: observability.Attributes{
+							"component":          observability.ComponentCall.String(),
+							"provider":           internal_twilio.TwilioProvider,
+							"conversation_uuid":  conversationUUID,
+							"disconnection_type": data.GetType().String(),
+							"reason":             "server_side_disconnect",
+						},
+					}, observability.RecordMetadata{
+						Metadata: []*protos.Metadata{
+							{Key: observability.MetadataCallStatus, Value: "completed"},
+							{Key: observability.MetadataDisconnectReason, Value: "server_side_disconnect"},
+						},
+					}, observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallStatus,
+							Value:       "COMPLETE",
+							Description: "Twilio call ended by server-side disconnect",
+						}},
+					})
+				}
 			}
 		}
 		tws.stopAudioProcessing()
@@ -169,17 +395,73 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 		switch data.GetAction() {
 		case protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION:
 			result := map[string]string{"status": "completed"}
-			if tws.GetConversationUuid() != "" {
+			conversationUUID := tws.GetConversationUuid()
+			if conversationUUID != "" {
 				client, err := twilioClient(tws.VaultCredential())
 				if err != nil {
-					tws.Logger.Errorf("Error creating Twilio client:", err)
+					_ = tws.Record(observability.RecordLog{
+						Level:   observability.LevelError,
+						Message: "Failed to create Twilio client for end conversation",
+						Attributes: observability.Attributes{
+							"component":         observability.ComponentCall.String(),
+							"provider":          internal_twilio.TwilioProvider,
+							"conversation_uuid": conversationUUID,
+							"tool_action":       data.GetAction().String(),
+							"error":             err.Error(),
+						},
+					}, observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallStatus,
+							Value:       "FAILED",
+							Description: "Failed to end Twilio call",
+						}},
+					})
 					result = map[string]string{"status": "failed", "reason": fmt.Sprintf("twilio client error: %v", err)}
 				} else {
 					params := &openapi.UpdateCallParams{}
 					params.SetStatus("completed")
-					if _, err := client.Api.UpdateCall(tws.GetConversationUuid(), params); err != nil {
-						tws.Logger.Errorf("Error ending Twilio call:", err)
+					if _, err := client.Api.UpdateCall(conversationUUID, params); err != nil {
+						_ = tws.Record(observability.RecordLog{
+							Level:   observability.LevelError,
+							Message: "Failed to end Twilio call",
+							Attributes: observability.Attributes{
+								"component":         observability.ComponentCall.String(),
+								"provider":          internal_twilio.TwilioProvider,
+								"conversation_uuid": conversationUUID,
+								"tool_action":       data.GetAction().String(),
+								"error":             err.Error(),
+							},
+						}, observability.RecordMetric{
+							Metrics: []*protos.Metric{{
+								Name:        observability.MetricCallStatus,
+								Value:       "FAILED",
+								Description: "Failed to create Twilio client for end conversation",
+							}},
+						})
 						result = map[string]string{"status": "failed", "reason": fmt.Sprintf("end call failed: %v", err)}
+					} else {
+						_ = tws.Record(observability.RecordEvent{
+							Component: observability.ComponentCall,
+							Event:     observability.CallHangup,
+							Attributes: observability.Attributes{
+								"component":         observability.ComponentCall.String(),
+								"provider":          internal_twilio.TwilioProvider,
+								"conversation_uuid": conversationUUID,
+								"tool_action":       data.GetAction().String(),
+								"reason":            "tool_end_conversation",
+							},
+						}, observability.RecordMetadata{
+							Metadata: []*protos.Metadata{
+								{Key: observability.MetadataCallStatus, Value: "completed"},
+								{Key: observability.MetadataDisconnectReason, Value: "tool_end_conversation"},
+							},
+						}, observability.RecordMetric{
+							Metrics: []*protos.Metric{{
+								Name:        observability.MetricCallStatus,
+								Value:       "COMPLETE",
+								Description: "Twilio call ended by tool action",
+							}},
+						})
 					}
 				}
 			}
@@ -191,22 +473,33 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 				Result: result,
 			})
 		case protos.ToolCallAction_TOOL_CALL_ACTION_TRANSFER_CONVERSATION:
-			// Twilio transfer is a blind transfer via REST `UpdateCall` with TwiML
-			// `<Dial>`. Twilio takes over the leg; the AI WebSocket is closed by
-			// Cancel() below and cannot be resumed. As a result, only
-			// post_transfer_action=end_call is meaningful — resume_ai is NOT
-			// supported on Twilio. Supporting resume_ai would require a TwiML
-			// `<Dial action="...">` callback that hands the leg back to a fresh
-			// assistant Stream on hangup (not implemented).
-			//
-			// Multi-target failover (try t1, on failure try t2 …) is NOT
-			// supported either: once the redirect is dispatched, the WebSocket
-			// is closed and we lose the ability to retry. Only the first
-			// target from a SEPARATOR-joined transfer_to is dialed; the rest
-			// are dropped with a warning.
+			// Twilio transfer is one-way: the carrier owns the leg after REST redirect.
+			// Only the first transfer target is attempted; resume/failover is unsupported.
 			raw := data.GetArgs()["transfer_to"]
 			targets := tws.SplitTransferTargets(raw)
 			if raw == "" || len(targets) == 0 || tws.GetConversationUuid() == "" {
+				_ = tws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Twilio transfer failed before dispatch",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_twilio.TwilioProvider,
+						"conversation_uuid": tws.GetConversationUuid(),
+						"tool_action":       data.GetAction().String(),
+						"reason":            "missing target or call ID",
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "transfer_failed"},
+						{Key: observability.MetadataFailureReason, Value: "missing target or call ID"},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Twilio transfer failed before dispatch",
+					}},
+				})
 				tws.Input(&protos.ConversationToolCallResult{
 					Id:     data.GetId(),
 					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
@@ -216,12 +509,39 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 			}
 			to := targets[0]
 			if len(targets) > 1 {
-				tws.Logger.Warnw("Twilio transfer received multiple targets; failover not supported, using first only",
-					"chosen", to, "ignored", targets[1:])
+				_ = tws.Record(observability.RecordLog{
+					Level:   observability.LevelDebug,
+					Message: "Twilio transfer received multiple targets",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_twilio.TwilioProvider,
+						"conversation_uuid": tws.GetConversationUuid(),
+						"tool_action":       data.GetAction().String(),
+						"transfer_to":       to,
+						"ignored_targets":   fmt.Sprintf("%v", targets[1:]),
+					},
+				})
 			}
-			tws.Logger.Infow("Transferring Twilio call", "to", to)
 			client, err := twilioClient(tws.VaultCredential())
 			if err != nil {
+				_ = tws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to create Twilio client for transfer",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_twilio.TwilioProvider,
+						"conversation_uuid": tws.GetConversationUuid(),
+						"tool_action":       data.GetAction().String(),
+						"transfer_to":       to,
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Failed to create Twilio client for transfer",
+					}},
+				})
 				tws.Input(&protos.ConversationToolCallResult{
 					Id:     data.GetId(),
 					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
@@ -232,12 +552,59 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 			params := &openapi.UpdateCallParams{}
 			params.SetTwiml(fmt.Sprintf(`<Response><Dial>%s</Dial></Response>`, to))
 			if _, err := client.Api.UpdateCall(tws.GetConversationUuid(), params); err != nil {
+				_ = tws.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Twilio transfer dispatch failed",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_twilio.TwilioProvider,
+						"conversation_uuid": tws.GetConversationUuid(),
+						"tool_action":       data.GetAction().String(),
+						"transfer_to":       to,
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "transfer_failed"},
+						{Key: observability.MetadataFailureReason, Value: err.Error()},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Twilio transfer dispatch failed",
+					}},
+				})
 				tws.Input(&protos.ConversationToolCallResult{
 					Id:     data.GetId(),
 					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
 					Result: map[string]string{"status": "failed", "reason": fmt.Sprintf("transfer failed: %v", err), "next_action": "end_call"},
 				})
 			} else {
+				_ = tws.Record(observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallHangup,
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_twilio.TwilioProvider,
+						"conversation_uuid": tws.GetConversationUuid(),
+						"tool_action":       data.GetAction().String(),
+						"transfer_to":       to,
+						"reason":            "tool_transfer_conversation",
+					},
+				}, observability.RecordMetadata{
+					Metadata: []*protos.Metadata{
+						{Key: observability.MetadataCallStatus, Value: "transfer_dispatched"},
+						{Key: observability.MetadataBridgeTransferTarget, Value: to},
+						{Key: observability.MetadataBridgeTransferStatus, Value: "dispatched"},
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "INPROGRESS",
+						Description: "Twilio transfer dispatched",
+					}},
+				})
 				tws.Input(&protos.ConversationToolCallResult{
 					Id:     data.GetId(),
 					ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
@@ -250,7 +617,16 @@ func (tws *twilioWebsocketStreamer) Send(response internal_type.Stream) error {
 			}
 		}
 	default:
-		tws.Logger.Warnw("Twilio Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
+		_ = tws.Record(observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Twilio Send unknown message type",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_twilio.TwilioProvider,
+				"conversation_uuid": tws.GetConversationUuid(),
+				"type":              fmt.Sprintf("%T", response),
+			},
+		})
 	}
 	return nil
 }
@@ -279,12 +655,12 @@ func (tws *twilioWebsocketStreamer) Cancel() error {
 	return nil
 }
 
-func (tws *twilioWebsocketStreamer) sendAudioChunk(chunk *internal_twilio.AudioChunk) error {
-	if chunk == nil || len(chunk.Data) == 0 {
+func (tws *twilioWebsocketStreamer) sendOutputFrame(frame internal_telephony_media.AssistantOutputFrame) error {
+	if len(frame.ProviderAudio) == 0 {
 		return nil
 	}
-	return tws.sendTwilioMessage("media", map[string]interface{}{
-		"payload": tws.Encoder().EncodeToString(chunk.Data),
+	return tws.sendTwilioMessage(internal_twilio.EventTypeMedia, &internal_twilio.TwilioOutboundMedia{
+		Payload: tws.Encoder().EncodeToString(frame.ProviderAudio),
 	})
 }
 
@@ -295,38 +671,91 @@ func (tws *twilioWebsocketStreamer) stopAudioProcessing() {
 }
 
 func (tws *twilioWebsocketStreamer) handleMediaEvent(mediaEvent internal_twilio.TwilioMediaEvent) error {
+	if mediaEvent.Media == nil {
+		_ = tws.Record(observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Twilio media event missing media payload",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_twilio.TwilioProvider,
+				"stream_id":         tws.streamID,
+				"conversation_uuid": tws.GetConversationUuid(),
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       "FAILED",
+				Description: "Twilio media event missing media payload",
+			}},
+		})
+		return nil
+	}
 	payloadBytes, err := tws.Encoder().DecodeString(mediaEvent.Media.Payload)
 	if err != nil {
-		tws.Logger.Warn("Failed to decode media payload", "error", err.Error())
+		_ = tws.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to decode Twilio media payload",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_twilio.TwilioProvider,
+				"stream_id":         tws.streamID,
+				"conversation_uuid": tws.GetConversationUuid(),
+				"error":             err.Error(),
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       "FAILED",
+				Description: "Failed to decode Twilio media payload",
+			}},
+		})
 		return nil
 	}
 
 	if tws.mediaSession == nil {
 		return nil
 	}
-	if err := tws.mediaSession.HandleProviderAudio(payloadBytes); err != nil {
+	if err := tws.mediaSession.HandleProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+		Audio:      payloadBytes,
+		ReceivedAt: time.Now(),
+	}); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (tws *twilioWebsocketStreamer) sendTwilioMessage(
-	eventType string,
-	mediaData map[string]interface{}) error {
-	if tws.connection == nil || tws.streamID == "" {
+	eventType internal_twilio.EventType,
+	mediaData *internal_twilio.TwilioOutboundMedia,
+) error {
+	if tws.streamID == "" {
 		return nil
 	}
-	message := map[string]interface{}{
-		"event":     eventType,
-		"streamSid": tws.streamID,
-	}
-	if mediaData != nil {
-		message["media"] = mediaData
-	}
-
-	twilioMessageJSON, err := json.Marshal(message)
+	twilioMessageJSON, err := json.Marshal(internal_twilio.TwilioOutboundMessage{
+		Event:    eventType,
+		StreamID: tws.streamID,
+		Media:    mediaData,
+	})
 	if err != nil {
-		return tws.handleError("Failed to marshal Twilio message", err)
+		_ = tws.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to marshal Twilio message",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_twilio.TwilioProvider,
+				"provider_event":    string(eventType),
+				"stream_id":         tws.streamID,
+				"conversation_uuid": tws.GetConversationUuid(),
+				"error":             err.Error(),
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       "FAILED",
+				Description: "Failed to marshal Twilio message",
+			}},
+		})
+		return err
 	}
 
 	tws.writeMu.Lock()
@@ -335,13 +764,26 @@ func (tws *twilioWebsocketStreamer) sendTwilioMessage(
 		return nil
 	}
 	if err := tws.connection.WriteMessage(websocket.TextMessage, twilioMessageJSON); err != nil {
-		return tws.handleError("Failed to send message to Twilio", err)
+		_ = tws.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to send message to Twilio",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_twilio.TwilioProvider,
+				"provider_event":    string(eventType),
+				"stream_id":         tws.streamID,
+				"conversation_uuid": tws.GetConversationUuid(),
+				"error":             err.Error(),
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       "FAILED",
+				Description: "Failed to send message to Twilio",
+			}},
+		})
+		return err
 	}
 
 	return nil
-}
-
-func (tws *twilioWebsocketStreamer) handleError(message string, err error) error {
-	tws.Logger.Error(message, "error", err.Error())
-	return err
 }

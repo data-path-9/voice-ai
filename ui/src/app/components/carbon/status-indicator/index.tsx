@@ -74,5 +74,7 @@ export const CarbonStatusIndicator: FC<CarbonStatusIndicatorProps> = ({
 }) => {
   const { kind, label } = statusMap[state] || defaultStatus;
 
-  return <ShapeIndicator kind={kind as any} label={label} textSize={textSize} />;
+  return (
+    <ShapeIndicator kind={kind as any} label={label} textSize={textSize} />
+  );
 };

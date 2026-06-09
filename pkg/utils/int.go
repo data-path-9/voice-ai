@@ -5,6 +5,12 @@
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
 package utils
 
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
 func MaxUint64(a, b uint64) uint64 {
 	if a > b {
 		return a
@@ -18,4 +24,12 @@ func MinUint64(a, b uint64) uint64 {
 		return a
 	}
 	return b
+}
+
+func StringToUint32(value string) (uint32, error) {
+	parsed, err := strconv.ParseUint(strings.TrimSpace(value), 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("cannot parse %q as uint32: %w", value, err)
+	}
+	return uint32(parsed), nil
 }

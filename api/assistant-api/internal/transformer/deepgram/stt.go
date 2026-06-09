@@ -18,6 +18,7 @@ import (
 
 	interfaces "github.com/deepgram/deepgram-go-sdk/v3/pkg/client/interfaces/v1"
 	client "github.com/deepgram/deepgram-go-sdk/v3/pkg/client/listen"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	deepgram_internal "github.com/rapidaai/api/assistant-api/internal/transformer/deepgram/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
@@ -78,7 +79,7 @@ func (dg *deepgramSTT) Initialize() error {
 		dg.ctx,
 		dg.GetKey(),
 		&interfaces.ClientOptions{APIKey: dg.GetKey(), EnableKeepAlive: true},
-		dg.SpeechToTextOptions(), deepgram_internal.NewDeepgramSttCallback(dg.logger, dg.onPacket, dg.deepgramOption.mdlOpts, dg.swapStartedAt, dg.getContextID))
+		dg.SpeechToTextOptions(), deepgram_internal.NewDeepgramSttCallback(dg.logger, dg.onPacket, dg.deepgramOption.mdlOpts, dg.swapStartedAt, dg.getContextID, dg.Name()))
 	if err != nil {
 		dg.logger.Errorf("deepgram-stt: unable create dg client with error %+v", err.Error())
 		return err
@@ -93,15 +94,19 @@ func (dg *deepgramSTT) Initialize() error {
 	dg.sttConnectedAt = time.Now()
 	dg.mu.Unlock()
 
-	dg.onPacket(internal_type.ConversationEventPacket{
+	dg.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: dg.getContextID(),
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": dg.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": dg.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -119,13 +124,16 @@ func (dg *deepgramSTT) Transform(ctx context.Context, in internal_type.Packet) e
 		dg.contextId = pkt.ContextID
 		dg.mu.Unlock()
 		return nil
-	case internal_type.SpeechToTextInterruptPacket:
+	case internal_type.SpeechToTextStartPacket:
 		dg.mu.Lock()
 		dg.startedAt = time.Now()
 		dg.mu.Unlock()
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
 		dg.mu.Lock()
+		if dg.startedAt.IsZero() {
+			dg.startedAt = time.Now()
+		}
 		client := dg.client
 		dg.mu.Unlock()
 
@@ -166,22 +174,43 @@ func (dg *deepgramSTT) Close(ctx context.Context) error {
 	dg.mu.Unlock()
 
 	if !connectedAt.IsZero() {
+		duration := time.Since(connectedAt)
 		dg.onPacket(
-			internal_type.ConversationEventPacket{
+			internal_type.ObservabilityEventRecordPacket{
 				ContextID: ctxID,
-				Name:      "stt",
-				Data: map[string]string{
-					"type":     "closed",
-					"provider": dg.Name(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordEvent{
+					Component: observability.ComponentSTT,
+					Event:     observability.STTClosed,
+					Attributes: observability.Attributes{
+						"type":     "closed",
+						"provider": dg.Name(),
+					},
+					OccurredAt: time.Now(),
 				},
-				Time: time.Now(),
 			},
-			internal_type.ConversationMetricPacket{
-				Metrics: []*protos.Metric{{
+			internal_type.ObservabilityMetricRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetricRecord([]*protos.Metric{{
 					Name:        type_enums.CONVERSATION_STT_DURATION.String(),
-					Value:       fmt.Sprintf("%d", time.Since(connectedAt).Nanoseconds()),
+					Value:       fmt.Sprintf("%d", duration.Nanoseconds()),
 					Description: "Total STT connection duration in nanoseconds",
-				}},
+				}}),
+			},
+			internal_type.ObservabilityUsageRecordPacket{
+				ContextID: ctxID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordUsage{
+					Component: observability.ComponentSTT,
+					Provider:  dg.Name(),
+					Duration:  duration,
+					Attributes: observability.Attributes{
+						"context_id": ctxID,
+						"provider":   dg.Name(),
+						"metric":     type_enums.CONVERSATION_STT_DURATION.String(),
+					},
+				},
 			},
 		)
 	}

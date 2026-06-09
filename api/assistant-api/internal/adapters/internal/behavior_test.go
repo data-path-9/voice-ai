@@ -12,7 +12,7 @@ import (
 	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
-	observe "github.com/rapidaai/api/assistant-api/internal/observe"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	gorm_model "github.com/rapidaai/pkg/models/gorm"
@@ -190,8 +190,8 @@ func requireBehaviorPacketEventually[T internal_type.Packet](
 }
 
 type behaviorDisconnectPacketCapture struct {
-	event    internal_type.ConversationEventPacket
-	metadata internal_type.ConversationMetadataPacket
+	event    internal_type.ObservabilityEventRecordPacket
+	metadata internal_type.ObservabilityMetadataRecordPacket
 	err      string
 }
 
@@ -200,27 +200,27 @@ func captureBehaviorDisconnectPacketsBeforeNotify(r *genericRequestor) behaviorD
 	var capture behaviorDisconnectPacketCapture
 	select {
 	case env := <-r.channels.BackgroundChannel():
-		event, ok := env.Pkt.(internal_type.ConversationEventPacket)
+		event, ok := env.Pkt.(internal_type.ObservabilityEventRecordPacket)
 		if !ok {
-			capture.err = "background packet was not ConversationEventPacket"
+			capture.err = "background packet was not ObservabilityEventRecordPacket"
 			return capture
 		}
 		capture.event = event
 	default:
-		capture.err = "missing ConversationEventPacket before notify"
+		capture.err = "missing ObservabilityEventRecordPacket before notify"
 		return capture
 	}
 
 	select {
-	case env := <-r.channels.DataChannel():
-		metadata, ok := env.Pkt.(internal_type.ConversationMetadataPacket)
+	case env := <-r.channels.BackgroundChannel():
+		metadata, ok := env.Pkt.(internal_type.ObservabilityMetadataRecordPacket)
 		if !ok {
-			capture.err = "data packet was not ConversationMetadataPacket"
+			capture.err = "background packet was not ObservabilityMetadataRecordPacket"
 			return capture
 		}
 		capture.metadata = metadata
 	default:
-		capture.err = "missing ConversationMetadataPacket before notify"
+		capture.err = "missing ObservabilityMetadataRecordPacket before notify"
 	}
 	return capture
 }
@@ -247,15 +247,14 @@ func assertDisconnectReasonPackets(
 
 	event := capture.event
 	assert.Equal(t, "ctx-behavior", event.ContextID)
-	assert.Equal(t, observe.ComponentSession, event.Name)
-	assert.Equal(t, observe.EventDisconnectRequested, event.Data[observe.DataType])
-	assert.Equal(t, reason.String(), event.Data[observe.DataReason])
+	assert.Equal(t, observability.ConversationCompleted, event.Record.Event)
+	assert.Equal(t, reason.String(), event.Record.Attributes["reason"])
 
 	metadata := capture.metadata
-	require.Len(t, metadata.Metadata, 1)
-	assert.Equal(t, uint64(202), metadata.ContextID)
-	assert.Equal(t, "disconnect_reason", metadata.Metadata[0].Key)
-	assert.Equal(t, reason.String(), metadata.Metadata[0].Value)
+	require.Len(t, metadata.Record.Metadata, 1)
+	assert.Equal(t, "ctx-behavior", metadata.ContextID)
+	assert.Equal(t, "disconnect_reason", metadata.Record.Metadata[0].Key)
+	assert.Equal(t, reason.String(), metadata.Record.Metadata[0].Value)
 }
 
 // Max duration should persist the disconnect reason before notifying the client.
@@ -384,42 +383,6 @@ func TestBehavior_GetBehavior(t *testing.T) {
 	})
 }
 
-// InitializeBehavior should fan out greeting, idle timeout, and max duration setup.
-func TestBehavior_InitializeBehavior(t *testing.T) {
-	t.Run("no behavior configured is no-op", func(t *testing.T) {
-		r := newBehaviorDisconnectTestRequestor(t, &behaviorCapturingStreamer{})
-		r.assistant = nil
-
-		require.NoError(t, r.initializeBehavior(context.Background()))
-		assert.Zero(t, len(r.channels.EgressChannel()))
-		assert.Zero(t, len(r.channels.BackgroundChannel()))
-		assert.Nil(t, r.maxSessionTimer)
-	})
-
-	t.Run("configured greeting and idle timeout enqueue packets", func(t *testing.T) {
-		r := newBehaviorDisconnectTestRequestor(t, &behaviorCapturingStreamer{})
-		setBehaviorForSource(r, utils.Debugger, internal_assistant_entity.AssistantDeploymentBehavior{
-			Greeting:    behaviorStr("Hello from behavior"),
-			IdleTimeout: behaviorU64(9),
-		})
-
-		require.NoError(t, r.initializeBehavior(context.Background()))
-
-		egressPackets := collectBehaviorPackets(r.channels.EgressChannel())
-		require.Len(t, egressPackets, 3)
-		assert.Equal(t, 1, countBehaviorPacketType[internal_type.InjectMessagePacket](egressPackets))
-		assert.Equal(t, 2, countBehaviorPacketType[internal_type.StartIdleTimeoutPacket](egressPackets))
-
-		backgroundPackets := collectBehaviorPackets(r.channels.BackgroundChannel())
-		require.Len(t, backgroundPackets, 1)
-		event, ok := backgroundPackets[0].(internal_type.ConversationEventPacket)
-		require.True(t, ok)
-		assert.Equal(t, "behavior", event.Name)
-		assert.Equal(t, "greeting", event.Data["type"])
-		assert.Equal(t, "19", event.Data["text_chars"])
-	})
-}
-
 // Greeting should be ignored when empty and queued when configured.
 func TestBehavior_InitializeGreeting(t *testing.T) {
 	cases := []struct {
@@ -462,12 +425,12 @@ func TestBehavior_InitializeGreeting(t *testing.T) {
 		)
 		assert.Equal(t, "ctx-greeting", start.ContextID)
 
-		event := requireBehaviorPacketEventually[internal_type.ConversationEventPacket](
+		event := requireBehaviorPacketEventually[internal_type.ObservabilityEventRecordPacket](
 			t, r.channels.BackgroundChannel(), time.Second,
 		)
-		assert.Equal(t, "behavior", event.Name)
-		assert.Equal(t, "greeting", event.Data["type"])
-		assert.Equal(t, "8", event.Data["text_chars"])
+		assert.Equal(t, observability.ConversationAgentStateChanged, event.Record.Event)
+		assert.Equal(t, "greeting", event.Record.Attributes["type"])
+		assert.Equal(t, "8", event.Record.Attributes["text_chars"])
 	})
 }
 
@@ -570,12 +533,12 @@ func TestBehavior_OnError(t *testing.T) {
 		)
 		assert.Equal(t, newContextID, start.ContextID)
 
-		event := requireBehaviorPacketEventually[internal_type.ConversationEventPacket](
+		event := requireBehaviorPacketEventually[internal_type.ObservabilityEventRecordPacket](
 			t, r.channels.BackgroundChannel(), time.Second,
 		)
-		assert.Equal(t, "behavior", event.Name)
-		assert.Equal(t, "error", event.Data["type"])
-		assert.Equal(t, fmt.Sprintf("%d", len(inject.Text)), event.Data["text_chars"])
+		assert.Equal(t, observability.ConversationAgentStateChanged, event.Record.Event)
+		assert.Equal(t, "error", event.Record.Attributes["type"])
+		assert.Equal(t, fmt.Sprintf("%d", len(inject.Text)), event.Record.Attributes["text_chars"])
 	})
 
 	t.Run("configured mistake message", func(t *testing.T) {
@@ -652,13 +615,13 @@ func TestBehavior_OnIdleTimeout(t *testing.T) {
 		)
 		assert.Equal(t, newContextID, start.ContextID)
 
-		event := requireBehaviorPacketEventually[internal_type.ConversationEventPacket](
+		event := requireBehaviorPacketEventually[internal_type.ObservabilityEventRecordPacket](
 			t, r.channels.BackgroundChannel(), time.Second,
 		)
-		assert.Equal(t, "behavior", event.Name)
-		assert.Equal(t, "idle_timeout", event.Data["type"])
-		assert.Equal(t, "2", event.Data["count"])
-		assert.Equal(t, "4", event.Data["max_count"])
+		assert.Equal(t, observability.ConversationAgentStateChanged, event.Record.Event)
+		assert.Equal(t, "idle_timeout", event.Record.Attributes["type"])
+		assert.Equal(t, "2", event.Record.Attributes["count"])
+		assert.Equal(t, "4", event.Record.Attributes["max_count"])
 	})
 }
 

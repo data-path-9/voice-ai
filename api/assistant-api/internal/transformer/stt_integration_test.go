@@ -127,8 +127,8 @@ func TestSTTInterimAndFinal(t *testing.T) {
 	}
 }
 
-// TestSTTMetricsAndEvents verifies that STT providers emit ConversationEventPacket
-// and/or MessageMetricPacket alongside transcripts.
+// TestSTTMetricsAndEvents verifies that STT providers emit ObservabilityEventRecordPacket
+// and/or ObservabilityMetricRecordPacket alongside transcripts.
 func TestSTTMetricsAndEvents(t *testing.T) {
 	cfg := testutil.LoadConfig(t)
 	logger := testutil.NewTestLogger()
@@ -163,8 +163,8 @@ func TestSTTMetricsAndEvents(t *testing.T) {
 
 			// Verify event packets have required fields when present
 			for _, ev := range events {
-				assert.NotEmpty(t, ev.Name, "event name should not be empty")
-				assert.NotNil(t, ev.Data, "event data should not be nil")
+				assert.NotEmpty(t, ev.Record.Component.String(), "event name should not be empty")
+				assert.NotNil(t, ev.Record.Attributes, "event data should not be nil")
 			}
 
 			// STT providers typically emit interruption packets with transcripts

@@ -8,6 +8,7 @@ package internal_telnyx_telephony
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telnyx "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -26,8 +28,6 @@ import (
 	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
-
-const telnyxProvider = "telnyx"
 
 const (
 	// Telnyx API base URL
@@ -54,7 +54,7 @@ func (tpc *telnyxTelephony) CatchAllStatusCallback(ctx *gin.Context) (*internal_
 	}
 	if statusInfo == nil || !validator.NotBlank(statusInfo.ChannelUUID) {
 		tpc.logger.Errorf("call control id not found or invalid in catch-all payload")
-		return nil, fmt.Errorf("call control id not found in callback")
+		return nil, internal_telnyx.ErrCatchAllCallControlIDMissing
 	}
 	return statusInfo, nil
 }
@@ -65,16 +65,16 @@ func (tpc *telnyxTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 	body, err := c.GetRawData()
 	if err != nil {
 		tpc.logger.Errorf("failed to read request body with error %+v", err)
-		return nil, fmt.Errorf("failed to read request body: %w", err)
+		return nil, fmt.Errorf("%w: %w", internal_telnyx.ErrRequestBodyReadFailed, err)
 	}
 
 	var payload map[string]interface{}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		tpc.logger.Errorf("failed to parse request body: %+v", err)
-		return nil, fmt.Errorf("failed to parse request body: %w", err)
+		return nil, fmt.Errorf("%w: %w", internal_telnyx.ErrRequestBodyParseFailed, err)
 	}
 
-	callback, err := internal_telnyx.NewStatusCallback(payload)
+	callback, err := internal_telnyx.NewStatusCallback(payload, string(body))
 	if err != nil {
 		tpc.logger.Errorf("failed to parse status callback: %+v", err)
 		return nil, err
@@ -121,14 +121,14 @@ func (tpc *telnyxTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo
 
 	if clientNumber == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing caller number"})
-		return nil, fmt.Errorf("missing or empty 'from' query parameter")
+		return nil, internal_telnyx.ErrInboundFromMissing
 	}
 
 	info := &internal_type.CallInfo{
 		CallerNumber: clientNumber,
-		Provider:     telnyxProvider,
+		Provider:     internal_telnyx.Provider,
 		Status:       "SUCCESS",
-		StatusInfo:   internal_type.StatusInfo{Event: "webhook", Payload: queryParams},
+		StatusInfo:   internal_type.StatusInfo{Event: internal_telnyx.WebhookEvent, Payload: queryParams},
 		Extra:        make(map[string]string),
 	}
 
@@ -144,21 +144,44 @@ func (tpc *telnyxTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo
 // OutboundCall places an outbound call using Telnyx Call Control API.
 // POST to /v2/calls with connection_id, to, from, and stream_url.
 func (tpc *telnyxTelephony) OutboundCall(
+	ctx context.Context,
 	auth types.SimplePrinciple,
 	toPhone string,
 	fromPhone string,
 	assistant *internal_assistant_entity.Assistant,
 	assistantConversationId uint64,
 	vaultCredential *protos.VaultCredential,
+	statusReporter internal_type.ProviderCallStatusReporter,
 	opts utils.Option,
 ) (*internal_type.CallInfo, error) {
-	info := &internal_type.CallInfo{Provider: telnyxProvider}
+	info := &internal_type.CallInfo{Provider: internal_telnyx.Provider}
 
-	// Get credentials from vault
+	if err := ctx.Err(); err != nil {
+		info.Status = "FAILED"
+		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCancelled,
+			"request cancelled",
+			internal_telephony_base.OutboundDisconnectReasonRequestCancelled,
+			err,
+			0,
+		)
+		return info, err
+	}
+
 	apiKey, connectionID, err := tpc.getCredentials(vaultCredential)
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("authentication error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassAuthentication,
+			"authentication error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
@@ -167,7 +190,7 @@ func (tpc *telnyxTelephony) OutboundCall(
 	// Build the WebSocket stream URL for bidirectional audio
 	streamURL := fmt.Sprintf("wss://%s/%s",
 		tpc.appCfg.Assistant.Public,
-		internal_type.GetContextAnswerPath(telnyxProvider, contextID))
+		internal_type.GetContextAnswerPath(internal_telnyx.Provider, contextID))
 
 	// Build the request body for Telnyx Call Control API
 	callRequest := map[string]interface{}{
@@ -175,26 +198,42 @@ func (tpc *telnyxTelephony) OutboundCall(
 		"to":            toPhone,
 		"from":          fromPhone,
 		"stream_url":    streamURL,
-		"stream_track":  "both_tracks", // Stream both inbound and outbound audio
+		"stream_track":  internal_telnyx.StreamTrackBoth,
 	}
 
 	requestBody, err := json.Marshal(callRequest)
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to marshal request: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestPayload,
+			"failed to build provider request payload",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
 	// Create the HTTP request
-	req, err := http.NewRequest("POST", telnyxAPIBaseURL+"/calls", bytes.NewReader(requestBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", telnyxAPIBaseURL+"/calls", bytes.NewReader(requestBody))
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to create request: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCreation,
+			"failed to create provider request",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set(internal_telnyx.HTTPHeaderContentType, internal_telnyx.HTTPContentTypeApplication)
+	req.Header.Set(internal_telnyx.HTTPHeaderAuthorization, "Bearer "+apiKey)
 
 	// Send the request with timeout
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -202,6 +241,14 @@ func (tpc *telnyxTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("API error: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			"provider API error",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			0,
+		)
 		return info, err
 	}
 	defer resp.Body.Close()
@@ -210,6 +257,14 @@ func (tpc *telnyxTelephony) OutboundCall(
 	if err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to read response: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			"failed to read provider response",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
 		return info, err
 	}
 
@@ -218,6 +273,14 @@ func (tpc *telnyxTelephony) OutboundCall(
 	if err := json.Unmarshal(respBody, &callResponse); err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("failed to parse response: %s", err.Error())
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderResponse,
+			"failed to decode provider response",
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
 		return info, err
 	}
 
@@ -233,7 +296,16 @@ func (tpc *telnyxTelephony) OutboundCall(
 		}
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("API error: %s", errMsg)
-		return info, fmt.Errorf("API error: %s", errMsg)
+		err := fmt.Errorf("%w: %s", internal_telnyx.ErrProviderAPIError, errMsg)
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassProviderAPI,
+			errMsg,
+			internal_telephony_base.OutboundDisconnectReasonSetupFailed,
+			err,
+			resp.StatusCode,
+		)
+		return info, err
 	}
 
 	// Extract call information from response
@@ -273,6 +345,7 @@ func (tpc *telnyxTelephony) OutboundCall(
 	}
 
 	info.StatusInfo = internal_type.StatusInfo{Event: eventName, Payload: callResponse}
+	internal_telephony_base.ReportOutboundInitiated(statusReporter, info.ChannelUUID)
 
 	return info, nil
 }
@@ -285,12 +358,12 @@ func (tpc *telnyxTelephony) InboundCall(c *gin.Context, auth types.SimplePrincip
 
 	// Return JSON to tell Telnyx to start streaming
 	c.JSON(http.StatusOK, gin.H{
-		"result": "streaming.start",
+		"result": internal_telnyx.InboundStreamingStart,
 		"params": gin.H{
 			"stream_url": fmt.Sprintf("wss://%s/%s",
 				tpc.appCfg.Assistant.Public,
-				internal_type.GetContextAnswerPath("telnyx", ctxID)),
-			"stream_track": "both_tracks",
+				internal_type.GetContextAnswerPath(internal_telnyx.Provider, ctxID)),
+			"stream_track": internal_telnyx.StreamTrackBoth,
 		},
 	})
 
@@ -306,22 +379,22 @@ func (tpc *telnyxTelephony) Auth(vaultCredential *protos.VaultCredential) (strin
 // getCredentials extracts API key and connection ID from vault credential.
 func (tpc *telnyxTelephony) getCredentials(vaultCredential *protos.VaultCredential) (string, string, error) {
 	if vaultCredential == nil {
-		return "", "", fmt.Errorf("vault credential is nil")
+		return "", "", internal_telnyx.ErrVaultCredentialMissing
 	}
 	if vaultCredential.GetValue() == nil {
-		return "", "", fmt.Errorf("vault credential value is nil")
+		return "", "", internal_telnyx.ErrVaultCredentialValueMissing
 	}
 
 	credMap := vaultCredential.GetValue().AsMap()
 
 	apiKey, ok := credMap["api_key"]
 	if !ok {
-		return "", "", fmt.Errorf("api_key not found in vault credential")
+		return "", "", internal_telnyx.ErrVaultAPIKeyMissing
 	}
 
 	connectionID, ok := credMap["connection_id"]
 	if !ok {
-		return "", "", fmt.Errorf("connection_id not found in vault credential")
+		return "", "", internal_telnyx.ErrVaultConnectionIDMissing
 	}
 
 	return fmt.Sprintf("%v", apiKey), fmt.Sprintf("%v", connectionID), nil
@@ -341,7 +414,7 @@ func (tpc *telnyxTelephony) HangupCall(callControlID string, vaultCredential *pr
 		return err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set(internal_telnyx.HTTPHeaderAuthorization, "Bearer "+apiKey)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -352,7 +425,7 @@ func (tpc *telnyxTelephony) HangupCall(callControlID string, vaultCredential *pr
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("hangup failed with status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("%w with status %d: %s", internal_telnyx.ErrProviderHangupFailed, resp.StatusCode, string(body))
 	}
 
 	return nil

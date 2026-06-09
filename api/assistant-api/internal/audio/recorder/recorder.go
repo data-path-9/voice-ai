@@ -6,11 +6,15 @@
 package internal_audio_recorder
 
 import (
+	"context"
+
 	internal_recorder "github.com/rapidaai/api/assistant-api/internal/audio/recorder/internal"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
-	"github.com/rapidaai/pkg/commons"
 )
 
-func GetRecorder(logger commons.Logger) (internal_type.Recorder, error) {
-	return internal_recorder.NewDefaultAudioRecorder(logger)
+func GetConversationRecordingExecutor(
+	contextID string,
+	emitPacket func(context.Context, ...internal_type.Packet) error,
+) (internal_type.ConversationRecordingExecutor, error) {
+	return internal_recorder.NewConversationRecordingExecutor(contextID, emitPacket)
 }

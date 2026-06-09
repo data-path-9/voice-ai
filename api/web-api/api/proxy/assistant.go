@@ -603,15 +603,6 @@ func (assistantGRPCApi *webAssistantGRPCApi) GetAllAssistantToolLog(ctx context.
 	return assistantGRPCApi.assistantClient.GetAllAssistantToolLog(ctx, iAuth, iRequest)
 }
 
-func (assistantGRPCApi *webAssistantGRPCApi) GetAllAssistantTelemetry(ctx context.Context, iRequest *protos.GetAllAssistantTelemetryRequest) (*protos.GetAllAssistantTelemetryResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to GetAllAssistantTelemetry")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.GetAllAssistantTelemetry(ctx, iAuth, iRequest)
-}
-
 // CreateAssistantTelemetryProvider implements [protos.AssistantServiceServer].
 func (assistantGRPCApi *webAssistantGRPCApi) CreateAssistantTelemetryProvider(ctx context.Context, iRequest *protos.CreateAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)

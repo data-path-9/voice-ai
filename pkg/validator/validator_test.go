@@ -34,8 +34,16 @@ func TestNonNil(t *testing.T) {
 	if !NonNil(&value) {
 		t.Fatal("expected non-nil pointer to pass validation")
 	}
-	if NonNil[string](nil) {
+	var valuePtr *string
+	if NonNil(valuePtr) {
 		t.Fatal("expected nil pointer to fail validation")
+	}
+	var iface interface{} = valuePtr
+	if NonNil(iface) {
+		t.Fatal("expected typed nil interface value to fail validation")
+	}
+	if !NonNil("value") {
+		t.Fatal("expected non-pointer value to pass validation")
 	}
 }
 
@@ -45,6 +53,31 @@ func TestNotBlank(t *testing.T) {
 	}
 	if NotBlank(" ") {
 		t.Fatal("expected blank string to fail validation")
+	}
+}
+
+func TestBetween(t *testing.T) {
+	tests := []struct {
+		name  string
+		value int
+		min   int
+		max   int
+		want  bool
+	}{
+		{name: "inside", value: 5, min: 1, max: 10, want: true},
+		{name: "lower bound", value: 1, min: 1, max: 10, want: true},
+		{name: "upper bound", value: 10, min: 1, max: 10, want: true},
+		{name: "below", value: 0, min: 1, max: 10, want: false},
+		{name: "above", value: 11, min: 1, max: 10, want: false},
+		{name: "invalid range", value: 5, min: 10, max: 1, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Between(tt.value, tt.min, tt.max); got != tt.want {
+				t.Fatalf("Between(%d, %d, %d) = %v, want %v", tt.value, tt.min, tt.max, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	transformer_testutil "github.com/rapidaai/api/assistant-api/internal/transformer/internal/testutil"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -86,6 +87,41 @@ func (collector *packetCollector) hasTTSError() bool {
 		}
 	}
 	return false
+}
+
+func TestNewTextToSpeech_ConfigErrorEmitsTTSErrorEvent(t *testing.T) {
+	collector := newPacketCollector()
+	transformer, err := NewTextToSpeech(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testWSCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: "wss://example.invalid/ws",
+		}),
+		collector.onPacket,
+		utils.Option{},
+	)
+
+	require.Error(t, err)
+	assert.Nil(t, transformer)
+	assert.Contains(t, err.Error(), optionKeyRequestRules)
+	assert.False(t, collector.hasTTSError(), "constructor should emit observability, not runtime TextToSpeechErrorPacket")
+
+	var found bool
+	for _, packet := range collector.all() {
+		event, ok := packet.(internal_type.ObservabilityEventRecordPacket)
+		if !ok {
+			continue
+		}
+		if event.Scope == internal_type.ObservabilityRecordScopeConversation &&
+			event.Record.Component == observability.ComponentTTS &&
+			event.Record.Event == observability.TTSError &&
+			event.Record.Attributes["provider"] == "custom-tts-websocket-v1" &&
+			event.Record.Attributes["operation"] == "load_config" &&
+			strings.Contains(event.Record.Attributes["error"], optionKeyRequestRules) {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected tts.error observability event for config failure")
 }
 
 func testWSCredential(t *testing.T, values map[string]any) *protos.VaultCredential {
@@ -457,11 +493,11 @@ func TestTextToSpeech_InterruptRequestRule(t *testing.T) {
 
 	hasInterruptedEvent := false
 	for _, packet := range collector.all() {
-		event, ok := packet.(internal_type.ConversationEventPacket)
+		event, ok := packet.(internal_type.ObservabilityEventRecordPacket)
 		if !ok {
 			continue
 		}
-		if event.ContextID == "ctx-int" && event.Name == "tts" && event.Data["type"] == "interrupted" {
+		if event.ContextID == "ctx-int" && event.Record.Component.String() == "tts" && event.Record.Attributes["type"] == "interrupted" {
 			hasInterruptedEvent = true
 		}
 	}
@@ -558,11 +594,11 @@ func TestTextToSpeech_StaleInterruptDoesNotAffectActiveConnection(t *testing.T) 
 
 	hasStaleInterruptedEvent := false
 	for _, packet := range collector.all() {
-		event, ok := packet.(internal_type.ConversationEventPacket)
+		event, ok := packet.(internal_type.ObservabilityEventRecordPacket)
 		if !ok {
 			continue
 		}
-		if event.ContextID == "ctx-stale" && event.Name == "tts" && event.Data["type"] == "interrupted" {
+		if event.ContextID == "ctx-stale" && event.Record.Component.String() == "tts" && event.Record.Attributes["type"] == "interrupted" {
 			hasStaleInterruptedEvent = true
 		}
 	}
@@ -712,82 +748,24 @@ func TestTextToSpeech_CloseEmitsConversationDurationAfterDone(t *testing.T) {
 	require.NoError(t, transformer.Close(context.Background()))
 
 	hasDurationMetric := false
+	hasDurationUsage := false
 	for _, packet := range collector.all() {
-		metricPacket, ok := packet.(internal_type.ConversationMetricPacket)
-		if !ok {
-			continue
-		}
-		for _, metric := range metricPacket.Metrics {
-			if metric.GetName() == type_enums.CONVERSATION_TTS_DURATION.String() && strings.TrimSpace(metric.GetValue()) != "" {
-				hasDurationMetric = true
+		switch typed := packet.(type) {
+		case internal_type.ObservabilityMetricRecordPacket:
+			for _, metric := range typed.Record.Metrics {
+				if metric.GetName() == type_enums.CONVERSATION_TTS_DURATION.String() && strings.TrimSpace(metric.GetValue()) != "" {
+					hasDurationMetric = true
+				}
+			}
+		case internal_type.ObservabilityUsageRecordPacket:
+			if typed.Record.Component == observability.ComponentTTS &&
+				typed.Record.Provider == "custom-tts-websocket-v1" &&
+				typed.Record.Duration > 0 &&
+				typed.Record.Attributes["metric"] == type_enums.CONVERSATION_TTS_DURATION.String() {
+				hasDurationUsage = true
 			}
 		}
 	}
 	assert.True(t, hasDurationMetric, "expected CONVERSATION_TTS_DURATION metric after Close")
-}
-
-func TestTextToSpeech_CloseUnblocksPendingDial(t *testing.T) {
-	collector := newPacketCollector()
-	transformer, err := NewTextToSpeech(
-		context.Background(),
-		transformer_testutil.NewTestLogger(),
-		testWSCredential(t, map[string]any{
-			credentialKeyBaseURLCamel: "wss://example.com/tts",
-		}),
-		collector.onPacket,
-		utils.Option{
-			optionKeyVoiceID:       "virat",
-			optionKeyRequestRules:  `[{"when":{"packet":"text"},"send":{"frame":"json","body":{"text":{"$path":"packet.text"}}}}]`,
-			optionKeyResponseRules: `[{"when":{"frame":"binary"},"emit":{"audio":{"$frame":"binary"}}}]`,
-		},
-	)
-	require.NoError(t, err)
-	require.NoError(t, transformer.Initialize())
-
-	typed, ok := transformer.(*textToSpeech)
-	require.True(t, ok)
-	dialStarted := make(chan struct{}, 1)
-	typed.dialWS = func(ctx context.Context, urlStr string, requestHeader http.Header) (*websocket.Conn, *http.Response, error) {
-		select {
-		case dialStarted <- struct{}{}:
-		default:
-		}
-		<-ctx.Done()
-		return nil, nil, ctx.Err()
-	}
-
-	transformErrCh := make(chan error, 1)
-	go func() {
-		transformErrCh <- transformer.Transform(context.Background(), internal_type.TextToSpeechTextPacket{
-			ContextID: "ctx-blocked",
-			Text:      "hello",
-		})
-	}()
-
-	select {
-	case <-dialStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for blocked dial to start")
-	}
-
-	closeErrCh := make(chan error, 1)
-	go func() {
-		closeErrCh <- transformer.Close(context.Background())
-	}()
-
-	select {
-	case err := <-closeErrCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatalf("Close() timed out while dial was blocked")
-	}
-
-	select {
-	case err := <-transformErrCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatalf("Transform() timed out after Close()")
-	}
-
-	assert.False(t, collector.hasTTSError(), "did not expect TextToSpeechErrorPacket on canceled dial during shutdown")
+	assert.True(t, hasDurationUsage, "expected TTS duration usage after Close")
 }

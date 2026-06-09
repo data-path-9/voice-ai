@@ -6,14 +6,13 @@
 package assistant_talk_api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
-	observe "github.com/rapidaai/api/assistant-api/internal/observe"
-	"github.com/rapidaai/pkg/types"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
@@ -48,34 +47,79 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 		return
 	}
 
-	observer := cApi.conversationObserver.ConversationObserver(cc.ToAuth(), cc.AssistantID, cc.ConversationID)
-	observer.EmitEvent(c, observe.ComponentTelephony, map[string]string{
-		observe.DataType:      observe.EventCallback,
-		observe.DataProvider:  cc.Provider,
-		observe.DataStatus:    statusInfo.Event,
-		observe.DataContextID: cc.ContextID,
-		observe.DataDirection: cc.Direction,
+	auth := cc.ToAuth()
+	observer := cApi.Observability(c, auth)
+	scope := observability.ConversationScope{
+		AssistantScope: observability.AssistantScope{AssistantID: cc.AssistantID},
+		ConversationID: cc.ConversationID,
+	}
+	_ = observer.Record(c, scope, observability.RecordLog{
+		Level:   observability.LevelInfo,
+		Message: "telephony provider callback received",
+		Attributes: observability.Attributes{
+			"provider":     cc.Provider,
+			"status_event": statusInfo.Event,
+			"context_id":   cc.ContextID,
+			"direction":    cc.Direction,
+			"channel_uuid": statusInfo.ChannelUUID,
+			"raw_payload":  statusInfo.RawPayload,
+		},
+	})
+	_ = observer.Record(c, scope, observability.RecordEvent{
+		Event: observability.CallStatus,
+		Attributes: observability.Attributes{
+			"provider":     cc.Provider,
+			"status_event": statusInfo.Event,
+			"context_id":   cc.ContextID,
+			"direction":    cc.Direction,
+			"channel_uuid": statusInfo.ChannelUUID,
+		},
 	})
 	if statusInfo.Error != nil {
-		observer.EmitMetric(c, observe.CallStatusMetric("FAILED", statusInfo.Error.Reason))
+		if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+			CallStatus:       callcontext.CallStatusFailed,
+			CallError:        statusInfo.Error.Error,
+			FailureClass:     "provider_response",
+			FailureReason:    statusInfo.Error.Reason,
+			DisconnectReason: statusInfo.Error.Reason,
+		}); err != nil {
+			cApi.logger.Warnf("failed to update call context %s from failed callback: %v", cc.ContextID, err)
+		}
+		_ = observer.Record(c, scope, observability.RecordMetric{
+			Metrics: observability.CallStatusMetric("FAILED", statusInfo.Error.Reason),
+		})
 		if validator.NotBlank(statusInfo.Error.Reason) {
-			observer.EmitMetadata(c, []*types.Metadata{types.NewMetadata("disconnect_reason", statusInfo.Error.Reason)})
+			_ = observer.Record(c, scope, observability.RecordMetadata{
+				Metadata: observability.DisconnectMetadata(statusInfo.Error.Reason, "", ""),
+			})
+		}
+	} else if statusInfo.Completed {
+		if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+			CallStatus:       callcontext.CallStatusCompleted,
+			DisconnectReason: statusInfo.Event,
+		}); err != nil {
+			cApi.logger.Warnf("failed to update call context %s from completed callback: %v", cc.ContextID, err)
+		}
+	} else if validator.NotBlank(statusInfo.Event) {
+		if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+			CallStatus: statusInfo.Event,
+		}); err != nil {
+			cApi.logger.Warnf("failed to update call context %s from callback event %s: %v", cc.ContextID, statusInfo.Event, err)
 		}
 	}
 	metrics := make([]*protos.Metric, 0, 2)
 	if statusInfo.Duration != nil {
-		metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10)})
+		metrics = append(metrics, &protos.Metric{Name: observability.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10)})
 	}
 	if validator.NotBlank(statusInfo.Price) {
-		metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyPrice, Value: statusInfo.Price})
+		metrics = append(metrics, &protos.Metric{Name: observability.MetricTelephonyPrice, Value: statusInfo.Price})
 	}
-	observer.EmitMetric(c, metrics)
-	if strings.EqualFold(statusInfo.Event, "completed") && statusInfo.Error == nil {
-		if err := cApi.callContextStore.UpdateField(c, cc.ContextID, "status", callcontext.StatusCompleted); err != nil {
-			cApi.logger.Warnf("failed to mark call context %s completed: %v", cc.ContextID, err)
-		}
+	if len(metrics) > 0 {
+		_ = observer.Record(c, scope, observability.RecordMetric{Metrics: metrics})
 	}
-	observer.Shutdown(c)
+	if err := observer.Close(context.Background()); err != nil {
+		cApi.logger.Warnf("failed to close callback observability recorder: %v", err)
+	}
 
 	c.Status(http.StatusCreated)
 }
@@ -102,34 +146,79 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 		return
 	}
 	if statusInfo != nil {
-		observer := cApi.conversationObserver.ConversationObserver(cc.ToAuth(), cc.AssistantID, cc.ConversationID)
-		observer.EmitEvent(c, observe.ComponentTelephony, map[string]string{
-			observe.DataType:      observe.EventCallback,
-			observe.DataProvider:  cc.Provider,
-			observe.DataStatus:    statusInfo.Event,
-			observe.DataContextID: contextID,
-			observe.DataDirection: cc.Direction,
+		auth := cc.ToAuth()
+		observer := cApi.Observability(c, auth)
+		scope := observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: cc.AssistantID},
+			ConversationID: cc.ConversationID,
+		}
+		_ = observer.Record(c, scope, observability.RecordLog{
+			Level:   observability.LevelInfo,
+			Message: "telephony provider callback received",
+			Attributes: observability.Attributes{
+				"provider":     cc.Provider,
+				"status_event": statusInfo.Event,
+				"context_id":   contextID,
+				"direction":    cc.Direction,
+				"channel_uuid": statusInfo.ChannelUUID,
+				"raw_payload":  statusInfo.RawPayload,
+			},
+		})
+		_ = observer.Record(c, scope, observability.RecordEvent{
+			Event: observability.CallStatus,
+			Attributes: observability.Attributes{
+				"provider":     cc.Provider,
+				"status_event": statusInfo.Event,
+				"context_id":   contextID,
+				"direction":    cc.Direction,
+				"channel_uuid": statusInfo.ChannelUUID,
+			},
 		})
 		if statusInfo.Error != nil {
-			observer.EmitMetric(c, observe.CallStatusMetric("FAILED", statusInfo.Error.Reason))
+			if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+				CallStatus:       callcontext.CallStatusFailed,
+				CallError:        statusInfo.Error.Error,
+				FailureClass:     "provider_response",
+				FailureReason:    statusInfo.Error.Reason,
+				DisconnectReason: statusInfo.Error.Reason,
+			}); err != nil {
+				cApi.logger.Warnf("failed to update call context %s from failed callback: %v", cc.ContextID, err)
+			}
+			_ = observer.Record(c, scope, observability.RecordMetric{
+				Metrics: observability.CallStatusMetric("FAILED", statusInfo.Error.Reason),
+			})
 			if validator.NotBlank(statusInfo.Error.Reason) {
-				observer.EmitMetadata(c, []*types.Metadata{types.NewMetadata("disconnect_reason", statusInfo.Error.Reason)})
+				_ = observer.Record(c, scope, observability.RecordMetadata{
+					Metadata: observability.DisconnectMetadata(statusInfo.Error.Reason, "", ""),
+				})
+			}
+		} else if statusInfo.Completed {
+			if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+				CallStatus:       callcontext.CallStatusCompleted,
+				DisconnectReason: statusInfo.Event,
+			}); err != nil {
+				cApi.logger.Warnf("failed to update call context %s from completed callback: %v", cc.ContextID, err)
+			}
+		} else if validator.NotBlank(statusInfo.Event) {
+			if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
+				CallStatus: statusInfo.Event,
+			}); err != nil {
+				cApi.logger.Warnf("failed to update call context %s from callback event %s: %v", cc.ContextID, statusInfo.Event, err)
 			}
 		}
 		metrics := make([]*protos.Metric, 0, 2)
 		if statusInfo.Duration != nil {
-			metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10), Description: "Call duration in nanoseconds"})
+			metrics = append(metrics, &protos.Metric{Name: observability.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10), Description: "Call duration in nanoseconds"})
 		}
 		if validator.NotBlank(statusInfo.Price) {
-			metrics = append(metrics, &protos.Metric{Name: observe.MetricTelephonyPrice, Value: statusInfo.Price, Description: "Call price"})
+			metrics = append(metrics, &protos.Metric{Name: observability.MetricTelephonyPrice, Value: statusInfo.Price, Description: "Call price"})
 		}
-		observer.EmitMetric(c, metrics)
-		if strings.EqualFold(statusInfo.Event, "completed") && statusInfo.Error == nil {
-			if err := cApi.callContextStore.UpdateField(c, cc.ContextID, "status", callcontext.StatusCompleted); err != nil {
-				cApi.logger.Warnf("failed to mark call context %s completed: %v", cc.ContextID, err)
-			}
+		if len(metrics) > 0 {
+			_ = observer.Record(c, scope, observability.RecordMetric{Metrics: metrics})
 		}
-		observer.Shutdown(c)
+		if err := observer.Close(context.Background()); err != nil {
+			cApi.logger.Warnf("failed to close callback observability recorder: %v", err)
+		}
 	}
 
 	c.Status(http.StatusCreated)

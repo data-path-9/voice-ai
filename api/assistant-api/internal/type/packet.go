@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/pkg/utils"
@@ -85,9 +86,8 @@ func (f UserTextReceivedPacket) Role() string      { return "user" }
 
 // UserAudioReceivedPacket carries raw audio input from the user (e.g. via WebRTC).
 type UserAudioReceivedPacket struct {
-	ContextID    string
-	Audio        []byte
-	NoiseReduced bool
+	ContextID string
+	Audio     []byte
 }
 
 func (f UserAudioReceivedPacket) ContextId() string { return f.ContextID }
@@ -115,10 +115,9 @@ func (f DenoiseAudioPacket) ContextId() string { return f.ContextID }
 // The denoiser pushes this via onPacket instead of returning bytes to the caller.
 // On error the denoiser falls back to the original audio with NoiseReduced=false.
 type DenoisedAudioPacket struct {
-	ContextID    string
-	Audio        []byte
-	Confidence   float64
-	NoiseReduced bool
+	ContextID  string
+	Audio      []byte
+	Confidence float64
 }
 
 func (f DenoisedAudioPacket) ContextId() string { return f.ContextID }
@@ -134,9 +133,11 @@ func (f VadAudioPacket) ContextId() string { return f.ContextID }
 // VadSpeechActivityPacket is a lightweight heartbeat emitted by the VAD on every
 // audio chunk where the user is actively speaking. The EOS detector uses it to
 // keep extending the silence timer during sustained speech.
-type VadSpeechActivityPacket struct{}
+type VadSpeechActivityPacket struct {
+	ContextID string
+}
 
-func (f VadSpeechActivityPacket) ContextId() string { return "" }
+func (f VadSpeechActivityPacket) ContextId() string { return f.ContextID }
 
 // SpeechToTextPacket carries a transcript result from the STT provider.
 type SpeechToTextPacket struct {
@@ -265,13 +266,21 @@ func (f SpeechToTextErrorPacket) IsRecoverable() bool {
 func (f SpeechToTextErrorPacket) Err() error         { return f.Error }
 func (f SpeechToTextErrorPacket) ErrMessage() string { return fmt.Sprintf("stt: %s", f.Error.Error()) }
 
-type SpeechToTextInterruptPacket struct {
+type SpeechToTextEndPacket struct {
 	ContextID string
 	StartAt   float64
 	EndAt     float64
 }
 
-func (f SpeechToTextInterruptPacket) ContextId() string { return f.ContextID }
+func (f SpeechToTextEndPacket) ContextId() string { return f.ContextID }
+
+type SpeechToTextStartPacket struct {
+	ContextID string
+	StartAt   float64
+	EndAt     float64
+}
+
+func (f SpeechToTextStartPacket) ContextId() string { return f.ContextID }
 
 // InterruptLLMPacket signals the LLM executor to cancel current generation.
 type LLMInterruptPacket struct {
@@ -440,7 +449,6 @@ func (f InitializeBehaviorPacket) ContextId() string { return f.ContextID }
 // InitializationCompletedPacket is emitted when the connect initialization chain succeeds.
 type InitializationCompletedPacket struct {
 	ContextID string
-	Event     utils.AssistantWebhookEvent
 	Config    *protos.ConversationInitialization
 }
 
@@ -459,13 +467,6 @@ type InitializeTelemetryPacket struct {
 
 func (p InitializeTelemetryPacket) ContextId() string { return p.ContextID }
 func (p InitializeTelemetryPacket) IsAsync() bool     { return true }
-
-// InitializeOutboundDispatcherPacket starts control, egress, and background dispatchers.
-type InitializeOutboundDispatcherPacket struct {
-	ContextID string
-}
-
-func (p InitializeOutboundDispatcherPacket) ContextId() string { return p.ContextID }
 
 // InitializeInboundDispatcherPacket starts the ingress dispatcher.
 type InitializeInboundDispatcherPacket struct {
@@ -490,6 +491,7 @@ const (
 	InitializationStageBehavior            InitializationStage = "behavior"
 	InitializationStageAnalysis            InitializationStage = "analysis"
 	InitializationStageWebhook             InitializationStage = "webhook"
+	InitializationStageRecording           InitializationStage = "recording"
 	InitializationStageInputNormalizer     InitializationStage = "input_normalizer"
 	InitializationStageOutputNormalizer    InitializationStage = "output_normalizer"
 	InitializationStageInitializationFinal InitializationStage = "initialization_completed"
@@ -993,20 +995,27 @@ func (f TextToSpeechEndPacket) ContextId() string { return f.ContextID }
 type RecordUserAudioPacket struct {
 	ContextID string
 	Audio     []byte
+	Timestamp time.Time
 }
 
 func (f RecordUserAudioPacket) ContextId() string { return f.ContextID }
 
 // RecordAssistantAudioPacket carries an assistant audio chunk to the recorder.
-// When Truncate is true, the recorder trims buffered assistant audio at the current
-// wall-clock position, mirroring the streamer's ClearOutputBuffer on interruption.
 type RecordAssistantAudioPacket struct {
 	ContextID string
 	Audio     []byte
-	Truncate  bool
+	Timestamp time.Time
 }
 
 func (f RecordAssistantAudioPacket) ContextId() string { return f.ContextID }
+
+// ConversationRecordingCompletedPacket carries finalized recording audio for persistence.
+type ConversationRecordingCompletedPacket struct {
+	ContextID string
+	Audio     ConversationRecordingAudio
+}
+
+func (f ConversationRecordingCompletedPacket) ContextId() string { return f.ContextID }
 
 // =============================================================================
 // Persistence
@@ -1065,84 +1074,138 @@ func (f HTTPLogCreatePacket) ContextId() string { return f.ContextID }
 func (f HTTPLogCreatePacket) IsAsync() bool     { return true }
 
 // =============================================================================
-// Metrics & Metadata
-// =============================================================================
-
-// ConversationMetricPacket carries conversation-level metrics.
-type ConversationMetricPacket struct {
-	ContextID uint64
-	Metrics   []*protos.Metric
-}
-
-func (f ConversationMetricPacket) ContextId() string      { return fmt.Sprintf("%d", f.ContextID) }
-func (f ConversationMetricPacket) ConversationID() uint64 { return f.ContextID }
-
-// ConversationMetadataPacket carries conversation-level metadata.
-type ConversationMetadataPacket struct {
-	ContextID uint64
-	Metadata  []*protos.Metadata
-}
-
-func (f ConversationMetadataPacket) ContextId() string      { return fmt.Sprintf("%d", f.ContextID) }
-func (f ConversationMetadataPacket) ConversationID() uint64 { return f.ContextID }
-
-// UserMessageMetricPacket carries metrics for a user message turn.
-type UserMessageMetricPacket struct {
-	ContextID string
-	Metrics   []*protos.Metric
-}
-
-func (f UserMessageMetricPacket) ContextId() string { return f.ContextID }
-
-// AssistantMessageMetricPacket carries metrics for an assistant message turn.
-type AssistantMessageMetricPacket struct {
-	ContextID string
-	Metrics   []*protos.Metric
-}
-
-func (f AssistantMessageMetricPacket) ContextId() string { return f.ContextID }
-
-// AssistantMessageMetadataPacket carries metadata for an assistant message turn.
-type AssistantMessageMetadataPacket struct {
-	ContextID string
-	Metadata  []*protos.Metadata
-}
-
-func (f AssistantMessageMetadataPacket) ContextId() string { return f.ContextID }
-
-// UserMessageMetadataPacket carries metadata for a user message turn.
-type UserMessageMetadataPacket struct {
-	ContextID string
-	Metadata  []*protos.Metadata
-}
-
-func (f UserMessageMetadataPacket) ContextId() string { return f.ContextID }
-
-// =============================================================================
 // Observability
 // =============================================================================
 
-// ConversationEventPacket carries a named pipeline event for the debugger.
-// Each component emits these alongside its existing packets; they flow through
-// lowCh so they never compete with STT/LLM/TTS audio.
-type ConversationEventPacket struct {
-	// ContextID identifies the interaction turn. May be empty when emitted by
-	// components that don't hold the session context (e.g. STT callbacks);
-	// handleConversationEvent fills it from r.GetID() in that case.
-	ContextID string
+// ObservabilityRecordPacket is the base packet for emitting a typed observability record.
+type ObservabilityRecordScope string
 
-	// Name is the component name: "stt", "tts", "llm", "vad", "eos",
-	// "knowledge", "session", "behavior", "denoise", "audio", "tool", etc.
-	Name string
+const (
+	ObservabilityRecordScopeAssistant    ObservabilityRecordScope = "assistant"
+	ObservabilityRecordScopeConversation ObservabilityRecordScope = "conversation"
+	ObservabilityRecordScopeMessage      ObservabilityRecordScope = "message"
+)
 
-	// Data carries event-specific key/value pairs. Always includes "type".
-	Data map[string]string
-
-	// Time is the wall-clock time the event was raised.
-	Time time.Time
+type ObservabilityRecordPacket interface {
+	ContextId() string
+	GetScope() ObservabilityRecordScope
+	GetMessageRole() observability.MessageRole
+	GetRecord() observability.Record
 }
 
-func (f ConversationEventPacket) ContextId() string { return f.ContextID }
+// ObservabilityLogRecordPacket emits an observability.RecordLog.
+type ObservabilityLogRecordPacket struct {
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordLog
+}
+
+func (p ObservabilityLogRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityLogRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityLogRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
+func (p ObservabilityLogRecordPacket) GetRecord() observability.Record {
+	return p.Record
+}
+
+// ObservabilityEventRecordPacket emits an observability.RecordEvent.
+type ObservabilityEventRecordPacket struct {
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordEvent
+}
+
+func (p ObservabilityEventRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityEventRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityEventRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
+func (p ObservabilityEventRecordPacket) GetRecord() observability.Record {
+	return p.Record
+}
+
+// ObservabilityMetricRecordPacket emits an observability.RecordMetric.
+type ObservabilityMetricRecordPacket struct {
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordMetric
+}
+
+func (p ObservabilityMetricRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityMetricRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityMetricRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
+func (p ObservabilityMetricRecordPacket) GetRecord() observability.Record {
+	return p.Record
+}
+
+// ObservabilityMetadataRecordPacket emits an observability.RecordMetadata.
+type ObservabilityMetadataRecordPacket struct {
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordMetadata
+}
+
+func (p ObservabilityMetadataRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityMetadataRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityMetadataRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
+func (p ObservabilityMetadataRecordPacket) GetRecord() observability.Record {
+	return p.Record
+}
+
+// ObservabilityUsageRecordPacket emits an observability.RecordUsage.
+type ObservabilityUsageRecordPacket struct {
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordUsage
+}
+
+func (p ObservabilityUsageRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityUsageRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityUsageRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
+func (p ObservabilityUsageRecordPacket) GetRecord() observability.Record {
+	return p.Record
+}
+
+// ObservabilityWebhookRecordPacket emits an observability.RecordWebhook.
+type ObservabilityWebhookRecordPacket struct {
+	ContextID   string
+	Scope       ObservabilityRecordScope
+	MessageRole observability.MessageRole
+	Record      observability.RecordWebhook
+}
+
+func (p ObservabilityWebhookRecordPacket) ContextId() string { return p.ContextID }
+func (p ObservabilityWebhookRecordPacket) GetScope() ObservabilityRecordScope {
+	return p.Scope
+}
+func (p ObservabilityWebhookRecordPacket) GetMessageRole() observability.MessageRole {
+	return p.MessageRole
+}
+func (p ObservabilityWebhookRecordPacket) GetRecord() observability.Record {
+	return p.Record
+}
 
 // =============================================================================
 // Non-packet Support Types

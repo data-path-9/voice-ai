@@ -7,25 +7,22 @@
 package internal_exotel_telephony
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
-	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_exotel "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/exotel/internal"
 	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-var exotelLinear8kConfig = internal_audio.NewLinear8khzMonoAudioConfig()
 
 type exotelWebsocketStreamer struct {
 	internal_telephony_base.BaseTelephonyStreamer
@@ -36,37 +33,72 @@ type exotelWebsocketStreamer struct {
 	streamID     string
 }
 
-func NewExotelWebsocketStreamer(logger commons.Logger, connection *websocket.Conn, cc *callcontext.CallContext, vaultCred *protos.VaultCredential,
-) (internal_type.Streamer, error) {
-	audioProcessor, err := internal_exotel.NewAudioProcessor(logger)
+type StreamerOptions struct {
+	Logger          commons.Logger
+	Connection      *websocket.Conn
+	CallContext     *callcontext.CallContext
+	VaultCredential *protos.VaultCredential
+	Observer        observability.Recorder
+}
+
+type FuncOption func(*StreamerOptions)
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithConnection(connection *websocket.Conn) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Connection = connection
+	}
+}
+
+func WithCallContext(callContext *callcontext.CallContext) FuncOption {
+	return func(options *StreamerOptions) {
+		options.CallContext = callContext
+	}
+}
+
+func WithVaultCredential(vaultCredential *protos.VaultCredential) FuncOption {
+	return func(options *StreamerOptions) {
+		options.VaultCredential = vaultCredential
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.Streamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	audioProcessor, err := internal_exotel.NewAudioProcessor(options.Logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Exotel audio processor: %w", err)
+		return nil, fmt.Errorf("%w: %w", internal_exotel.ErrAudioProcessorInitFailed, err)
 	}
 	exotel := &exotelWebsocketStreamer{
-		BaseTelephonyStreamer: internal_telephony_base.NewBaseTelephonyStreamer(
-			logger, cc, vaultCred,
-			internal_telephony_base.WithSourceAudioConfig(exotelLinear8kConfig),
+		BaseTelephonyStreamer: internal_telephony_base.New(
+			options.Logger, options.CallContext, options.VaultCredential, options.Observer,
 		),
 		streamID:   "",
-		connection: connection,
+		connection: options.Connection,
 	}
-	audioProcessor.SetOutputChunkCallback(exotel.sendAudioChunk)
-	exotel.mediaSession = internal_telephony_media.NewMediaSession(context.Background(), logger, audioProcessor, func() error {
-		return exotel.sendExotelMessage("clear", nil)
-	})
-	exotel.mediaSession.SetInputSink(func(audio []byte) {
-		exotel.Input(&protos.ConversationUserMessage{
-			Message: &protos.ConversationUserMessage_Audio{Audio: audio},
-		})
-	})
-	exotel.mediaSession.SetEventSink(func(event *protos.ConversationEvent) {
-		if event != nil {
-			if event.Data == nil {
-				event.Data = map[string]string{}
-			}
-			event.Data["provider"] = "exotel"
-		}
-		exotel.Input(event)
+	exotel.mediaSession = internal_telephony_media.NewMediaSession(internal_telephony_media.MediaSessionConfig{
+		Context:     exotel.Ctx,
+		Logger:      options.Logger,
+		MediaEngine: audioProcessor,
+		SendProviderClear: func() error {
+			return exotel.sendExotelMessage(internal_exotel.EventTypeClear, nil)
+		},
+		StreamSink: exotel.Input,
+		OutputSink: exotel.sendOutputFrame,
+		Record:     exotel.Record,
 	})
 	go exotel.runWebSocketReader()
 	return exotel, nil
@@ -81,6 +113,38 @@ func (exotel *exotelWebsocketStreamer) runWebSocketReader() {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			exotel.stopAudioProcessing()
+			_ = exotel.Record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Exotel websocket reader closed",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"stream_id":         exotel.streamID,
+					"conversation_uuid": exotel.ChannelUUID,
+					"error":             err.Error(),
+				},
+			}, observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallEnded,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"stream_id":         exotel.streamID,
+					"conversation_uuid": exotel.ChannelUUID,
+					"reason":            "websocket_closed",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "websocket_closed"},
+					{Key: observability.MetadataDisconnectReason, Value: "websocket_closed"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "COMPLETE",
+					Description: "Exotel websocket reader closed",
+				}},
+			})
 			if msg := exotel.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				exotel.Input(msg)
 			}
@@ -89,43 +153,155 @@ func (exotel *exotelWebsocketStreamer) runWebSocketReader() {
 		}
 		var mediaEvent internal_exotel.ExotelMediaEvent
 		if err := json.Unmarshal(message, &mediaEvent); err != nil {
-			exotel.Logger.Error("Failed to unmarshal Exotel media event", "error", err.Error())
+			_ = exotel.Record(observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Failed to unmarshal Exotel media event",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"stream_id":         exotel.streamID,
+					"conversation_uuid": exotel.ChannelUUID,
+					"error":             err.Error(),
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "FAILED",
+					Description: "Failed to unmarshal Exotel media event",
+				}},
+			})
 			continue
 		}
 		switch mediaEvent.Event {
-		case "connected":
+		case internal_exotel.EventTypeConnected:
 			exotel.Input(exotel.CreateConnectionRequest())
-			exotel.Input(&protos.ConversationEvent{
-				Name: "channel",
-				Data: map[string]string{"type": "connected", "provider": "exotel"},
-				Time: timestamppb.Now(),
+			_ = exotel.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallSessionConnected,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"provider_event":    string(internal_exotel.EventTypeConnected),
+					"conversation_uuid": exotel.ChannelUUID,
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataClientChannel, Value: internal_exotel.Provider},
+					{Key: observability.MetadataClientProviderCallID, Value: exotel.ChannelUUID},
+					{Key: observability.MetadataCallStatus, Value: "connected"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "INPROGRESS",
+					Description: "Exotel websocket connected",
+				}},
 			})
-		case "start":
+		case internal_exotel.EventTypeStart:
 			exotel.handleStartEvent(mediaEvent)
 			if exotel.mediaSession != nil {
 				exotel.mediaSession.Start()
 			}
-			exotel.Input(&protos.ConversationEvent{
-				Name: "channel",
-				Data: map[string]string{"type": "stream_started", "provider": "exotel", "stream_id": exotel.streamID},
-				Time: timestamppb.Now(),
+			_ = exotel.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallMediaStarted,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"provider_event":    string(internal_exotel.EventTypeStart),
+					"stream_id":         exotel.streamID,
+					"conversation_uuid": exotel.ChannelUUID,
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataClientChannel, Value: internal_exotel.Provider},
+					{Key: observability.MetadataClientProviderCallID, Value: exotel.ChannelUUID},
+					{Key: observability.MetadataClientCodec, Value: "linear16"},
+					{Key: observability.MetadataClientSampleRate, Value: "16000"},
+					{Key: observability.MetadataCallStatus, Value: "media_started"},
+					{Key: "exotel.stream_id", Value: exotel.streamID},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "INPROGRESS",
+					Description: "Exotel media stream started",
+				}},
 			})
-		case "media":
-			_ = exotel.handleMediaEvent(mediaEvent)
-		case "dtmf":
-			exotel.Input(&protos.ConversationEvent{
-				Name: "channel",
-				Data: map[string]string{"type": "dtmf", "provider": "exotel"},
-				Time: timestamppb.Now(),
+		case internal_exotel.EventTypeMedia:
+			if err := exotel.handleMediaEvent(mediaEvent); err != nil {
+				_ = exotel.Record(observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Failed to process Exotel media frame",
+					Attributes: observability.Attributes{
+						"component":         observability.ComponentCall.String(),
+						"provider":          internal_exotel.Provider,
+						"stream_id":         exotel.streamID,
+						"conversation_uuid": exotel.ChannelUUID,
+						"error":             err.Error(),
+					},
+				}, observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       "FAILED",
+						Description: "Exotel media frame processing failed",
+					}},
+				})
+			}
+		case internal_exotel.EventTypeDTMF:
+			_ = exotel.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallStatus,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"provider_event":    string(internal_exotel.EventTypeDTMF),
+					"stream_id":         exotel.streamID,
+					"conversation_uuid": exotel.ChannelUUID,
+					"status":            internal_exotel.ChannelEventDTMF,
+				},
 			})
-		case "stop":
+		case internal_exotel.EventTypeStop:
+			_ = exotel.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallHangup,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"provider_event":    string(internal_exotel.EventTypeStop),
+					"stream_id":         exotel.streamID,
+					"conversation_uuid": exotel.ChannelUUID,
+					"reason":            "provider_stop",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "provider_stop"},
+					{Key: observability.MetadataDisconnectReason, Value: "provider_stop"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "COMPLETE",
+					Description: "Exotel media stream stopped by provider",
+				}},
+			})
 			if msg := exotel.Disconnect(protos.ConversationDisconnection_DISCONNECTION_TYPE_USER); msg != nil {
 				exotel.Input(msg)
 			}
 			exotel.Cancel()
 			return
 		default:
-			exotel.Logger.Warn("Unhandled Exotel event", "event", mediaEvent.Event)
+			_ = exotel.Record(observability.RecordLog{
+				Level:   observability.LevelDebug,
+				Message: "Unhandled Exotel event",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"provider_event":    string(mediaEvent.Event),
+					"stream_id":         exotel.streamID,
+					"conversation_uuid": exotel.ChannelUUID,
+				},
+			})
 		}
 	}
 }
@@ -159,11 +335,57 @@ func (exotel *exotelWebsocketStreamer) Send(response internal_type.Stream) error
 		// CriticalCh — Exotel has no REST API to terminate a call; closing
 		// the WebSocket via Cancel is the only way to release the call leg.
 		_ = exotel.Disconnect(data.GetType())
+		_ = exotel.Record(observability.RecordEvent{
+			Component: observability.ComponentCall,
+			Event:     observability.CallHangup,
+			Attributes: observability.Attributes{
+				"component":          observability.ComponentCall.String(),
+				"provider":           internal_exotel.Provider,
+				"stream_id":          exotel.streamID,
+				"conversation_uuid":  exotel.ChannelUUID,
+				"disconnection_type": data.GetType().String(),
+				"reason":             "server_side_disconnect",
+			},
+		}, observability.RecordMetadata{
+			Metadata: []*protos.Metadata{
+				{Key: observability.MetadataCallStatus, Value: "completed"},
+				{Key: observability.MetadataDisconnectReason, Value: "server_side_disconnect"},
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       "COMPLETE",
+				Description: "Exotel call ended by server-side disconnect",
+			}},
+		})
 		exotel.stopAudioProcessing()
 		exotel.Cancel()
 	case *protos.ConversationToolCall:
 		switch data.GetAction() {
 		case protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION:
+			_ = exotel.Record(observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallHangup,
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"stream_id":         exotel.streamID,
+					"conversation_uuid": exotel.ChannelUUID,
+					"tool_action":       data.GetAction().String(),
+					"reason":            "tool_end_conversation",
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "completed"},
+					{Key: observability.MetadataDisconnectReason, Value: "tool_end_conversation"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "COMPLETE",
+					Description: "Exotel call ended by tool action",
+				}},
+			})
 			exotel.Input(&protos.ConversationToolCallResult{
 				Id:     data.GetId(),
 				ToolId: data.GetToolId(),
@@ -178,15 +400,49 @@ func (exotel *exotelWebsocketStreamer) Send(response internal_type.Stream) error
 			// an out-of-band Connect/Dial app and redirecting via the Exotel
 			// HTTP API; resume_ai is not feasible without a B2BUA bridge
 			// (Exotel does not provide an SDP/RTP path to bridge against).
-			exotel.Logger.Warnw("Call transfer not supported for Exotel")
+			_ = exotel.Record(observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Exotel call transfer is not supported",
+				Attributes: observability.Attributes{
+					"component":         observability.ComponentCall.String(),
+					"provider":          internal_exotel.Provider,
+					"stream_id":         exotel.streamID,
+					"conversation_uuid": exotel.ChannelUUID,
+					"tool_action":       data.GetAction().String(),
+					"transfer_to":       data.GetArgs()["transfer_to"],
+				},
+			}, observability.RecordMetadata{
+				Metadata: []*protos.Metadata{
+					{Key: observability.MetadataCallStatus, Value: "transfer_failed"},
+					{Key: observability.MetadataFailureReason, Value: "transfer not supported for Exotel"},
+				},
+			}, observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       "FAILED",
+					Description: "Exotel call transfer is not supported",
+				}},
+			})
 			exotel.Input(&protos.ConversationToolCallResult{
 				Id:     data.GetId(),
-				ToolId: data.GetToolId(), Name: data.GetName(), Action: data.GetAction(),
+				ToolId: data.GetToolId(),
+				Name:   data.GetName(),
+				Action: data.GetAction(),
 				Result: map[string]string{"status": "failed", "reason": "transfer not supported for Exotel", "next_action": "end_call"},
 			})
 		}
 	default:
-		exotel.Logger.Warnw("Exotel Send: unknown message type, skipping", "type", fmt.Sprintf("%T", response))
+		_ = exotel.Record(observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Exotel Send unknown message type",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_exotel.Provider,
+				"stream_id":         exotel.streamID,
+				"conversation_uuid": exotel.ChannelUUID,
+				"type":              fmt.Sprintf("%T", response),
+			},
+		})
 	}
 	return nil
 }
@@ -196,35 +452,84 @@ func (exotel *exotelWebsocketStreamer) handleStartEvent(mediaEvent internal_exot
 }
 
 func (exotel *exotelWebsocketStreamer) handleMediaEvent(mediaEvent internal_exotel.ExotelMediaEvent) error {
+	if mediaEvent.Media == nil {
+		_ = exotel.Record(observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Exotel media event missing media payload",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_exotel.Provider,
+				"stream_id":         exotel.streamID,
+				"conversation_uuid": exotel.ChannelUUID,
+			},
+		})
+		return nil
+	}
+	receivedAt := time.Now()
 	payloadBytes, err := exotel.Encoder().DecodeString(mediaEvent.Media.Payload)
 	if err != nil {
-		exotel.Logger.Warn("Failed to decode media payload", "error", err.Error())
+		_ = exotel.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to decode Exotel media payload",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_exotel.Provider,
+				"stream_id":         exotel.streamID,
+				"conversation_uuid": exotel.ChannelUUID,
+				"error":             err.Error(),
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       "FAILED",
+				Description: "Failed to decode Exotel media payload",
+			}},
+		})
 		return nil
 	}
 
 	if exotel.mediaSession == nil {
 		return nil
 	}
-	if err := exotel.mediaSession.HandleProviderAudio(payloadBytes); err != nil {
+	if err := exotel.mediaSession.HandleProviderAudioFrame(internal_telephony_media.ProviderAudioFrame{
+		Audio:      payloadBytes,
+		ReceivedAt: receivedAt,
+	}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (exotel *exotelWebsocketStreamer) sendExotelMessage(eventType string, mediaData map[string]interface{}) error {
+func (exotel *exotelWebsocketStreamer) sendExotelMessage(eventType internal_exotel.EventType, mediaData *internal_exotel.ExotelOutboundMedia) error {
 	if exotel.streamID == "" {
 		return nil
 	}
-	message := map[string]interface{}{
-		"event":     eventType,
-		"streamSid": exotel.streamID,
-	}
-	if mediaData != nil {
-		message["media"] = mediaData
+	message := internal_exotel.ExotelOutboundMessage{
+		Event:    eventType,
+		StreamID: exotel.streamID,
+		Media:    mediaData,
 	}
 	exotelMessageJSON, err := json.Marshal(message)
 	if err != nil {
-		return exotel.handleError("Failed to marshal Exotel message", err)
+		_ = exotel.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to marshal Exotel message",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_exotel.Provider,
+				"provider_event":    string(eventType),
+				"stream_id":         exotel.streamID,
+				"conversation_uuid": exotel.ChannelUUID,
+				"error":             err.Error(),
+			},
+		}, observability.RecordMetric{
+			Metrics: []*protos.Metric{{
+				Name:        observability.MetricCallStatus,
+				Value:       "FAILED",
+				Description: "Failed to marshal Exotel message",
+			}},
+		})
+		return err
 	}
 	exotel.writeMu.Lock()
 	defer exotel.writeMu.Unlock()
@@ -232,14 +537,21 @@ func (exotel *exotelWebsocketStreamer) sendExotelMessage(eventType string, media
 		return nil
 	}
 	if err := exotel.connection.WriteMessage(websocket.TextMessage, exotelMessageJSON); err != nil {
-		return exotel.handleError("Failed to send message to Exotel", err)
+		_ = exotel.Record(observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "Failed to send message to Exotel",
+			Attributes: observability.Attributes{
+				"component":         observability.ComponentCall.String(),
+				"provider":          internal_exotel.Provider,
+				"provider_event":    string(eventType),
+				"stream_id":         exotel.streamID,
+				"conversation_uuid": exotel.ChannelUUID,
+				"error":             err.Error(),
+			},
+		})
+		return err
 	}
 	return nil
-}
-
-func (exotel *exotelWebsocketStreamer) handleError(message string, err error) error {
-	exotel.Logger.Error(message, "error", err.Error())
-	return err
 }
 
 func (exotel *exotelWebsocketStreamer) Cancel() error {
@@ -258,12 +570,12 @@ func (exotel *exotelWebsocketStreamer) Cancel() error {
 	return nil
 }
 
-func (exotel *exotelWebsocketStreamer) sendAudioChunk(chunk *internal_exotel.AudioChunk) error {
-	if chunk == nil || len(chunk.Data) == 0 {
+func (exotel *exotelWebsocketStreamer) sendOutputFrame(frame internal_telephony_media.AssistantOutputFrame) error {
+	if len(frame.ProviderAudio) == 0 {
 		return nil
 	}
-	return exotel.sendExotelMessage("media", map[string]interface{}{
-		"payload": exotel.Encoder().EncodeToString(chunk.Data),
+	return exotel.sendExotelMessage(internal_exotel.EventTypeMedia, &internal_exotel.ExotelOutboundMedia{
+		Payload: exotel.Encoder().EncodeToString(frame.ProviderAudio),
 	})
 }
 

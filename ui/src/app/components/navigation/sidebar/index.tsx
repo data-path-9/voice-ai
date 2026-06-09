@@ -63,7 +63,9 @@ export function SidebarNavigation(props: {}) {
         <ul>
           <Dashboard isLoading={isLoading} />
           <Deployment isLoading={isLoading} />
-          {workspace.features?.knowledge !== false && <Knowledge isLoading={isLoading} />}
+          {workspace.features?.knowledge !== false && (
+            <Knowledge isLoading={isLoading} />
+          )}
         </ul>
 
         {/* Group 2 — Observability */}
@@ -79,7 +81,11 @@ export function SidebarNavigation(props: {}) {
                 : 'opacity-0 h-0 py-0 overflow-hidden border-none',
             )}
           >
-            <Text isLoading={isLoading} skeletonWidth="60%">
+            <Text
+              isLoading={isLoading}
+              skeletonWidth="60%"
+              className="uppercase"
+            >
               Observability
             </Text>
           </div>
@@ -101,7 +107,11 @@ export function SidebarNavigation(props: {}) {
                 : 'opacity-0 h-0 py-0 overflow-hidden border-none',
             )}
           >
-            <Text isLoading={isLoading} skeletonWidth="60%">
+            <Text
+              isLoading={isLoading}
+              skeletonWidth="60%"
+              className="uppercase"
+            >
               Integrations
             </Text>
           </div>
@@ -124,7 +134,11 @@ export function SidebarNavigation(props: {}) {
                 : 'opacity-0 h-0 py-0 overflow-hidden border-none',
             )}
           >
-            <Text isLoading={isLoading} skeletonWidth="60%">
+            <Text
+              isLoading={isLoading}
+              skeletonWidth="60%"
+              className="uppercase"
+            >
               Organizations
             </Text>
           </div>

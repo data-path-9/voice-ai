@@ -31,7 +31,6 @@ const (
 	AssistantService_GetAllAssistantMessage_FullMethodName           = "/assistant_api.AssistantService/GetAllAssistantMessage"
 	AssistantService_GetAllConversationMessage_FullMethodName        = "/assistant_api.AssistantService/GetAllConversationMessage"
 	AssistantService_GetAllMessage_FullMethodName                    = "/assistant_api.AssistantService/GetAllMessage"
-	AssistantService_GetAllAssistantTelemetry_FullMethodName         = "/assistant_api.AssistantService/GetAllAssistantTelemetry"
 	AssistantService_GetAssistantTelemetryProvider_FullMethodName    = "/assistant_api.AssistantService/GetAssistantTelemetryProvider"
 	AssistantService_GetAllAssistantTelemetryProvider_FullMethodName = "/assistant_api.AssistantService/GetAllAssistantTelemetryProvider"
 	AssistantService_CreateAssistantTelemetryProvider_FullMethodName = "/assistant_api.AssistantService/CreateAssistantTelemetryProvider"
@@ -85,7 +84,6 @@ type AssistantServiceClient interface {
 	GetAllAssistantMessage(ctx context.Context, in *GetAllAssistantMessageRequest, opts ...grpc.CallOption) (*GetAllAssistantMessageResponse, error)
 	GetAllConversationMessage(ctx context.Context, in *GetAllConversationMessageRequest, opts ...grpc.CallOption) (*GetAllConversationMessageResponse, error)
 	GetAllMessage(ctx context.Context, in *GetAllMessageRequest, opts ...grpc.CallOption) (*GetAllMessageResponse, error)
-	GetAllAssistantTelemetry(ctx context.Context, in *GetAllAssistantTelemetryRequest, opts ...grpc.CallOption) (*GetAllAssistantTelemetryResponse, error)
 	GetAssistantTelemetryProvider(ctx context.Context, in *GetAssistantTelemetryProviderRequest, opts ...grpc.CallOption) (*GetAssistantTelemetryProviderResponse, error)
 	GetAllAssistantTelemetryProvider(ctx context.Context, in *GetAllAssistantTelemetryProviderRequest, opts ...grpc.CallOption) (*GetAllAssistantTelemetryProviderResponse, error)
 	CreateAssistantTelemetryProvider(ctx context.Context, in *CreateAssistantTelemetryProviderRequest, opts ...grpc.CallOption) (*GetAssistantTelemetryProviderResponse, error)
@@ -250,16 +248,6 @@ func (c *assistantServiceClient) GetAllMessage(ctx context.Context, in *GetAllMe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetAllMessageResponse)
 	err := c.cc.Invoke(ctx, AssistantService_GetAllMessage_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *assistantServiceClient) GetAllAssistantTelemetry(ctx context.Context, in *GetAllAssistantTelemetryRequest, opts ...grpc.CallOption) (*GetAllAssistantTelemetryResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetAllAssistantTelemetryResponse)
-	err := c.cc.Invoke(ctx, AssistantService_GetAllAssistantTelemetry_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -632,7 +620,6 @@ type AssistantServiceServer interface {
 	GetAllAssistantMessage(context.Context, *GetAllAssistantMessageRequest) (*GetAllAssistantMessageResponse, error)
 	GetAllConversationMessage(context.Context, *GetAllConversationMessageRequest) (*GetAllConversationMessageResponse, error)
 	GetAllMessage(context.Context, *GetAllMessageRequest) (*GetAllMessageResponse, error)
-	GetAllAssistantTelemetry(context.Context, *GetAllAssistantTelemetryRequest) (*GetAllAssistantTelemetryResponse, error)
 	GetAssistantTelemetryProvider(context.Context, *GetAssistantTelemetryProviderRequest) (*GetAssistantTelemetryProviderResponse, error)
 	GetAllAssistantTelemetryProvider(context.Context, *GetAllAssistantTelemetryProviderRequest) (*GetAllAssistantTelemetryProviderResponse, error)
 	CreateAssistantTelemetryProvider(context.Context, *CreateAssistantTelemetryProviderRequest) (*GetAssistantTelemetryProviderResponse, error)
@@ -717,9 +704,6 @@ func (UnimplementedAssistantServiceServer) GetAllConversationMessage(context.Con
 }
 func (UnimplementedAssistantServiceServer) GetAllMessage(context.Context, *GetAllMessageRequest) (*GetAllMessageResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAllMessage not implemented")
-}
-func (UnimplementedAssistantServiceServer) GetAllAssistantTelemetry(context.Context, *GetAllAssistantTelemetryRequest) (*GetAllAssistantTelemetryResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetAllAssistantTelemetry not implemented")
 }
 func (UnimplementedAssistantServiceServer) GetAssistantTelemetryProvider(context.Context, *GetAssistantTelemetryProviderRequest) (*GetAssistantTelemetryProviderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAssistantTelemetryProvider not implemented")
@@ -1058,24 +1042,6 @@ func _AssistantService_GetAllMessage_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AssistantServiceServer).GetAllMessage(ctx, req.(*GetAllMessageRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AssistantService_GetAllAssistantTelemetry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetAllAssistantTelemetryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AssistantServiceServer).GetAllAssistantTelemetry(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AssistantService_GetAllAssistantTelemetry_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AssistantServiceServer).GetAllAssistantTelemetry(ctx, req.(*GetAllAssistantTelemetryRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1764,10 +1730,6 @@ var AssistantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAllMessage",
 			Handler:    _AssistantService_GetAllMessage_Handler,
-		},
-		{
-			MethodName: "GetAllAssistantTelemetry",
-			Handler:    _AssistantService_GetAllAssistantTelemetry_Handler,
 		},
 		{
 			MethodName: "GetAssistantTelemetryProvider",

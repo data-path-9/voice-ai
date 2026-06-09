@@ -15,7 +15,7 @@ import (
 )
 
 // CreateAssistantWhatsappDeployment implements assistant_api.AssistantDeploymentServiceServer.
-func (deploymentApi *assistantDeploymentApi) CreateAssistantWhatsappDeployment(ctx context.Context, deployment *assistant_api.CreateAssistantDeploymentRequest) (*assistant_api.GetAssistantWhatsappDeploymentResponse, error) {
+func (deploymentApi *assistantDeploymentGrpcApi) CreateAssistantWhatsappDeployment(ctx context.Context, deployment *assistant_api.CreateAssistantDeploymentRequest) (*assistant_api.GetAssistantWhatsappDeploymentResponse, error) {
 	iAuth, isAuthenticated := types.GetSimplePrincipleGRPC(ctx)
 	if !isAuthenticated || iAuth.GetCurrentProjectId() == nil {
 		deploymentApi.logger.Errorf("unauthenticated request for invoke")

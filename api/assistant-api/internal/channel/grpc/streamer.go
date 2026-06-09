@@ -3,11 +3,12 @@
 //
 // Licensed under GPL-2.0 with Rapida Additional Terms.
 // See LICENSE.md or contact sales@rapida.ai for commercial usage.
-package channel_grpc_test
+package channel_grpc
 
 import (
 	"context"
 
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -15,21 +16,64 @@ import (
 )
 
 type unidirectionalStreamer struct {
-	server grpc.BidiStreamingServer[protos.AssistantTalkRequest, protos.AssistantTalkResponse]
+	ctx      context.Context
+	logger   commons.Logger
+	server   grpc.BidiStreamingServer[protos.AssistantTalkRequest, protos.AssistantTalkResponse]
+	observer observability.Recorder
 }
 
-func NewGrpcStreamer(
-	ctx context.Context,
-	logger commons.Logger,
-	server protos.TalkService_AssistantTalkServer,
-) (internal_type.Streamer, error) {
+type StreamerOptions struct {
+	Context  context.Context
+	Logger   commons.Logger
+	Server   protos.TalkService_AssistantTalkServer
+	Observer observability.Recorder
+}
+
+type FuncOption func(*StreamerOptions)
+
+func WithContext(ctx context.Context) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Context = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Logger = logger
+	}
+}
+
+func WithServer(server protos.TalkService_AssistantTalkServer) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Server = server
+	}
+}
+
+func WithObserver(observer observability.Recorder) FuncOption {
+	return func(options *StreamerOptions) {
+		options.Observer = observer
+	}
+}
+
+func New(opts ...FuncOption) (internal_type.Streamer, error) {
+	var options StreamerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
 	return &unidirectionalStreamer{
-		server: server,
+		ctx:      options.Context,
+		logger:   options.Logger,
+		server:   options.Server,
+		observer: options.Observer,
 	}, nil
 }
 
 func (uds *unidirectionalStreamer) Context() context.Context {
-	return uds.server.Context()
+	return uds.ctx
+}
+
+func (uds *unidirectionalStreamer) Observer() observability.Recorder {
+	return uds.observer
 }
 
 // NotifyMode is a no-op for the plain gRPC streamer (audio transport is N/A).

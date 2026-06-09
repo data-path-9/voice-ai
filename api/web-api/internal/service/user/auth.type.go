@@ -164,6 +164,6 @@ func (aP *authPrinciple) GetCurrentToken() string {
 	return ""
 }
 
-func (ap *authPrinciple) Type() string {
-	return "user"
+func (ap *authPrinciple) Type() types.AuthType {
+	return types.AuthTypeUser
 }

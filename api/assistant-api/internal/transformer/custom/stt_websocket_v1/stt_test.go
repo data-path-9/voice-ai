@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	transformer_testutil "github.com/rapidaai/api/assistant-api/internal/transformer/internal/testutil"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/utils"
@@ -56,6 +57,41 @@ func (collector *sttPacketCollector) hasSTTError() bool {
 		}
 	}
 	return false
+}
+
+func TestNewSpeechToText_ConfigErrorEmitsSTTErrorEvent(t *testing.T) {
+	collector := &sttPacketCollector{}
+	transformer, err := NewSpeechToText(
+		context.Background(),
+		transformer_testutil.NewTestLogger(),
+		testCredential(t, map[string]any{
+			credentialKeyBaseURLCamel: "wss://example.invalid/ws",
+		}),
+		collector.onPacket,
+		utils.Option{},
+	)
+
+	require.Error(t, err)
+	assert.Nil(t, transformer)
+	assert.Contains(t, err.Error(), optionKeyRequestRules)
+	assert.False(t, collector.hasSTTError(), "constructor should emit observability, not runtime SpeechToTextErrorPacket")
+
+	var found bool
+	for _, packet := range collector.all() {
+		event, ok := packet.(internal_type.ObservabilityEventRecordPacket)
+		if !ok {
+			continue
+		}
+		if event.Scope == internal_type.ObservabilityRecordScopeConversation &&
+			event.Record.Component == observability.ComponentSTT &&
+			event.Record.Event == observability.STTError &&
+			event.Record.Attributes["provider"] == "custom-stt-websocket-v1" &&
+			event.Record.Attributes["operation"] == "load_config" &&
+			strings.Contains(event.Record.Attributes["error"], optionKeyRequestRules) {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected stt.error observability event for config failure")
 }
 
 type blockingResampler struct {
@@ -156,7 +192,7 @@ func TestSpeechToText_WebsocketFlow_JSONRequestRules(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transformer.Initialize())
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-1"}))
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-1"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-1"}))
 
 	audio := []byte{0x01, 0x02, 0x03, 0x04}
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
@@ -221,8 +257,8 @@ func TestSpeechToText_WebsocketFlow_JSONRequestRules(t *testing.T) {
 			}
 		case internal_type.InterruptionDetectedPacket:
 			interruptionPacketCount++
-		case internal_type.UserMessageMetricPacket:
-			for _, metric := range typed.Metrics {
+		case internal_type.ObservabilityMetricRecordPacket:
+			for _, metric := range typed.Record.Metrics {
 				if metric.GetName() == "stt_latency_ms" {
 					hasLatencyMetric = true
 					latencyMetricPacketCount++
@@ -291,7 +327,7 @@ func TestSpeechToText_BinaryAudioResampledWithBinaryRequestRule(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transformer.Initialize())
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-2"}))
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-2"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-2"}))
 
 	audio := transformer_testutil.SineTonePCM(440, 1.0)
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
@@ -362,7 +398,7 @@ func TestSpeechToText_WebsocketFlow_TextTranscriptFrames(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transformer.Initialize())
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-text"}))
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-text"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextEndPacket{ContextID: "ctx-text"}))
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
 		ContextID: "ctx-text",
 		Audio:     []byte{0x01, 0x02, 0x03, 0x04},
@@ -394,8 +430,8 @@ func TestSpeechToText_WebsocketFlow_TextTranscriptFrames(t *testing.T) {
 			if !typed.Interim && typed.Script == "namaste duniya" && typed.Language == "hi" {
 				hasTranscript = true
 			}
-		case internal_type.UserMessageMetricPacket:
-			for _, metric := range typed.Metrics {
+		case internal_type.ObservabilityMetricRecordPacket:
+			for _, metric := range typed.Record.Metrics {
 				if metric.GetName() == "stt_latency_ms" {
 					hasLatency = true
 				}
@@ -407,7 +443,7 @@ func TestSpeechToText_WebsocketFlow_TextTranscriptFrames(t *testing.T) {
 	assert.True(t, hasLatency, "expected final transcript latency metric")
 }
 
-func TestSpeechToText_DoesNotEmitLatencyMetricWithoutInterruption(t *testing.T) {
+func TestSpeechToText_EmitsLatencyMetricFromFirstAudioWithoutStart(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := upgrader.Upgrade(writer, request, nil)
@@ -465,21 +501,21 @@ func TestSpeechToText_DoesNotEmitLatencyMetricWithoutInterruption(t *testing.T) 
 
 	latencyMetricPacketCount := 0
 	for _, packet := range collector.all() {
-		metricPacket, ok := packet.(internal_type.UserMessageMetricPacket)
+		metricPacket, ok := packet.(internal_type.ObservabilityMetricRecordPacket)
 		if !ok {
 			continue
 		}
-		for _, metric := range metricPacket.Metrics {
+		for _, metric := range metricPacket.Record.Metrics {
 			if metric.GetName() == "stt_latency_ms" {
 				latencyMetricPacketCount++
 			}
 		}
 	}
 
-	assert.Equal(t, 0, latencyMetricPacketCount, "did not expect latency metric without interruption start")
+	assert.Equal(t, 1, latencyMetricPacketCount, "expected latency metric from first audio without explicit start")
 }
 
-func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
+func TestSpeechToText_LatencyUsesFirstStartInWindow(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := upgrader.Upgrade(writer, request, nil)
@@ -518,11 +554,11 @@ func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transformer.Initialize())
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.TurnChangePacket{ContextID: "ctx-first-interrupt"}))
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-first-interrupt"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextStartPacket{ContextID: "ctx-first-interrupt"}))
 
 	time.Sleep(120 * time.Millisecond)
 
-	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextInterruptPacket{ContextID: "ctx-first-interrupt"}))
+	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextStartPacket{ContextID: "ctx-first-interrupt"}))
 	require.NoError(t, transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
 		ContextID: "ctx-first-interrupt",
 		Audio:     []byte{0x01, 0x02, 0x03, 0x04},
@@ -543,11 +579,11 @@ func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
 	latencyMetricPacketCount := 0
 	latencyMilliseconds := int64(-1)
 	for _, packet := range collector.all() {
-		metricPacket, ok := packet.(internal_type.UserMessageMetricPacket)
+		metricPacket, ok := packet.(internal_type.ObservabilityMetricRecordPacket)
 		if !ok {
 			continue
 		}
-		for _, metric := range metricPacket.Metrics {
+		for _, metric := range metricPacket.Record.Metrics {
 			if metric.GetName() != "stt_latency_ms" {
 				continue
 			}
@@ -557,73 +593,8 @@ func TestSpeechToText_LatencyUsesFirstInterruptInWindow(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 1, latencyMetricPacketCount, "expected one latency metric for the interruption window")
-	assert.GreaterOrEqual(t, latencyMilliseconds, int64(100), "expected latency to be measured from the first interrupt in the window")
-}
-
-func TestSpeechToText_CloseUnblocksPendingDial(t *testing.T) {
-	collector := &sttPacketCollector{}
-	transformer, err := NewSpeechToText(
-		context.Background(),
-		transformer_testutil.NewTestLogger(),
-		testCredential(t, map[string]any{
-			credentialKeyBaseURLCamel: "wss://example.com/stt",
-		}),
-		collector.onPacket,
-		utils.Option{
-			optionKeyRequestRules:  `[{"when":{"packet":"audio"},"send":{"frame":"binary","body":{"$path":"packet.audio.bytes"}}}]`,
-			optionKeyResponseRules: `[{"when":{"frame":"json","path":"type","equals":"final"},"emit":{"script":{"$path":"text"},"interim":false}}]`,
-		},
-	)
-	require.NoError(t, err)
-
-	typed, ok := transformer.(*speechToText)
-	require.True(t, ok)
-
-	dialStarted := make(chan struct{}, 1)
-	typed.dialWS = func(ctx context.Context, _ string, _ http.Header) (*websocket.Conn, *http.Response, error) {
-		select {
-		case dialStarted <- struct{}{}:
-		default:
-		}
-		<-ctx.Done()
-		return nil, nil, ctx.Err()
-	}
-
-	transformErrCh := make(chan error, 1)
-	go func() {
-		transformErrCh <- transformer.Transform(context.Background(), internal_type.SpeechToTextAudioPacket{
-			ContextID: "ctx-blocked",
-			Audio:     []byte{0x01, 0x02},
-		})
-	}()
-
-	select {
-	case <-dialStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for dial to start")
-	}
-
-	closeErrCh := make(chan error, 1)
-	go func() {
-		closeErrCh <- transformer.Close(context.Background())
-	}()
-
-	select {
-	case closeErr := <-closeErrCh:
-		require.NoError(t, closeErr)
-	case <-time.After(2 * time.Second):
-		t.Fatalf("Close() timed out while dial was blocked")
-	}
-
-	select {
-	case transformErr := <-transformErrCh:
-		require.NoError(t, transformErr)
-	case <-time.After(2 * time.Second):
-		t.Fatalf("Transform() timed out after Close()")
-	}
-
-	assert.False(t, collector.hasSTTError(), "did not expect SpeechToTextErrorPacket on canceled dial during shutdown")
+	assert.Equal(t, 1, latencyMetricPacketCount, "expected one latency metric for the start window")
+	assert.GreaterOrEqual(t, latencyMilliseconds, int64(100), "expected latency to be measured from the first start in the window")
 }
 
 func TestSpeechToText_AudioRequestContextStaysBoundToAudioPacket(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -73,7 +74,6 @@ func (e *runtimeExecutor) GetEndpointVersion() (string, error) {
 
 // Execute runs one analysis and pushes metadata via callback packet.
 func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.ExecuteAnalysisPacket) error {
-
 	endpointID, err := e.GetEndpointId()
 	if err != nil {
 		return fmt.Errorf("failed to get endpoint ID: %w", err)
@@ -116,9 +116,10 @@ func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.Exec
 		protoMetadata = append(protoMetadata, &protos.Metadata{Key: item.Key, Value: item.Value})
 	}
 
-	e.callback.OnPacket(ctx, internal_type.ConversationMetadataPacket{
-		ContextID: packet.ConversationID,
-		Metadata:  protoMetadata,
+	e.callback.OnPacket(ctx, internal_type.ObservabilityMetadataRecordPacket{
+		ContextID: fmt.Sprintf("%d", packet.ConversationID),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record:    observability.NewConversationMetadataRecord(protoMetadata),
 	})
 	return nil
 }

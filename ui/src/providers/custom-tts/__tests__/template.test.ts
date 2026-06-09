@@ -48,7 +48,7 @@ describe('custom-tts websocket DSL helpers', () => {
 
     expect(renderedRequestBody).toEqual({
       text: 'Hello "world"',
-      voice_id: 'voice-9',
+      voice_id: 'narrator-1',
       message_id: 'msg-7',
       model: 'sonic-2',
       language: 'en-US',

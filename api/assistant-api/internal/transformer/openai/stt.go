@@ -9,6 +9,7 @@ package internal_transformer_openai
 import (
 	"context"
 	"fmt"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"time"
 
 	openai "github.com/openai/openai-go"
@@ -32,15 +33,19 @@ func (o *openaiSpeechToText) Initialize() error {
 	o.ctx, o.cancel = context.WithCancel(context.Background())
 	o.client = openai.NewClient(option.WithAPIKey("YOUR_API_KEY"))
 
-	o.onPacket(internal_type.ConversationEventPacket{
+	o.onPacket(internal_type.ObservabilityEventRecordPacket{
 		ContextID: o.contextId,
-		Name:      "stt",
-		Data: map[string]string{
-			"type":     "initialized",
-			"provider": o.Name(),
-			"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+		Scope:     internal_type.ObservabilityRecordScopeConversation,
+		Record: observability.RecordEvent{
+			Component: observability.ComponentSTT,
+			Event:     observability.STTInitialized,
+			Attributes: observability.Attributes{
+				"type":     "initialized",
+				"provider": o.Name(),
+				"init_ms":  fmt.Sprintf("%d", time.Since(start).Milliseconds()),
+			},
+			OccurredAt: time.Now(),
 		},
-		Time: time.Now(),
 	})
 	return nil
 }
@@ -65,7 +70,7 @@ func (o *openaiSpeechToText) Transform(ctx context.Context, byt internal_type.Pa
 			o.contextId = pkt.ContextID
 		}
 		return nil
-	case internal_type.SpeechToTextInterruptPacket:
+	case internal_type.SpeechToTextEndPacket:
 		return nil
 	case internal_type.SpeechToTextAudioPacket:
 		return nil

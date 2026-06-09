@@ -10,10 +10,13 @@ type CreateBulkPhoneCallRequest struct {
 
 // CreateBulkPhoneCallResponse defines model for CreateBulkPhoneCallResponse.
 type CreateBulkPhoneCallResponse struct {
-	Code    *int32                   `json:"code,omitempty"`
-	Data    *[]AssistantConversation `json:"data,omitempty"`
-	Error   *Error                   `json:"error,omitempty"`
-	Success *bool                    `json:"success,omitempty"`
+	Code *int32                   `json:"code,omitempty"`
+	Data *[]AssistantConversation `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error   *Error `json:"error,omitempty"`
+	Success *bool  `json:"success,omitempty"`
 }
 
 // CreatePhoneCallRequest defines model for CreatePhoneCallRequest.
@@ -28,21 +31,17 @@ type CreatePhoneCallRequest struct {
 
 // CreatePhoneCallResponse defines model for CreatePhoneCallResponse.
 type CreatePhoneCallResponse struct {
-	Code    *int32                 `json:"code,omitempty"`
-	Data    *AssistantConversation `json:"data,omitempty"`
-	Error   *Error                 `json:"error,omitempty"`
-	Success *bool                  `json:"success,omitempty"`
-}
+	Code *int32                 `json:"code,omitempty"`
+	Data *AssistantConversation `json:"data,omitempty"`
 
-// ErrorResponse defines model for ErrorResponse.
-type ErrorResponse struct {
-	Code    *int32 `json:"code,omitempty"`
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
 	Error   *Error `json:"error,omitempty"`
 	Success *bool  `json:"success,omitempty"`
 }
 
-// CreatePhoneCallJSONRequestBody defines body for CreatePhoneCall for application/json ContentType.
-type CreatePhoneCallJSONRequestBody = CreatePhoneCallRequest
-
 // CreateBulkPhoneCallJSONRequestBody defines body for CreateBulkPhoneCall for application/json ContentType.
 type CreateBulkPhoneCallJSONRequestBody = CreateBulkPhoneCallRequest
+
+// CreatePhoneCallJSONRequestBody defines body for CreatePhoneCall for application/json ContentType.
+type CreatePhoneCallJSONRequestBody = CreatePhoneCallRequest

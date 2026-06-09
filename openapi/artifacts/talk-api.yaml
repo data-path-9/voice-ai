@@ -25,19 +25,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
         "403":
           description: Unauthenticated request
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
         "500":
           description: Failed to initiate outbound call
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
   /v1/talk/create-bulk-phone-call:
     post:
       operationId: createBulkPhoneCall
@@ -60,19 +60,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
         "403":
           description: Unauthenticated request
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
         "500":
           description: Failed to initiate outbound calls
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
 components:
   schemas:
     CreatePhoneCallRequest:
@@ -124,15 +124,5 @@ components:
           type: array
           items:
             $ref: "./common.yaml#/components/schemas/AssistantConversation"
-        error:
-          $ref: "./common.yaml#/components/schemas/Error"
-    ErrorResponse:
-      type: object
-      properties:
-        code:
-          type: integer
-          format: int32
-        success:
-          type: boolean
         error:
           $ref: "./common.yaml#/components/schemas/Error"

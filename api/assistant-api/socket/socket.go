@@ -18,9 +18,21 @@ import (
 	"sync"
 
 	"github.com/rapidaai/api/assistant-api/config"
+	internal_adapter "github.com/rapidaai/api/assistant-api/internal/adapters"
+	internal_callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	channel_pipeline "github.com/rapidaai/api/assistant-api/internal/channel/pipeline"
+	channel_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
+	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
+	observability_collector_conversationdb "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationdb"
+	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
+	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
+	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/connectors"
+	"github.com/rapidaai/pkg/storages"
+	storage_files "github.com/rapidaai/pkg/storages/file-storage"
+	"github.com/rapidaai/pkg/utils"
 )
 
 type audioSocketEngine struct {
@@ -29,9 +41,15 @@ type audioSocketEngine struct {
 	postgres   connectors.PostgresConnector
 	redis      connectors.RedisConnector
 	opensearch connectors.OpenSearchConnector
+	storage    storages.Storage
 	listener   net.Listener
 	pipeline   *channel_pipeline.Dispatcher
+	inbound    *channel_telephony.InboundDispatcher
 	mu         sync.RWMutex
+
+	vaultClient                  web_client.VaultClient
+	callcontext                  internal_callcontext.Store
+	assistantConversationService internal_services.AssistantConversationService
 }
 
 func NewAudioSocketEngine(cfg *config.AssistantConfig, logger commons.Logger,
@@ -39,17 +57,36 @@ func NewAudioSocketEngine(cfg *config.AssistantConfig, logger commons.Logger,
 	redis connectors.RedisConnector,
 	opensearch connectors.OpenSearchConnector,
 ) *audioSocketEngine {
+	fileStorage := storage_files.NewStorage(cfg.AssetStoreConfig, logger)
 	return &audioSocketEngine{
-		cfg:        cfg,
-		logger:     logger,
-		postgres:   postgres,
-		redis:      redis,
-		opensearch: opensearch,
+		cfg:                          cfg,
+		logger:                       logger,
+		postgres:                     postgres,
+		redis:                        redis,
+		opensearch:                   opensearch,
+		storage:                      fileStorage,
+		callcontext:                  internal_callcontext.NewStore(postgres, logger),
+		vaultClient:                  web_client.NewVaultClientGRPC(&cfg.AppConfig, logger, redis),
+		assistantConversationService: internal_assistant_service.NewAssistantConversationService(logger, postgres, fileStorage),
 	}
 }
 
 func (m *audioSocketEngine) Connect(ctx context.Context) error {
-	m.pipeline = newSessionPipeline(ctx, m.cfg, m.logger, m.postgres, m.redis, m.opensearch)
+	m.inbound = channel_telephony.NewInboundDispatcher(
+		channel_telephony.WithConfig(m.cfg),
+		channel_telephony.WithLogger(m.logger),
+		channel_telephony.WithStore(m.callcontext),
+		channel_telephony.WithVaultClient(m.vaultClient),
+		channel_telephony.WithAssistantService(internal_assistant_service.NewAssistantService(m.cfg, m.logger, m.postgres, m.opensearch)),
+		channel_telephony.WithConversationService(m.assistantConversationService),
+		channel_telephony.WithTelephonyOption(channel_telephony.TelephonyOption{}),
+	)
+
+	m.pipeline = channel_pipeline.NewDispatcher(
+		channel_pipeline.WithLogger(m.logger),
+		channel_pipeline.WithConversationService(m.assistantConversationService),
+		channel_pipeline.WithAssistantService(internal_assistant_service.NewAssistantService(m.cfg, m.logger, m.postgres, m.opensearch)),
+	)
 
 	addr := fmt.Sprintf("%s:%d", m.cfg.AudioSocketConfig.Host, m.cfg.AudioSocketConfig.Port)
 	listener, err := net.Listen("tcp", addr)
@@ -104,12 +141,60 @@ func (m *audioSocketEngine) handleConnection(ctx context.Context, conn net.Conn)
 
 	m.logger.Infof("AudioSocket connection contextId=%s", contextID)
 
+	callContext, vaultCredential, err := m.inbound.ResolveCallSessionByContext(ctx, contextID)
+	if err != nil {
+		m.logger.Warnw("AudioSocket failed to resolve call context", "contextId", contextID, "error", err)
+		return
+	}
+	otelCollectors := make([]observability.Collector, 0)
+	otelCollectors = append(otelCollectors, observability_collector_conversationdb.New(observability_collector_conversationdb.Config{
+		Logger:              m.logger,
+		ConversationService: m.assistantConversationService,
+	}))
+	otelCollectors = append(otelCollectors, collectors.NewWithEnv(ctx, m.logger, m.cfg)...)
+	observer := observability.New(
+		observability.WithLogger(m.logger),
+		observability.WithAuth(callContext.ToAuth()),
+		observability.WithContext(ctx),
+		observability.WithCollectors(otelCollectors...),
+		observability.WithGracePeriod(),
+	)
+	defer observer.Close(context.Background())
+
+	streamer, err := channel_telephony.Telephony(callContext.Provider).NewStreamer(
+		m.logger,
+		callContext,
+		vaultCredential,
+		channel_telephony.WithAudioSocketStreamer(conn, reader, writer),
+		channel_telephony.WithObserver(observer),
+	)
+	if err != nil {
+		m.logger.Warnw("AudioSocket failed to create streamer", "contextId", contextID, "error", err)
+		return
+	}
+	talker, err := internal_adapter.New(
+		internal_adapter.WithSource(utils.PhoneCall),
+		internal_adapter.WithContext(ctx),
+		internal_adapter.WithConfig(m.cfg),
+		internal_adapter.WithLogger(m.logger),
+		internal_adapter.WithPostgres(m.postgres),
+		internal_adapter.WithOpenSearch(m.opensearch),
+		internal_adapter.WithRedis(m.redis),
+		internal_adapter.WithStorage(m.storage),
+		internal_adapter.WithStreamer(streamer),
+		internal_adapter.WithObserver(observer),
+	)
+	if err != nil {
+		m.logger.Warnw("AudioSocket failed to create talker", "contextId", contextID, "error", err)
+		return
+	}
+
 	result := m.pipeline.Run(ctx, channel_pipeline.SessionConnectedPipeline{
-		ID:        contextID,
-		ContextID: contextID,
-		Conn:      conn,
-		Reader:    reader,
-		Writer:    writer,
+		ID:          contextID,
+		ContextID:   contextID,
+		CallContext: callContext,
+		Talker:      talker,
+		Observer:    observer,
 	})
 
 	if result.Error != nil {

@@ -65,5 +65,6 @@ func ProxyApiRoute(Cfg *config.WebAppConfig,
 	protos.RegisterKnowledgeServiceServer(S, webProxyApi.NewKnowledgeGRPC(Cfg, Logger, Postgres, Redis))
 	protos.RegisterAssistantServiceServer(S, webProxyApi.NewAssistantGRPC(Cfg, Logger, Postgres, Redis))
 	protos.RegisterAssistantDeploymentServiceServer(S, webProxyApi.NewAssistantDeploymentGRPCApi(Cfg, Logger, Postgres, Redis))
+	protos.RegisterObservabilityServiceServer(S, webProxyApi.NewObservabilityGRPC(Cfg, Logger, Postgres, Redis))
 	protos.RegisterDocumentServiceServer(S, webProxyApi.NewDocumentGRPCApi(Cfg, Logger, Postgres, Redis))
 }
