@@ -9,9 +9,12 @@ package observability
 import "time"
 
 const (
-	UsageConversationSTTDuration = "stt_duration"
-	UsageConversationTTSDuration = "tts_duration"
-	UsageConversationLLMDuration = "llm_duration"
+	UsageConversationSTTDuration     = "stt_duration"
+	UsageConversationTTSDuration     = "tts_duration"
+	UsageConversationVADDuration     = "vad_duration"
+	UsageConversationEOSDuration     = "eos_duration"
+	UsageConversationDenoiseDuration = "denoise_duration"
+	UsageConversationLLMDuration     = "llm_duration"
 )
 
 func NewSTTDurationUsageRecord(provider string, duration time.Duration, attr Attributes) RecordUsage {
@@ -22,6 +25,24 @@ func NewSTTDurationUsageRecord(provider string, duration time.Duration, attr Att
 
 func NewTTSDurationUsageRecord(provider string, duration time.Duration, attr Attributes) RecordUsage {
 	record := NewUsageRecord(ComponentName(UsageConversationTTSDuration), provider, duration)
+	record.Attributes = attr
+	return record
+}
+
+func NewVADDurationUsageRecord(provider string, duration time.Duration, attr Attributes) RecordUsage {
+	record := NewUsageRecord(ComponentName(UsageConversationVADDuration), provider, duration)
+	record.Attributes = attr
+	return record
+}
+
+func NewEOSDurationUsageRecord(provider string, duration time.Duration, attr Attributes) RecordUsage {
+	record := NewUsageRecord(ComponentName(UsageConversationEOSDuration), provider, duration)
+	record.Attributes = attr
+	return record
+}
+
+func NewDenoiseDurationUsageRecord(provider string, duration time.Duration, attr Attributes) RecordUsage {
+	record := NewUsageRecord(ComponentName(UsageConversationDenoiseDuration), provider, duration)
 	record.Attributes = attr
 	return record
 }

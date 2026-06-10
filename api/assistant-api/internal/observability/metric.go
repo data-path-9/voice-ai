@@ -62,11 +62,16 @@ const (
 	MetricTTSInitLatencyMs = "tts_init_ms"
 	MetricTTSLatencyMs     = "tts_latency_ms"
 
+	MetricVADInitLatencyMs = "vad_init_ms"
+
+	MetricEOSInitLatencyMs     = "eos_init_ms"
 	MetricEOSLatencyMs         = "eos_latency_ms"
 	MetricEOSTextToTriggerMs   = "eos_text_to_trigger_ms"
 	MetricEOSWordCount         = "eos_word_count"
 	MetricEOSCharCount         = "eos_char_count"
 	MetricEOSConfidence        = "eos_confidence"
+	MetricDenoiseInitLatencyMs = "denoise_init_ms"
+	MetricLLMInitLatencyMs     = "llm_init_ms"
 	MetricKnowledgeLatencyMs   = "knowledge_latency_ms"
 	MetricLLMError             = "llm_error"
 	MetricSTTError             = "stt_error"
@@ -124,6 +129,46 @@ func NewMetricTTSLatencyMs(duration time.Duration, attr Attributes) RecordMetric
 		Name:        MetricTTSLatencyMs,
 		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
 		Description: "TTS latency from text input to first audio in milliseconds",
+	}})
+	record.Attributes = attr
+	return record
+}
+
+func NewMetricVADInitLatencyMs(duration time.Duration, attr Attributes) RecordMetric {
+	record := NewConversationMetricRecord([]*protos.Metric{{
+		Name:        MetricVADInitLatencyMs,
+		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
+		Description: "VAD initialization latency in milliseconds",
+	}})
+	record.Attributes = attr
+	return record
+}
+
+func NewMetricEOSInitLatencyMs(duration time.Duration, attr Attributes) RecordMetric {
+	record := NewConversationMetricRecord([]*protos.Metric{{
+		Name:        MetricEOSInitLatencyMs,
+		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
+		Description: "EOS initialization latency in milliseconds",
+	}})
+	record.Attributes = attr
+	return record
+}
+
+func NewMetricDenoiseInitLatencyMs(duration time.Duration, attr Attributes) RecordMetric {
+	record := NewConversationMetricRecord([]*protos.Metric{{
+		Name:        MetricDenoiseInitLatencyMs,
+		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
+		Description: "Denoise initialization latency in milliseconds",
+	}})
+	record.Attributes = attr
+	return record
+}
+
+func NewMetricLLMInitLatencyMs(duration time.Duration, attr Attributes) RecordMetric {
+	record := NewConversationMetricRecord([]*protos.Metric{{
+		Name:        MetricLLMInitLatencyMs,
+		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
+		Description: "LLM initialization latency in milliseconds",
 	}})
 	record.Attributes = attr
 	return record

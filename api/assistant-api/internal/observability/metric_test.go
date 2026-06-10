@@ -49,11 +49,15 @@ func TestMetricNames_MirrorCurrentImplementation(t *testing.T) {
 		{MetricSTTLatencyMs, "stt_latency_ms"},
 		{MetricTTSInitLatencyMs, "tts_init_ms"},
 		{MetricTTSLatencyMs, "tts_latency_ms"},
+		{MetricVADInitLatencyMs, "vad_init_ms"},
+		{MetricEOSInitLatencyMs, "eos_init_ms"},
 		{MetricEOSLatencyMs, "eos_latency_ms"},
 		{MetricEOSTextToTriggerMs, "eos_text_to_trigger_ms"},
 		{MetricEOSWordCount, "eos_word_count"},
 		{MetricEOSCharCount, "eos_char_count"},
 		{MetricEOSConfidence, "eos_confidence"},
+		{MetricDenoiseInitLatencyMs, "denoise_init_ms"},
+		{MetricLLMInitLatencyMs, "llm_init_ms"},
 		{MetricKnowledgeLatencyMs, "knowledge_latency_ms"},
 		{MetricLLMError, "llm_error"},
 		{MetricSTTError, "stt_error"},
@@ -145,6 +149,70 @@ func TestNewMetricTTSLatencyMs(t *testing.T) {
 		t.Fatalf("expected metric description %q, got %q", "TTS latency from text input to first audio in milliseconds", metric.Description)
 	}
 	assertRecordAttribute(t, record, "provider", "deepgram")
+}
+
+func TestNewMetricVADInitLatencyMs(t *testing.T) {
+	record := NewMetricVADInitLatencyMs(123*time.Millisecond, Attributes{"provider": "silero_vad"})
+	metric := singleMetric(t, record)
+
+	if metric.Name != MetricVADInitLatencyMs {
+		t.Fatalf("expected metric name %q, got %q", MetricVADInitLatencyMs, metric.Name)
+	}
+	if metric.Value != "123" {
+		t.Fatalf("expected metric value %q, got %q", "123", metric.Value)
+	}
+	if metric.Description != "VAD initialization latency in milliseconds" {
+		t.Fatalf("expected metric description %q, got %q", "VAD initialization latency in milliseconds", metric.Description)
+	}
+	assertRecordAttribute(t, record, "provider", "silero_vad")
+}
+
+func TestNewMetricEOSInitLatencyMs(t *testing.T) {
+	record := NewMetricEOSInitLatencyMs(123*time.Millisecond, Attributes{"provider": "silenceBasedEndOfSpeech"})
+	metric := singleMetric(t, record)
+
+	if metric.Name != MetricEOSInitLatencyMs {
+		t.Fatalf("expected metric name %q, got %q", MetricEOSInitLatencyMs, metric.Name)
+	}
+	if metric.Value != "123" {
+		t.Fatalf("expected metric value %q, got %q", "123", metric.Value)
+	}
+	if metric.Description != "EOS initialization latency in milliseconds" {
+		t.Fatalf("expected metric description %q, got %q", "EOS initialization latency in milliseconds", metric.Description)
+	}
+	assertRecordAttribute(t, record, "provider", "silenceBasedEndOfSpeech")
+}
+
+func TestNewMetricDenoiseInitLatencyMs(t *testing.T) {
+	record := NewMetricDenoiseInitLatencyMs(123*time.Millisecond, Attributes{"provider": "rn_noise"})
+	metric := singleMetric(t, record)
+
+	if metric.Name != MetricDenoiseInitLatencyMs {
+		t.Fatalf("expected metric name %q, got %q", MetricDenoiseInitLatencyMs, metric.Name)
+	}
+	if metric.Value != "123" {
+		t.Fatalf("expected metric value %q, got %q", "123", metric.Value)
+	}
+	if metric.Description != "Denoise initialization latency in milliseconds" {
+		t.Fatalf("expected metric description %q, got %q", "Denoise initialization latency in milliseconds", metric.Description)
+	}
+	assertRecordAttribute(t, record, "provider", "rn_noise")
+}
+
+func TestNewMetricLLMInitLatencyMs(t *testing.T) {
+	record := NewMetricLLMInitLatencyMs(123*time.Millisecond, Attributes{"provider": "openai"})
+	metric := singleMetric(t, record)
+
+	if metric.Name != MetricLLMInitLatencyMs {
+		t.Fatalf("expected metric name %q, got %q", MetricLLMInitLatencyMs, metric.Name)
+	}
+	if metric.Value != "123" {
+		t.Fatalf("expected metric value %q, got %q", "123", metric.Value)
+	}
+	if metric.Description != "LLM initialization latency in milliseconds" {
+		t.Fatalf("expected metric description %q, got %q", "LLM initialization latency in milliseconds", metric.Description)
+	}
+	assertRecordAttribute(t, record, "provider", "openai")
 }
 
 func TestNewMetricSTTDuration(t *testing.T) {

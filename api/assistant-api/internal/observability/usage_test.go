@@ -62,6 +62,57 @@ func TestNewTTSDurationUsageRecord(t *testing.T) {
 	}
 }
 
+func TestNewVADDurationUsageRecord(t *testing.T) {
+	record := NewVADDurationUsageRecord("silero_vad", 321*time.Millisecond, Attributes{"context_id": "ctx-1"})
+
+	if record.Component != ComponentName(UsageConversationVADDuration) {
+		t.Fatalf("expected component %q, got %q", UsageConversationVADDuration, record.Component)
+	}
+	if record.Provider != "silero_vad" {
+		t.Fatalf("expected provider %q, got %q", "silero_vad", record.Provider)
+	}
+	if record.Duration != 321*time.Millisecond {
+		t.Fatalf("expected duration %v, got %v", 321*time.Millisecond, record.Duration)
+	}
+	if record.Attributes["context_id"] != "ctx-1" {
+		t.Fatalf("expected context_id %q, got %q", "ctx-1", record.Attributes["context_id"])
+	}
+}
+
+func TestNewEOSDurationUsageRecord(t *testing.T) {
+	record := NewEOSDurationUsageRecord("silenceBasedEndOfSpeech", 654*time.Millisecond, Attributes{"context_id": "ctx-1"})
+
+	if record.Component != ComponentName(UsageConversationEOSDuration) {
+		t.Fatalf("expected component %q, got %q", UsageConversationEOSDuration, record.Component)
+	}
+	if record.Provider != "silenceBasedEndOfSpeech" {
+		t.Fatalf("expected provider %q, got %q", "silenceBasedEndOfSpeech", record.Provider)
+	}
+	if record.Duration != 654*time.Millisecond {
+		t.Fatalf("expected duration %v, got %v", 654*time.Millisecond, record.Duration)
+	}
+	if record.Attributes["context_id"] != "ctx-1" {
+		t.Fatalf("expected context_id %q, got %q", "ctx-1", record.Attributes["context_id"])
+	}
+}
+
+func TestNewDenoiseDurationUsageRecord(t *testing.T) {
+	record := NewDenoiseDurationUsageRecord("rn_noise", 987*time.Millisecond, Attributes{"context_id": "ctx-1"})
+
+	if record.Component != ComponentName(UsageConversationDenoiseDuration) {
+		t.Fatalf("expected component %q, got %q", UsageConversationDenoiseDuration, record.Component)
+	}
+	if record.Provider != "rn_noise" {
+		t.Fatalf("expected provider %q, got %q", "rn_noise", record.Provider)
+	}
+	if record.Duration != 987*time.Millisecond {
+		t.Fatalf("expected duration %v, got %v", 987*time.Millisecond, record.Duration)
+	}
+	if record.Attributes["context_id"] != "ctx-1" {
+		t.Fatalf("expected context_id %q, got %q", "ctx-1", record.Attributes["context_id"])
+	}
+}
+
 func TestNewLLMDurationUsageRecord(t *testing.T) {
 	record := NewLLMDurationUsageRecord("openai", 123*time.Millisecond, Attributes{"context_id": "ctx-1"})
 
