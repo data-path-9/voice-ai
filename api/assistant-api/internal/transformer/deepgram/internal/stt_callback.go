@@ -119,7 +119,7 @@ func (d *deepgramSttCallback) Message(mr *msginterfaces.MessageResponse) error {
 					internal_type.ObservabilityMetricRecordPacket{
 						ContextID: ctxID,
 						Scope:     internal_type.ObservabilityRecordScopeUserMessage,
-						Record:    observability.NewMetricSTTLatencyMs(time.Since(startedOn), observability.Attributes{"provider": "deepgram"}),
+						Record:    observability.NewMetricSTTLatencyMs(time.Since(startedOn), observability.Attributes{"provider": "deepgram-stt"}),
 					})
 			}
 		} else {

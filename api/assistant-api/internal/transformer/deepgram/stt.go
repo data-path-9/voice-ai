@@ -40,7 +40,7 @@ type deepgramSTT struct {
 }
 
 func (*deepgramSTT) Name() string {
-	return "deepgram"
+	return "deepgram-stt"
 }
 
 func NewDeepgramSpeechToText(ctx context.Context, logger commons.Logger, vaultCredential *protos.VaultCredential,

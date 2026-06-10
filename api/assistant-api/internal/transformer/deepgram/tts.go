@@ -80,11 +80,11 @@ func (t *deepgramTTS) Initialize() error {
 				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
 					Level:   observability.LevelError,
-					Message: fmt.Sprintf("deepgram-tts: error while performing connect"),
+					Message: "deepgram-tts: error while performing connect",
 					Attributes: observability.Attributes{
-						"component": observability.ComponentSTT.String(),
+						"component": observability.ComponentTTS.String(),
 						"provider":  t.Name(),
-						"options":   observability.AttributeValue(t.SpeechToTextOptions()),
+						"path":      observability.AttributeValue(t.GetTextToSpeechConnectionString()),
 					},
 					OccurredAt: time.Now(),
 				},
@@ -110,8 +110,8 @@ func (t *deepgramTTS) Initialize() error {
 				Level:   observability.LevelInfo,
 				Message: "deepgram-tts: initialization completed",
 				Attributes: observability.Attributes{
-					"component": observability.ComponentSTT.String(),
-					"provider":  "deepgram",
+					"component": observability.ComponentTTS.String(),
+					"provider":  t.Name(),
 					"path":      observability.AttributeValue(t.GetTextToSpeechConnectionString()),
 				},
 				OccurredAt: time.Now(),
@@ -121,7 +121,7 @@ func (t *deepgramTTS) Initialize() error {
 }
 
 func (*deepgramTTS) Name() string {
-	return "deepgram"
+	return "deepgram-tts"
 }
 
 // handleFlushComplete is called when Deepgram signals Flushed. It emits
@@ -136,7 +136,7 @@ func (t *deepgramTTS) handleFlushComplete(conn *websocket.Conn) {
 		internal_type.TextToSpeechEndPacket{ContextID: ctxId},
 		internal_type.ObservabilityEventRecordPacket{
 			ContextID: ctxId,
-			Scope:     internal_type.ObservabilityRecordScopeAssistant,
+			Scope:     internal_type.ObservabilityRecordScopeAssistantMessage,
 			Record: observability.RecordEvent{
 				Component:  observability.ComponentTTS,
 				Event:      observability.TTSCompleted,
@@ -162,35 +162,36 @@ func (t *deepgramTTS) readLoop(conn *websocket.Conn) {
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
 			t.mu.Lock()
-			intentional := t.connection == nil // set to nil before conn.Close() on intentional paths
-			if !intentional {
-				t.connection = nil // unintentional drop: next delta will reconnect
+			if t.connection != conn {
+				t.mu.Unlock()
+				return
 			}
+			// Active connection dropped; next text packet reconnects.
+			t.connection = nil
 			t.mu.Unlock()
-			if !intentional {
-				t.logger.Errorf("deepgram-tts: connection lost: %v", err)
-			}
+			t.logger.Errorf("deepgram-tts: connection lost: %v", err)
 			return
 		}
 
 		if msgType == websocket.BinaryMessage {
+			var shouldEmitFirstAudioLatencyMetric bool
 			t.mu.Lock()
-			startedAt := t.ttsStartedAt
-			metricSent := t.ttsMetricSent
-			ctxId := t.contextId
-			if !metricSent && !startedAt.IsZero() {
+			ttsStartedAt := t.ttsStartedAt
+			contextId := t.contextId
+			if !t.ttsMetricSent && !ttsStartedAt.IsZero() {
 				t.ttsMetricSent = true
+				shouldEmitFirstAudioLatencyMetric = true
 			}
 			t.mu.Unlock()
-			if !metricSent && !startedAt.IsZero() {
+			if shouldEmitFirstAudioLatencyMetric {
 				t.onPacket(internal_type.ObservabilityMetricRecordPacket{
-					ContextID: ctxId,
-					Scope:     internal_type.ObservabilityRecordScopeAssistant,
-					Record:    observability.NewMetricTTSLatencyMs(time.Since(startedAt), observability.Attributes{"provider": t.Name()}),
+					ContextID: contextId,
+					Scope:     internal_type.ObservabilityRecordScopeAssistantMessage,
+					Record:    observability.NewMetricTTSLatencyMs(time.Since(ttsStartedAt), observability.Attributes{"provider": t.Name()}),
 				})
 			}
 			t.onPacket(internal_type.TextToSpeechAudioPacket{
-				ContextID:  ctxId,
+				ContextID:  contextId,
 				AudioChunk: data,
 			})
 			continue
@@ -267,17 +268,13 @@ func (t *deepgramTTS) Transform(ctx context.Context, in internal_type.Packet) er
 			}
 			t.mu.Lock()
 			connection = t.connection
-			if t.ttsStartedAt.IsZero() {
-				t.ttsStartedAt = time.Now()
-			}
-			t.mu.Unlock()
-		} else {
-			t.mu.Lock()
-			if t.ttsStartedAt.IsZero() {
-				t.ttsStartedAt = time.Now()
-			}
 			t.mu.Unlock()
 		}
+		t.mu.Lock()
+		if t.ttsStartedAt.IsZero() {
+			t.ttsStartedAt = time.Now()
+		}
+		t.mu.Unlock()
 		normalized := t.normalizer.Normalize(input.Text)
 		if err := connection.WriteJSON(map[string]interface{}{
 			"type": "Speak",
