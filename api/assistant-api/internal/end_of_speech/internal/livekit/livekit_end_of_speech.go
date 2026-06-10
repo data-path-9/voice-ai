@@ -584,14 +584,13 @@ func (endOfSpeech *livekitEndOfSpeech) Close(ctx context.Context) error {
 	endOfSpeech.mu.Unlock()
 
 	if endOfSpeech.onPacket != nil {
-		packets := []internal_type.Packet{}
 		if !eosStartedAt.IsZero() {
-			packets = append(packets, internal_type.ObservabilityUsageRecordPacket{
+			endOfSpeech.onPacket(ctx, internal_type.ObservabilityUsageRecordPacket{
 				Scope:  internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.NewEOSDurationUsageRecord(endOfSpeech.Name(), time.Since(eosStartedAt), observability.Attributes{}),
 			})
 		}
-		packets = append(packets, internal_type.ObservabilityEventRecordPacket{
+		endOfSpeech.onPacket(ctx, internal_type.ObservabilityEventRecordPacket{
 			Scope: internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.RecordEvent{
 				Component: observability.ComponentEOS,
@@ -602,10 +601,9 @@ func (endOfSpeech *livekitEndOfSpeech) Close(ctx context.Context) error {
 				OccurredAt: time.Now(),
 			},
 		})
-		_ = endOfSpeech.onPacket(ctx, packets...)
 	}
-	close(endOfSpeech.stopCh)
 
+	close(endOfSpeech.stopCh)
 	endOfSpeech.predictorMu.Lock()
 	if predictor, ok := endOfSpeech.predictor.(interface{ Destroy() }); ok {
 		predictor.Destroy()

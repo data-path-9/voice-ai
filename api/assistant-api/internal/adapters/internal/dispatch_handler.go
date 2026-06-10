@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
@@ -2584,25 +2585,30 @@ func (h requestorDispatchHandler) HandleFinalizeAuthentication(ctx context.Conte
 	h.r.OnPacket(ctx, internal_type.FinalizeSessionRuntimePacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Context, p internal_type.FinalizeSessionRuntimePacket) {
-	if h.r.outputNormalizer != nil {
+	var closeGroup sync.WaitGroup
+	if outputNormalizer := h.r.outputNormalizer; outputNormalizer != nil {
+		closeGroup.Add(1)
 		utils.Go(ctx, func() {
-			h.r.outputNormalizer.Close(ctx)
+			defer closeGroup.Done()
+			outputNormalizer.Close(ctx)
 			h.r.outputNormalizer = nil
 		})
 	}
-
 	//
-	if h.r.inputNormalizer != nil {
+	if inputNormalizer := h.r.inputNormalizer; inputNormalizer != nil {
+		closeGroup.Add(1)
 		utils.Go(ctx, func() {
-			h.r.inputNormalizer.Close(ctx)
+			defer closeGroup.Done()
+			inputNormalizer.Close(ctx)
 			h.r.inputNormalizer = nil
 		})
 	}
-
 	//
-	if h.r.conversationRecordingExecutor != nil {
+	if conversationRecordingExecutor := h.r.conversationRecordingExecutor; conversationRecordingExecutor != nil {
+		closeGroup.Add(1)
 		utils.Go(ctx, func() {
-			if err := h.r.conversationRecordingExecutor.Close(ctx); err != nil {
+			defer closeGroup.Done()
+			if err := conversationRecordingExecutor.Close(ctx); err != nil {
 				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 					ContextID: p.ContextID,
 					Scope:     internal_type.ObservabilityRecordScopeConversation,
@@ -2619,11 +2625,11 @@ func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Conte
 						},
 					},
 				})
-				return
 			}
+			h.r.conversationRecordingExecutor = nil
 		})
 	}
-	// analysis -> webhooks -> finalize conversation
+	closeGroup.Wait()
 	h.r.OnPacket(ctx,
 		internal_type.ExecuteAnalysisPacket{
 			ContextID:      p.ContextID,

@@ -50,6 +50,7 @@ const (
 	LLMGenerating      = adapter_lifecycle.LLMGenerating
 	LLMGenerated       = adapter_lifecycle.LLMGenerated
 	dbWriteTimeout     = 5 * time.Second
+	recordingTimeout   = 3*storages.FileWriteTimeout + dbWriteTimeout
 	connectDeadline    = 30 * time.Second
 	disconnectDeadline = 30 * time.Second
 )
