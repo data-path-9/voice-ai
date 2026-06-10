@@ -512,12 +512,23 @@ func (conversationService *assistantConversationService) CreateConversationRecor
 	assistantKey := conversationService.ObjectKey(s3Prefix, assistantConversationId, fmt.Sprintf("assistant-%d.wav", recordingId))
 	conversationKey := conversationService.ObjectKey(s3Prefix, assistantConversationId, fmt.Sprintf("conversation-%d.wav", recordingId))
 
-	// we know the file path so no need to wait for it
-	utils.Go(context.Background(), func() {
-		conversationService.storage.Store(ctx, userKey, user)
-		conversationService.storage.Store(ctx, assistantKey, assistant)
-		conversationService.storage.Store(ctx, conversationKey, conversation)
-	})
+	recordings := []struct {
+		label string
+		key   string
+		data  []byte
+	}{
+		{label: "user", key: userKey, data: user},
+		{label: "assistant", key: assistantKey, data: assistant},
+		{label: "conversation", key: conversationKey, data: conversation},
+	}
+	for _, recording := range recordings {
+		result := conversationService.storage.Store(ctx, recording.key, recording.data)
+		if result.Error != nil {
+			conversationService.logger.Benchmark("conversationService.CreateConversationRecording", time.Since(start))
+			conversationService.logger.Errorf("error while storing %s conversation recording %s: %v", recording.label, recording.key, result.Error)
+			return nil, fmt.Errorf("store %s recording: %w", recording.label, result.Error)
+		}
+	}
 
 	conversationRecording := &internal_conversation_entity.AssistantConversationRecording{
 		Audited: gorm_models.Audited{

@@ -284,6 +284,7 @@ func (deb *genericRequestor) onAddMessage(_ context.Context, msg internal_type.M
 		_, err := deb.conversationService.CreateConversationMessage(dbCtx, deb.Auth(), deb.GetSource(), deb.Assistant().Id, deb.Assistant().AssistantProviderId, deb.Conversation().Id,
 			fmt.Sprintf("%s-%s", msg.Role(), msg.ContextId()), msg.Role(), msg.Content())
 		if err != nil {
+			deb.logger.Debugf("error while persisting conversation recording %+v", err)
 		}
 	})
 	return nil
@@ -291,29 +292,11 @@ func (deb *genericRequestor) onAddMessage(_ context.Context, msg internal_type.M
 
 func (gr *genericRequestor) CreateConversationRecording(_ context.Context, user, assistant, conversation []byte) error {
 	utils.Go(context.Background(), func() {
-		dbCtx, cancel := context.WithTimeout(context.Background(), dbWriteTimeout)
+		dbCtx, cancel := context.WithTimeout(context.Background(), recordingTimeout)
 		defer cancel()
-		if _, err := gr.conversationService.CreateConversationRecording(dbCtx, gr.auth, gr.assistant.Id, gr.assistantConversation.Id, user, assistant, conversation); err != nil {
-			gr.OnPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{
-				ContextID: gr.GetID(),
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.RecordLog{
-					Level:   observability.LevelError,
-					Message: "conversation recording persistence failed",
-					Attributes: observability.Attributes{
-						"component":             observability.ComponentRecording.String(),
-						"operation":             "persist_recording",
-						"context_id":            gr.GetID(),
-						"assistant_id":          fmt.Sprintf("%d", gr.assistant.Id),
-						"conversation_id":       fmt.Sprintf("%d", gr.assistantConversation.Id),
-						"user_audio_bytes":      fmt.Sprintf("%d", len(user)),
-						"assistant_audio_bytes": fmt.Sprintf("%d", len(assistant)),
-						"mixed_audio_bytes":     fmt.Sprintf("%d", len(conversation)),
-						"error":                 err.Error(),
-						"error_type":            fmt.Sprintf("%T", err),
-					},
-				},
-			})
+		_, err := gr.conversationService.CreateConversationRecording(dbCtx, gr.auth, gr.assistant.Id, gr.assistantConversation.Id, user, assistant, conversation)
+		if err != nil {
+			gr.logger.Debugf("error while persisting conversation recording %+v", err)
 		}
 	})
 	return nil
