@@ -70,6 +70,8 @@ export function CreateProviderCredentialDialog(
     if (field.required === false) return false;
     if (field.label?.toLowerCase().includes('(optional)')) return false;
     if (provider?.code === 'sip' && field.name === 'sip_headers') return false;
+    // Vobiz auto-generates a password server-side when left blank.
+    if (provider?.code === 'vobiz' && field.name === 'sip_password') return false;
     return true;
   };
 
@@ -115,7 +117,9 @@ export function CreateProviderCredentialDialog(
         hideLoader();
         if (cpkr?.getSuccess()) {
           toast.success(
-            'Provider credential have been successfully added to the vault.',
+            provider.code === 'vobiz'
+              ? 'Vobiz trunk provisioned and a SIP credential was stored. Note: completing outbound calls requires assistant-api running on a public-IP host.'
+              : 'Provider credential have been successfully added to the vault.',
           );
           providerCtx.reloadProviderCredentials();
           props.setModalOpen(false);

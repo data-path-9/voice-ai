@@ -117,5 +117,11 @@ func TalkApiRoute(
 		apiv1.GET("/:telephony/ctx/:contextId", talkRpcApi.CallTalkerByContext)
 		apiv1.GET("/:telephony/ctx/:contextId/event", talkRpcApi.CallbackByContext)
 		apiv1.POST("/:telephony/ctx/:contextId/event", talkRpcApi.CallbackByContext)
+
+		// answer_url callback — returns provider answer XML (e.g. vobiz <Stream>)
+		// pointing at the contextId WebSocket route above. Used by providers that
+		// fetch XML before connecting media (vobiz_websocket).
+		apiv1.GET("/:telephony/ctx/:contextId/answer", talkRpcApi.CallAnswerByContext)
+		apiv1.POST("/:telephony/ctx/:contextId/answer", talkRpcApi.CallAnswerByContext)
 	}
 }

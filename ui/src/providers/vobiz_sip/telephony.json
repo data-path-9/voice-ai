@@ -1,0 +1,28 @@
+{
+  "telephony": {
+    "parameters": [
+      {
+        "key": "phone",
+        "label": "Caller ID",
+        "type": "input",
+        "required": true,
+        "default": "",
+        "placeholder": "e.g., +15551234567",
+        "helpText": "The phone number to display as caller ID for outbound calls.",
+        "errorMessage": "Please provide a valid caller ID."
+      },
+      {
+        "key": "rapida.sip_inbound",
+        "label": "Accept inbound calls",
+        "type": "select",
+        "required": false,
+        "default": "false",
+        "choices": [
+          { "label": "Enabled", "value": "true" },
+          { "label": "Disabled", "value": "false" }
+        ],
+        "helpText": "Register this trunk with Vobiz to receive incoming calls."
+      }
+    ]
+  }
+}

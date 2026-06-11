@@ -32,7 +32,7 @@ func (m *manager) loadRecords(ctx context.Context) ([]Record, error) {
 	var deployments []internal_assistant_entity.AssistantPhoneDeployment
 	if err := m.postgres.DB(ctx).
 		Preload("TelephonyOption").
-		Where("telephony_provider = ? AND status = ?", "sip", type_enums.RECORD_ACTIVE).
+		Where("telephony_provider IN ? AND status = ?", []string{"sip", "vobiz_sip"}, type_enums.RECORD_ACTIVE).
 		Find(&deployments).Error; err != nil {
 		return nil, err
 	}

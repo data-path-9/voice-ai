@@ -183,7 +183,7 @@ func (d *OutboundDispatcher) providerOutboundConnectTimeout(provider string) tim
 	if timeout <= 0 {
 		timeout = defaultOutboundConnectTimeout
 	}
-	if provider == SIP.String() && d.cfg != nil && d.cfg.SIPConfig != nil && d.cfg.SIPConfig.InviteTimeout > 0 {
+	if (provider == SIP.String() || provider == VobizSIP.String()) && d.cfg != nil && d.cfg.SIPConfig != nil && d.cfg.SIPConfig.InviteTimeout > 0 {
 		return d.cfg.SIPConfig.InviteTimeout + 15*time.Second
 	}
 	return timeout

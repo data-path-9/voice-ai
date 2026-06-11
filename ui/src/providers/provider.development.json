@@ -105,6 +105,70 @@
         ]
     },
     {
+        "name": "Vobiz SIP",
+        "code": "vobiz_sip",
+        "description": "Auto-provision a Vobiz SIP trunk and credential. Rapida creates the trunk on Vobiz via API and stores a ready-to-use SIP credential. Note: completing outbound calls requires assistant-api running on a public-IP host.",
+        "image": "https://cdn-01.rapida.ai/partners/tools/sip.png",
+        "featureList": [
+            "telephony",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "auth_id",
+                "type": "string",
+                "label": "Vobiz Account Auth ID"
+            },
+            {
+                "name": "auth_token",
+                "type": "string",
+                "label": "Vobiz API Auth Token"
+            },
+            {
+                "name": "trunk_name",
+                "type": "string",
+                "label": "Trunk Name"
+            },
+            {
+                "name": "sip_username",
+                "type": "string",
+                "label": "SIP Username"
+            },
+            {
+                "name": "sip_password",
+                "type": "string",
+                "label": "SIP Password (min 8 chars; leave blank to auto-generate)"
+            }
+        ]
+    },
+    {
+        "name": "Vobiz WebSocket",
+        "code": "vobiz_websocket",
+        "description": "Place outbound calls via the Vobiz REST API and stream audio over a WebSocket (no public SIP/RTP needed — works through a public HTTPS/ngrok URL). Requires assistant.public to be a reachable HTTPS host tunneling to assistant-api.",
+        "image": "https://cdn-01.rapida.ai/partners/tools/sip.png",
+        "featureList": [
+            "telephony",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "auth_id",
+                "type": "string",
+                "label": "Vobiz Account Auth ID"
+            },
+            {
+                "name": "auth_token",
+                "type": "string",
+                "label": "Vobiz API Auth Token"
+            },
+            {
+                "name": "from_number",
+                "type": "string",
+                "label": "Caller ID (from number, E.164)"
+            }
+        ]
+    },
+    {
         "code": "asterisk",
         "name": "Asterisk",
         "description": "Open-source PBX platform for building custom telephony solutions with SIP/PJSIP support.",

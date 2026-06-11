@@ -577,7 +577,7 @@ func (m *SIPEngine) resolveAssistantByDID(did string) (uint64, types.SimplePrinc
 		Select("assistants.id AS assistant_id, assistants.project_id, assistants.organization_id").
 		Joins("JOIN assistant_phone_deployments apd ON apd.assistant_id = assistants.id").
 		Joins("JOIN assistant_deployment_telephony_options o ON o.assistant_deployment_telephony_id = apd.id").
-		Where("apd.telephony_provider = ? AND apd.status = ?", "sip", type_enums.RECORD_ACTIVE).
+		Where("apd.telephony_provider IN ? AND apd.status = ?", []string{"sip", "vobiz_sip"}, type_enums.RECORD_ACTIVE).
 		Where("o.key = ?", "phone").
 		Where("o.value IN ?", []string{did, strings.TrimPrefix(did, "+")}).
 		First(&result)
