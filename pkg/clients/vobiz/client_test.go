@@ -100,3 +100,68 @@ func TestCreateCredential_Success(t *testing.T) {
 	assert.Equal(t, "cred-1", cred.ID)
 	assert.Equal(t, "trunkuser", cred.Username)
 }
+
+func TestCreateOriginationURI_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/Account/AUTH_ID/origination-uris", r.URL.Path)
+		assert.Equal(t, "AUTH_ID", r.Header.Get("X-Auth-ID"))
+		assert.Equal(t, "AUTH_TOKEN", r.Header.Get("X-Auth-Token"))
+
+		var body CreateOriginationURIRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "1.2.3.4:5090", body.URI) // bare host:port — vobiz adds the sip: scheme
+		assert.Equal(t, "udp", body.Transport)
+		assert.True(t, body.Enabled)
+
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":        "uri-1",
+			"uri":       "1.2.3.4:5090",
+			"transport": "udp",
+			"enabled":   true,
+		})
+	}))
+	defer server.Close()
+
+	c := NewClientWithBaseURL(server.URL)
+	uri, err := c.CreateOriginationURI(context.Background(), "AUTH_ID", "AUTH_TOKEN", CreateOriginationURIRequest{
+		URI: "1.2.3.4:5090", Transport: "udp", Priority: 1, Weight: 10, Enabled: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "uri-1", uri.ID)
+}
+
+func TestAssignNumber_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		// DID is URL-encoded in the path ("+" -> "%2B").
+		assert.Equal(t, "/api/v1/Account/AUTH_ID/numbers/+919262171438/assign", r.URL.Path)
+
+		var body map[string]string
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "trunk-1", body["trunk_group_id"])
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := NewClientWithBaseURL(server.URL)
+	err := c.AssignNumber(context.Background(), "AUTH_ID", "AUTH_TOKEN", "+919262171438", "trunk-1")
+	require.NoError(t, err)
+}
+
+func TestAssignNumber_AlreadyAttached(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": "Number already assigned to another trunk"})
+	}))
+	defer server.Close()
+
+	c := NewClientWithBaseURL(server.URL)
+	err := c.AssignNumber(context.Background(), "AUTH_ID", "AUTH_TOKEN", "+919262171438", "trunk-1")
+	require.Error(t, err)
+	var apiErr *VobizAPIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+}

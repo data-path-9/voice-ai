@@ -30,9 +30,13 @@ import (
 // failure whose message is safe to surface to the UI (e.g. "number already
 // attached"). The deployment handler surfaces this type's message and keeps its
 // generic message for every other error — so non-vobiz flows are unchanged.
-type InboundProvisioningError struct{ Message string }
+type InboundProvisioningError struct {
+	Message string
+	Err     error // underlying cause — preserved for logs / errors.Unwrap (UI sees Message only)
+}
 
 func (e *InboundProvisioningError) Error() string { return e.Message }
+func (e *InboundProvisioningError) Unwrap() error  { return e.Err }
 
 type assistantDeploymentService struct {
 	logger   commons.Logger
@@ -455,7 +459,7 @@ func (eService assistantDeploymentService) maybeProvisionVobizInbound(
 	}
 	credentialID, err := strconv.ParseUint(credIDStr, 10, 64)
 	if err != nil {
-		return nil, &InboundProvisioningError{Message: "invalid Vobiz SIP credential"}
+		return nil, &InboundProvisioningError{Message: "invalid Vobiz SIP credential", Err: err}
 	}
 
 	// Idempotency: reuse an existing inbound trunk for the same DID if a prior
@@ -472,12 +476,13 @@ func (eService assistantDeploymentService) maybeProvisionVobizInbound(
 	// Read the Vobiz account credentials via a redis-free, one-shot gRPC fetch.
 	cred, err := web_client.GetCredentialDirect(&eService.cfg.AppConfig, eService.logger, auth, credentialID)
 	if err != nil {
-		return nil, &InboundProvisioningError{Message: "could not read the Vobiz SIP credential"}
+		eService.logger.Errorf("vobiz inbound: failed to read credential %d: %v", credentialID, err)
+		return nil, &InboundProvisioningError{Message: "could not read the Vobiz SIP credential", Err: err}
 	}
 	value := cred.GetValue().AsMap()
-	authID, _ := value["auth_id"].(string)
-	authToken, _ := value["auth_token"].(string)
-	if authID == "" || authToken == "" {
+	authID, idOK := value["auth_id"].(string)
+	authToken, tokenOK := value["auth_token"].(string)
+	if !idOK || !tokenOK || authID == "" || authToken == "" {
 		return nil, &InboundProvisioningError{Message: "the Vobiz SIP credential is missing auth_id/auth_token"}
 	}
 
@@ -500,7 +505,7 @@ func (eService assistantDeploymentService) provisionVobizInbound(
 		URI: sipAddr, Transport: "udp", Priority: 1, Weight: 10, Enabled: true,
 	})
 	if err != nil {
-		return "", "", &InboundProvisioningError{Message: fmt.Sprintf("failed to create the Vobiz origination URI: %v", err)}
+		return "", "", &InboundProvisioningError{Message: "failed to create the Vobiz origination URI", Err: err}
 	}
 
 	trunk, err := client.CreateTrunk(ctx, authID, authToken, vobiz.CreateTrunkRequest{
@@ -514,7 +519,7 @@ func (eService assistantDeploymentService) provisionVobizInbound(
 		InboundDestination:   uri.ID,
 	})
 	if err != nil {
-		return "", "", &InboundProvisioningError{Message: fmt.Sprintf("failed to create the Vobiz inbound trunk: %v", err)}
+		return "", "", &InboundProvisioningError{Message: "failed to create the Vobiz inbound trunk", Err: err}
 	}
 
 	if err := client.AssignNumber(ctx, authID, authToken, did, trunk.TrunkID); err != nil {
@@ -534,6 +539,9 @@ func (eService assistantDeploymentService) existingInboundTrunk(ctx context.Cont
 	if err := eService.postgres.DB(ctx).Preload("TelephonyOption").
 		Where("assistant_id = ? AND telephony_provider = ? AND status = ?", assistantId, "vobiz_sip", type_enums.RECORD_ACTIVE).
 		Find(&deployments).Error; err != nil {
+		// Log instead of silently swallowing: a query failure here could otherwise
+		// look like "no existing trunk" and cause a duplicate provisioning attempt.
+		eService.logger.Errorf("vobiz inbound: idempotency lookup failed for assistant %d, did %s: %v", assistantId, did, err)
 		return "", ""
 	}
 	for _, dep := range deployments {
@@ -561,12 +569,12 @@ func vobizAssignError(did string, err error) error {
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
 		case 404:
-			return &InboundProvisioningError{Message: fmt.Sprintf("phone number %s is not in your Vobiz account", did)}
+			return &InboundProvisioningError{Message: fmt.Sprintf("phone number %s is not in your Vobiz account", did), Err: err}
 		case 400, 409:
-			return &InboundProvisioningError{Message: fmt.Sprintf("phone number %s is already attached to another Vobiz trunk — unlink it first", did)}
+			return &InboundProvisioningError{Message: fmt.Sprintf("phone number %s is already attached to another Vobiz trunk — unlink it first", did), Err: err}
 		}
 	}
-	return &InboundProvisioningError{Message: fmt.Sprintf("failed to attach %s to the Vobiz inbound trunk: %v", did, err)}
+	return &InboundProvisioningError{Message: fmt.Sprintf("failed to attach %s to the Vobiz inbound trunk", did), Err: err}
 }
 
 func (eService assistantDeploymentService) GetAssistantApiDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantApiDeployment, error) {
