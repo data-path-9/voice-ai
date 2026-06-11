@@ -174,7 +174,7 @@ func asString(v interface{}) string {
 func generatePassword() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to generate vobiz sip password: %w", err)
 	}
 	return hex.EncodeToString(b), nil
 }

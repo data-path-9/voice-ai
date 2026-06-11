@@ -42,7 +42,7 @@ func (cApi *ConversationApi) CallAnswerByContext(c *gin.Context) {
 	}
 	xml, err := ap.AnswerXML(provider, contextID)
 	if err != nil {
-		cApi.logger.Errorf("vobiz answer XML build failed: %v", err)
+		cApi.logger.Errorf("answer XML build failed for provider %s: %v", provider, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build answer"})
 		return
 	}
