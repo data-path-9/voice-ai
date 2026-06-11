@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 
+	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
 	assistant_api "github.com/rapidaai/protos"
@@ -47,6 +48,14 @@ func (deploymentApi *assistantDeploymentGrpcApi) CreateAssistantPhoneDeployment(
 	)
 
 	if err != nil {
+		deploymentApi.logger.Errorf("create assistant phone deployment failed: %v", err)
+		// Surface Vobiz inbound-provisioning messages (e.g. "number already
+		// attached") to the UI; keep the generic message for every other error
+		// so non-vobiz flows are unchanged.
+		var provErr *internal_assistant_service.InboundProvisioningError
+		if errors.As(err, &provErr) {
+			return utils.Error[assistant_api.GetAssistantPhoneDeploymentResponse](err, provErr.Error())
+		}
 		return utils.Error[assistant_api.GetAssistantPhoneDeploymentResponse](
 			errors.New("illegal request for create assistant phone deployment"),
 			"Please provider valid a valid request to create assistant phone deployment.",

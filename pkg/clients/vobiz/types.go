@@ -20,7 +20,31 @@ type CreateTrunkRequest struct {
 	Secure               bool   `json:"secure,omitempty"`          // TLS/SRTP
 	ConcurrentCallsLimit int    `json:"concurrent_calls_limit,omitempty"`
 	CpsLimit             int    `json:"cps_limit,omitempty"`
-	CredentialUUID       string `json:"credential_uuid,omitempty"`
+	CredentialUUID       string `json:"credential_uuid,omitempty"` // outbound auth credential
+	// Inbound-trunk fields: PrimaryURIUUID + InboundDestination both reference a
+	// pre-created origination URI's id (Vobiz forwards inbound INVITEs there).
+	PrimaryURIUUID     string `json:"primary_uri_uuid,omitempty"`
+	InboundDestination string `json:"inbound_destination,omitempty"`
+}
+
+// CreateOriginationURIRequest is the body for
+// POST /api/v1/Account/{auth_id}/origination-uris. URI is a bare host:port
+// (e.g. "1.2.3.4:5090") — Vobiz prepends the "sip:" scheme itself.
+type CreateOriginationURIRequest struct {
+	URI       string `json:"uri"`
+	Transport string `json:"transport,omitempty"` // "udp" | "tcp"
+	Priority  int    `json:"priority,omitempty"`
+	Weight    int    `json:"weight,omitempty"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// OriginationURI is the response for a created origination URI. ID is attached
+// to an inbound trunk via primary_uri_uuid / inbound_destination.
+type OriginationURI struct {
+	ID        string `json:"id"`
+	URI       string `json:"uri"`
+	Transport string `json:"transport"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // Trunk is the response for a created/retrieved trunk. The TrunkDomain is the

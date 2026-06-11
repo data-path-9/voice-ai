@@ -13,6 +13,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/rapidaai/config"
 	clients "github.com/rapidaai/pkg/clients"
@@ -134,4 +135,36 @@ func (client *vaultServiceClient) GetCredential(c context.Context, auth types.Si
 
 	client.logger.Benchmark("vaultServiceClient.GetCredential", time.Since(start))
 	return nil, errors.New("failed to get credentials from vault service")
+}
+
+// GetCredentialDirect fetches a vault credential via a one-shot gRPC call to the
+// vault service WITHOUT the redis-backed caching client. The internal
+// service-scope auth token is a stateless JWT (no redis), so callers that don't
+// hold a RedisConnector (e.g. the deployment service) can still read a
+// credential. Intended for infrequent reads; it opens and closes its own
+// connection per call.
+func GetCredentialDirect(cfg *config.AppConfig, logger commons.Logger, auth types.SimplePrinciple, vaultId uint64) (*vault_api.VaultCredential, error) {
+	conn, err := grpc.NewClient(cfg.Web.Host, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("vault: unable to connect to web-api: %w", err)
+	}
+	defer conn.Close()
+
+	token, err := types.CreateServiceScopeToken(auth, cfg.Secret)
+	if err != nil {
+		return nil, fmt.Errorf("vault: unable to create service token: %w", err)
+	}
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(map[string]string{types.SERVICE_SCOPE_KEY: token}))
+
+	res, err := vault_api.NewVaultServiceClient(conn).GetCredential(ctx, &vault_api.GetCredentialRequest{VaultId: vaultId})
+	if err != nil {
+		return nil, fmt.Errorf("vault: GetCredential failed: %w", err)
+	}
+	if res.GetSuccess() && res.GetData() != nil {
+		return res.GetData(), nil
+	}
+	if res.GetError() != nil {
+		return nil, fmt.Errorf("vault: %s", res.GetError().HumanMessage)
+	}
+	return nil, errors.New("vault: credential not found")
 }

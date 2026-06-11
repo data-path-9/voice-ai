@@ -9,10 +9,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/rapidaai/api/assistant-api/config"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
+	"github.com/rapidaai/pkg/clients/vobiz"
+	web_client "github.com/rapidaai/pkg/clients/web"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/connectors"
 	gorm_models "github.com/rapidaai/pkg/models/gorm"
@@ -22,6 +25,14 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// InboundProvisioningError marks a user-facing Vobiz inbound-provisioning
+// failure whose message is safe to surface to the UI (e.g. "number already
+// attached"). The deployment handler surfaces this type's message and keeps its
+// generic message for every other error — so non-vobiz flows are unchanged.
+type InboundProvisioningError struct{ Message string }
+
+func (e *InboundProvisioningError) Error() string { return e.Message }
 
 type assistantDeploymentService struct {
 	logger   commons.Logger
@@ -329,6 +340,17 @@ func (eService assistantDeploymentService) CreatePhoneDeployment(
 	opts []*protos.Metadata,
 ) (*internal_assistant_entity.AssistantPhoneDeployment, error) {
 	db := eService.postgres.DB(ctx)
+
+	// Auto-provision Vobiz inbound (origination URI -> inbound trunk -> assign
+	// DID) when a vobiz_sip deployment enables inbound calls. Done before any DB
+	// write so a provisioning failure surfaces to the UI without leaving a
+	// partial deployment; returns extra options (inbound_trunk_id/uri_id).
+	inboundOpts, perr := eService.maybeProvisionVobizInbound(ctx, auth, assistantId, phoneProvider, opts)
+	if perr != nil {
+		return nil, perr
+	}
+	opts = append(opts, inboundOpts...)
+
 	deployment := &internal_assistant_entity.AssistantPhoneDeployment{
 		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
 			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
@@ -400,6 +422,151 @@ func (eService assistantDeploymentService) CreatePhoneDeployment(
 	}
 
 	return deployment, nil
+}
+
+// maybeProvisionVobizInbound provisions Vobiz inbound routing when a vobiz_sip
+// deployment enables inbound calls: it creates an origination URI pointing at
+// this assistant-api's SIP server (cfg.SIPConfig.ExternalIP:Port), an inbound
+// trunk referencing it, and assigns the DID. Returns extra telephony options
+// (inbound_trunk_id / inbound_uri_id) to persist. Non-vobiz / non-inbound paths
+// early-return (nil, nil), so they are byte-for-byte unchanged.
+func (eService assistantDeploymentService) maybeProvisionVobizInbound(
+	ctx context.Context, auth types.SimplePrinciple, assistantId uint64,
+	phoneProvider string, opts []*protos.Metadata,
+) ([]*protos.Metadata, error) {
+	if phoneProvider != "vobiz_sip" {
+		return nil, nil
+	}
+	optMap := make(map[string]string, len(opts))
+	for _, o := range opts {
+		optMap[o.GetKey()] = o.GetValue()
+	}
+	if optMap["rapida.sip_inbound"] != "true" {
+		return nil, nil
+	}
+
+	did := optMap["phone"]
+	if did == "" {
+		return nil, &InboundProvisioningError{Message: "a caller-ID phone number is required to enable inbound calls"}
+	}
+	credIDStr := optMap["rapida.credential_id"]
+	if credIDStr == "" {
+		return nil, &InboundProvisioningError{Message: "a Vobiz SIP credential is required to enable inbound calls"}
+	}
+	credentialID, err := strconv.ParseUint(credIDStr, 10, 64)
+	if err != nil {
+		return nil, &InboundProvisioningError{Message: "invalid Vobiz SIP credential"}
+	}
+
+	// Idempotency: reuse an existing inbound trunk for the same DID if a prior
+	// deployment already provisioned one (avoids duplicate Vobiz trunks on re-save).
+	if trunkID, uriID := eService.existingInboundTrunk(ctx, assistantId, did); trunkID != "" {
+		eService.logger.Infof("vobiz inbound: reusing existing trunk %s for DID %s", trunkID, did)
+		return inboundMetadata(trunkID, uriID), nil
+	}
+
+	if eService.cfg.SIPConfig == nil || eService.cfg.SIPConfig.ExternalIP == "" {
+		return nil, &InboundProvisioningError{Message: "the assistant SIP server has no external IP configured; cannot provision inbound"}
+	}
+
+	// Read the Vobiz account credentials via a redis-free, one-shot gRPC fetch.
+	cred, err := web_client.GetCredentialDirect(&eService.cfg.AppConfig, eService.logger, auth, credentialID)
+	if err != nil {
+		return nil, &InboundProvisioningError{Message: "could not read the Vobiz SIP credential"}
+	}
+	value := cred.GetValue().AsMap()
+	authID, _ := value["auth_id"].(string)
+	authToken, _ := value["auth_token"].(string)
+	if authID == "" || authToken == "" {
+		return nil, &InboundProvisioningError{Message: "the Vobiz SIP credential is missing auth_id/auth_token"}
+	}
+
+	sipAddr := fmt.Sprintf("%s:%d", eService.cfg.SIPConfig.ExternalIP, eService.cfg.SIPConfig.Port)
+	trunkID, uriID, err := eService.provisionVobizInbound(ctx, authID, authToken, sipAddr, did)
+	if err != nil {
+		return nil, err // already an *InboundProvisioningError
+	}
+	return inboundMetadata(trunkID, uriID), nil
+}
+
+// provisionVobizInbound performs the three Vobiz API calls and rolls back the
+// trunk if number assignment fails.
+func (eService assistantDeploymentService) provisionVobizInbound(
+	ctx context.Context, authID, authToken, sipAddr, did string,
+) (string, string, error) {
+	client := vobiz.NewClient()
+
+	uri, err := client.CreateOriginationURI(ctx, authID, authToken, vobiz.CreateOriginationURIRequest{
+		URI: sipAddr, Transport: "udp", Priority: 1, Weight: 10, Enabled: true,
+	})
+	if err != nil {
+		return "", "", &InboundProvisioningError{Message: fmt.Sprintf("failed to create the Vobiz origination URI: %v", err)}
+	}
+
+	trunk, err := client.CreateTrunk(ctx, authID, authToken, vobiz.CreateTrunkRequest{
+		Name:                 fmt.Sprintf("rapida-inbound-%s", did),
+		TrunkStatus:          "enabled",
+		TrunkDirection:       "inbound",
+		Transport:            "udp",
+		ConcurrentCallsLimit: 10,
+		CpsLimit:             2,
+		PrimaryURIUUID:       uri.ID,
+		InboundDestination:   uri.ID,
+	})
+	if err != nil {
+		return "", "", &InboundProvisioningError{Message: fmt.Sprintf("failed to create the Vobiz inbound trunk: %v", err)}
+	}
+
+	if err := client.AssignNumber(ctx, authID, authToken, did, trunk.TrunkID); err != nil {
+		// Roll back the just-created trunk; surface a user-friendly message.
+		if delErr := client.DeleteTrunk(ctx, authID, authToken, trunk.TrunkID); delErr != nil {
+			eService.logger.Errorf("vobiz inbound: failed to roll back trunk %s: %v", trunk.TrunkID, delErr)
+		}
+		return "", "", vobizAssignError(did, err)
+	}
+	return trunk.TrunkID, uri.ID, nil
+}
+
+// existingInboundTrunk returns the inbound trunk/URI ids already provisioned for
+// the given DID on an active vobiz_sip deployment of this assistant, if any.
+func (eService assistantDeploymentService) existingInboundTrunk(ctx context.Context, assistantId uint64, did string) (string, string) {
+	var deployments []internal_assistant_entity.AssistantPhoneDeployment
+	if err := eService.postgres.DB(ctx).Preload("TelephonyOption").
+		Where("assistant_id = ? AND telephony_provider = ? AND status = ?", assistantId, "vobiz_sip", type_enums.RECORD_ACTIVE).
+		Find(&deployments).Error; err != nil {
+		return "", ""
+	}
+	for _, dep := range deployments {
+		o := dep.GetOptions()
+		phone, _ := o.GetString("phone")
+		trunkID, _ := o.GetString("rapida.inbound_trunk_id")
+		uriID, _ := o.GetString("rapida.inbound_uri_id")
+		if phone == did && trunkID != "" {
+			return trunkID, uriID
+		}
+	}
+	return "", ""
+}
+
+func inboundMetadata(trunkID, uriID string) []*protos.Metadata {
+	return []*protos.Metadata{
+		{Key: "rapida.inbound_trunk_id", Value: trunkID},
+		{Key: "rapida.inbound_uri_id", Value: uriID},
+	}
+}
+
+// vobizAssignError maps a Vobiz number-assignment failure to a clear UI message.
+func vobizAssignError(did string, err error) error {
+	var apiErr *vobiz.VobizAPIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 404:
+			return &InboundProvisioningError{Message: fmt.Sprintf("phone number %s is not in your Vobiz account", did)}
+		case 400, 409:
+			return &InboundProvisioningError{Message: fmt.Sprintf("phone number %s is already attached to another Vobiz trunk — unlink it first", did)}
+		}
+	}
+	return &InboundProvisioningError{Message: fmt.Sprintf("failed to attach %s to the Vobiz inbound trunk: %v", did, err)}
 }
 
 func (eService assistantDeploymentService) GetAssistantApiDeployment(ctx context.Context, auth types.SimplePrinciple, assistantId uint64) (*internal_assistant_entity.AssistantApiDeployment, error) {
