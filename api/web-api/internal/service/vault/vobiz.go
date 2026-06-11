@@ -137,7 +137,7 @@ func (vs *vaultService) findExistingVobizSIP(ctx context.Context, auth types.Sim
 		*auth.GetCurrentProjectId(),
 		type_enums.RECORD_ACTIVE,
 	).Find(&rows).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("vobiz: failed to query existing vobiz_sip credentials: %w", err)
 	}
 	for _, row := range rows {
 		if asString(row.Value["trunk_name"]) == trunkName {
