@@ -32,6 +32,21 @@ type Assistant struct {
 	Visibility                 *string                     `json:"visibility,omitempty"`
 }
 
+// AssistantApiDeployment defines model for AssistantApiDeployment.
+type AssistantApiDeployment struct {
+	AssistantId         *Uint64String            `json:"assistantId,omitempty"`
+	Greeting            *string                  `json:"greeting,omitempty"`
+	Id                  *Uint64String            `json:"id,omitempty"`
+	IdealTimeout        *uint64                  `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff *uint64                  `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage *string                  `json:"idealTimeoutMessage,omitempty"`
+	InputAudio          *DeploymentAudioProvider `json:"inputAudio,omitempty"`
+	MaxSessionDuration  *uint64                  `json:"maxSessionDuration,omitempty"`
+	Mistake             *string                  `json:"mistake,omitempty"`
+	OutputAudio         *DeploymentAudioProvider `json:"outputAudio,omitempty"`
+	Status              *string                  `json:"status,omitempty"`
+}
+
 // AssistantDebuggerDeployment defines model for AssistantDebuggerDeployment.
 type AssistantDebuggerDeployment struct {
 	AssistantId         *Uint64String            `json:"assistantId,omitempty"`
@@ -59,6 +74,23 @@ type AssistantKnowledge struct {
 	ScoreThreshold                    *float32      `json:"scoreThreshold,omitempty"`
 	Status                            *string       `json:"status,omitempty"`
 	TopK                              *uint32       `json:"topK,omitempty"`
+}
+
+// AssistantPhoneDeployment defines model for AssistantPhoneDeployment.
+type AssistantPhoneDeployment struct {
+	AssistantId         *Uint64String            `json:"assistantId,omitempty"`
+	Greeting            *string                  `json:"greeting,omitempty"`
+	Id                  *Uint64String            `json:"id,omitempty"`
+	IdealTimeout        *uint64                  `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff *uint64                  `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage *string                  `json:"idealTimeoutMessage,omitempty"`
+	InputAudio          *DeploymentAudioProvider `json:"inputAudio,omitempty"`
+	MaxSessionDuration  *uint64                  `json:"maxSessionDuration,omitempty"`
+	Mistake             *string                  `json:"mistake,omitempty"`
+	OutputAudio         *DeploymentAudioProvider `json:"outputAudio,omitempty"`
+	PhoneOptions        *[]Metadata              `json:"phoneOptions,omitempty"`
+	PhoneProviderName   *string                  `json:"phoneProviderName,omitempty"`
+	Status              *string                  `json:"status,omitempty"`
 }
 
 // AssistantProviderAgentkit defines model for AssistantProviderAgentkit.
@@ -113,6 +145,50 @@ type AssistantTool struct {
 	Status           *string                 `json:"status,omitempty"`
 }
 
+// AssistantWebpluginDeployment defines model for AssistantWebpluginDeployment.
+type AssistantWebpluginDeployment struct {
+	AssistantId         *Uint64String            `json:"assistantId,omitempty"`
+	Greeting            *string                  `json:"greeting,omitempty"`
+	Id                  *Uint64String            `json:"id,omitempty"`
+	IdealTimeout        *uint64                  `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff *uint64                  `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage *string                  `json:"idealTimeoutMessage,omitempty"`
+	InputAudio          *DeploymentAudioProvider `json:"inputAudio,omitempty"`
+	MaxSessionDuration  *uint64                  `json:"maxSessionDuration,omitempty"`
+	Mistake             *string                  `json:"mistake,omitempty"`
+	OutputAudio         *DeploymentAudioProvider `json:"outputAudio,omitempty"`
+	Status              *string                  `json:"status,omitempty"`
+	Suggestion          *[]string                `json:"suggestion,omitempty"`
+}
+
+// AssistantWhatsappDeployment defines model for AssistantWhatsappDeployment.
+type AssistantWhatsappDeployment struct {
+	AssistantId          *Uint64String `json:"assistantId,omitempty"`
+	Greeting             *string       `json:"greeting,omitempty"`
+	Id                   *Uint64String `json:"id,omitempty"`
+	IdealTimeout         *uint64       `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff  *uint64       `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage  *string       `json:"idealTimeoutMessage,omitempty"`
+	MaxSessionDuration   *uint64       `json:"maxSessionDuration,omitempty"`
+	Mistake              *string       `json:"mistake,omitempty"`
+	Status               *string       `json:"status,omitempty"`
+	WhatsappOptions      *[]Metadata   `json:"whatsappOptions,omitempty"`
+	WhatsappProviderName *string       `json:"whatsappProviderName,omitempty"`
+}
+
+// CreateAssistantApiDeploymentRequest defines model for CreateAssistantApiDeploymentRequest.
+type CreateAssistantApiDeploymentRequest struct {
+	AssistantId         Uint64String                    `json:"assistantId"`
+	Greeting            *string                         `json:"greeting,omitempty"`
+	IdealTimeout        *uint64                         `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff *uint64                         `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage *string                         `json:"idealTimeoutMessage,omitempty"`
+	InputAudio          *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
+	MaxSessionDuration  *uint64                         `json:"maxSessionDuration,omitempty"`
+	Mistake             *string                         `json:"mistake,omitempty"`
+	OutputAudio         *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
+}
+
 // CreateAssistantDebuggerDeploymentRequest defines model for CreateAssistantDebuggerDeploymentRequest.
 type CreateAssistantDebuggerDeploymentRequest struct {
 	AssistantId         Uint64String                    `json:"assistantId"`
@@ -137,6 +213,21 @@ type CreateAssistantKnowledgeRequest struct {
 	RetrievalMethod                   *string       `json:"retrievalMethod,omitempty"`
 	ScoreThreshold                    *float32      `json:"scoreThreshold,omitempty"`
 	TopK                              *uint32       `json:"topK,omitempty"`
+}
+
+// CreateAssistantPhoneDeploymentRequest defines model for CreateAssistantPhoneDeploymentRequest.
+type CreateAssistantPhoneDeploymentRequest struct {
+	AssistantId         Uint64String                    `json:"assistantId"`
+	Greeting            *string                         `json:"greeting,omitempty"`
+	IdealTimeout        *uint64                         `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff *uint64                         `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage *string                         `json:"idealTimeoutMessage,omitempty"`
+	InputAudio          *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
+	MaxSessionDuration  *uint64                         `json:"maxSessionDuration,omitempty"`
+	Mistake             *string                         `json:"mistake,omitempty"`
+	OutputAudio         *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
+	PhoneOptions        *[]Metadata                     `json:"phoneOptions,omitempty"`
+	PhoneProviderName   string                          `json:"phoneProviderName"`
 }
 
 // CreateAssistantProviderAgentkit defines model for CreateAssistantProviderAgentkit.
@@ -193,6 +284,33 @@ type CreateAssistantToolRequest struct {
 	Name             *string                 `json:"name,omitempty"`
 }
 
+// CreateAssistantWebpluginDeploymentRequest defines model for CreateAssistantWebpluginDeploymentRequest.
+type CreateAssistantWebpluginDeploymentRequest struct {
+	AssistantId         Uint64String                    `json:"assistantId"`
+	Greeting            *string                         `json:"greeting,omitempty"`
+	IdealTimeout        *uint64                         `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff *uint64                         `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage *string                         `json:"idealTimeoutMessage,omitempty"`
+	InputAudio          *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
+	MaxSessionDuration  *uint64                         `json:"maxSessionDuration,omitempty"`
+	Mistake             *string                         `json:"mistake,omitempty"`
+	OutputAudio         *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
+	Suggestion          *[]string                       `json:"suggestion,omitempty"`
+}
+
+// CreateAssistantWhatsappDeploymentRequest defines model for CreateAssistantWhatsappDeploymentRequest.
+type CreateAssistantWhatsappDeploymentRequest struct {
+	AssistantId          Uint64String `json:"assistantId"`
+	Greeting             *string      `json:"greeting,omitempty"`
+	IdealTimeout         *uint64      `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff  *uint64      `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage  *string      `json:"idealTimeoutMessage,omitempty"`
+	MaxSessionDuration   *uint64      `json:"maxSessionDuration,omitempty"`
+	Mistake              *string      `json:"mistake,omitempty"`
+	WhatsappOptions      *[]Metadata  `json:"whatsappOptions,omitempty"`
+	WhatsappProviderName string       `json:"whatsappProviderName"`
+}
+
 // DeploymentAudioProvider defines model for DeploymentAudioProvider.
 type DeploymentAudioProvider struct {
 	AudioOptions  *[]Metadata   `json:"audioOptions,omitempty"`
@@ -210,6 +328,77 @@ type DeploymentAudioProviderRequest struct {
 	Status        *string     `json:"status,omitempty"`
 }
 
+// GetAllAssistantApiDeploymentResponse defines model for GetAllAssistantApiDeploymentResponse.
+type GetAllAssistantApiDeploymentResponse struct {
+	Code *int32                    `json:"code,omitempty"`
+	Data *[]AssistantApiDeployment `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error     *Error     `json:"error,omitempty"`
+	Paginated *Paginated `json:"paginated,omitempty"`
+	Success   *bool      `json:"success,omitempty"`
+}
+
+// GetAllAssistantDebuggerDeploymentResponse defines model for GetAllAssistantDebuggerDeploymentResponse.
+type GetAllAssistantDebuggerDeploymentResponse struct {
+	Code *int32                         `json:"code,omitempty"`
+	Data *[]AssistantDebuggerDeployment `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error     *Error     `json:"error,omitempty"`
+	Paginated *Paginated `json:"paginated,omitempty"`
+	Success   *bool      `json:"success,omitempty"`
+}
+
+// GetAllAssistantPhoneDeploymentResponse defines model for GetAllAssistantPhoneDeploymentResponse.
+type GetAllAssistantPhoneDeploymentResponse struct {
+	Code *int32                      `json:"code,omitempty"`
+	Data *[]AssistantPhoneDeployment `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error     *Error     `json:"error,omitempty"`
+	Paginated *Paginated `json:"paginated,omitempty"`
+	Success   *bool      `json:"success,omitempty"`
+}
+
+// GetAllAssistantWebpluginDeploymentResponse defines model for GetAllAssistantWebpluginDeploymentResponse.
+type GetAllAssistantWebpluginDeploymentResponse struct {
+	Code *int32                          `json:"code,omitempty"`
+	Data *[]AssistantWebpluginDeployment `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error     *Error     `json:"error,omitempty"`
+	Paginated *Paginated `json:"paginated,omitempty"`
+	Success   *bool      `json:"success,omitempty"`
+}
+
+// GetAllAssistantWhatsappDeploymentResponse defines model for GetAllAssistantWhatsappDeploymentResponse.
+type GetAllAssistantWhatsappDeploymentResponse struct {
+	Code *int32                         `json:"code,omitempty"`
+	Data *[]AssistantWhatsappDeployment `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error     *Error     `json:"error,omitempty"`
+	Paginated *Paginated `json:"paginated,omitempty"`
+	Success   *bool      `json:"success,omitempty"`
+}
+
+// GetAssistantApiDeploymentResponse defines model for GetAssistantApiDeploymentResponse.
+type GetAssistantApiDeploymentResponse struct {
+	Code *int32                  `json:"code,omitempty"`
+	Data *AssistantApiDeployment `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error   *Error `json:"error,omitempty"`
+	Success *bool  `json:"success,omitempty"`
+}
+
 // GetAssistantDebuggerDeploymentResponse defines model for GetAssistantDebuggerDeploymentResponse.
 type GetAssistantDebuggerDeploymentResponse struct {
 	Code *int32                       `json:"code,omitempty"`
@@ -221,10 +410,43 @@ type GetAssistantDebuggerDeploymentResponse struct {
 	Success *bool  `json:"success,omitempty"`
 }
 
+// GetAssistantPhoneDeploymentResponse defines model for GetAssistantPhoneDeploymentResponse.
+type GetAssistantPhoneDeploymentResponse struct {
+	Code *int32                    `json:"code,omitempty"`
+	Data *AssistantPhoneDeployment `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error   *Error `json:"error,omitempty"`
+	Success *bool  `json:"success,omitempty"`
+}
+
 // GetAssistantResponse defines model for GetAssistantResponse.
 type GetAssistantResponse struct {
 	Code *int32     `json:"code,omitempty"`
 	Data *Assistant `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error   *Error `json:"error,omitempty"`
+	Success *bool  `json:"success,omitempty"`
+}
+
+// GetAssistantWebpluginDeploymentResponse defines model for GetAssistantWebpluginDeploymentResponse.
+type GetAssistantWebpluginDeploymentResponse struct {
+	Code *int32                        `json:"code,omitempty"`
+	Data *AssistantWebpluginDeployment `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error   *Error `json:"error,omitempty"`
+	Success *bool  `json:"success,omitempty"`
+}
+
+// GetAssistantWhatsappDeploymentResponse defines model for GetAssistantWhatsappDeploymentResponse.
+type GetAssistantWhatsappDeploymentResponse struct {
+	Code *int32                       `json:"code,omitempty"`
+	Data *AssistantWhatsappDeployment `json:"data,omitempty"`
 
 	// Error Platform error response details. `errorCode` is a stable platform error code.
 	// See `PlatformErrorCode` for documented code/message mappings.
@@ -252,8 +474,65 @@ type Variable struct {
 	Type         *string       `json:"type,omitempty"`
 }
 
+// GetAllAssistantApiDeploymentParams defines parameters for GetAllAssistantApiDeployment.
+type GetAllAssistantApiDeploymentParams struct {
+	Page     *uint32 `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *uint32 `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+
+	// Criterias JSON encoded array of Criteria objects.
+	Criterias *string `form:"criterias,omitempty" json:"criterias,omitempty"`
+}
+
+// GetAllAssistantDebuggerDeploymentParams defines parameters for GetAllAssistantDebuggerDeployment.
+type GetAllAssistantDebuggerDeploymentParams struct {
+	Page     *uint32 `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *uint32 `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+
+	// Criterias JSON encoded array of Criteria objects.
+	Criterias *string `form:"criterias,omitempty" json:"criterias,omitempty"`
+}
+
+// GetAllAssistantPhoneDeploymentParams defines parameters for GetAllAssistantPhoneDeployment.
+type GetAllAssistantPhoneDeploymentParams struct {
+	Page     *uint32 `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *uint32 `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+
+	// Criterias JSON encoded array of Criteria objects.
+	Criterias *string `form:"criterias,omitempty" json:"criterias,omitempty"`
+}
+
+// GetAllAssistantWebpluginDeploymentParams defines parameters for GetAllAssistantWebpluginDeployment.
+type GetAllAssistantWebpluginDeploymentParams struct {
+	Page     *uint32 `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *uint32 `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+
+	// Criterias JSON encoded array of Criteria objects.
+	Criterias *string `form:"criterias,omitempty" json:"criterias,omitempty"`
+}
+
+// GetAllAssistantWhatsappDeploymentParams defines parameters for GetAllAssistantWhatsappDeployment.
+type GetAllAssistantWhatsappDeploymentParams struct {
+	Page     *uint32 `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *uint32 `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+
+	// Criterias JSON encoded array of Criteria objects.
+	Criterias *string `form:"criterias,omitempty" json:"criterias,omitempty"`
+}
+
+// CreateAssistantApiDeploymentJSONRequestBody defines body for CreateAssistantApiDeployment for application/json ContentType.
+type CreateAssistantApiDeploymentJSONRequestBody = CreateAssistantApiDeploymentRequest
+
 // CreateAssistantDebuggerDeploymentJSONRequestBody defines body for CreateAssistantDebuggerDeployment for application/json ContentType.
 type CreateAssistantDebuggerDeploymentJSONRequestBody = CreateAssistantDebuggerDeploymentRequest
+
+// CreateAssistantPhoneDeploymentJSONRequestBody defines body for CreateAssistantPhoneDeployment for application/json ContentType.
+type CreateAssistantPhoneDeploymentJSONRequestBody = CreateAssistantPhoneDeploymentRequest
+
+// CreateAssistantWebpluginDeploymentJSONRequestBody defines body for CreateAssistantWebpluginDeployment for application/json ContentType.
+type CreateAssistantWebpluginDeploymentJSONRequestBody = CreateAssistantWebpluginDeploymentRequest
+
+// CreateAssistantWhatsappDeploymentJSONRequestBody defines body for CreateAssistantWhatsappDeployment for application/json ContentType.
+type CreateAssistantWhatsappDeploymentJSONRequestBody = CreateAssistantWhatsappDeploymentRequest
 
 // CreateAssistantJSONRequestBody defines body for CreateAssistant for application/json ContentType.
 type CreateAssistantJSONRequestBody = CreateAssistantRequest

@@ -63,7 +63,21 @@ func AssistantDeploymentApiRoute(Cfg *config.AssistantConfig,
 
 	apiv1 := engine.Group("v1/assistant-deployment")
 	deploymentApi := assistantDeploymentApi.NewAssistantDeploymentApi(Cfg, Logger, Postgres)
+	apiv1.POST("/create-api-deployment", deploymentApi.CreateAssistantApiDeploymentRest)
 	apiv1.POST("/create-debugger-deployment", deploymentApi.CreateAssistantDebuggerDeploymentRest)
+	apiv1.POST("/create-phone-deployment", deploymentApi.CreateAssistantPhoneDeploymentRest)
+	apiv1.POST("/create-webplugin-deployment", deploymentApi.CreateAssistantWebpluginDeploymentRest)
+	apiv1.POST("/create-whatsapp-deployment", deploymentApi.CreateAssistantWhatsappDeploymentRest)
+	apiv1.GET("/get-api-deployment/:assistantId", deploymentApi.GetAssistantApiDeploymentRest)
+	apiv1.GET("/get-debugger-deployment/:assistantId", deploymentApi.GetAssistantDebuggerDeploymentRest)
+	apiv1.GET("/get-phone-deployment/:assistantId", deploymentApi.GetAssistantPhoneDeploymentRest)
+	apiv1.GET("/get-webplugin-deployment/:assistantId", deploymentApi.GetAssistantWebpluginDeploymentRest)
+	apiv1.GET("/get-whatsapp-deployment/:assistantId", deploymentApi.GetAssistantWhatsappDeploymentRest)
+	apiv1.GET("/get-all-api-deployment/:assistantId", deploymentApi.GetAllAssistantApiDeploymentRest)
+	apiv1.GET("/get-all-debugger-deployment/:assistantId", deploymentApi.GetAllAssistantDebuggerDeploymentRest)
+	apiv1.GET("/get-all-phone-deployment/:assistantId", deploymentApi.GetAllAssistantPhoneDeploymentRest)
+	apiv1.GET("/get-all-webplugin-deployment/:assistantId", deploymentApi.GetAllAssistantWebpluginDeploymentRest)
+	apiv1.GET("/get-all-whatsapp-deployment/:assistantId", deploymentApi.GetAllAssistantWhatsappDeploymentRest)
 }
 
 func AssistantConversationApiRoute(
