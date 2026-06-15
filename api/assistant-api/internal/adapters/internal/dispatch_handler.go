@@ -1737,55 +1737,84 @@ func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx conte
 		h.r.applyOptions(p.Options)
 	}
 
+	conversationConfigurationObj := &protos.ConversationInitialization{
+		AssistantConversationId: h.r.assistantConversation.Id,
+		Assistant: &protos.AssistantDefinition{
+			AssistantId: h.r.assistant.Id,
+			Version:     utils.GetVersionString(h.r.assistant.AssistantProviderId),
+		},
+		StreamMode:   p.Initialization.GetStreamMode(),
+		UserIdentity: p.Initialization.GetUserIdentity(),
+		Time:         timestamppb.Now(),
+	}
+	options := h.r.GetOptions()
+	if outputAudio, err := h.r.GetTextToSpeechTransformer(); err == nil && outputAudio != nil {
+		if ambient, _ := outputAudio.GetOptions().GetString("speaker.ambient"); ambient != "" {
+			options["speaker.ambient"] = ambient
+		}
+		if volume, _ := outputAudio.GetOptions().GetString("speaker.ambient_volume"); volume != "" {
+			options["speaker.ambient_volume"] = volume
+		}
+	}
+	if anyArgMap, err := utils.InterfaceMapToAnyMap(h.r.GetArgs()); err == nil {
+		conversationConfigurationObj.Args = anyArgMap
+	}
+	if anyMetaMap, err := utils.InterfaceMapToAnyMap(h.r.GetMetadata()); err == nil {
+		conversationConfigurationObj.Metadata = anyMetaMap
+	}
+	if anyOptionMap, err := utils.InterfaceMapToAnyMap(options); err == nil {
+		conversationConfigurationObj.Options = anyOptionMap
+	}
+
 	switch p.Initialization.StreamMode {
 	case protos.StreamMode_STREAM_MODE_TEXT:
 		h.r.SwitchMode(type_enums.TextMode)
 		h.r.OnPacket(ctx,
 			internal_type.InitializeAssistantExecutorPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			}, internal_type.InitializeBehaviorPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			},
 			internal_type.InitializationCompletedPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			})
 
 	case protos.StreamMode_STREAM_MODE_AUDIO:
 		h.r.OnPacket(ctx,
 			internal_type.InitializeSpeechToTextPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			},
 			internal_type.InitializeTextToSpeechPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			},
 			internal_type.InitializeAssistantExecutorPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			},
 			internal_type.InitializeVoiceActivityDetectionPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			},
 			internal_type.InitializeEndOfSpeechPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			},
 			internal_type.InitializeDenoisePacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			},
 			internal_type.InitializeBehaviorPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			},
 			internal_type.InitializationCompletedPacket{
 				ContextID: p.ContextID,
-				Config:    p.Initialization,
+				Config:    conversationConfigurationObj,
 			},
 		)
 		h.r.SwitchMode(type_enums.AudioMode)
@@ -2905,36 +2934,8 @@ func (h requestorDispatchHandler) callInputNormalizer(ctx context.Context, vl in
 }
 
 func (r *genericRequestor) OnNotifyAssistantConfiguration(ctx context.Context, config *protos.ConversationInitialization, conversation *internal_conversation_entity.AssistantConversation) {
-	conversationConfigurationObj := &protos.ConversationInitialization{
-		AssistantConversationId: conversation.Id,
-		Assistant: &protos.AssistantDefinition{
-			AssistantId: r.assistant.Id,
-			Version:     utils.GetVersionString(r.assistant.AssistantProviderId),
-		},
-		StreamMode:   config.GetStreamMode(),
-		UserIdentity: config.GetUserIdentity(),
-		Time:         timestamppb.Now(),
-	}
-	options := r.GetOptions()
-	if outputAudio, err := r.GetTextToSpeechTransformer(); err == nil && outputAudio != nil {
-		if ambient, _ := outputAudio.GetOptions().GetString("speaker.ambient"); ambient != "" {
-			options["speaker.ambient"] = ambient
-		}
-		if volume, _ := outputAudio.GetOptions().GetString("speaker.ambient_volume"); volume != "" {
-			options["speaker.ambient_volume"] = volume
-		}
-	}
-	if anyArgMap, err := utils.InterfaceMapToAnyMap(r.GetArgs()); err == nil {
-		conversationConfigurationObj.Args = anyArgMap
-	}
-	if anyMetaMap, err := utils.InterfaceMapToAnyMap(r.GetMetadata()); err == nil {
-		conversationConfigurationObj.Metadata = anyMetaMap
-	}
-	if anyOptionMap, err := utils.InterfaceMapToAnyMap(options); err == nil {
-		conversationConfigurationObj.Options = anyOptionMap
-	}
 	utils.Go(ctx, func() {
-		if err := r.Notify(ctx, conversationConfigurationObj); err != nil {
+		if err := r.Notify(ctx, config); err != nil {
 			r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 				ContextID: r.GetID(),
 				Scope:     internal_type.ObservabilityRecordScopeConversation,
