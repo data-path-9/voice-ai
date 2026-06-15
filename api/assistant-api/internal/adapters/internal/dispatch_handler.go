@@ -182,15 +182,6 @@ func (h requestorDispatchHandler) HandleUserInput(ctx context.Context, p interna
 
 	contextID := h.r.GetID()
 	p.ContextID = contextID
-
-	if err := h.r.Notify(ctx, &protos.ConversationUserMessage{
-		Id:        contextID,
-		Message:   &protos.ConversationUserMessage_Text{Text: p.Text},
-		Completed: true,
-		Time:      timestamppb.New(time.Now()),
-	}); err != nil {
-		return
-	}
 	h.r.OnPacket(ctx,
 		internal_type.MessageCreatePacket{ContextID: contextID, MessageRole: "user", Text: p.Text},
 		internal_type.ObservabilityMetadataRecordPacket{
@@ -232,6 +223,14 @@ func (h requestorDispatchHandler) HandleUserInput(ctx context.Context, p interna
 				h.r.OnPacket(ctx, internal_type.LLMErrorPacket{ContextID: contextID, Error: err})
 			}
 		})
+	}
+	if err := h.r.Notify(ctx, &protos.ConversationUserMessage{
+		Id:        contextID,
+		Message:   &protos.ConversationUserMessage_Text{Text: p.Text},
+		Completed: true,
+		Time:      timestamppb.New(time.Now()),
+	}); err != nil {
+		return
 	}
 }
 func (h requestorDispatchHandler) HandleInterruptionDetected(ctx context.Context, p internal_type.InterruptionDetectedPacket) {
@@ -742,7 +741,7 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 func (h requestorDispatchHandler) HandleInjectMessage(ctx context.Context, p internal_type.InjectMessagePacket) {
 	if err := h.r.Transition(LLMGenerating); err != nil {
 		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-			ContextID: h.r.GetID(),
+			ContextID: p.ContextID,
 			Scope:     internal_type.ObservabilityRecordScopeAssistantMessage,
 			Record: observability.RecordLog{
 				Level:   observability.LevelError,
@@ -2934,24 +2933,26 @@ func (r *genericRequestor) OnNotifyAssistantConfiguration(ctx context.Context, c
 	if anyOptionMap, err := utils.InterfaceMapToAnyMap(options); err == nil {
 		conversationConfigurationObj.Options = anyOptionMap
 	}
-	if err := r.Notify(ctx, conversationConfigurationObj); err != nil {
-		r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-			ContextID: r.GetID(),
-			Scope:     internal_type.ObservabilityRecordScopeConversation,
-			Record: observability.RecordLog{
-				Level:   observability.LevelError,
-				Message: "Configuration notification failed; streamer may use stale settings",
-				Attributes: observability.Attributes{
-					"component":  observability.ComponentConversation.String(),
-					"operation":  "notify_configuration",
-					"context_id": r.GetID(),
-					"mode":       r.GetMode().String(),
-					"error":      err.Error(),
-					"error_type": fmt.Sprintf("%T", err),
+	utils.Go(ctx, func() {
+		if err := r.Notify(ctx, conversationConfigurationObj); err != nil {
+			r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: r.GetID(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Configuration notification failed; streamer may use stale settings",
+					Attributes: observability.Attributes{
+						"component":  observability.ComponentConversation.String(),
+						"operation":  "notify_configuration",
+						"context_id": r.GetID(),
+						"mode":       r.GetMode().String(),
+						"error":      err.Error(),
+						"error_type": fmt.Sprintf("%T", err),
+					},
 				},
-			},
-		})
-	}
+			})
+		}
+	})
 }
 
 func (r *genericRequestor) IsConditionAllowed(opts utils.Option, key string) bool {

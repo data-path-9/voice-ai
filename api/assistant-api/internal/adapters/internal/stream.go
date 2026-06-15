@@ -179,7 +179,14 @@ func (t *genericRequestor) OnCallCompletion(startTime time.Time) {
 // Notify sends notifications to websocket for various events.
 func (t *genericRequestor) Notify(ctx context.Context, actionDatas ...internal_type.Stream) error {
 	for _, actionData := range actionDatas {
-		t.streamer.Send(actionData)
+		start := time.Now()
+		if err := t.streamer.Send(actionData); err != nil {
+			t.logger.Errorf("error while notifing client %v", err)
+		}
+		if t.logger != nil {
+			t.logger.Benchmark(fmt.Sprintf("requestor.Notify.%T", actionData), time.Since(start))
+		}
+
 	}
 	return nil
 }

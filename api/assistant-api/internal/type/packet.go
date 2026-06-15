@@ -574,7 +574,6 @@ func (f InitializeAssistantExecutorPacket) ContextId() string { return f.Context
 func (f InitializeAssistantExecutorPacket) PacketName() PacketName {
 	return PacketNameInitializeAssistantExecutor
 }
-func (f InitializeAssistantExecutorPacket) IsAsync() bool { return true }
 
 // InitializeTextToSpeechPacket initializes text-to-speech.
 type InitializeTextToSpeechPacket struct {
