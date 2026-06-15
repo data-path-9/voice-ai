@@ -14,6 +14,7 @@ import (
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	"github.com/rapidaai/pkg/commons"
 	pkg_errors "github.com/rapidaai/pkg/errors"
+	gorm_types "github.com/rapidaai/pkg/models/gorm/types"
 	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/protos"
@@ -24,60 +25,161 @@ import (
 type createDebuggerDeploymentRestServiceStub struct {
 	createCalled       bool
 	createErr          error
+	getCalled          bool
+	getErr             error
+	getNil             bool
+	getAllCalled       bool
+	getAllErr          error
+	page               uint32
+	pageSize           uint32
+	criterias          []*protos.Criteria
 	assistantId        uint64
 	greeting           *string
 	inputAudio         *protos.DeploymentAudioProvider
+	outputAudio        *protos.DeploymentAudioProvider
 	maxSessionDuration *uint64
+	suggestion         []string
+	phoneProviderName  string
+	phoneOptions       []*protos.Metadata
+	whatsappProvider   string
+	whatsappOptions    []*protos.Metadata
 }
 
 func (s *createDebuggerDeploymentRestServiceStub) CreateWhatsappDeployment(
-	context.Context,
-	types.SimplePrinciple,
-	uint64,
-	*string,
-	*string,
-	*uint64,
-	*uint64,
-	*string,
-	*uint64,
-	string,
-	[]*protos.Metadata,
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+	greeting *string,
+	mistake *string,
+	idealTimeout *uint64,
+	idealTimeoutBackoff *uint64,
+	idealTimeoutMessage *string,
+	maxSessionDuration *uint64,
+	whatsappProvider string,
+	whatsappOptions []*protos.Metadata,
 ) (*internal_assistant_entity.AssistantWhatsappDeployment, error) {
-	return nil, errors.New("not implemented")
+	_, _, _ = mistake, idealTimeoutBackoff, idealTimeoutMessage
+	s.createCalled = true
+	s.assistantId = assistantId
+	s.greeting = greeting
+	s.maxSessionDuration = maxSessionDuration
+	s.whatsappProvider = whatsappProvider
+	s.whatsappOptions = whatsappOptions
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+
+	whatsappDeployment := &internal_assistant_entity.AssistantWhatsappDeployment{
+		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+				AssistantId: assistantId,
+			},
+			Greeting:           greeting,
+			IdleTimeout:        idealTimeout,
+			MaxSessionDuration: maxSessionDuration,
+		},
+		AssistantDeploymentWhatsapp: internal_assistant_entity.AssistantDeploymentWhatsapp{
+			WhatsappProvider: whatsappProvider,
+		},
+	}
+	for _, option := range whatsappOptions {
+		optionEntity := &internal_assistant_entity.AssistantDeploymentWhatsappOption{}
+		optionEntity.Key = option.GetKey()
+		optionEntity.Value = option.GetValue()
+		whatsappDeployment.WhatsappOptions = append(whatsappDeployment.WhatsappOptions, optionEntity)
+	}
+	return whatsappDeployment, nil
 }
 
 func (s *createDebuggerDeploymentRestServiceStub) CreatePhoneDeployment(
-	context.Context,
-	types.SimplePrinciple,
-	uint64,
-	*string,
-	*string,
-	*uint64,
-	*uint64,
-	*string,
-	*uint64,
-	string,
-	*protos.DeploymentAudioProvider,
-	*protos.DeploymentAudioProvider,
-	[]*protos.Metadata,
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+	greeting *string,
+	mistake *string,
+	idealTimeout *uint64,
+	idealTimeoutBackoff *uint64,
+	idealTimeoutMessage *string,
+	maxSessionDuration *uint64,
+	phoneProviderName string,
+	inputAudio *protos.DeploymentAudioProvider,
+	outputAudio *protos.DeploymentAudioProvider,
+	phoneOptions []*protos.Metadata,
 ) (*internal_assistant_entity.AssistantPhoneDeployment, error) {
-	return nil, errors.New("not implemented")
+	_, _, _, _, _ = mistake, idealTimeout, idealTimeoutBackoff, idealTimeoutMessage, outputAudio
+	s.createCalled = true
+	s.assistantId = assistantId
+	s.greeting = greeting
+	s.inputAudio = inputAudio
+	s.outputAudio = outputAudio
+	s.maxSessionDuration = maxSessionDuration
+	s.phoneProviderName = phoneProviderName
+	s.phoneOptions = phoneOptions
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+
+	inputAudioEntity := deploymentAudioProviderEntityFromProto(inputAudio)
+	phoneDeployment := &internal_assistant_entity.AssistantPhoneDeployment{
+		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+				AssistantId: assistantId,
+			},
+			Greeting:           greeting,
+			MaxSessionDuration: maxSessionDuration,
+		},
+		AssistantDeploymentTelephony: internal_assistant_entity.AssistantDeploymentTelephony{
+			TelephonyProvider: phoneProviderName,
+		},
+		InputAudio: inputAudioEntity,
+	}
+	for _, option := range phoneOptions {
+		optionEntity := &internal_assistant_entity.AssistantDeploymentTelephonyOption{}
+		optionEntity.Key = option.GetKey()
+		optionEntity.Value = option.GetValue()
+		phoneDeployment.TelephonyOption = append(phoneDeployment.TelephonyOption, optionEntity)
+	}
+	return phoneDeployment, nil
 }
 
 func (s *createDebuggerDeploymentRestServiceStub) CreateApiDeployment(
-	context.Context,
-	types.SimplePrinciple,
-	uint64,
-	*string,
-	*string,
-	*uint64,
-	*uint64,
-	*string,
-	*uint64,
-	*protos.DeploymentAudioProvider,
-	*protos.DeploymentAudioProvider,
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+	greeting *string,
+	mistake *string,
+	idealTimeout *uint64,
+	idealTimeoutBackoff *uint64,
+	idealTimeoutMessage *string,
+	maxSessionDuration *uint64,
+	inputAudio *protos.DeploymentAudioProvider,
+	outputAudio *protos.DeploymentAudioProvider,
 ) (*internal_assistant_entity.AssistantApiDeployment, error) {
-	return nil, errors.New("not implemented")
+	_, _, _ = mistake, idealTimeoutBackoff, idealTimeoutMessage
+	s.createCalled = true
+	s.assistantId = assistantId
+	s.greeting = greeting
+	s.inputAudio = inputAudio
+	s.outputAudio = outputAudio
+	s.maxSessionDuration = maxSessionDuration
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+
+	inputAudioEntity := deploymentAudioProviderEntityFromProto(inputAudio)
+	outputAudioEntity := deploymentAudioProviderEntityFromProto(outputAudio)
+	return &internal_assistant_entity.AssistantApiDeployment{
+		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+				AssistantId: assistantId,
+			},
+			Greeting:           greeting,
+			IdleTimeout:        idealTimeout,
+			MaxSessionDuration: maxSessionDuration,
+		},
+		InputAudio:  inputAudioEntity,
+		OutputAudio: outputAudioEntity,
+	}, nil
 }
 
 func (s *createDebuggerDeploymentRestServiceStub) CreateDebuggerDeployment(
@@ -95,6 +197,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateDebuggerDeployment(
 	s.assistantId = assistantId
 	s.greeting = greeting
 	s.inputAudio = inputAudio
+	s.outputAudio = nil
 	s.maxSessionDuration = maxSessionDuration
 	if s.createErr != nil {
 		return nil, s.createErr
@@ -115,60 +218,317 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateDebuggerDeployment(
 }
 
 func (s *createDebuggerDeploymentRestServiceStub) CreateWebPluginDeployment(
-	context.Context,
-	types.SimplePrinciple,
-	uint64,
-	*string,
-	*string,
-	*uint64,
-	*uint64,
-	*string,
-	*uint64,
-	[]string,
-	*protos.DeploymentAudioProvider,
-	*protos.DeploymentAudioProvider,
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+	greeting *string,
+	mistake *string,
+	idealTimeout *uint64,
+	idealTimeoutBackoff *uint64,
+	idealTimeoutMessage *string,
+	maxSessionDuration *uint64,
+	suggestion []string,
+	inputAudio *protos.DeploymentAudioProvider,
+	outputAudio *protos.DeploymentAudioProvider,
 ) (*internal_assistant_entity.AssistantWebPluginDeployment, error) {
-	return nil, errors.New("not implemented")
+	_, _, _ = mistake, idealTimeoutBackoff, idealTimeoutMessage
+	s.createCalled = true
+	s.assistantId = assistantId
+	s.greeting = greeting
+	s.inputAudio = inputAudio
+	s.outputAudio = outputAudio
+	s.maxSessionDuration = maxSessionDuration
+	s.suggestion = suggestion
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+
+	inputAudioEntity := deploymentAudioProviderEntityFromProto(inputAudio)
+	outputAudioEntity := deploymentAudioProviderEntityFromProto(outputAudio)
+	return &internal_assistant_entity.AssistantWebPluginDeployment{
+		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+				AssistantId: assistantId,
+			},
+			Greeting:           greeting,
+			IdleTimeout:        idealTimeout,
+			MaxSessionDuration: maxSessionDuration,
+		},
+		Suggestion:  gorm_types.StringArray(suggestion),
+		InputAudio:  inputAudioEntity,
+		OutputAudio: outputAudioEntity,
+	}, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAssistantApiDeployment(context.Context, types.SimplePrinciple, uint64) (*internal_assistant_entity.AssistantApiDeployment, error) {
-	return nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAssistantApiDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+) (*internal_assistant_entity.AssistantApiDeployment, error) {
+	s.getCalled = true
+	s.assistantId = assistantId
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.getNil {
+		return nil, nil
+	}
+	greeting := "Hello"
+	inputAudio := &internal_assistant_entity.AssistantDeploymentAudio{
+		AudioType:     "input",
+		AudioProvider: "twilio",
+	}
+	inputAudio.Id = 321
+	inputAudio.Status = type_enums.RECORD_ACTIVE
+	inputAudioOption := &internal_assistant_entity.AssistantDeploymentAudioOption{}
+	inputAudioOption.Key = "codec"
+	inputAudioOption.Value = "mulaw"
+	inputAudio.AudioOptions = append(inputAudio.AudioOptions, inputAudioOption)
+	deployment := &internal_assistant_entity.AssistantApiDeployment{
+		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+				AssistantId: assistantId,
+			},
+			Greeting: &greeting,
+		},
+		InputAudio: inputAudio,
+	}
+	deployment.Id = 654
+	deployment.Status = type_enums.RECORD_ACTIVE
+	return deployment, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAssistantDebuggerDeployment(context.Context, types.SimplePrinciple, uint64) (*internal_assistant_entity.AssistantDebuggerDeployment, error) {
-	return nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAssistantDebuggerDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+) (*internal_assistant_entity.AssistantDebuggerDeployment, error) {
+	s.getCalled = true
+	s.assistantId = assistantId
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.getNil {
+		return nil, nil
+	}
+	greeting := "Hello"
+	deployment := &internal_assistant_entity.AssistantDebuggerDeployment{
+		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+				AssistantId: assistantId,
+			},
+			Greeting: &greeting,
+		},
+	}
+	deployment.Id = 655
+	deployment.Status = type_enums.RECORD_ACTIVE
+	return deployment, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAssistantPhoneDeployment(context.Context, types.SimplePrinciple, uint64) (*internal_assistant_entity.AssistantPhoneDeployment, error) {
-	return nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAssistantPhoneDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+) (*internal_assistant_entity.AssistantPhoneDeployment, error) {
+	s.getCalled = true
+	s.assistantId = assistantId
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.getNil {
+		return nil, nil
+	}
+	greeting := "Hello"
+	deployment := &internal_assistant_entity.AssistantPhoneDeployment{
+		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+				AssistantId: assistantId,
+			},
+			Greeting: &greeting,
+		},
+		AssistantDeploymentTelephony: internal_assistant_entity.AssistantDeploymentTelephony{
+			TelephonyProvider: "twilio",
+		},
+	}
+	deployment.Id = 656
+	deployment.Status = type_enums.RECORD_ACTIVE
+	phoneOption := &internal_assistant_entity.AssistantDeploymentTelephonyOption{}
+	phoneOption.Key = "phone"
+	phoneOption.Value = "+15551234567"
+	deployment.TelephonyOption = append(deployment.TelephonyOption, phoneOption)
+	return deployment, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAssistantWebpluginDeployment(context.Context, types.SimplePrinciple, uint64) (*internal_assistant_entity.AssistantWebPluginDeployment, error) {
-	return nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAssistantWebpluginDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+) (*internal_assistant_entity.AssistantWebPluginDeployment, error) {
+	s.getCalled = true
+	s.assistantId = assistantId
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.getNil {
+		return nil, nil
+	}
+	greeting := "Hello"
+	deployment := &internal_assistant_entity.AssistantWebPluginDeployment{
+		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+				AssistantId: assistantId,
+			},
+			Greeting: &greeting,
+		},
+		Suggestion: gorm_types.StringArray{"Book demo", "Talk to support"},
+	}
+	deployment.Id = 657
+	deployment.Status = type_enums.RECORD_ACTIVE
+	return deployment, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAssistantWhatsappDeployment(context.Context, types.SimplePrinciple, uint64) (*internal_assistant_entity.AssistantWhatsappDeployment, error) {
-	return nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAssistantWhatsappDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+) (*internal_assistant_entity.AssistantWhatsappDeployment, error) {
+	s.getCalled = true
+	s.assistantId = assistantId
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.getNil {
+		return nil, nil
+	}
+	greeting := "Hello"
+	deployment := &internal_assistant_entity.AssistantWhatsappDeployment{
+		AssistantDeploymentBehavior: internal_assistant_entity.AssistantDeploymentBehavior{
+			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
+				AssistantId: assistantId,
+			},
+			Greeting: &greeting,
+		},
+		AssistantDeploymentWhatsapp: internal_assistant_entity.AssistantDeploymentWhatsapp{
+			WhatsappProvider: "gupshup",
+		},
+	}
+	deployment.Id = 658
+	deployment.Status = type_enums.RECORD_ACTIVE
+	whatsappOption := &internal_assistant_entity.AssistantDeploymentWhatsappOption{}
+	whatsappOption.Key = "template"
+	whatsappOption.Value = "welcome"
+	deployment.WhatsappOptions = append(deployment.WhatsappOptions, whatsappOption)
+	return deployment, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantApiDeployment(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantApiDeployment, error) {
-	return 0, nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantApiDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+	criterias []*protos.Criteria,
+	paginate *protos.Paginate,
+) (int64, []*internal_assistant_entity.AssistantApiDeployment, error) {
+	s.getAllCalled = true
+	s.assistantId = assistantId
+	s.criterias = criterias
+	s.page = paginate.GetPage()
+	s.pageSize = paginate.GetPageSize()
+	if s.getAllErr != nil {
+		return 0, nil, s.getAllErr
+	}
+	deployment, err := s.GetAssistantApiDeployment(context.Background(), nil, assistantId)
+	if err != nil {
+		return 0, nil, err
+	}
+	return 1, []*internal_assistant_entity.AssistantApiDeployment{deployment}, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantDebuggerDeployment(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantDebuggerDeployment, error) {
-	return 0, nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantDebuggerDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+	criterias []*protos.Criteria,
+	paginate *protos.Paginate,
+) (int64, []*internal_assistant_entity.AssistantDebuggerDeployment, error) {
+	s.getAllCalled = true
+	s.assistantId = assistantId
+	s.criterias = criterias
+	s.page = paginate.GetPage()
+	s.pageSize = paginate.GetPageSize()
+	if s.getAllErr != nil {
+		return 0, nil, s.getAllErr
+	}
+	deployment, err := s.GetAssistantDebuggerDeployment(context.Background(), nil, assistantId)
+	if err != nil {
+		return 0, nil, err
+	}
+	return 1, []*internal_assistant_entity.AssistantDebuggerDeployment{deployment}, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantPhoneDeployment(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantPhoneDeployment, error) {
-	return 0, nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantPhoneDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+	criterias []*protos.Criteria,
+	paginate *protos.Paginate,
+) (int64, []*internal_assistant_entity.AssistantPhoneDeployment, error) {
+	s.getAllCalled = true
+	s.assistantId = assistantId
+	s.criterias = criterias
+	s.page = paginate.GetPage()
+	s.pageSize = paginate.GetPageSize()
+	if s.getAllErr != nil {
+		return 0, nil, s.getAllErr
+	}
+	deployment, err := s.GetAssistantPhoneDeployment(context.Background(), nil, assistantId)
+	if err != nil {
+		return 0, nil, err
+	}
+	return 1, []*internal_assistant_entity.AssistantPhoneDeployment{deployment}, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantWebpluginDeployment(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantWebPluginDeployment, error) {
-	return 0, nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantWebpluginDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+	criterias []*protos.Criteria,
+	paginate *protos.Paginate,
+) (int64, []*internal_assistant_entity.AssistantWebPluginDeployment, error) {
+	s.getAllCalled = true
+	s.assistantId = assistantId
+	s.criterias = criterias
+	s.page = paginate.GetPage()
+	s.pageSize = paginate.GetPageSize()
+	if s.getAllErr != nil {
+		return 0, nil, s.getAllErr
+	}
+	deployment, err := s.GetAssistantWebpluginDeployment(context.Background(), nil, assistantId)
+	if err != nil {
+		return 0, nil, err
+	}
+	return 1, []*internal_assistant_entity.AssistantWebPluginDeployment{deployment}, nil
 }
 
-func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantWhatsappDeployment(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantWhatsappDeployment, error) {
-	return 0, nil, errors.New("not implemented")
+func (s *createDebuggerDeploymentRestServiceStub) GetAllAssistantWhatsappDeployment(
+	_ context.Context,
+	_ types.SimplePrinciple,
+	assistantId uint64,
+	criterias []*protos.Criteria,
+	paginate *protos.Paginate,
+) (int64, []*internal_assistant_entity.AssistantWhatsappDeployment, error) {
+	s.getAllCalled = true
+	s.assistantId = assistantId
+	s.criterias = criterias
+	s.page = paginate.GetPage()
+	s.pageSize = paginate.GetPageSize()
+	if s.getAllErr != nil {
+		return 0, nil, s.getAllErr
+	}
+	deployment, err := s.GetAssistantWhatsappDeployment(context.Background(), nil, assistantId)
+	if err != nil {
+		return 0, nil, err
+	}
+	return 1, []*internal_assistant_entity.AssistantWhatsappDeployment{deployment}, nil
 }
 
 func (s *createDebuggerDeploymentRestServiceStub) DisableAssistantApiDeployment(context.Context, types.SimplePrinciple, uint64) (*internal_assistant_entity.AssistantApiDeployment, error) {

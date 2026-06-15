@@ -80,6 +80,694 @@ paths:
             application/json:
               schema:
                 $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/create-phone-deployment:
+    post:
+      operationId: createAssistantPhoneDeployment
+      summary: Create assistant phone deployment
+      description: Creates a phone deployment for an assistant. This endpoint requires user authentication with organization and project scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssistantPhoneDeploymentRequest"
+      responses:
+        "200":
+          description: Assistant phone deployment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantPhoneDeploymentResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to create assistant phone deployment
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/create-api-deployment:
+    post:
+      operationId: createAssistantApiDeployment
+      summary: Create assistant API deployment
+      description: Creates an API deployment for an assistant. This endpoint requires user authentication with organization and project scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssistantApiDeploymentRequest"
+      responses:
+        "200":
+          description: Assistant API deployment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantApiDeploymentResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to create assistant API deployment
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/create-webplugin-deployment:
+    post:
+      operationId: createAssistantWebpluginDeployment
+      summary: Create assistant webplugin deployment
+      description: Creates a webplugin deployment for an assistant. This endpoint requires user authentication with organization and project scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssistantWebpluginDeploymentRequest"
+      responses:
+        "200":
+          description: Assistant webplugin deployment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantWebpluginDeploymentResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to create assistant webplugin deployment
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/create-whatsapp-deployment:
+    post:
+      operationId: createAssistantWhatsappDeployment
+      summary: Create assistant WhatsApp deployment
+      description: Creates a WhatsApp deployment for an assistant. This endpoint requires user authentication with organization and project scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssistantWhatsappDeploymentRequest"
+      responses:
+        "200":
+          description: Assistant WhatsApp deployment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantWhatsappDeploymentResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to create assistant WhatsApp deployment
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-api-deployment/{assistantId}:
+    get:
+      operationId: getAssistantApiDeployment
+      summary: Get assistant API deployment
+      description: Gets the latest API deployment for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+      responses:
+        "200":
+          description: Assistant API deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantApiDeploymentResponse"
+        "400":
+          description: Invalid assistantId
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant API deployment
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-debugger-deployment/{assistantId}:
+    get:
+      operationId: getAssistantDebuggerDeployment
+      summary: Get assistant debugger deployment
+      description: Gets the latest debugger deployment for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+      responses:
+        "200":
+          description: Assistant debugger deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantDebuggerDeploymentResponse"
+        "400":
+          description: Invalid assistantId
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant debugger deployment
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-phone-deployment/{assistantId}:
+    get:
+      operationId: getAssistantPhoneDeployment
+      summary: Get assistant phone deployment
+      description: Gets the latest phone deployment for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+      responses:
+        "200":
+          description: Assistant phone deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantPhoneDeploymentResponse"
+        "400":
+          description: Invalid assistantId
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant phone deployment
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-webplugin-deployment/{assistantId}:
+    get:
+      operationId: getAssistantWebpluginDeployment
+      summary: Get assistant webplugin deployment
+      description: Gets the latest webplugin deployment for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+      responses:
+        "200":
+          description: Assistant webplugin deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantWebpluginDeploymentResponse"
+        "400":
+          description: Invalid assistantId
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant webplugin deployment
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-whatsapp-deployment/{assistantId}:
+    get:
+      operationId: getAssistantWhatsappDeployment
+      summary: Get assistant WhatsApp deployment
+      description: Gets the latest WhatsApp deployment for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+      responses:
+        "200":
+          description: Assistant WhatsApp deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantWhatsappDeploymentResponse"
+        "400":
+          description: Invalid assistantId
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant WhatsApp deployment
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-all-api-deployment/{assistantId}:
+    get:
+      operationId: getAllAssistantApiDeployment
+      summary: Get all assistant API deployments
+      description: Gets API deployments for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 20
+        - name: criterias
+          in: query
+          required: false
+          description: JSON encoded array of Criteria objects.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Assistant API deployments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAllAssistantApiDeploymentResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant API deployments
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-all-debugger-deployment/{assistantId}:
+    get:
+      operationId: getAllAssistantDebuggerDeployment
+      summary: Get all assistant debugger deployments
+      description: Gets debugger deployments for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 20
+        - name: criterias
+          in: query
+          required: false
+          description: JSON encoded array of Criteria objects.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Assistant debugger deployments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAllAssistantDebuggerDeploymentResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant debugger deployments
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-all-phone-deployment/{assistantId}:
+    get:
+      operationId: getAllAssistantPhoneDeployment
+      summary: Get all assistant phone deployments
+      description: Gets phone deployments for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 20
+        - name: criterias
+          in: query
+          required: false
+          description: JSON encoded array of Criteria objects.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Assistant phone deployments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAllAssistantPhoneDeploymentResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant phone deployments
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-all-webplugin-deployment/{assistantId}:
+    get:
+      operationId: getAllAssistantWebpluginDeployment
+      summary: Get all assistant webplugin deployments
+      description: Gets webplugin deployments for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 20
+        - name: criterias
+          in: query
+          required: false
+          description: JSON encoded array of Criteria objects.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Assistant webplugin deployments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAllAssistantWebpluginDeploymentResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant webplugin deployments
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant-deployment/get-all-whatsapp-deployment/{assistantId}:
+    get:
+      operationId: getAllAssistantWhatsappDeployment
+      summary: Get all assistant WhatsApp deployments
+      description: Gets WhatsApp deployments for an assistant. This endpoint requires user authentication with organization and project scope.
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 20
+        - name: criterias
+          in: query
+          required: false
+          description: JSON encoded array of Criteria objects.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Assistant WhatsApp deployments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAllAssistantWhatsappDeploymentResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing authentication scope
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to get assistant WhatsApp deployments
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
 components:
   schemas:
     CreateAssistantRequest:
@@ -146,6 +834,148 @@ components:
           $ref: "#/components/schemas/DeploymentAudioProviderRequest"
         outputAudio:
           $ref: "#/components/schemas/DeploymentAudioProviderRequest"
+    CreateAssistantPhoneDeploymentRequest:
+      type: object
+      required:
+        - assistantId
+        - phoneProviderName
+      properties:
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        greeting:
+          type: string
+        mistake:
+          type: string
+        idealTimeout:
+          type: integer
+          format: uint64
+          minimum: 15
+          maximum: 120
+        idealTimeoutBackoff:
+          type: integer
+          format: uint64
+          minimum: 0
+          maximum: 5
+        idealTimeoutMessage:
+          type: string
+        maxSessionDuration:
+          type: integer
+          format: uint64
+          minimum: 180
+          maximum: 600
+        phoneProviderName:
+          type: string
+        phoneOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+        inputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProviderRequest"
+        outputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProviderRequest"
+    CreateAssistantApiDeploymentRequest:
+      type: object
+      required:
+        - assistantId
+      properties:
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        greeting:
+          type: string
+        mistake:
+          type: string
+        idealTimeout:
+          type: integer
+          format: uint64
+          minimum: 15
+          maximum: 120
+        idealTimeoutBackoff:
+          type: integer
+          format: uint64
+          minimum: 0
+          maximum: 5
+        idealTimeoutMessage:
+          type: string
+        maxSessionDuration:
+          type: integer
+          format: uint64
+          minimum: 180
+          maximum: 600
+        inputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProviderRequest"
+        outputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProviderRequest"
+    CreateAssistantWebpluginDeploymentRequest:
+      type: object
+      required:
+        - assistantId
+      properties:
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        greeting:
+          type: string
+        mistake:
+          type: string
+        idealTimeout:
+          type: integer
+          format: uint64
+          minimum: 15
+          maximum: 120
+        idealTimeoutBackoff:
+          type: integer
+          format: uint64
+          minimum: 0
+          maximum: 5
+        idealTimeoutMessage:
+          type: string
+        maxSessionDuration:
+          type: integer
+          format: uint64
+          minimum: 180
+          maximum: 600
+        suggestion:
+          type: array
+          items:
+            type: string
+        inputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProviderRequest"
+        outputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProviderRequest"
+    CreateAssistantWhatsappDeploymentRequest:
+      type: object
+      required:
+        - assistantId
+        - whatsappProviderName
+      properties:
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        greeting:
+          type: string
+        mistake:
+          type: string
+        idealTimeout:
+          type: integer
+          format: uint64
+          minimum: 15
+          maximum: 120
+        idealTimeoutBackoff:
+          type: integer
+          format: uint64
+          minimum: 0
+          maximum: 5
+        idealTimeoutMessage:
+          type: string
+        maxSessionDuration:
+          type: integer
+          format: uint64
+          minimum: 180
+          maximum: 600
+        whatsappProviderName:
+          type: string
+        whatsappOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
     DeploymentAudioProviderRequest:
       type: object
       required:
@@ -311,6 +1141,134 @@ components:
           $ref: "#/components/schemas/AssistantDebuggerDeployment"
         error:
           $ref: "./common.yaml#/components/schemas/Error"
+    GetAssistantPhoneDeploymentResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AssistantPhoneDeployment"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+    GetAssistantApiDeploymentResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AssistantApiDeployment"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+    GetAssistantWebpluginDeploymentResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AssistantWebpluginDeployment"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+    GetAssistantWhatsappDeploymentResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AssistantWhatsappDeployment"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+    GetAllAssistantApiDeploymentResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantApiDeployment"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+        paginated:
+          $ref: "./common.yaml#/components/schemas/Paginated"
+    GetAllAssistantDebuggerDeploymentResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantDebuggerDeployment"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+        paginated:
+          $ref: "./common.yaml#/components/schemas/Paginated"
+    GetAllAssistantPhoneDeploymentResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantPhoneDeployment"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+        paginated:
+          $ref: "./common.yaml#/components/schemas/Paginated"
+    GetAllAssistantWebpluginDeploymentResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantWebpluginDeployment"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+        paginated:
+          $ref: "./common.yaml#/components/schemas/Paginated"
+    GetAllAssistantWhatsappDeploymentResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantWhatsappDeployment"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+        paginated:
+          $ref: "./common.yaml#/components/schemas/Paginated"
     AssistantDebuggerDeployment:
       type: object
       properties:
@@ -326,6 +1284,154 @@ components:
           $ref: "#/components/schemas/DeploymentAudioProvider"
         outputAudio:
           $ref: "#/components/schemas/DeploymentAudioProvider"
+        status:
+          type: string
+        maxSessionDuration:
+          type: integer
+          format: uint64
+          minimum: 180
+          maximum: 600
+        idealTimeout:
+          type: integer
+          format: uint64
+          minimum: 15
+          maximum: 120
+        idealTimeoutBackoff:
+          type: integer
+          format: uint64
+          minimum: 0
+          maximum: 5
+        idealTimeoutMessage:
+          type: string
+    AssistantPhoneDeployment:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        greeting:
+          type: string
+        mistake:
+          type: string
+        inputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProvider"
+        outputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProvider"
+        phoneProviderName:
+          type: string
+        phoneOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+        status:
+          type: string
+        maxSessionDuration:
+          type: integer
+          format: uint64
+          minimum: 180
+          maximum: 600
+        idealTimeout:
+          type: integer
+          format: uint64
+          minimum: 15
+          maximum: 120
+        idealTimeoutBackoff:
+          type: integer
+          format: uint64
+          minimum: 0
+          maximum: 5
+        idealTimeoutMessage:
+          type: string
+    AssistantApiDeployment:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        greeting:
+          type: string
+        mistake:
+          type: string
+        inputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProvider"
+        outputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProvider"
+        status:
+          type: string
+        maxSessionDuration:
+          type: integer
+          format: uint64
+          minimum: 180
+          maximum: 600
+        idealTimeout:
+          type: integer
+          format: uint64
+          minimum: 15
+          maximum: 120
+        idealTimeoutBackoff:
+          type: integer
+          format: uint64
+          minimum: 0
+          maximum: 5
+        idealTimeoutMessage:
+          type: string
+    AssistantWebpluginDeployment:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        greeting:
+          type: string
+        mistake:
+          type: string
+        inputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProvider"
+        outputAudio:
+          $ref: "#/components/schemas/DeploymentAudioProvider"
+        suggestion:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        maxSessionDuration:
+          type: integer
+          format: uint64
+          minimum: 180
+          maximum: 600
+        idealTimeout:
+          type: integer
+          format: uint64
+          minimum: 15
+          maximum: 120
+        idealTimeoutBackoff:
+          type: integer
+          format: uint64
+          minimum: 0
+          maximum: 5
+        idealTimeoutMessage:
+          type: string
+    AssistantWhatsappDeployment:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        greeting:
+          type: string
+        mistake:
+          type: string
+        whatsappProviderName:
+          type: string
+        whatsappOptions:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
         status:
           type: string
         maxSessionDuration:

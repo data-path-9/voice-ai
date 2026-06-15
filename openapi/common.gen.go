@@ -90,6 +90,13 @@ type AssistantDefinition struct {
 	Version     *string       `json:"version,omitempty"`
 }
 
+// Criteria defines model for Criteria.
+type Criteria struct {
+	Key   *string `json:"key,omitempty"`
+	Logic *string `json:"logic,omitempty"`
+	Value *string `json:"value,omitempty"`
+}
+
 // Error Platform error response details. `errorCode` is a stable platform error code.
 // See `PlatformErrorCode` for documented code/message mappings.
 type Error struct {
@@ -124,6 +131,18 @@ type Metric struct {
 	Description *string `json:"description,omitempty"`
 	Name        *string `json:"name,omitempty"`
 	Value       *string `json:"value,omitempty"`
+}
+
+// Paginate defines model for Paginate.
+type Paginate struct {
+	Page     *uint32 `json:"page,omitempty"`
+	PageSize *uint32 `json:"pageSize,omitempty"`
+}
+
+// Paginated defines model for Paginated.
+type Paginated struct {
+	CurrentPage *uint32 `json:"currentPage,omitempty"`
+	TotalItem   *uint32 `json:"totalItem,omitempty"`
 }
 
 // PlatformErrorCode Stable platform error code.
@@ -184,6 +203,116 @@ type Metric struct {
 // - `1004007`: invalid ideal_timeout parameter - Please provide idealTimeout between 15 and 120 seconds.
 // - `1004008`: invalid ideal_timeout_backoff parameter - Please provide idealTimeoutBackoff between 0 and 5 times.
 // - `1004009`: invalid max_session_duration parameter - Please provide maxSessionDuration between 180 and 600 seconds.
+//
+// Create Assistant Phone Deployment:
+// - `1005001`: invalid request - Invalid request.
+// - `1005002`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1005003`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1005004`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1005005`: unable to create assistant phone deployment - Unable to create assistant phone deployment, please try again later.
+// - `1005006`: invalid audio provider parameter - Please provide a valid audioProvider parameter.
+// - `1005007`: invalid ideal_timeout parameter - Please provide idealTimeout between 15 and 120 seconds.
+// - `1005008`: invalid ideal_timeout_backoff parameter - Please provide idealTimeoutBackoff between 0 and 5 times.
+// - `1005009`: invalid max_session_duration parameter - Please provide maxSessionDuration between 180 and 600 seconds.
+// - `1005010`: missing phone_provider_name parameter - Please provide the required phoneProviderName parameter.
+//
+// Create Assistant API Deployment:
+// - `1006001`: invalid request - Invalid request.
+// - `1006002`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1006003`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1006004`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1006005`: unable to create assistant api deployment - Unable to create assistant api deployment, please try again later.
+// - `1006006`: invalid audio provider parameter - Please provide a valid audioProvider parameter.
+// - `1006007`: invalid ideal_timeout parameter - Please provide idealTimeout between 15 and 120 seconds.
+// - `1006008`: invalid ideal_timeout_backoff parameter - Please provide idealTimeoutBackoff between 0 and 5 times.
+// - `1006009`: invalid max_session_duration parameter - Please provide maxSessionDuration between 180 and 600 seconds.
+//
+// Create Assistant Webplugin Deployment:
+// - `1007001`: invalid request - Invalid request.
+// - `1007002`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1007003`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1007004`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1007005`: unable to create assistant webplugin deployment - Unable to create assistant webplugin deployment, please try again later.
+// - `1007006`: invalid audio provider parameter - Please provide a valid audioProvider parameter.
+// - `1007007`: invalid ideal_timeout parameter - Please provide idealTimeout between 15 and 120 seconds.
+// - `1007008`: invalid ideal_timeout_backoff parameter - Please provide idealTimeoutBackoff between 0 and 5 times.
+// - `1007009`: invalid max_session_duration parameter - Please provide maxSessionDuration between 180 and 600 seconds.
+//
+// Create Assistant WhatsApp Deployment:
+// - `1008001`: invalid request - Invalid request.
+// - `1008002`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1008003`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1008004`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1008005`: unable to create assistant whatsapp deployment - Unable to create assistant whatsapp deployment, please try again later.
+// - `1008006`: invalid ideal_timeout parameter - Please provide idealTimeout between 15 and 120 seconds.
+// - `1008007`: invalid ideal_timeout_backoff parameter - Please provide idealTimeoutBackoff between 0 and 5 times.
+// - `1008008`: invalid max_session_duration parameter - Please provide maxSessionDuration between 180 and 600 seconds.
+// - `1008009`: missing whatsapp_provider_name parameter - Please provide the required whatsappProviderName parameter.
+//
+// Get Assistant Debugger Deployment:
+// - `1009001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1009002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1009003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1009004`: unable to get assistant debugger deployment - Unable to get assistant debugger deployment, please try again later.
+//
+// Get Assistant Phone Deployment:
+// - `1010001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1010002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1010003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1010004`: unable to get assistant phone deployment - Unable to get assistant phone deployment, please try again later.
+//
+// Get Assistant API Deployment:
+// - `1011001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1011002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1011003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1011004`: unable to get assistant api deployment - Unable to get assistant api deployment, please try again later.
+//
+// Get Assistant Webplugin Deployment:
+// - `1012001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1012002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1012003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1012004`: unable to get assistant webplugin deployment - Unable to get assistant webplugin deployment, please try again later.
+//
+// Get Assistant WhatsApp Deployment:
+// - `1013001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1013002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1013003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1013004`: unable to get assistant whatsapp deployment - Unable to get assistant whatsapp deployment, please try again later.
+//
+// Get All Assistant Debugger Deployment:
+// - `1014001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1014002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1014003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1014004`: invalid request - Invalid request.
+// - `1014005`: unable to get assistant debugger deployments - Unable to get assistant debugger deployments, please try again later.
+//
+// Get All Assistant Phone Deployment:
+// - `1015001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1015002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1015003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1015004`: invalid request - Invalid request.
+// - `1015005`: unable to get assistant phone deployments - Unable to get assistant phone deployments, please try again later.
+//
+// Get All Assistant API Deployment:
+// - `1016001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1016002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1016003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1016004`: invalid request - Invalid request.
+// - `1016005`: unable to get assistant api deployments - Unable to get assistant api deployments, please try again later.
+//
+// Get All Assistant Webplugin Deployment:
+// - `1017001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1017002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1017003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1017004`: invalid request - Invalid request.
+// - `1017005`: unable to get assistant webplugin deployments - Unable to get assistant webplugin deployments, please try again later.
+//
+// Get All Assistant WhatsApp Deployment:
+// - `1018001`: unauthenticated request - Unauthenticated request, please try again with valid authentication.
+// - `1018002`: missing authentication scope - Unauthenticated request, please try again with valid authentication.
+// - `1018003`: invalid assistant_id parameter - Please provide a valid assistantId parameter.
+// - `1018004`: invalid request - Invalid request.
+// - `1018005`: unable to get assistant whatsapp deployments - Unable to get assistant whatsapp deployments, please try again later.
 type PlatformErrorCode = string
 
 // Uint64String defines model for Uint64String.
