@@ -17,7 +17,6 @@ import (
 	internal_vobiz "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vobiz/internal"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
-	"github.com/rapidaai/pkg/clients/vobiz"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
@@ -25,7 +24,7 @@ import (
 )
 
 // newVobizClient is overridable in tests.
-var newVobizClient = vobiz.NewClient
+var newVobizClient = internal_vobiz.NewClient
 
 type vobizTelephony struct {
 	appCfg *config.AssistantConfig
@@ -125,7 +124,7 @@ func (v *vobizTelephony) OutboundCall(ctx context.Context, auth types.SimplePrin
 	answerURL := fmt.Sprintf("https://%s/%s", public, answerPath(contextID))
 	eventURL := fmt.Sprintf("https://%s/%s", public, internal_type.GetContextEventPath(internal_vobiz.VobizProvider, contextID))
 
-	resp, err := newVobizClient().MakeCall(ctx, authID, authToken, vobiz.MakeCallRequest{
+	resp, err := newVobizClient().MakeCall(ctx, authID, authToken, internal_vobiz.MakeCallRequest{
 		From:         from,
 		To:           toPhone,
 		AnswerURL:    answerURL,
