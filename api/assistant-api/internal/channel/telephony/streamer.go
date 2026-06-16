@@ -145,7 +145,7 @@ func (at Telephony) NewStreamer(
 			internal_vobiz_telephony.WithVaultCredential(vaultCredential),
 			internal_vobiz_telephony.WithObserver(resolvedOptions.Observer),
 		)
-	case SIP, VobizSIP:
+	case SIP:
 		return New(
 			WithSIPContext(resolvedOptions.Context),
 			WithSIPLogger(logger),

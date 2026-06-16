@@ -32,13 +32,6 @@ func (vs *vaultService) Create(ctx context.Context,
 	auth types.SimplePrinciple,
 	provider string,
 	name string, credential map[string]interface{}) (*internal_entity.Vault, error) {
-
-		// Vobiz integration: auto-provision a SIP trunk + credential via the Vobiz
-	// API and store the result as a "sip" credential the SIP provider consumes.
-	if provider == VobizProvider {
-		return vs.provisionVobiz(ctx, auth, name, credential)
-	}
-
 	db := vs.postgres.DB(ctx)
 	vlt := &internal_entity.Vault{
 		Mutable: gorm_models.Mutable{

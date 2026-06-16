@@ -34,10 +34,6 @@ const (
 	Asterisk Telephony = "asterisk"
 	SIP      Telephony = "sip"
 	Vobiz    Telephony = "vobiz_websocket"
-	// VobizSIP is an auto-provisioned vobiz SIP trunk. It places calls through
-	// the same SIP engine as SIP — the only difference is the credential is
-	// created via vobiz's trunk API (see web-api vault provisioning).
-	VobizSIP Telephony = "vobiz_sip"
 )
 
 func (at Telephony) String() string {
@@ -68,7 +64,7 @@ func GetTelephony(at Telephony, cfg *config.AssistantConfig, logger commons.Logg
 		return internal_telnyx_telephony.NewTelnyxTelephony(cfg, logger)
 	case Vobiz:
 		return internal_vobiz_telephony.NewVobizTelephony(cfg, logger)
-	case SIP, VobizSIP:
+	case SIP:
 		if opt.SIPServer == nil {
 			return nil, errors.New("SIP server not available — SIP telephony requires a running SIP server")
 		}
