@@ -161,17 +161,18 @@ func (deploymentApi *AssistantDeploymentApi) GetAllAssistantWhatsappDeploymentRe
 		}
 		whatsappProviderName := deployment.WhatsappProvider
 		responseDeployments = append(responseDeployments, openapi.AssistantWhatsappDeployment{
-			Id:                   &deploymentId,
-			AssistantId:          &deploymentAssistantId,
-			Greeting:             deployment.Greeting,
-			Mistake:              deployment.Mistake,
-			WhatsappProviderName: &whatsappProviderName,
-			WhatsappOptions:      &responseWhatsappOptions,
-			Status:               &deploymentStatus,
-			MaxSessionDuration:   deployment.MaxSessionDuration,
-			IdealTimeout:         deployment.IdleTimeout,
-			IdealTimeoutBackoff:  deployment.IdleTimeoutBackoff,
-			IdealTimeoutMessage:  deployment.IdleTimeoutMessage,
+			Id:                    &deploymentId,
+			AssistantId:           &deploymentAssistantId,
+			Greeting:              deployment.Greeting,
+			GreetingInterruptible: deployment.GreetingInterruptible,
+			Mistake:               deployment.Mistake,
+			WhatsappProviderName:  &whatsappProviderName,
+			WhatsappOptions:       &responseWhatsappOptions,
+			Status:                &deploymentStatus,
+			MaxSessionDuration:    deployment.MaxSessionDuration,
+			IdealTimeout:          deployment.IdleTimeout,
+			IdealTimeoutBackoff:   deployment.IdleTimeoutBackoff,
+			IdealTimeoutMessage:   deployment.IdleTimeoutMessage,
 		})
 	}
 	totalItem := uint32(totalItems)

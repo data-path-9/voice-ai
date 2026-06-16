@@ -36,6 +36,7 @@ func (deploymentApi *assistantDeploymentGrpcApi) CreateAssistantWebpluginDeploym
 		iAuth, deployment.GetPlugin().GetAssistantId(),
 		deployment.GetPlugin().Greeting,
 		deployment.GetPlugin().Mistake,
+		deployment.GetPlugin().GreetingInterruptible,
 		&deployment.GetPlugin().IdealTimeout,
 		&deployment.GetPlugin().IdealTimeoutBackoff,
 		&deployment.GetPlugin().IdealTimeoutMessage,

@@ -70,6 +70,7 @@ func (deploymentApi *assistantDeploymentGrpcApi) CreateAssistantDebuggerDeployme
 		iAuth, deployment.GetDebugger().GetAssistantId(),
 		deployment.GetDebugger().Greeting,
 		deployment.GetDebugger().Mistake,
+		deployment.GetDebugger().GreetingInterruptible,
 		&deployment.GetDebugger().IdealTimeout,
 		&deployment.GetDebugger().IdealTimeoutBackoff,
 		&deployment.GetDebugger().IdealTimeoutMessage,

@@ -95,6 +95,7 @@ const EditAssistantCallDeployment: FC<{ assistantId: string }> = ({
 
   const [experienceConfig, setExperienceConfig] = useState<ExperienceConfig>({
     greeting: undefined,
+    greetingInterruptible: true,
     messageOnError: undefined,
     idealTimeout: '30',
     idealMessage: 'Are you there?',
@@ -157,6 +158,9 @@ const EditAssistantCallDeployment: FC<{ assistantId: string }> = ({
 
         setExperienceConfig({
           greeting: deployment.getGreeting(),
+          greetingInterruptible: deployment.hasGreetinginterruptible()
+            ? deployment.getGreetinginterruptible()
+            : true,
           messageOnError: deployment.getMistake(),
           idealTimeout: deployment.getIdealtimeout(),
           idealMessage: deployment.getIdealtimeoutmessage(),
@@ -275,6 +279,9 @@ const EditAssistantCallDeployment: FC<{ assistantId: string }> = ({
     const req = new CreateAssistantDeploymentRequest();
     const deployment = new AssistantPhoneDeployment();
     deployment.setAssistantid(assistantId);
+    deployment.setGreetinginterruptible(
+      experienceConfig.greetingInterruptible ?? true,
+    );
     if (experienceConfig.greeting)
       deployment.setGreeting(experienceConfig.greeting);
     if (experienceConfig.messageOnError)

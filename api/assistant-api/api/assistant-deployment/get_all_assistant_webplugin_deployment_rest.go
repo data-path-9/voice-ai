@@ -197,18 +197,19 @@ func (deploymentApi *AssistantDeploymentApi) GetAllAssistantWebpluginDeploymentR
 		}
 		responseSuggestions := []string(deployment.Suggestion)
 		responseDeployments = append(responseDeployments, openapi.AssistantWebpluginDeployment{
-			Id:                  &deploymentId,
-			AssistantId:         &deploymentAssistantId,
-			Greeting:            deployment.Greeting,
-			Mistake:             deployment.Mistake,
-			InputAudio:          responseInputAudio,
-			OutputAudio:         responseOutputAudio,
-			Suggestion:          &responseSuggestions,
-			Status:              &deploymentStatus,
-			MaxSessionDuration:  deployment.MaxSessionDuration,
-			IdealTimeout:        deployment.IdleTimeout,
-			IdealTimeoutBackoff: deployment.IdleTimeoutBackoff,
-			IdealTimeoutMessage: deployment.IdleTimeoutMessage,
+			Id:                    &deploymentId,
+			AssistantId:           &deploymentAssistantId,
+			Greeting:              deployment.Greeting,
+			GreetingInterruptible: deployment.GreetingInterruptible,
+			Mistake:               deployment.Mistake,
+			InputAudio:            responseInputAudio,
+			OutputAudio:           responseOutputAudio,
+			Suggestion:            &responseSuggestions,
+			Status:                &deploymentStatus,
+			MaxSessionDuration:    deployment.MaxSessionDuration,
+			IdealTimeout:          deployment.IdleTimeout,
+			IdealTimeoutBackoff:   deployment.IdleTimeoutBackoff,
+			IdealTimeoutMessage:   deployment.IdleTimeoutMessage,
 		})
 	}
 	totalItem := uint32(totalItems)

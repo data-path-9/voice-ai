@@ -66,6 +66,7 @@ jest.mock('@rapidaai/react', () => {
     private phoneOptions: Metadata[] = [];
     setAssistantid(_: string) {}
     setGreeting(_: string) {}
+    setGreetinginterruptible(_: boolean) {}
     setMistake(_: string) {}
     setIdealtimeout(_: string) {}
     setIdealtimeoutbackoff(_: string) {}
@@ -257,6 +258,8 @@ describe('Phone deployment create and edit flows', () => {
     (GetAssistantPhoneDeployment as jest.Mock).mockResolvedValue({
       getData: () => ({
         getGreeting: () => 'hello',
+        hasGreetinginterruptible: () => true,
+        getGreetinginterruptible: () => true,
         getMistake: () => '',
         getIdealtimeout: () => '30',
         getIdealtimeoutmessage: () => 'Are you there?',

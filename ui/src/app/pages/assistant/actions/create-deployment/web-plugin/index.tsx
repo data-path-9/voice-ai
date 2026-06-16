@@ -96,6 +96,7 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
   const [experienceConfig, setExperienceConfig] =
     useState<WebWidgetExperienceConfig>({
       greeting: undefined,
+      greetingInterruptible: true,
       messageOnError: undefined,
       idealTimeout: '30',
       idealMessage: 'Are you there?',
@@ -152,6 +153,9 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
         setDeploymentId(deployment.getId() ?? null);
         setExperienceConfig({
           greeting: deployment.getGreeting(),
+          greetingInterruptible: deployment.hasGreetinginterruptible()
+            ? deployment.getGreetinginterruptible()
+            : true,
           suggestions: deployment.getSuggestionList() || [],
           messageOnError: deployment.getMistake(),
           idealTimeout: deployment.getIdealtimeout(),
@@ -301,6 +305,9 @@ const ConfigureAssistantWebDeployment: FC<{ assistantId: string }> = ({
     const req = new CreateAssistantDeploymentRequest();
     const webDeployment = new AssistantWebpluginDeployment();
     webDeployment.setAssistantid(assistantId);
+    webDeployment.setGreetinginterruptible(
+      experienceConfig.greetingInterruptible ?? true,
+    );
     if (experienceConfig.greeting)
       webDeployment.setGreeting(experienceConfig.greeting);
     if (experienceConfig.messageOnError)

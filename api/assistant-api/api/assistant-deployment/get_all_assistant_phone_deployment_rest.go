@@ -207,19 +207,20 @@ func (deploymentApi *AssistantDeploymentApi) GetAllAssistantPhoneDeploymentRest(
 		}
 		phoneProviderName := deployment.TelephonyProvider
 		responseDeployments = append(responseDeployments, openapi.AssistantPhoneDeployment{
-			Id:                  &deploymentId,
-			AssistantId:         &deploymentAssistantId,
-			Greeting:            deployment.Greeting,
-			Mistake:             deployment.Mistake,
-			InputAudio:          responseInputAudio,
-			OutputAudio:         responseOutputAudio,
-			PhoneProviderName:   &phoneProviderName,
-			PhoneOptions:        &responsePhoneOptions,
-			Status:              &deploymentStatus,
-			MaxSessionDuration:  deployment.MaxSessionDuration,
-			IdealTimeout:        deployment.IdleTimeout,
-			IdealTimeoutBackoff: deployment.IdleTimeoutBackoff,
-			IdealTimeoutMessage: deployment.IdleTimeoutMessage,
+			Id:                    &deploymentId,
+			AssistantId:           &deploymentAssistantId,
+			Greeting:              deployment.Greeting,
+			GreetingInterruptible: deployment.GreetingInterruptible,
+			Mistake:               deployment.Mistake,
+			InputAudio:            responseInputAudio,
+			OutputAudio:           responseOutputAudio,
+			PhoneProviderName:     &phoneProviderName,
+			PhoneOptions:          &responsePhoneOptions,
+			Status:                &deploymentStatus,
+			MaxSessionDuration:    deployment.MaxSessionDuration,
+			IdealTimeout:          deployment.IdleTimeout,
+			IdealTimeoutBackoff:   deployment.IdleTimeoutBackoff,
+			IdealTimeoutMessage:   deployment.IdleTimeoutMessage,
 		})
 	}
 	totalItem := uint32(totalItems)
