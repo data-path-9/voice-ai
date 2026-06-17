@@ -966,7 +966,7 @@ export const InfoRow: FC<{ label: string; value: string }> = ({
       </span>
       <IconOnlyButton
         kind="ghost"
-        size="xs"
+        size="sm"
         renderIcon={Copy}
         iconDescription={`Copy ${label}`}
         tooltipPosition="left"

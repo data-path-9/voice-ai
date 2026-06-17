@@ -669,6 +669,13 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 			internal_type.DispatchPolicyPacket{
 				ContextID: p.ContextId(),
 				Policy: internal_type.DispatchPolicy{
+					Target: internal_type.PacketNameUserTextReceived,
+					Action: internal_type.DispatchActionPassthrough,
+				},
+			},
+			internal_type.DispatchPolicyPacket{
+				ContextID: p.ContextId(),
+				Policy: internal_type.DispatchPolicy{
 					Target: internal_type.PacketNameInterruptionDetected,
 					Action: internal_type.DispatchActionPassthrough,
 				},
@@ -828,9 +835,6 @@ func (h requestorDispatchHandler) HandleInjectMessage(ctx context.Context, p int
 	}
 }
 func (h requestorDispatchHandler) HandleStartIdleTimeout(ctx context.Context, p internal_type.StartIdleTimeoutPacket) {
-	if h.r.idleTimeoutTimer != nil {
-		h.r.idleTimeoutTimer.Stop()
-	}
 	behavior, err := h.r.GetBehavior()
 	if err != nil {
 		return
@@ -840,37 +844,35 @@ func (h requestorDispatchHandler) HandleStartIdleTimeout(ctx context.Context, p 
 	}
 
 	timeoutDuration := time.Duration(*behavior.IdleTimeout) * time.Second
-	h.r.idleTimeoutDeadline = time.Now().Add(timeoutDuration)
-	h.r.idleTimeoutTimer = time.AfterFunc(timeoutDuration, func() {
-		if err := h.r.onIdleTimeout(ctx); err != nil {
-			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-				ContextID: p.ContextID,
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.RecordLog{
-					Level:   observability.LevelError,
-					Message: "Idle timeout handling failed; conversation may not end as configured",
-					Attributes: observability.Attributes{
-						"component":        observability.ComponentConversation.String(),
-						"operation":        "idle_timeout",
-						"packet":           "StartIdleTimeoutPacket",
-						"context_id":       p.ContextID,
-						"idle_timeout_sec": fmt.Sprintf("%d", *behavior.IdleTimeout),
-						"error":            err.Error(),
-						"error_type":       fmt.Sprintf("%T", err),
-					},
-				},
-			})
-		}
-	})
+	if h.r.idleTimeoutWatchdog != nil {
+		h.r.idleTimeoutWatchdog.Start(p.ContextID, timeoutDuration)
+	}
 }
 func (h requestorDispatchHandler) HandleStopIdleTimeout(ctx context.Context, p internal_type.StopIdleTimeoutPacket) {
-	if h.r.idleTimeoutTimer != nil {
-		h.r.idleTimeoutTimer.Stop()
-		h.r.idleTimeoutTimer = nil
+	if h.r.idleTimeoutWatchdog != nil {
+		h.r.idleTimeoutWatchdog.Stop(p.ResetCount)
 	}
-	h.r.idleTimeoutDeadline = time.Time{}
-	if p.ResetCount {
-		h.r.idleTimeoutCount = 0
+}
+
+func (h requestorDispatchHandler) HandleIdleTimeoutExpired(ctx context.Context, p internal_type.IdleTimeoutExpiredPacket) {
+	if err := h.r.onIdleTimeout(ctx); err != nil {
+		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+			ContextID: p.ContextID,
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.RecordLog{
+				Level:   observability.LevelError,
+				Message: "Idle timeout handling failed; conversation may not end as configured",
+				Attributes: observability.Attributes{
+					"component":  observability.ComponentConversation.String(),
+					"operation":  "idle_timeout",
+					"packet":     "IdleTimeoutExpiredPacket",
+					"context_id": p.ContextID,
+					"count":      fmt.Sprintf("%d", p.Count),
+					"error":      err.Error(),
+					"error_type": fmt.Sprintf("%T", err),
+				},
+			},
+		})
 	}
 }
 
@@ -896,7 +898,11 @@ func (h requestorDispatchHandler) HandleTextToSpeechText(ctx context.Context, p 
 		})
 		return
 	}
+
 	if h.r.textToSpeechTransformer != nil && h.r.GetMode().Audio() {
+		if h.r.ttsCompletionWatchdog != nil {
+			h.r.ttsCompletionWatchdog.StartFromText(p.ContextID, p.Text)
+		}
 		if err := h.r.textToSpeechTransformer.Transform(ctx, p); err != nil {
 			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 				ContextID: p.ContextID,
@@ -929,6 +935,9 @@ func (h requestorDispatchHandler) HandleTextToSpeechDone(ctx context.Context, p 
 	}
 
 	if h.r.textToSpeechTransformer != nil && h.r.GetMode().Audio() {
+		if h.r.ttsCompletionWatchdog != nil {
+			h.r.ttsCompletionWatchdog.StartFromText(p.ContextID, p.Text)
+		}
 		if err := h.r.textToSpeechTransformer.Transform(ctx, p); err != nil {
 			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 				ContextID: p.ContextID,
@@ -958,7 +967,13 @@ func (h requestorDispatchHandler) HandleTextToSpeechDone(ctx context.Context, p 
 func (h requestorDispatchHandler) HandleTextToSpeechAudio(ctx context.Context, p internal_type.TextToSpeechAudioPacket) {
 	if h.r.GetMode().Audio() {
 		audioInfo := internal_audio.GetAudioInfo(p.AudioChunk, internal_audio.RAPIDA_INTERNAL_AUDIO_CONFIG)
-		h.r.extendIdleTimeoutTimer(time.Duration(audioInfo.DurationMs) * time.Millisecond)
+		audioDuration := time.Duration(audioInfo.DurationMs) * time.Millisecond
+		if h.r.idleTimeoutWatchdog != nil {
+			h.r.idleTimeoutWatchdog.Extend(p.ContextID, audioDuration)
+		}
+		if h.r.ttsCompletionWatchdog != nil {
+			h.r.ttsCompletionWatchdog.Extend(p.ContextID, audioDuration)
+		}
 	}
 	if p.ContextID != h.r.GetID() {
 		h.r.OnPacket(ctx,
@@ -992,6 +1007,9 @@ func (h requestorDispatchHandler) HandleTextToSpeechAudio(ctx context.Context, p
 	}
 }
 func (h requestorDispatchHandler) HandleTextToSpeechEnd(ctx context.Context, p internal_type.TextToSpeechEndPacket) {
+	if h.r.ttsCompletionWatchdog != nil {
+		h.r.ttsCompletionWatchdog.Complete(p.ContextID)
+	}
 	if p.ContextID != h.r.GetID() {
 		h.r.OnPacket(ctx,
 			internal_type.ObservabilityEventRecordPacket{
@@ -1026,6 +1044,13 @@ func (h requestorDispatchHandler) HandleTextToSpeechEnd(ctx context.Context, p i
 			ContextID: p.ContextID,
 			Policy: internal_type.DispatchPolicy{
 				Target: internal_type.PacketNameUserAudioReceived,
+				Action: internal_type.DispatchActionPassthrough,
+			},
+		},
+		internal_type.DispatchPolicyPacket{
+			ContextID: p.ContextID,
+			Policy: internal_type.DispatchPolicy{
+				Target: internal_type.PacketNameUserTextReceived,
 				Action: internal_type.DispatchActionPassthrough,
 			},
 		},
@@ -2041,6 +2066,7 @@ func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, 
 				},
 			},
 		})
+		return
 	}
 	h.r.initializeGreeting(ctx, behavior)
 	h.r.initializeIdleTimeout(ctx, behavior)
@@ -2531,8 +2557,11 @@ func (h requestorDispatchHandler) HandleInitializeInboundDispatcher(ctx context.
 }
 
 func (h requestorDispatchHandler) HandleFinalizeBehavior(ctx context.Context, p internal_type.FinalizeBehaviorPacket) {
-	if h.r.idleTimeoutTimer != nil {
-		h.r.idleTimeoutTimer.Stop()
+	if h.r.idleTimeoutWatchdog != nil {
+		h.r.idleTimeoutWatchdog.Cancel()
+	}
+	if h.r.ttsCompletionWatchdog != nil {
+		h.r.ttsCompletionWatchdog.Cancel()
 	}
 	if h.r.maxSessionTimer != nil {
 		h.r.maxSessionTimer.Stop()

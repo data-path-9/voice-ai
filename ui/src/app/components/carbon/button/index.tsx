@@ -25,7 +25,7 @@ type ButtonKind =
   | 'danger--ghost';
 
 type IconButtonKind = 'primary' | 'secondary' | 'ghost' | 'tertiary';
-type IconButtonSize = 'xs' | 'sm' | 'md' | 'lg';
+type IconButtonSize = 'sm' | 'md' | 'lg';
 
 export interface CarbonButtonProps {
   children?: ReactNode;

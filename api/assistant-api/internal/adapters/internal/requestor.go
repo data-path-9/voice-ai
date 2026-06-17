@@ -30,6 +30,7 @@ import (
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
 	internal_knowledge_service "github.com/rapidaai/api/assistant-api/internal/services/knowledge"
+	"github.com/rapidaai/api/assistant-api/internal/watchdog"
 	endpoint_client "github.com/rapidaai/pkg/clients/endpoint"
 	integration_client "github.com/rapidaai/pkg/clients/integration"
 	web_client "github.com/rapidaai/pkg/clients/web"
@@ -121,10 +122,9 @@ type genericRequestor struct {
 	options  map[string]interface{}
 
 	// experience
-	idleTimeoutTimer    *time.Timer
-	idleTimeoutDeadline time.Time // when the current idle timer is set to fire
-	idleTimeoutCount    uint64
-	maxSessionTimer     *time.Timer
+	idleTimeoutWatchdog   *watchdog.IdleTimeoutWatchdog
+	ttsCompletionWatchdog *watchdog.TTSCompletionWatchdog
+	maxSessionTimer       *time.Timer
 
 	// sessionCtx is the adapter-owned lifecycle context. Outlives the gRPC stream.
 	// cancelSession is invoked exactly once, by HandleFinalizationCompleted, after
@@ -189,6 +189,16 @@ func NewGenericRequestor(
 		cancelSession:             cancelSession,
 		channels:                  channels,
 	}
+
+	gr.idleTimeoutWatchdog = watchdog.NewIdleTimeoutWatchdog(
+		watchdog.WithOnPacket(gr.OnPacket),
+		watchdog.WithPacketContext(sessionCtx),
+	)
+	gr.ttsCompletionWatchdog = watchdog.NewTTSCompletionWatchdog(
+		watchdog.WithOnPacket(gr.OnPacket),
+		watchdog.WithPacketContext(sessionCtx),
+		watchdog.WithGracePeriod(300*time.Millisecond),
+	)
 
 	go gr.runBootstrapDispatcher(sessionCtx)
 	go gr.runCriticalDispatcher(sessionCtx)

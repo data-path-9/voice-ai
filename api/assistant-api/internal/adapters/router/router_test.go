@@ -134,6 +134,7 @@ func TestClassifyName_DispatchablePacketNamesAreExplicitlyRouted(t *testing.T) {
 		internal_type.PacketNameInjectMessage:                              RouteEgress,
 		internal_type.PacketNameStartIdleTimeout:                           RouteEgress,
 		internal_type.PacketNameStopIdleTimeout:                            RouteEgress,
+		internal_type.PacketNameIdleTimeoutExpired:                         RouteEgress,
 		internal_type.PacketNameTextToSpeechText:                           RouteEgress,
 		internal_type.PacketNameTextToSpeechDone:                           RouteEgress,
 		internal_type.PacketNameTextToSpeechAudio:                          RouteEgress,
