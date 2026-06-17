@@ -59,6 +59,7 @@ jest.mock('@rapidaai/react', () => {
     private outputAudio?: DeploymentAudioProvider;
     setAssistantid(_: string) {}
     setGreeting(_: string) {}
+    setGreetinginterruptible(_: boolean) {}
     setMistake(_: string) {}
     setIdealtimeout(_: string) {}
     setIdealtimeoutbackoff(_: string) {}
@@ -253,6 +254,8 @@ describe('Web plugin deployment voice input intent actions', () => {
     getData: () => ({
       getId: () => 'dep-1',
       getGreeting: () => 'hello',
+      hasGreetinginterruptible: () => true,
+      getGreetinginterruptible: () => true,
       getSuggestionList: () => [],
       getMistake: () => '',
       getIdealtimeout: () => '30',

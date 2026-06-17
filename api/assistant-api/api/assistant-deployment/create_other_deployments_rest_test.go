@@ -22,6 +22,7 @@ func TestCreateAssistantApiDeploymentRest_HappyPath(t *testing.T) {
 	requestBody := []byte(`{
 		"assistantId": "123",
 		"greeting": "Hello",
+		"greetingInterruptible": false,
 		"idealTimeout": 30,
 		"maxSessionDuration": 600,
 		"inputAudio": {
@@ -50,6 +51,8 @@ func TestCreateAssistantApiDeploymentRest_HappyPath(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.True(t, service.createCalled)
 	assert.Equal(t, uint64(123), service.assistantId)
+	require.NotNil(t, service.greetingInterruptible)
+	assert.False(t, *service.greetingInterruptible)
 	require.NotNil(t, service.inputAudio)
 	assert.Equal(t, "twilio", service.inputAudio.GetAudioProvider())
 	require.NotNil(t, service.outputAudio)
@@ -60,6 +63,7 @@ func TestCreateAssistantApiDeploymentRest_HappyPath(t *testing.T) {
 	assert.Equal(t, true, response["success"])
 	data := response["data"].(map[string]interface{})
 	assert.Equal(t, "123", data["assistantId"])
+	assert.Equal(t, false, data["greetingInterruptible"])
 }
 
 func TestCreateAssistantApiDeploymentRest_InvalidAudioProvider(t *testing.T) {
@@ -89,6 +93,7 @@ func TestCreateAssistantWebpluginDeploymentRest_HappyPath(t *testing.T) {
 	requestBody := []byte(`{
 		"assistantId": "123",
 		"greeting": "Hello",
+		"greetingInterruptible": false,
 		"idealTimeout": 30,
 		"maxSessionDuration": 600,
 		"suggestion": ["Book demo", "Talk to support"],
@@ -113,6 +118,8 @@ func TestCreateAssistantWebpluginDeploymentRest_HappyPath(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.True(t, service.createCalled)
 	assert.Equal(t, uint64(123), service.assistantId)
+	require.NotNil(t, service.greetingInterruptible)
+	assert.False(t, *service.greetingInterruptible)
 	assert.Equal(t, []string{"Book demo", "Talk to support"}, service.suggestion)
 	require.NotNil(t, service.inputAudio)
 	assert.Equal(t, "browser", service.inputAudio.GetAudioProvider())
@@ -122,6 +129,7 @@ func TestCreateAssistantWebpluginDeploymentRest_HappyPath(t *testing.T) {
 	assert.Equal(t, true, response["success"])
 	data := response["data"].(map[string]interface{})
 	assert.Equal(t, "123", data["assistantId"])
+	assert.Equal(t, false, data["greetingInterruptible"])
 	assert.Equal(t, []interface{}{"Book demo", "Talk to support"}, data["suggestion"])
 }
 
@@ -156,6 +164,7 @@ func TestCreateAssistantWhatsappDeploymentRest_HappyPath(t *testing.T) {
 	requestBody := []byte(`{
 		"assistantId": "123",
 		"greeting": "Hello",
+		"greetingInterruptible": false,
 		"idealTimeout": 30,
 		"maxSessionDuration": 600,
 		"whatsappProviderName": "gupshup",
@@ -177,6 +186,8 @@ func TestCreateAssistantWhatsappDeploymentRest_HappyPath(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.True(t, service.createCalled)
 	assert.Equal(t, uint64(123), service.assistantId)
+	require.NotNil(t, service.greetingInterruptible)
+	assert.False(t, *service.greetingInterruptible)
 	assert.Equal(t, "gupshup", service.whatsappProvider)
 	require.Len(t, service.whatsappOptions, 1)
 	assert.Equal(t, "template", service.whatsappOptions[0].GetKey())
@@ -186,6 +197,7 @@ func TestCreateAssistantWhatsappDeploymentRest_HappyPath(t *testing.T) {
 	assert.Equal(t, true, response["success"])
 	data := response["data"].(map[string]interface{})
 	assert.Equal(t, "123", data["assistantId"])
+	assert.Equal(t, false, data["greetingInterruptible"])
 	assert.Equal(t, "gupshup", data["whatsappProviderName"])
 }
 

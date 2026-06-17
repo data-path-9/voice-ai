@@ -1,0 +1,220 @@
+package watchdog
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/rapidaai/api/assistant-api/internal/observability"
+	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+)
+
+type IdleTimeoutEvent struct {
+	ContextID string
+	Deadline  time.Time
+	Count     uint64
+}
+
+type IdleTimeoutOptions struct {
+	OnPacket      func(context.Context, ...internal_type.Packet) error
+	PacketContext context.Context
+	RecordScope   internal_type.ObservabilityRecordScope
+}
+
+type IdleTimeoutOption interface {
+	applyIdleTimeoutOptions(*IdleTimeoutOptions)
+}
+
+type idleTimeoutOption struct {
+	applyFunc func(*IdleTimeoutOptions)
+}
+
+func (option idleTimeoutOption) applyIdleTimeoutOptions(options *IdleTimeoutOptions) {
+	if option.applyFunc == nil {
+		return
+	}
+	option.applyFunc(options)
+}
+
+type IdleTimeoutWatchdog struct {
+	mu      sync.Mutex
+	options IdleTimeoutOptions
+
+	timer *time.Timer
+
+	generation       uint64
+	active           bool
+	contextID        string
+	deadline         time.Time
+	idleTimeoutCount uint64
+}
+
+func NewIdleTimeoutWatchdog(opts ...IdleTimeoutOption) *IdleTimeoutWatchdog {
+	options := IdleTimeoutOptions{}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt.applyIdleTimeoutOptions(&options)
+	}
+
+	if options.PacketContext == nil {
+		options.PacketContext = context.Background()
+	}
+	if options.RecordScope == "" {
+		options.RecordScope = internal_type.ObservabilityRecordScopeConversation
+	}
+
+	watchdog := &IdleTimeoutWatchdog{
+		options: options,
+	}
+
+	if options.OnPacket != nil {
+		_ = options.OnPacket(
+			options.PacketContext,
+			internal_type.ObservabilityLogRecordPacket{
+				Scope: options.RecordScope,
+				Record: observability.RecordLog{
+					Level:   observability.LevelInfo,
+					Message: "idle-timeout-watchdog: initialization completed",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentConversation.String(),
+						"watchdog":  "idle_timeout",
+					},
+					OccurredAt: time.Now(),
+				},
+			},
+		)
+	}
+
+	return watchdog
+}
+
+func (w *IdleTimeoutWatchdog) Start(contextID string, timeout time.Duration) bool {
+	if timeout <= 0 {
+		return false
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.timer != nil {
+		w.timer.Stop()
+		w.timer = nil
+	}
+	w.generation++
+	w.active = true
+	w.contextID = contextID
+	w.deadline = time.Now().Add(timeout)
+
+	generation := w.generation
+	w.timer = time.AfterFunc(timeout, func() {
+		w.expire(generation)
+	})
+
+	return true
+}
+
+func (w *IdleTimeoutWatchdog) Extend(contextID string, duration time.Duration) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.active || w.contextID != contextID || duration <= 0 {
+		return false
+	}
+
+	w.deadline = w.deadline.Add(duration)
+	if remaining := time.Until(w.deadline); remaining > 0 {
+		if w.timer != nil {
+			w.timer.Stop()
+			w.timer = nil
+		}
+		w.generation++
+		generation := w.generation
+		w.timer = time.AfterFunc(remaining, func() {
+			w.expire(generation)
+		})
+	}
+
+	return true
+}
+
+func (w *IdleTimeoutWatchdog) Stop(resetCount bool) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	wasActive := w.active
+	if w.timer != nil {
+		w.timer.Stop()
+		w.timer = nil
+	}
+	w.generation++
+	w.active = false
+	w.contextID = ""
+	w.deadline = time.Time{}
+	if resetCount {
+		w.idleTimeoutCount = 0
+	}
+
+	return wasActive
+}
+
+func (w *IdleTimeoutWatchdog) Cancel() bool {
+	return w.Stop(false)
+}
+
+func (w *IdleTimeoutWatchdog) Count() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.idleTimeoutCount
+}
+
+func (w *IdleTimeoutWatchdog) IncrementCount() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.idleTimeoutCount++
+	return w.idleTimeoutCount
+}
+
+func (w *IdleTimeoutWatchdog) expire(generation uint64) {
+	w.mu.Lock()
+	if !w.active || w.generation != generation {
+		w.mu.Unlock()
+		return
+	}
+
+	event := IdleTimeoutEvent{
+		ContextID: w.contextID,
+		Deadline:  w.deadline,
+		Count:     w.idleTimeoutCount,
+	}
+	w.timer = nil
+	w.generation++
+	w.active = false
+	w.contextID = ""
+	w.deadline = time.Time{}
+	w.mu.Unlock()
+
+	if w.options.OnPacket != nil {
+		_ = w.options.OnPacket(
+			w.options.PacketContext,
+			internal_type.ObservabilityLogRecordPacket{
+				ContextID: event.ContextID,
+				Scope:     w.options.RecordScope,
+				Record: observability.RecordLog{
+					Level:   observability.LevelInfo,
+					Message: "idle-timeout-watchdog: deadline expired",
+					Attributes: observability.Attributes{
+						"component": observability.ComponentConversation.String(),
+						"watchdog":  "idle_timeout",
+						"count":     observability.AttributeValue(event.Count),
+					},
+					OccurredAt: time.Now(),
+				},
+			},
+			internal_type.IdleTimeoutExpiredPacket{ContextID: event.ContextID, Count: event.Count},
+		)
+	}
+}

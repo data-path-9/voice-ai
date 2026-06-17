@@ -99,6 +99,7 @@ func ClassifyName(name internal_type.PacketName) Route {
 		internal_type.PacketNameInjectMessage,
 		internal_type.PacketNameStartIdleTimeout,
 		internal_type.PacketNameStopIdleTimeout,
+		internal_type.PacketNameIdleTimeoutExpired,
 		internal_type.PacketNameTextToSpeechText,
 		internal_type.PacketNameTextToSpeechDone,
 		internal_type.PacketNameTextToSpeechAudio,

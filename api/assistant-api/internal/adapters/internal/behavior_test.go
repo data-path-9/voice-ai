@@ -14,6 +14,7 @@ import (
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+	"github.com/rapidaai/api/assistant-api/internal/watchdog"
 	"github.com/rapidaai/pkg/commons"
 	gorm_model "github.com/rapidaai/pkg/models/gorm"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -92,14 +93,16 @@ func newBehaviorDisconnectTestRequestor(t *testing.T, streamer internal_type.Str
 	messageLifecycle.SetContextID("ctx-behavior")
 
 	return &genericRequestor{
-		logger:           behaviorTestLogger(t),
-		source:           utils.Debugger,
-		streamer:         streamer,
-		channels:         adapter_channel.NewRequestorChannels(),
-		messageLifecycle: messageLifecycle,
-		sessionLifecycle: adapter_lifecycle.NewSessionLifecycle(),
-		sessionCtx:       sessionCtx,
-		cancelSession:    cancelSession,
+		logger:                behaviorTestLogger(t),
+		source:                utils.Debugger,
+		streamer:              streamer,
+		channels:              adapter_channel.NewRequestorChannels(),
+		messageLifecycle:      messageLifecycle,
+		sessionLifecycle:      adapter_lifecycle.NewSessionLifecycle(),
+		idleTimeoutWatchdog:   watchdog.NewIdleTimeoutWatchdog(),
+		ttsCompletionWatchdog: watchdog.NewTTSCompletionWatchdog(),
+		sessionCtx:            sessionCtx,
+		cancelSession:         cancelSession,
 		assistant: &internal_assistant_entity.Assistant{
 			Audited: gorm_model.Audited{Id: 101},
 			AssistantDebuggerDeployment: &internal_assistant_entity.AssistantDebuggerDeployment{
@@ -295,7 +298,9 @@ func TestBehavior_OnIdleTimeout_BackoffReached_QueuesIdleDisconnectReasonBeforeN
 		IdleTimeout:        behaviorU64(1),
 		IdleTimeoutBackoff: &backoff,
 	}
-	r.idleTimeoutCount = backoff
+	for i := uint64(0); i < backoff; i++ {
+		r.idleTimeoutWatchdog.IncrementCount()
+	}
 
 	reason := protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT
 	captureCh := make(chan behaviorDisconnectPacketCapture, 1)
@@ -452,6 +457,13 @@ func TestBehavior_InitializeGreeting(t *testing.T) {
 		assert.Equal(t, internal_type.DispatchActionIgnore, userAudioPolicy.Policy.Action)
 		assert.Equal(t, internal_type.PacketNameUserAudioReceived, userAudioPolicy.Policy.Target)
 
+		userTextPolicy := requireBehaviorPacketEventually[internal_type.DispatchPolicyPacket](
+			t, r.channels.ControlChannel(), time.Second,
+		)
+		assert.Equal(t, "ctx-greeting", userTextPolicy.ContextID)
+		assert.Equal(t, internal_type.DispatchActionIgnore, userTextPolicy.Policy.Action)
+		assert.Equal(t, internal_type.PacketNameUserTextReceived, userTextPolicy.Policy.Target)
+
 		interruptionPolicy := requireBehaviorPacketEventually[internal_type.DispatchPolicyPacket](
 			t, r.channels.ControlChannel(), time.Second,
 		)
@@ -481,12 +493,33 @@ func TestHandleTextToSpeechEnd_RestoresGreetingDispatchPolicies(t *testing.T) {
 	assert.Equal(t, internal_type.DispatchActionPassthrough, userAudioPolicy.Policy.Action)
 	assert.Equal(t, internal_type.PacketNameUserAudioReceived, userAudioPolicy.Policy.Target)
 
+	userTextPolicy := requireBehaviorPacketEventually[internal_type.DispatchPolicyPacket](
+		t, r.channels.ControlChannel(), time.Second,
+	)
+	assert.Equal(t, "ctx-tts-end", userTextPolicy.ContextID)
+	assert.Equal(t, internal_type.DispatchActionPassthrough, userTextPolicy.Policy.Action)
+	assert.Equal(t, internal_type.PacketNameUserTextReceived, userTextPolicy.Policy.Target)
+
 	interruptionPolicy := requireBehaviorPacketEventually[internal_type.DispatchPolicyPacket](
 		t, r.channels.ControlChannel(), time.Second,
 	)
 	assert.Equal(t, "ctx-tts-end", interruptionPolicy.ContextID)
 	assert.Equal(t, internal_type.DispatchActionPassthrough, interruptionPolicy.Policy.Action)
 	assert.Equal(t, internal_type.PacketNameInterruptionDetected, interruptionPolicy.Policy.Target)
+}
+
+func TestHandleTextToSpeechEnd_DoesNotRestorePoliciesForStaleContext(t *testing.T) {
+	r := newBehaviorDisconnectTestRequestor(t, &behaviorCapturingStreamer{})
+	r.messageLifecycle.SetContextID("ctx-current")
+	h := requestorDispatchHandler{r: r}
+
+	h.HandleTextToSpeechEnd(context.Background(), internal_type.TextToSpeechEndPacket{ContextID: "ctx-stale"})
+
+	select {
+	case packet := <-r.channels.ControlChannel():
+		t.Fatalf("stale tts end restored dispatch policy: %+v", packet)
+	case <-time.After(50 * time.Millisecond):
+	}
 }
 
 // Idle timeout initialization should only enqueue a timer start when configured.
@@ -620,7 +653,7 @@ func TestBehavior_OnIdleTimeout(t *testing.T) {
 		r.assistant = nil
 
 		require.NoError(t, r.onIdleTimeout(context.Background()))
-		assert.Equal(t, uint64(0), r.idleTimeoutCount)
+		assert.Equal(t, uint64(0), r.idleTimeoutWatchdog.Count())
 		assert.Zero(t, len(r.channels.ControlChannel()))
 		assert.Zero(t, len(r.channels.EgressChannel()))
 	})
@@ -630,7 +663,7 @@ func TestBehavior_OnIdleTimeout(t *testing.T) {
 		setBehaviorForSource(r, utils.Debugger, internal_assistant_entity.AssistantDeploymentBehavior{})
 
 		require.NoError(t, r.onIdleTimeout(context.Background()))
-		assert.Equal(t, uint64(0), r.idleTimeoutCount)
+		assert.Equal(t, uint64(0), r.idleTimeoutWatchdog.Count())
 		assert.Zero(t, len(r.channels.ControlChannel()))
 		assert.Zero(t, len(r.channels.EgressChannel()))
 		assert.Zero(t, len(r.channels.BackgroundChannel()))
@@ -646,11 +679,11 @@ func TestBehavior_OnIdleTimeout(t *testing.T) {
 			IdleTimeoutBackoff: &backoff,
 			IdleTimeoutMessage: behaviorStr("Still there?"),
 		})
-		r.idleTimeoutCount = 1
+		r.idleTimeoutWatchdog.IncrementCount()
 
 		require.NoError(t, r.onIdleTimeout(context.Background()))
 
-		assert.Equal(t, uint64(2), r.idleTimeoutCount)
+		assert.Equal(t, uint64(2), r.idleTimeoutWatchdog.Count())
 		newContextID := r.GetID()
 		assert.NotEqual(t, "ctx-before-idle", newContextID)
 
@@ -702,56 +735,4 @@ func TestBehavior_GetIdleTimeoutMessage(t *testing.T) {
 			assert.Equal(t, tc.expected, got)
 		})
 	}
-}
-
-// Timer extension should move the deadline only when a positive extension exists.
-func TestBehavior_ExtendIdleTimeoutTimer(t *testing.T) {
-	t.Run("no-op cases", func(t *testing.T) {
-		r := newBehaviorDisconnectTestRequestor(t, &behaviorCapturingStreamer{})
-		originalDeadline := time.Now().Add(2 * time.Second)
-		r.idleTimeoutDeadline = originalDeadline
-
-		r.extendIdleTimeoutTimer(time.Second)
-
-		assert.WithinDuration(t, originalDeadline, r.idleTimeoutDeadline, 5*time.Millisecond)
-
-		originalDeadline = time.Now().Add(200 * time.Millisecond)
-		r.idleTimeoutDeadline = originalDeadline
-		r.idleTimeoutTimer = time.AfterFunc(200*time.Millisecond, func() {})
-		defer r.idleTimeoutTimer.Stop()
-
-		r.extendIdleTimeoutTimer(0)
-		assert.WithinDuration(t, originalDeadline, r.idleTimeoutDeadline, 5*time.Millisecond)
-		r.extendIdleTimeoutTimer(-50 * time.Millisecond)
-		assert.WithinDuration(t, originalDeadline, r.idleTimeoutDeadline, 5*time.Millisecond)
-	})
-
-	t.Run("extends deadline and delays timer", func(t *testing.T) {
-		r := newBehaviorDisconnectTestRequestor(t, &behaviorCapturingStreamer{})
-		fired := make(chan time.Time, 1)
-		initial := 120 * time.Millisecond
-		extension := 180 * time.Millisecond
-
-		r.idleTimeoutDeadline = time.Now().Add(initial)
-		before := r.idleTimeoutDeadline
-		r.idleTimeoutTimer = time.AfterFunc(initial, func() {
-			fired <- time.Now()
-		})
-		defer r.idleTimeoutTimer.Stop()
-
-		r.extendIdleTimeoutTimer(extension)
-
-		assert.WithinDuration(t, before.Add(extension), r.idleTimeoutDeadline, 20*time.Millisecond)
-		select {
-		case <-fired:
-			t.Fatal("idle timeout fired before extended deadline")
-		case <-time.After(180 * time.Millisecond):
-		}
-
-		select {
-		case <-fired:
-		case <-time.After(260 * time.Millisecond):
-			t.Fatal("idle timeout did not fire after extension")
-		}
-	})
 }

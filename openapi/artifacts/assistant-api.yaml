@@ -811,6 +811,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         idealTimeout:
@@ -844,6 +846,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         idealTimeout:
@@ -882,6 +886,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         idealTimeout:
@@ -914,6 +920,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         idealTimeout:
@@ -951,6 +959,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         idealTimeout:
@@ -1278,6 +1288,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         inputAudio:
@@ -1312,6 +1324,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         inputAudio:
@@ -1352,6 +1366,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         inputAudio:
@@ -1386,6 +1402,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         inputAudio:
@@ -1424,6 +1442,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Uint64String"
         greeting:
           type: string
+        greetingInterruptible:
+          type: boolean
         mistake:
           type: string
         whatsappProviderName:

@@ -23,26 +23,27 @@ import (
 )
 
 type createDebuggerDeploymentRestServiceStub struct {
-	createCalled       bool
-	createErr          error
-	getCalled          bool
-	getErr             error
-	getNil             bool
-	getAllCalled       bool
-	getAllErr          error
-	page               uint32
-	pageSize           uint32
-	criterias          []*protos.Criteria
-	assistantId        uint64
-	greeting           *string
-	inputAudio         *protos.DeploymentAudioProvider
-	outputAudio        *protos.DeploymentAudioProvider
-	maxSessionDuration *uint64
-	suggestion         []string
-	phoneProviderName  string
-	phoneOptions       []*protos.Metadata
-	whatsappProvider   string
-	whatsappOptions    []*protos.Metadata
+	createCalled          bool
+	createErr             error
+	getCalled             bool
+	getErr                error
+	getNil                bool
+	getAllCalled          bool
+	getAllErr             error
+	page                  uint32
+	pageSize              uint32
+	criterias             []*protos.Criteria
+	assistantId           uint64
+	greeting              *string
+	greetingInterruptible *bool
+	inputAudio            *protos.DeploymentAudioProvider
+	outputAudio           *protos.DeploymentAudioProvider
+	maxSessionDuration    *uint64
+	suggestion            []string
+	phoneProviderName     string
+	phoneOptions          []*protos.Metadata
+	whatsappProvider      string
+	whatsappOptions       []*protos.Metadata
 }
 
 func (s *createDebuggerDeploymentRestServiceStub) CreateWhatsappDeployment(
@@ -51,6 +52,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateWhatsappDeployment(
 	assistantId uint64,
 	greeting *string,
 	mistake *string,
+	greetingInterruptible *bool,
 	idealTimeout *uint64,
 	idealTimeoutBackoff *uint64,
 	idealTimeoutMessage *string,
@@ -62,6 +64,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateWhatsappDeployment(
 	s.createCalled = true
 	s.assistantId = assistantId
 	s.greeting = greeting
+	s.greetingInterruptible = greetingInterruptible
 	s.maxSessionDuration = maxSessionDuration
 	s.whatsappProvider = whatsappProvider
 	s.whatsappOptions = whatsappOptions
@@ -74,9 +77,10 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateWhatsappDeployment(
 			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
 				AssistantId: assistantId,
 			},
-			Greeting:           greeting,
-			IdleTimeout:        idealTimeout,
-			MaxSessionDuration: maxSessionDuration,
+			Greeting:              greeting,
+			GreetingInterruptible: greetingInterruptible,
+			IdleTimeout:           idealTimeout,
+			MaxSessionDuration:    maxSessionDuration,
 		},
 		AssistantDeploymentWhatsapp: internal_assistant_entity.AssistantDeploymentWhatsapp{
 			WhatsappProvider: whatsappProvider,
@@ -97,6 +101,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreatePhoneDeployment(
 	assistantId uint64,
 	greeting *string,
 	mistake *string,
+	greetingInterruptible *bool,
 	idealTimeout *uint64,
 	idealTimeoutBackoff *uint64,
 	idealTimeoutMessage *string,
@@ -110,6 +115,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreatePhoneDeployment(
 	s.createCalled = true
 	s.assistantId = assistantId
 	s.greeting = greeting
+	s.greetingInterruptible = greetingInterruptible
 	s.inputAudio = inputAudio
 	s.outputAudio = outputAudio
 	s.maxSessionDuration = maxSessionDuration
@@ -125,8 +131,9 @@ func (s *createDebuggerDeploymentRestServiceStub) CreatePhoneDeployment(
 			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
 				AssistantId: assistantId,
 			},
-			Greeting:           greeting,
-			MaxSessionDuration: maxSessionDuration,
+			Greeting:              greeting,
+			GreetingInterruptible: greetingInterruptible,
+			MaxSessionDuration:    maxSessionDuration,
 		},
 		AssistantDeploymentTelephony: internal_assistant_entity.AssistantDeploymentTelephony{
 			TelephonyProvider: phoneProviderName,
@@ -148,6 +155,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateApiDeployment(
 	assistantId uint64,
 	greeting *string,
 	mistake *string,
+	greetingInterruptible *bool,
 	idealTimeout *uint64,
 	idealTimeoutBackoff *uint64,
 	idealTimeoutMessage *string,
@@ -159,6 +167,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateApiDeployment(
 	s.createCalled = true
 	s.assistantId = assistantId
 	s.greeting = greeting
+	s.greetingInterruptible = greetingInterruptible
 	s.inputAudio = inputAudio
 	s.outputAudio = outputAudio
 	s.maxSessionDuration = maxSessionDuration
@@ -173,9 +182,10 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateApiDeployment(
 			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
 				AssistantId: assistantId,
 			},
-			Greeting:           greeting,
-			IdleTimeout:        idealTimeout,
-			MaxSessionDuration: maxSessionDuration,
+			Greeting:              greeting,
+			GreetingInterruptible: greetingInterruptible,
+			IdleTimeout:           idealTimeout,
+			MaxSessionDuration:    maxSessionDuration,
 		},
 		InputAudio:  inputAudioEntity,
 		OutputAudio: outputAudioEntity,
@@ -187,6 +197,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateDebuggerDeployment(
 	_ types.SimplePrinciple,
 	assistantId uint64,
 	greeting, _ *string,
+	greetingInterruptible *bool,
 	idealTimeout *uint64,
 	_ *uint64,
 	_ *string,
@@ -196,6 +207,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateDebuggerDeployment(
 	s.createCalled = true
 	s.assistantId = assistantId
 	s.greeting = greeting
+	s.greetingInterruptible = greetingInterruptible
 	s.inputAudio = inputAudio
 	s.outputAudio = nil
 	s.maxSessionDuration = maxSessionDuration
@@ -209,9 +221,10 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateDebuggerDeployment(
 			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
 				AssistantId: assistantId,
 			},
-			Greeting:           greeting,
-			IdleTimeout:        idealTimeout,
-			MaxSessionDuration: maxSessionDuration,
+			Greeting:              greeting,
+			GreetingInterruptible: greetingInterruptible,
+			IdleTimeout:           idealTimeout,
+			MaxSessionDuration:    maxSessionDuration,
 		},
 		InputAudio: inputAudioEntity,
 	}, nil
@@ -223,6 +236,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateWebPluginDeployment(
 	assistantId uint64,
 	greeting *string,
 	mistake *string,
+	greetingInterruptible *bool,
 	idealTimeout *uint64,
 	idealTimeoutBackoff *uint64,
 	idealTimeoutMessage *string,
@@ -235,6 +249,7 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateWebPluginDeployment(
 	s.createCalled = true
 	s.assistantId = assistantId
 	s.greeting = greeting
+	s.greetingInterruptible = greetingInterruptible
 	s.inputAudio = inputAudio
 	s.outputAudio = outputAudio
 	s.maxSessionDuration = maxSessionDuration
@@ -250,9 +265,10 @@ func (s *createDebuggerDeploymentRestServiceStub) CreateWebPluginDeployment(
 			AssistantDeployment: internal_assistant_entity.AssistantDeployment{
 				AssistantId: assistantId,
 			},
-			Greeting:           greeting,
-			IdleTimeout:        idealTimeout,
-			MaxSessionDuration: maxSessionDuration,
+			Greeting:              greeting,
+			GreetingInterruptible: greetingInterruptible,
+			IdleTimeout:           idealTimeout,
+			MaxSessionDuration:    maxSessionDuration,
 		},
 		Suggestion:  gorm_types.StringArray(suggestion),
 		InputAudio:  inputAudioEntity,
@@ -558,6 +574,7 @@ func TestCreateAssistantDebuggerDeploymentRest_HappyPath(t *testing.T) {
 	requestBody := []byte(`{
 		"assistantId": "123",
 		"greeting": "Hello",
+		"greetingInterruptible": false,
 		"idealTimeout": 30,
 		"maxSessionDuration": 600,
 		"inputAudio": {
@@ -584,6 +601,8 @@ func TestCreateAssistantDebuggerDeploymentRest_HappyPath(t *testing.T) {
 	assert.Equal(t, uint64(123), service.assistantId)
 	require.NotNil(t, service.greeting)
 	assert.Equal(t, "Hello", *service.greeting)
+	require.NotNil(t, service.greetingInterruptible)
+	assert.False(t, *service.greetingInterruptible)
 	require.NotNil(t, service.maxSessionDuration)
 	assert.Equal(t, uint64(600), *service.maxSessionDuration)
 	require.NotNil(t, service.inputAudio)
@@ -596,6 +615,7 @@ func TestCreateAssistantDebuggerDeploymentRest_HappyPath(t *testing.T) {
 	assert.Equal(t, true, response["success"])
 	data := response["data"].(map[string]interface{})
 	assert.Equal(t, "123", data["assistantId"])
+	assert.Equal(t, false, data["greetingInterruptible"])
 }
 
 func TestCreateAssistantDebuggerDeploymentRest_Unauthenticated(t *testing.T) {

@@ -51,6 +51,8 @@ func (s *dispatchHandlerStub) HandleStartIdleTimeout(context.Context, internal_t
 }
 func (s *dispatchHandlerStub) HandleStopIdleTimeout(context.Context, internal_type.StopIdleTimeoutPacket) {
 }
+func (s *dispatchHandlerStub) HandleIdleTimeoutExpired(context.Context, internal_type.IdleTimeoutExpiredPacket) {
+}
 func (s *dispatchHandlerStub) HandleTextToSpeechText(context.Context, internal_type.TextToSpeechTextPacket) {
 }
 func (s *dispatchHandlerStub) HandleTextToSpeechDone(context.Context, internal_type.TextToSpeechDonePacket) {

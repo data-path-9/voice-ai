@@ -91,6 +91,7 @@ const EditAssistantDebuggerDeployment: FC<{ assistantId: string }> = ({
 
   const [experienceConfig, setExperienceConfig] = useState<ExperienceConfig>({
     greeting: undefined,
+    greetingInterruptible: true,
     messageOnError: undefined,
     idealTimeout: '30',
     idealMessage: 'Are you there?',
@@ -146,6 +147,9 @@ const EditAssistantDebuggerDeployment: FC<{ assistantId: string }> = ({
 
         setExperienceConfig({
           greeting: deployment.getGreeting(),
+          greetingInterruptible: deployment.hasGreetinginterruptible()
+            ? deployment.getGreetinginterruptible()
+            : true,
           messageOnError: deployment.getMistake(),
           idealTimeout: deployment.getIdealtimeout(),
           idealMessage: deployment.getIdealtimeoutmessage(),
@@ -249,6 +253,9 @@ const EditAssistantDebuggerDeployment: FC<{ assistantId: string }> = ({
 
     const deployment = new AssistantDebuggerDeployment();
     deployment.setAssistantid(assistantId);
+    deployment.setGreetinginterruptible(
+      experienceConfig.greetingInterruptible ?? true,
+    );
     if (experienceConfig.greeting)
       deployment.setGreeting(experienceConfig.greeting);
     if (experienceConfig.messageOnError)

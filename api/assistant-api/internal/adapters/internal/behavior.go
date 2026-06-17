@@ -72,6 +72,13 @@ func (r *genericRequestor) initializeGreeting(ctx context.Context, behavior *int
 			internal_type.DispatchPolicyPacket{
 				ContextID: contextID,
 				Policy: internal_type.DispatchPolicy{
+					Target: internal_type.PacketNameUserTextReceived,
+					Action: internal_type.DispatchActionIgnore,
+				},
+			},
+			internal_type.DispatchPolicyPacket{
+				ContextID: contextID,
+				Policy: internal_type.DispatchPolicy{
 					Target: internal_type.PacketNameInterruptionDetected,
 					Action: internal_type.DispatchActionIgnore,
 				},
@@ -179,9 +186,14 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 		return nil
 	}
 
+	idleTimeoutCount := uint64(0)
+	if r.idleTimeoutWatchdog != nil {
+		idleTimeoutCount = r.idleTimeoutWatchdog.Count()
+	}
+
 	// Check if max backoff retries reached
 	if behavior.IdleTimeoutBackoff != nil && *behavior.IdleTimeoutBackoff > 0 {
-		if r.idleTimeoutCount >= *behavior.IdleTimeoutBackoff {
+		if idleTimeoutCount >= *behavior.IdleTimeoutBackoff {
 			if r.Ready() {
 				r.OnPacket(r.sessionCtx,
 					internal_type.ObservabilityEventRecordPacket{
@@ -209,7 +221,10 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 		}
 	}
 
-	r.idleTimeoutCount++
+	idleTimeoutCount++
+	if r.idleTimeoutWatchdog != nil {
+		idleTimeoutCount = r.idleTimeoutWatchdog.IncrementCount()
+	}
 	timeoutContent := r.getIdleTimeoutMessage(behavior)
 	if timeoutContent == "" {
 		return nil
@@ -233,7 +248,7 @@ func (r *genericRequestor) onIdleTimeout(ctx context.Context) error {
 			Scope:     internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.NewConversationEventRecord(observability.ConversationAgentStateChanged, observability.Attributes{
 				"type":      "idle_timeout",
-				"count":     fmt.Sprintf("%d", r.idleTimeoutCount),
+				"count":     fmt.Sprintf("%d", idleTimeoutCount),
 				"max_count": fmt.Sprintf("%d", maxCount),
 			}),
 		},
@@ -252,19 +267,4 @@ func (r *genericRequestor) getIdleTimeoutMessage(behavior *internal_assistant_en
 	}
 
 	return defaultTimeoutMessage
-}
-
-// extendIdleTimeoutTimer pushes the existing idle timeout further into the future
-// by the given duration. Used to account for buffered TTS audio that the client
-// is still playing back. Per-chunk hot path called from handleTTSAudio on the
-// output dispatcher goroutine — not converted to a packet to avoid per-chunk
-// channel hops. No-op if the timer is not currently running.
-func (r *genericRequestor) extendIdleTimeoutTimer(d time.Duration) {
-	if r.idleTimeoutTimer == nil || d <= 0 {
-		return
-	}
-	r.idleTimeoutDeadline = r.idleTimeoutDeadline.Add(d)
-	if remaining := time.Until(r.idleTimeoutDeadline); remaining > 0 {
-		r.idleTimeoutTimer.Reset(remaining)
-	}
 }

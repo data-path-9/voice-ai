@@ -34,32 +34,34 @@ type Assistant struct {
 
 // AssistantApiDeployment defines model for AssistantApiDeployment.
 type AssistantApiDeployment struct {
-	AssistantId         *Uint64String            `json:"assistantId,omitempty"`
-	Greeting            *string                  `json:"greeting,omitempty"`
-	Id                  *Uint64String            `json:"id,omitempty"`
-	IdealTimeout        *uint64                  `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff *uint64                  `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage *string                  `json:"idealTimeoutMessage,omitempty"`
-	InputAudio          *DeploymentAudioProvider `json:"inputAudio,omitempty"`
-	MaxSessionDuration  *uint64                  `json:"maxSessionDuration,omitempty"`
-	Mistake             *string                  `json:"mistake,omitempty"`
-	OutputAudio         *DeploymentAudioProvider `json:"outputAudio,omitempty"`
-	Status              *string                  `json:"status,omitempty"`
+	AssistantId           *Uint64String            `json:"assistantId,omitempty"`
+	Greeting              *string                  `json:"greeting,omitempty"`
+	GreetingInterruptible *bool                    `json:"greetingInterruptible,omitempty"`
+	Id                    *Uint64String            `json:"id,omitempty"`
+	IdealTimeout          *uint64                  `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64                  `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string                  `json:"idealTimeoutMessage,omitempty"`
+	InputAudio            *DeploymentAudioProvider `json:"inputAudio,omitempty"`
+	MaxSessionDuration    *uint64                  `json:"maxSessionDuration,omitempty"`
+	Mistake               *string                  `json:"mistake,omitempty"`
+	OutputAudio           *DeploymentAudioProvider `json:"outputAudio,omitempty"`
+	Status                *string                  `json:"status,omitempty"`
 }
 
 // AssistantDebuggerDeployment defines model for AssistantDebuggerDeployment.
 type AssistantDebuggerDeployment struct {
-	AssistantId         *Uint64String            `json:"assistantId,omitempty"`
-	Greeting            *string                  `json:"greeting,omitempty"`
-	Id                  *Uint64String            `json:"id,omitempty"`
-	IdealTimeout        *uint64                  `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff *uint64                  `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage *string                  `json:"idealTimeoutMessage,omitempty"`
-	InputAudio          *DeploymentAudioProvider `json:"inputAudio,omitempty"`
-	MaxSessionDuration  *uint64                  `json:"maxSessionDuration,omitempty"`
-	Mistake             *string                  `json:"mistake,omitempty"`
-	OutputAudio         *DeploymentAudioProvider `json:"outputAudio,omitempty"`
-	Status              *string                  `json:"status,omitempty"`
+	AssistantId           *Uint64String            `json:"assistantId,omitempty"`
+	Greeting              *string                  `json:"greeting,omitempty"`
+	GreetingInterruptible *bool                    `json:"greetingInterruptible,omitempty"`
+	Id                    *Uint64String            `json:"id,omitempty"`
+	IdealTimeout          *uint64                  `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64                  `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string                  `json:"idealTimeoutMessage,omitempty"`
+	InputAudio            *DeploymentAudioProvider `json:"inputAudio,omitempty"`
+	MaxSessionDuration    *uint64                  `json:"maxSessionDuration,omitempty"`
+	Mistake               *string                  `json:"mistake,omitempty"`
+	OutputAudio           *DeploymentAudioProvider `json:"outputAudio,omitempty"`
+	Status                *string                  `json:"status,omitempty"`
 }
 
 // AssistantKnowledge defines model for AssistantKnowledge.
@@ -78,19 +80,20 @@ type AssistantKnowledge struct {
 
 // AssistantPhoneDeployment defines model for AssistantPhoneDeployment.
 type AssistantPhoneDeployment struct {
-	AssistantId         *Uint64String            `json:"assistantId,omitempty"`
-	Greeting            *string                  `json:"greeting,omitempty"`
-	Id                  *Uint64String            `json:"id,omitempty"`
-	IdealTimeout        *uint64                  `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff *uint64                  `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage *string                  `json:"idealTimeoutMessage,omitempty"`
-	InputAudio          *DeploymentAudioProvider `json:"inputAudio,omitempty"`
-	MaxSessionDuration  *uint64                  `json:"maxSessionDuration,omitempty"`
-	Mistake             *string                  `json:"mistake,omitempty"`
-	OutputAudio         *DeploymentAudioProvider `json:"outputAudio,omitempty"`
-	PhoneOptions        *[]Metadata              `json:"phoneOptions,omitempty"`
-	PhoneProviderName   *string                  `json:"phoneProviderName,omitempty"`
-	Status              *string                  `json:"status,omitempty"`
+	AssistantId           *Uint64String            `json:"assistantId,omitempty"`
+	Greeting              *string                  `json:"greeting,omitempty"`
+	GreetingInterruptible *bool                    `json:"greetingInterruptible,omitempty"`
+	Id                    *Uint64String            `json:"id,omitempty"`
+	IdealTimeout          *uint64                  `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64                  `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string                  `json:"idealTimeoutMessage,omitempty"`
+	InputAudio            *DeploymentAudioProvider `json:"inputAudio,omitempty"`
+	MaxSessionDuration    *uint64                  `json:"maxSessionDuration,omitempty"`
+	Mistake               *string                  `json:"mistake,omitempty"`
+	OutputAudio           *DeploymentAudioProvider `json:"outputAudio,omitempty"`
+	PhoneOptions          *[]Metadata              `json:"phoneOptions,omitempty"`
+	PhoneProviderName     *string                  `json:"phoneProviderName,omitempty"`
+	Status                *string                  `json:"status,omitempty"`
 }
 
 // AssistantProviderAgentkit defines model for AssistantProviderAgentkit.
@@ -147,59 +150,63 @@ type AssistantTool struct {
 
 // AssistantWebpluginDeployment defines model for AssistantWebpluginDeployment.
 type AssistantWebpluginDeployment struct {
-	AssistantId         *Uint64String            `json:"assistantId,omitempty"`
-	Greeting            *string                  `json:"greeting,omitempty"`
-	Id                  *Uint64String            `json:"id,omitempty"`
-	IdealTimeout        *uint64                  `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff *uint64                  `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage *string                  `json:"idealTimeoutMessage,omitempty"`
-	InputAudio          *DeploymentAudioProvider `json:"inputAudio,omitempty"`
-	MaxSessionDuration  *uint64                  `json:"maxSessionDuration,omitempty"`
-	Mistake             *string                  `json:"mistake,omitempty"`
-	OutputAudio         *DeploymentAudioProvider `json:"outputAudio,omitempty"`
-	Status              *string                  `json:"status,omitempty"`
-	Suggestion          *[]string                `json:"suggestion,omitempty"`
+	AssistantId           *Uint64String            `json:"assistantId,omitempty"`
+	Greeting              *string                  `json:"greeting,omitempty"`
+	GreetingInterruptible *bool                    `json:"greetingInterruptible,omitempty"`
+	Id                    *Uint64String            `json:"id,omitempty"`
+	IdealTimeout          *uint64                  `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64                  `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string                  `json:"idealTimeoutMessage,omitempty"`
+	InputAudio            *DeploymentAudioProvider `json:"inputAudio,omitempty"`
+	MaxSessionDuration    *uint64                  `json:"maxSessionDuration,omitempty"`
+	Mistake               *string                  `json:"mistake,omitempty"`
+	OutputAudio           *DeploymentAudioProvider `json:"outputAudio,omitempty"`
+	Status                *string                  `json:"status,omitempty"`
+	Suggestion            *[]string                `json:"suggestion,omitempty"`
 }
 
 // AssistantWhatsappDeployment defines model for AssistantWhatsappDeployment.
 type AssistantWhatsappDeployment struct {
-	AssistantId          *Uint64String `json:"assistantId,omitempty"`
-	Greeting             *string       `json:"greeting,omitempty"`
-	Id                   *Uint64String `json:"id,omitempty"`
-	IdealTimeout         *uint64       `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff  *uint64       `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage  *string       `json:"idealTimeoutMessage,omitempty"`
-	MaxSessionDuration   *uint64       `json:"maxSessionDuration,omitempty"`
-	Mistake              *string       `json:"mistake,omitempty"`
-	Status               *string       `json:"status,omitempty"`
-	WhatsappOptions      *[]Metadata   `json:"whatsappOptions,omitempty"`
-	WhatsappProviderName *string       `json:"whatsappProviderName,omitempty"`
+	AssistantId           *Uint64String `json:"assistantId,omitempty"`
+	Greeting              *string       `json:"greeting,omitempty"`
+	GreetingInterruptible *bool         `json:"greetingInterruptible,omitempty"`
+	Id                    *Uint64String `json:"id,omitempty"`
+	IdealTimeout          *uint64       `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64       `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string       `json:"idealTimeoutMessage,omitempty"`
+	MaxSessionDuration    *uint64       `json:"maxSessionDuration,omitempty"`
+	Mistake               *string       `json:"mistake,omitempty"`
+	Status                *string       `json:"status,omitempty"`
+	WhatsappOptions       *[]Metadata   `json:"whatsappOptions,omitempty"`
+	WhatsappProviderName  *string       `json:"whatsappProviderName,omitempty"`
 }
 
 // CreateAssistantApiDeploymentRequest defines model for CreateAssistantApiDeploymentRequest.
 type CreateAssistantApiDeploymentRequest struct {
-	AssistantId         Uint64String                    `json:"assistantId"`
-	Greeting            *string                         `json:"greeting,omitempty"`
-	IdealTimeout        *uint64                         `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff *uint64                         `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage *string                         `json:"idealTimeoutMessage,omitempty"`
-	InputAudio          *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
-	MaxSessionDuration  *uint64                         `json:"maxSessionDuration,omitempty"`
-	Mistake             *string                         `json:"mistake,omitempty"`
-	OutputAudio         *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
+	AssistantId           Uint64String                    `json:"assistantId"`
+	Greeting              *string                         `json:"greeting,omitempty"`
+	GreetingInterruptible *bool                           `json:"greetingInterruptible,omitempty"`
+	IdealTimeout          *uint64                         `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64                         `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string                         `json:"idealTimeoutMessage,omitempty"`
+	InputAudio            *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
+	MaxSessionDuration    *uint64                         `json:"maxSessionDuration,omitempty"`
+	Mistake               *string                         `json:"mistake,omitempty"`
+	OutputAudio           *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
 }
 
 // CreateAssistantDebuggerDeploymentRequest defines model for CreateAssistantDebuggerDeploymentRequest.
 type CreateAssistantDebuggerDeploymentRequest struct {
-	AssistantId         Uint64String                    `json:"assistantId"`
-	Greeting            *string                         `json:"greeting,omitempty"`
-	IdealTimeout        *uint64                         `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff *uint64                         `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage *string                         `json:"idealTimeoutMessage,omitempty"`
-	InputAudio          *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
-	MaxSessionDuration  *uint64                         `json:"maxSessionDuration,omitempty"`
-	Mistake             *string                         `json:"mistake,omitempty"`
-	OutputAudio         *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
+	AssistantId           Uint64String                    `json:"assistantId"`
+	Greeting              *string                         `json:"greeting,omitempty"`
+	GreetingInterruptible *bool                           `json:"greetingInterruptible,omitempty"`
+	IdealTimeout          *uint64                         `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64                         `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string                         `json:"idealTimeoutMessage,omitempty"`
+	InputAudio            *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
+	MaxSessionDuration    *uint64                         `json:"maxSessionDuration,omitempty"`
+	Mistake               *string                         `json:"mistake,omitempty"`
+	OutputAudio           *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
 }
 
 // CreateAssistantKnowledgeRequest defines model for CreateAssistantKnowledgeRequest.
@@ -217,17 +224,18 @@ type CreateAssistantKnowledgeRequest struct {
 
 // CreateAssistantPhoneDeploymentRequest defines model for CreateAssistantPhoneDeploymentRequest.
 type CreateAssistantPhoneDeploymentRequest struct {
-	AssistantId         Uint64String                    `json:"assistantId"`
-	Greeting            *string                         `json:"greeting,omitempty"`
-	IdealTimeout        *uint64                         `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff *uint64                         `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage *string                         `json:"idealTimeoutMessage,omitempty"`
-	InputAudio          *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
-	MaxSessionDuration  *uint64                         `json:"maxSessionDuration,omitempty"`
-	Mistake             *string                         `json:"mistake,omitempty"`
-	OutputAudio         *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
-	PhoneOptions        *[]Metadata                     `json:"phoneOptions,omitempty"`
-	PhoneProviderName   string                          `json:"phoneProviderName"`
+	AssistantId           Uint64String                    `json:"assistantId"`
+	Greeting              *string                         `json:"greeting,omitempty"`
+	GreetingInterruptible *bool                           `json:"greetingInterruptible,omitempty"`
+	IdealTimeout          *uint64                         `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64                         `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string                         `json:"idealTimeoutMessage,omitempty"`
+	InputAudio            *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
+	MaxSessionDuration    *uint64                         `json:"maxSessionDuration,omitempty"`
+	Mistake               *string                         `json:"mistake,omitempty"`
+	OutputAudio           *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
+	PhoneOptions          *[]Metadata                     `json:"phoneOptions,omitempty"`
+	PhoneProviderName     string                          `json:"phoneProviderName"`
 }
 
 // CreateAssistantProviderAgentkit defines model for CreateAssistantProviderAgentkit.
@@ -286,29 +294,31 @@ type CreateAssistantToolRequest struct {
 
 // CreateAssistantWebpluginDeploymentRequest defines model for CreateAssistantWebpluginDeploymentRequest.
 type CreateAssistantWebpluginDeploymentRequest struct {
-	AssistantId         Uint64String                    `json:"assistantId"`
-	Greeting            *string                         `json:"greeting,omitempty"`
-	IdealTimeout        *uint64                         `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff *uint64                         `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage *string                         `json:"idealTimeoutMessage,omitempty"`
-	InputAudio          *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
-	MaxSessionDuration  *uint64                         `json:"maxSessionDuration,omitempty"`
-	Mistake             *string                         `json:"mistake,omitempty"`
-	OutputAudio         *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
-	Suggestion          *[]string                       `json:"suggestion,omitempty"`
+	AssistantId           Uint64String                    `json:"assistantId"`
+	Greeting              *string                         `json:"greeting,omitempty"`
+	GreetingInterruptible *bool                           `json:"greetingInterruptible,omitempty"`
+	IdealTimeout          *uint64                         `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64                         `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string                         `json:"idealTimeoutMessage,omitempty"`
+	InputAudio            *DeploymentAudioProviderRequest `json:"inputAudio,omitempty"`
+	MaxSessionDuration    *uint64                         `json:"maxSessionDuration,omitempty"`
+	Mistake               *string                         `json:"mistake,omitempty"`
+	OutputAudio           *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
+	Suggestion            *[]string                       `json:"suggestion,omitempty"`
 }
 
 // CreateAssistantWhatsappDeploymentRequest defines model for CreateAssistantWhatsappDeploymentRequest.
 type CreateAssistantWhatsappDeploymentRequest struct {
-	AssistantId          Uint64String `json:"assistantId"`
-	Greeting             *string      `json:"greeting,omitempty"`
-	IdealTimeout         *uint64      `json:"idealTimeout,omitempty"`
-	IdealTimeoutBackoff  *uint64      `json:"idealTimeoutBackoff,omitempty"`
-	IdealTimeoutMessage  *string      `json:"idealTimeoutMessage,omitempty"`
-	MaxSessionDuration   *uint64      `json:"maxSessionDuration,omitempty"`
-	Mistake              *string      `json:"mistake,omitempty"`
-	WhatsappOptions      *[]Metadata  `json:"whatsappOptions,omitempty"`
-	WhatsappProviderName string       `json:"whatsappProviderName"`
+	AssistantId           Uint64String `json:"assistantId"`
+	Greeting              *string      `json:"greeting,omitempty"`
+	GreetingInterruptible *bool        `json:"greetingInterruptible,omitempty"`
+	IdealTimeout          *uint64      `json:"idealTimeout,omitempty"`
+	IdealTimeoutBackoff   *uint64      `json:"idealTimeoutBackoff,omitempty"`
+	IdealTimeoutMessage   *string      `json:"idealTimeoutMessage,omitempty"`
+	MaxSessionDuration    *uint64      `json:"maxSessionDuration,omitempty"`
+	Mistake               *string      `json:"mistake,omitempty"`
+	WhatsappOptions       *[]Metadata  `json:"whatsappOptions,omitempty"`
+	WhatsappProviderName  string       `json:"whatsappProviderName"`
 }
 
 // DeploymentAudioProvider defines model for DeploymentAudioProvider.

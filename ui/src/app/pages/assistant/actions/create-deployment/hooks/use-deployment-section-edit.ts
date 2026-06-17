@@ -57,6 +57,7 @@ type ExistingConfig = {
 
 const DEFAULT_EXPERIENCE: ExperienceConfig = {
   greeting: undefined,
+  greetingInterruptible: true,
   messageOnError: undefined,
   idealTimeout: '30',
   idealMessage: 'Are you there?',
@@ -157,6 +158,9 @@ export function useDeploymentSectionEdit(
 
           const fetchedExperience: ExperienceConfig = {
             greeting: deployment.getGreeting(),
+            greetingInterruptible: deployment.hasGreetinginterruptible?.()
+              ? deployment.getGreetinginterruptible()
+              : true,
             messageOnError: deployment.getMistake(),
             idealTimeout: deployment.getIdealtimeout(),
             idealMessage: deployment.getIdealtimeoutmessage(),
@@ -349,6 +353,9 @@ export function useDeploymentSectionEdit(
 
     const applyCommonFields = (deployment: any) => {
       deployment.setAssistantid(assistantId);
+      deployment.setGreetinginterruptible(
+        resolvedExperience.greetingInterruptible ?? true,
+      );
       if (resolvedExperience.greeting)
         deployment.setGreeting(resolvedExperience.greeting);
       if (resolvedExperience.messageOnError)

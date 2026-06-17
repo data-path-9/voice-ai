@@ -28,7 +28,6 @@ type DispatchHandler interface {
 	HandleInterruptionDetected(context.Context, internal_type.InterruptionDetectedPacket)
 	HandleEndOfSpeechInterruption(context.Context, internal_type.EndOfSpeechInterruptionPacket)
 	HandleEndOfSpeechAudio(context.Context, internal_type.EndOfSpeechAudioPacket)
-
 	HandleTextToSpeechInterrupt(context.Context, internal_type.TextToSpeechInterruptPacket)
 	HandleLLMInterrupt(context.Context, internal_type.LLMInterruptPacket)
 	HandleDispatchPolicy(context.Context, internal_type.DispatchPolicyPacket)
@@ -41,6 +40,7 @@ type DispatchHandler interface {
 	HandleInjectMessage(context.Context, internal_type.InjectMessagePacket)
 	HandleStartIdleTimeout(context.Context, internal_type.StartIdleTimeoutPacket)
 	HandleStopIdleTimeout(context.Context, internal_type.StopIdleTimeoutPacket)
+	HandleIdleTimeoutExpired(context.Context, internal_type.IdleTimeoutExpiredPacket)
 	HandleTextToSpeechText(context.Context, internal_type.TextToSpeechTextPacket)
 	HandleTextToSpeechDone(context.Context, internal_type.TextToSpeechDonePacket)
 	HandleTextToSpeechAudio(context.Context, internal_type.TextToSpeechAudioPacket)
@@ -149,6 +149,8 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleStartIdleTimeout(ctx, vl)
 	case internal_type.StopIdleTimeoutPacket:
 		handler.HandleStopIdleTimeout(ctx, vl)
+	case internal_type.IdleTimeoutExpiredPacket:
+		handler.HandleIdleTimeoutExpired(ctx, vl)
 	case internal_type.TextToSpeechTextPacket:
 		handler.HandleTextToSpeechText(ctx, vl)
 	case internal_type.TextToSpeechDonePacket:

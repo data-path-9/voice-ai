@@ -22,6 +22,7 @@ func TestCreateAssistantPhoneDeploymentRest_HappyPath(t *testing.T) {
 	requestBody := []byte(`{
 		"assistantId": "123",
 		"greeting": "Hello",
+		"greetingInterruptible": false,
 		"idealTimeout": 30,
 		"maxSessionDuration": 600,
 		"phoneProviderName": "twilio",
@@ -48,6 +49,8 @@ func TestCreateAssistantPhoneDeploymentRest_HappyPath(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.True(t, service.createCalled)
 	assert.Equal(t, uint64(123), service.assistantId)
+	require.NotNil(t, service.greetingInterruptible)
+	assert.False(t, *service.greetingInterruptible)
 	assert.Equal(t, "twilio", service.phoneProviderName)
 	require.Len(t, service.phoneOptions, 1)
 	assert.Equal(t, "phone", service.phoneOptions[0].GetKey())
@@ -59,6 +62,7 @@ func TestCreateAssistantPhoneDeploymentRest_HappyPath(t *testing.T) {
 	assert.Equal(t, true, response["success"])
 	data := response["data"].(map[string]interface{})
 	assert.Equal(t, "123", data["assistantId"])
+	assert.Equal(t, false, data["greetingInterruptible"])
 	assert.Equal(t, "twilio", data["phoneProviderName"])
 }
 

@@ -425,7 +425,6 @@ func (transformer *textToSpeech) getOrOpenConnection(scope queryScope) (*websock
 	transformer.stateMu.Unlock()
 
 	go transformer.readLoop(conn, scope.MessageID)
-
 	if err := transformer.onPacket(
 		internal_type.ObservabilityMetricRecordPacket{
 			ContextID: scope.MessageID,
@@ -503,7 +502,6 @@ func (transformer *textToSpeech) readLoop(conn *websocket.Conn, contextID string
 			return
 		default:
 		}
-
 		messageType, payload, err := conn.ReadMessage()
 		if err != nil {
 			switch transformer.classifyReadError(conn, err) {
@@ -538,7 +536,6 @@ func (transformer *textToSpeech) readLoop(conn *websocket.Conn, contextID string
 			}
 			return
 		}
-
 		frame, err := transformer.engine.ParseFrame(messageType, payload)
 		if err != nil {
 			if err := transformer.onPacket(internal_type.TextToSpeechErrorPacket{

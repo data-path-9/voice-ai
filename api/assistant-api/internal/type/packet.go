@@ -102,6 +102,7 @@ const (
 	PacketNameExecuteWebhook                             PacketName = "ExecuteWebhookPacket"
 	PacketNameStartIdleTimeout                           PacketName = "StartIdleTimeoutPacket"
 	PacketNameStopIdleTimeout                            PacketName = "StopIdleTimeoutPacket"
+	PacketNameIdleTimeoutExpired                         PacketName = "IdleTimeoutExpiredPacket"
 	PacketNameLLMResponseDelta                           PacketName = "LLMResponseDeltaPacket"
 	PacketNameLLMResponseDone                            PacketName = "LLMResponseDonePacket"
 	PacketNameLLMError                                   PacketName = "LLMErrorPacket"
@@ -1027,6 +1028,15 @@ type StopIdleTimeoutPacket struct {
 
 func (f StopIdleTimeoutPacket) ContextId() string      { return f.ContextID }
 func (f StopIdleTimeoutPacket) PacketName() PacketName { return PacketNameStopIdleTimeout }
+
+// IdleTimeoutExpiredPacket signals that the idle timeout watchdog expired.
+type IdleTimeoutExpiredPacket struct {
+	ContextID string
+	Count     uint64
+}
+
+func (f IdleTimeoutExpiredPacket) ContextId() string      { return f.ContextID }
+func (f IdleTimeoutExpiredPacket) PacketName() PacketName { return PacketNameIdleTimeoutExpired }
 
 // =============================================================================
 // LLM Pipeline — execute -> delta -> done -> error -> tools
