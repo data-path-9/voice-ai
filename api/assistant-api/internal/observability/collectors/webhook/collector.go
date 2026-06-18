@@ -70,7 +70,7 @@ func (c *Collector) Key() string {
 	return "webhook:" + strings.Join(ids, ",")
 }
 
-func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ observability.Context, record observability.Record) error {
+func (c *Collector) Collect(ctx context.Context, _ observability.Scope, _ observability.Context, record observability.Record) error {
 	webhookRecord, ok := record.(observability.RecordWebhook)
 	if !ok {
 		return nil
@@ -78,7 +78,7 @@ func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ ob
 	if !validator.NonNil(c) || !validator.NotEmpty(c.webhooks) {
 		return nil
 	}
-	payload := webhookPayload(scope, webhookRecord)
+	payload := webhookPayload(webhookRecord)
 
 	var errs []error
 	for _, assistantWebhook := range c.webhooks {
@@ -195,40 +195,13 @@ func isRetryableStatus(statusCode int, retryStatusCodes []string) bool {
 	return slices.Contains(retryStatusCodes, strconv.Itoa(statusCode))
 }
 
-func webhookPayload(scope observability.Scope, record observability.RecordWebhook) map[string]interface{} {
+func webhookPayload(record observability.RecordWebhook) map[string]interface{} {
 	if len(record.Payload) == 0 {
-		payload := map[string]interface{}{}
-		if scope != nil {
-			payload["scope"] = scope.ScopeType()
-			switch typed := scope.(type) {
-			case observability.ProjectScope:
-				payload["context_id"] = typed.ContextID()
-			case observability.AssistantScope:
-				payload["context_id"] = typed.ContextID()
-			case observability.ConversationScope:
-				payload["context_id"] = typed.ContextID()
-			case observability.MessageScope:
-				payload["context_id"] = typed.ContextID()
-			}
-		}
-		return payload
+		return map[string]interface{}{}
 	}
 	payload := make(map[string]interface{}, len(record.Payload))
 	for key, value := range record.Payload {
 		payload[key] = value
-	}
-	if scope != nil {
-		payload["scope"] = scope.ScopeType()
-		switch typed := scope.(type) {
-		case observability.ProjectScope:
-			payload["context_id"] = typed.ContextID()
-		case observability.AssistantScope:
-			payload["context_id"] = typed.ContextID()
-		case observability.ConversationScope:
-			payload["context_id"] = typed.ContextID()
-		case observability.MessageScope:
-			payload["context_id"] = typed.ContextID()
-		}
 	}
 	return payload
 }

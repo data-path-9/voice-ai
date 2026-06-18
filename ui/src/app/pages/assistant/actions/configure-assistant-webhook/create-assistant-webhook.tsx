@@ -265,7 +265,7 @@ export const CreateAssistantWebhook: FC<{ assistantId: string }> = ({
                 </InputGroup>
 
                 <InputGroup
-                childClass="p-0! m-0! px-4!"
+                  childClass="p-0! m-0! px-4!"
                   title={renderLabelWithTooltip(
                     getEventGroupTitle('Conversation', events),
                     'Choose which conversation lifecycle events trigger this webhook.',

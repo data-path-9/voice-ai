@@ -93,7 +93,6 @@ type DispatchHandler interface {
 	HandleFinalizeAssistant(context.Context, internal_type.FinalizeAssistantPacket)
 	HandleFinalizationCompleted(context.Context, internal_type.FinalizationCompletedPacket)
 	HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket)
-	HandleExecuteWebhook(context.Context, internal_type.ExecuteWebhookPacket)
 	HandleObservabilityRecordPacket(context.Context, internal_type.ObservabilityRecordPacket)
 }
 
@@ -256,8 +255,6 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleFinalizationCompleted(ctx, vl)
 	case internal_type.ExecuteAnalysisPacket:
 		handler.HandleExecuteAnalysis(ctx, vl)
-	case internal_type.ExecuteWebhookPacket:
-		handler.HandleExecuteWebhook(ctx, vl)
 	case internal_type.ObservabilityRecordPacket:
 		handler.HandleObservabilityRecordPacket(ctx, vl)
 	case internal_type.EndOfSpeechInterruptionPacket:

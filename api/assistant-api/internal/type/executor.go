@@ -33,10 +33,6 @@ type AnalysisExecutor interface {
 	Executor[ExecuteAnalysisPacket]
 }
 
-type WebhookExecutor interface {
-	Executor[ExecuteWebhookPacket]
-}
-
 type AuthenticationExecutor interface {
 	Executor[ExecuteSessionAuthenticationPacket]
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
-	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
 
@@ -99,7 +98,6 @@ const (
 	PacketNameFinalizeAssistant                          PacketName = "FinalizeAssistantPacket"
 	PacketNameFinalizationCompleted                      PacketName = "FinalizationCompletedPacket"
 	PacketNameExecuteAnalysis                            PacketName = "ExecuteAnalysisPacket"
-	PacketNameExecuteWebhook                             PacketName = "ExecuteWebhookPacket"
 	PacketNameStartIdleTimeout                           PacketName = "StartIdleTimeoutPacket"
 	PacketNameStopIdleTimeout                            PacketName = "StopIdleTimeoutPacket"
 	PacketNameIdleTimeoutExpired                         PacketName = "IdleTimeoutExpiredPacket"
@@ -679,7 +677,6 @@ const (
 	InitializationStageEndOfSpeech         InitializationStage = "eos"
 	InitializationStageBehavior            InitializationStage = "behavior"
 	InitializationStageAnalysis            InitializationStage = "analysis"
-	InitializationStageWebhook             InitializationStage = "webhook"
 	InitializationStageRecording           InitializationStage = "recording"
 	InitializationStageInputNormalizer     InitializationStage = "input_normalizer"
 	InitializationStageOutputNormalizer    InitializationStage = "output_normalizer"
@@ -896,7 +893,6 @@ func (f ModeSwitchFinalizeDenoisePacket) IsAsync() bool { return true }
 // FinalizeBehavior → FinalizeEndOfSpeech → FinalizeVoiceActivityDetection
 // → FinalizeTextToSpeech → FinalizeSpeechToText → FinalizeAuthentication
 // → FinalizeSessionRuntime → AnalysisStart → ExecuteAnalysis* → AnalysisDone
-// → WebhookStart → ExecuteWebhook* → WebhookDone
 // → FinalizeConversation → FinalizeAssistant → FinalizationCompleted
 // Each handler enqueues the next phase to backgroundCh, forming an ordered chain.
 // =============================================================================
@@ -997,16 +993,6 @@ type ExecuteAnalysisPacket struct {
 
 func (f ExecuteAnalysisPacket) ContextId() string      { return f.ContextID }
 func (f ExecuteAnalysisPacket) PacketName() PacketName { return PacketNameExecuteAnalysis }
-
-// ExecuteWebhookPacket triggers a single webhook execution.
-type ExecuteWebhookPacket struct {
-	ContextID string
-	Event     utils.AssistantWebhookEvent
-	Arguments map[string]interface{}
-}
-
-func (f ExecuteWebhookPacket) ContextId() string      { return f.ContextID }
-func (f ExecuteWebhookPacket) PacketName() PacketName { return PacketNameExecuteWebhook }
 
 // StartIdleTimeoutPacket explicitly (re)starts the idle timeout timer.
 // Routed on outputCh so producers can order it relative to InjectMessagePacket

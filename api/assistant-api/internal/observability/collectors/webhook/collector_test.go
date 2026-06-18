@@ -57,6 +57,12 @@ func TestCollector_SendsWebhookEventPayload(t *testing.T) {
 	if got["status"] != "ringing" || got["callId"] != "call-1" {
 		t.Fatalf("unexpected payload: %+v", got)
 	}
+	if _, ok := got["scope"]; ok {
+		t.Fatalf("webhook payload should not include observability scope: %+v", got)
+	}
+	if _, ok := got["context_id"]; ok {
+		t.Fatalf("webhook payload should not include observability context_id: %+v", got)
+	}
 }
 
 func TestCollector_IgnoresUnallowedWebhookEvent(t *testing.T) {

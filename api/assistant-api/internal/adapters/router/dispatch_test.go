@@ -159,8 +159,6 @@ func (s *dispatchHandlerStub) HandleFinalizationCompleted(context.Context, inter
 }
 func (s *dispatchHandlerStub) HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket) {
 }
-func (s *dispatchHandlerStub) HandleExecuteWebhook(context.Context, internal_type.ExecuteWebhookPacket) {
-}
 func (s *dispatchHandlerStub) HandleSpeechToTextAudio(context.Context, internal_type.SpeechToTextAudioPacket) {
 }
 func (s *dispatchHandlerStub) HandleEndOfSpeechInterruption(context.Context, internal_type.EndOfSpeechInterruptionPacket) {

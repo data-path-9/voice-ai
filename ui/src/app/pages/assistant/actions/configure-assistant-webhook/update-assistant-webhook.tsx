@@ -355,6 +355,7 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
             body: (
               <div className="pb-8 flex flex-col gap-6">
                 <InputGroup
+                  childClass="p-0! m-0! px-4!"
                   title={renderLabelWithTooltip(
                     getEventGroupTitle('Call', events),
                     'Choose which call lifecycle events trigger this webhook.',
@@ -368,6 +369,7 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
                 </InputGroup>
 
                 <InputGroup
+                  childClass="p-0! m-0! px-4!"
                   title={renderLabelWithTooltip(
                     getEventGroupTitle('Conversation', events),
                     'Choose which conversation lifecycle events trigger this webhook.',

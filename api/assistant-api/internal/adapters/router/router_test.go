@@ -189,7 +189,6 @@ func TestClassifyName_DispatchablePacketNamesAreExplicitlyRouted(t *testing.T) {
 		internal_type.PacketNameFinalizeAssistant:                          RouteData,
 		internal_type.PacketNameFinalizationCompleted:                      RouteData,
 		internal_type.PacketNameExecuteAnalysis:                            RouteData,
-		internal_type.PacketNameExecuteWebhook:                             RouteData,
 		internal_type.PacketNameObservabilityLogRecord:                     RouteBackground,
 		internal_type.PacketNameObservabilityEventRecord:                   RouteBackground,
 		internal_type.PacketNameObservabilityMetricRecord:                  RouteBackground,
