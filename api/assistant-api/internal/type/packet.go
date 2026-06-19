@@ -60,7 +60,6 @@ const (
 	PacketNameInitializeConversation                     PacketName = "InitializeConversationPacket"
 	PacketNameInitializeSessionRuntime                   PacketName = "InitializeSessionRuntimePacket"
 	PacketNameInitializeAuthentication                   PacketName = "InitializeAuthenticationPacket"
-	PacketNameExecuteSessionAuthentication               PacketName = "ExecuteSessionAuthenticationPacket"
 	PacketNameSessionAuthenticationSucceeded             PacketName = "SessionAuthenticationSucceededPacket"
 	PacketNameSessionAuthenticationFailed                PacketName = "SessionAuthenticationFailedPacket"
 	PacketNameInitializeSpeechToText                     PacketName = "InitializeSpeechToTextPacket"
@@ -97,7 +96,6 @@ const (
 	PacketNameFinalizeConversation                       PacketName = "FinalizeConversationPacket"
 	PacketNameFinalizeAssistant                          PacketName = "FinalizeAssistantPacket"
 	PacketNameFinalizationCompleted                      PacketName = "FinalizationCompletedPacket"
-	PacketNameExecuteAnalysis                            PacketName = "ExecuteAnalysisPacket"
 	PacketNameStartIdleTimeout                           PacketName = "StartIdleTimeoutPacket"
 	PacketNameStopIdleTimeout                            PacketName = "StopIdleTimeoutPacket"
 	PacketNameIdleTimeoutExpired                         PacketName = "IdleTimeoutExpiredPacket"
@@ -506,18 +504,6 @@ type InitializeAuthenticationPacket struct {
 func (f InitializeAuthenticationPacket) ContextId() string { return f.ContextID }
 func (f InitializeAuthenticationPacket) PacketName() PacketName {
 	return PacketNameInitializeAuthentication
-}
-
-// ExecuteSessionAuthenticationPacket triggers authentication against the configured endpoint.
-type ExecuteSessionAuthenticationPacket struct {
-	ContextID      string
-	Arguments      map[string]interface{}
-	Initialization *protos.ConversationInitialization
-}
-
-func (f ExecuteSessionAuthenticationPacket) ContextId() string { return f.ContextID }
-func (f ExecuteSessionAuthenticationPacket) PacketName() PacketName {
-	return PacketNameExecuteSessionAuthentication
 }
 
 // SessionAuthenticationSucceededPacket carries successful auth output.
@@ -982,17 +968,6 @@ type FinalizationCompletedPacket struct {
 
 func (f FinalizationCompletedPacket) ContextId() string      { return f.ContextID }
 func (f FinalizationCompletedPacket) PacketName() PacketName { return PacketNameFinalizationCompleted }
-
-// ExecuteAnalysisPacket triggers a single analysis execution.
-type ExecuteAnalysisPacket struct {
-	ContextID      string
-	Arguments      map[string]interface{}
-	ConversationID uint64
-	Auth           types.SimplePrinciple
-}
-
-func (f ExecuteAnalysisPacket) ContextId() string      { return f.ContextID }
-func (f ExecuteAnalysisPacket) PacketName() PacketName { return PacketNameExecuteAnalysis }
 
 // StartIdleTimeoutPacket explicitly (re)starts the idle timeout timer.
 // Routed on outputCh so producers can order it relative to InjectMessagePacket

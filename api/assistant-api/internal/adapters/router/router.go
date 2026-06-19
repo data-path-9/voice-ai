@@ -45,7 +45,6 @@ func ClassifyName(name internal_type.PacketName) Route {
 		internal_type.PacketNameInitializeConversation,
 		internal_type.PacketNameInitializeSessionRuntime,
 		internal_type.PacketNameInitializeAuthentication,
-		internal_type.PacketNameExecuteSessionAuthentication,
 		internal_type.PacketNameSessionAuthenticationSucceeded,
 		internal_type.PacketNameSessionAuthenticationFailed,
 		internal_type.PacketNameInitializeSpeechToText,
@@ -125,8 +124,7 @@ func ClassifyName(name internal_type.PacketName) Route {
 		internal_type.PacketNameFinalizeSessionRuntime,
 		internal_type.PacketNameFinalizeConversation,
 		internal_type.PacketNameFinalizeAssistant,
-		internal_type.PacketNameFinalizationCompleted,
-		internal_type.PacketNameExecuteAnalysis:
+		internal_type.PacketNameFinalizationCompleted:
 		return RouteData
 
 	// Background — observer-touching telemetry. Dispatcher starts after telemetry init.

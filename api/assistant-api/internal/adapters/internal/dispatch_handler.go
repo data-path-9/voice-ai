@@ -1626,7 +1626,7 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		Record:    observability.NewConversationEventRecord(observability.RecordingStarted, nil),
 	})
 	for _, analysis := range h.r.assistant.AssistantAnalyses {
-		exec, err := internal_analysis.NewExecutor(h.r.logger, ctx, analysis, h.r, h.r)
+		exec, err := internal_analysis.NewExecutor(h.r.logger, ctx, analysis, h.r)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,
@@ -1746,20 +1746,18 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 		return
 	}
 	h.r.OnPacket(ctx,
-		internal_type.ExecuteSessionAuthenticationPacket{
-			ContextID:      p.ContextID,
-			Arguments:      registry.Apply(args, source, variable.ResolveContext{}),
-			Initialization: p.Config,
-		},
 		internal_type.ObservabilityEventRecordPacket{
 			ContextID: p.ContextID,
 			Scope:     internal_type.ObservabilityRecordScopeConversation,
 			Record:    observability.NewConversationEventRecord(observability.ConversationAuthenticationStarted, nil),
 		},
 	)
-}
-func (h requestorDispatchHandler) HandleExecuteSessionAuthentication(ctx context.Context, p internal_type.ExecuteSessionAuthenticationPacket) {
-	if err := h.r.authenticationExecutor.Execute(ctx, p); err != nil {
+	output, err := h.r.authenticationExecutor.Execute(ctx, internal_type.AuthenticationInput{
+		ContextID:      p.ContextID,
+		Arguments:      registry.Apply(args, source, variable.ResolveContext{}),
+		Initialization: p.Config,
+	})
+	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 			ContextID: p.ContextID,
 			Scope:     internal_type.ObservabilityRecordScopeConversation,
@@ -1769,14 +1767,28 @@ func (h requestorDispatchHandler) HandleExecuteSessionAuthentication(ctx context
 				Attributes: observability.Attributes{
 					"component":  observability.ComponentConversation.String(),
 					"operation":  "execute_authentication",
-					"packet":     "ExecuteSessionAuthenticationPacket",
+					"packet":     "InitializeAuthenticationPacket",
 					"context_id": p.ContextID,
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
 				},
 			},
 		})
+		h.r.OnPacket(ctx, internal_type.SessionAuthenticationFailedPacket{
+			ContextID:      p.ContextID,
+			Error:          fmt.Errorf("authentication: execution failed: %w", err),
+			Initialization: p.Config,
+		})
+		return
 	}
+	h.r.OnPacket(ctx, internal_type.SessionAuthenticationSucceededPacket{
+		ContextID:      p.ContextID,
+		Authenticated:  output.Authenticated,
+		Arguments:      output.Arguments,
+		Metadata:       output.Metadata,
+		Options:        output.Options,
+		Initialization: p.Config,
+	})
 }
 func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx context.Context, p internal_type.SessionAuthenticationSucceededPacket) {
 	if p.Authenticated {
@@ -2764,9 +2776,87 @@ func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Conte
 		})
 	}
 	closeGroup.Wait()
-	assistantPayload := map[string]interface{}{}
-	if h.r.assistant != nil {
-		assistantPayload["id"] = h.r.assistant.Id
+	h.r.OnPacket(ctx, internal_type.FinalizeConversationPacket{ContextID: p.ContextID})
+
+}
+func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context, p internal_type.FinalizeConversationPacket) {
+	if len(h.r.assistantAnalyseExecutors) > 0 {
+		conversationID := uint64(0)
+		if h.r.Conversation() != nil {
+			conversationID = h.r.Conversation().Id
+		}
+		source := variable.NewCommunicationSource(h.r)
+		registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
+		for _, initializedAnalysis := range h.r.assistantAnalyseExecutors {
+			if h.r.IsConditionAllowed(initializedAnalysis.Options(), "analysis.condition") {
+				arguments, err := initializedAnalysis.Arguments()
+				if err != nil {
+					h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+						ContextID: p.ContextID,
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
+						Record: observability.RecordLog{
+							Level:   observability.LevelError,
+							Message: "Analysis argument resolution failed; analysis cannot run",
+							Attributes: observability.Attributes{
+								"component":  observability.ComponentConversation.String(),
+								"operation":  "build_analysis_arguments",
+								"packet":     "FinalizeConversationPacket",
+								"context_id": p.ContextID,
+								"name":       initializedAnalysis.Name(),
+								"event":      utils.ConversationCompleted.Get(),
+								"error":      err.Error(),
+								"error_type": fmt.Sprintf("%T", err),
+							},
+						},
+					})
+					continue
+				}
+				input := internal_type.AnalysisInput{
+					ContextID:      p.ContextID,
+					Arguments:      registry.Apply(arguments, source, variable.ResolveContext{Event: utils.ConversationCompleted.Get()}),
+					ConversationID: conversationID,
+					Auth:           h.r.auth,
+				}
+				output, err := initializedAnalysis.Execute(ctx, input)
+				if err != nil {
+					h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+						ContextID: p.ContextID,
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
+						Record: observability.RecordLog{
+							Level:   observability.LevelError,
+							Message: "Analysis execution failed; post-call analysis may be missing",
+							Attributes: observability.Attributes{
+								"component":  observability.ComponentConversation.String(),
+								"operation":  "execute_analysis",
+								"packet":     "FinalizeConversationPacket",
+								"context_id": p.ContextID,
+								"name":       initializedAnalysis.Name(),
+								"event":      utils.ConversationCompleted.Get(),
+								"error":      err.Error(),
+								"error_type": fmt.Sprintf("%T", err),
+							},
+						},
+					})
+					continue
+				}
+				metadata := output.Metadata
+				if metadata != nil && metadata.GetKey() != "" {
+					if h.r.metadata == nil {
+						h.r.metadata = make(map[string]interface{})
+					}
+					h.r.metadata[metadata.GetKey()] = metadata.GetValue()
+					metadataContextID := p.ContextID
+					if conversationID != 0 {
+						metadataContextID = fmt.Sprintf("%d", conversationID)
+					}
+					h.r.OnPacket(ctx, internal_type.ObservabilityMetadataRecordPacket{
+						ContextID: metadataContextID,
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
+						Record:    observability.NewConversationMetadataRecord([]*protos.Metadata{metadata}),
+					})
+				}
+			}
+		}
 	}
 	if h.r.metrics == nil {
 		h.r.metrics = make(map[string]*protos.Metric)
@@ -2776,63 +2866,63 @@ func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Conte
 		Value:       type_enums.CONVERSATION_COMPLETE.String(),
 		Description: "Status of current conversation",
 	}
-	messagesPayload := make([]map[string]interface{}, 0, len(h.r.GetHistories()))
-	for _, message := range h.r.GetHistories() {
-		if message == nil {
-			continue
+	if h.r.observabilityRecorder != nil && h.r.Assistant() != nil && h.r.Conversation() != nil {
+		assistantPayload := map[string]interface{}{
+			"id": h.r.Assistant().Id,
 		}
-		messagesPayload = append(messagesPayload, map[string]interface{}{
-			"id":      message.ContextId(),
-			"role":    message.Role(),
-			"content": message.Content(),
-		})
-	}
-	metadataPayload := make(map[string]interface{}, len(h.r.metadata))
-	for key, value := range h.r.metadata {
-		metadataPayload[key] = value
-	}
-	metricsPayload := make([]map[string]interface{}, 0, len(h.r.metrics))
-	for _, metric := range h.r.metrics {
-		if metric == nil {
-			continue
+		messagesPayload := make([]map[string]interface{}, 0, len(h.r.GetHistories()))
+		for _, message := range h.r.GetHistories() {
+			if message == nil {
+				continue
+			}
+			messagesPayload = append(messagesPayload, map[string]interface{}{
+				"id":      message.ContextId(),
+				"role":    message.Role(),
+				"content": message.Content(),
+			})
 		}
-		metricsPayload = append(metricsPayload, map[string]interface{}{
-			"name":        metric.GetName(),
-			"value":       metric.GetValue(),
-			"description": metric.GetDescription(),
-		})
-	}
-	h.r.OnPacket(ctx,
-		internal_type.ExecuteAnalysisPacket{
-			ContextID:      p.ContextID,
-			ConversationID: h.r.assistantConversation.Id,
-			Auth:           h.r.auth,
-		},
-		internal_type.ObservabilityWebhookRecordPacket{
-			ContextID: p.ContextID,
-			Scope:     internal_type.ObservabilityRecordScopeConversation,
-			Record: observability.RecordWebhook{
-				Event: observability.ConversationCompleted,
-				Payload: map[string]interface{}{
-					"event":     observability.ConversationCompleted.String(),
-					"assistant": assistantPayload,
-					"conversation": map[string]interface{}{
-						"id": h.r.assistantConversation.Id,
-					},
-					"data": map[string]interface{}{
-						"reason":   "conversation_completed",
-						"status":   "completed",
-						"messages": messagesPayload,
-						"metadata": metadataPayload,
-						"metrics":  metricsPayload,
-					},
+		metadataPayload := make(map[string]interface{}, len(h.r.metadata))
+		for key, value := range h.r.metadata {
+			metadataPayload[key] = value
+		}
+		metricsPayload := make([]map[string]interface{}, 0, len(h.r.metrics))
+		for _, metric := range h.r.metrics {
+			if metric == nil {
+				continue
+			}
+			metricsPayload = append(metricsPayload, map[string]interface{}{
+				"name":        metric.GetName(),
+				"value":       metric.GetValue(),
+				"description": metric.GetDescription(),
+			})
+		}
+		if err := h.r.observabilityRecorder.Record(ctx, observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{
+				AssistantID: h.r.Assistant().Id,
+			},
+			ConversationID: h.r.Conversation().Id,
+		}, observability.RecordWebhook{
+			Event: observability.ConversationCompleted,
+			Payload: map[string]interface{}{
+				"event":     observability.ConversationCompleted.String(),
+				"assistant": assistantPayload,
+				"conversation": map[string]interface{}{
+					"id": h.r.Conversation().Id,
+				},
+				"data": map[string]interface{}{
+					"reason":   "conversation_completed",
+					"status":   "completed",
+					"messages": messagesPayload,
+					"metadata": metadataPayload,
+					"metrics":  metricsPayload,
 				},
 			},
-		},
-		internal_type.FinalizeConversationPacket{ContextID: p.ContextID})
+		}); err != nil {
+			h.r.logger.Errorw("observability completed webhook failed to record", "error", err, "context_id", p.ContextID)
+		}
+	}
 
-}
-func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context, p internal_type.FinalizeConversationPacket) {
+	// running analysis to close
 	for _, analysis := range h.r.assistantAnalyseExecutors {
 		if err := analysis.Close(ctx); err != nil {
 			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
@@ -2854,6 +2944,8 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 			})
 		}
 	}
+
+	// assistant executor cleanup
 	if h.r.authenticationExecutor != nil {
 		if err := h.r.authenticationExecutor.Close(ctx); err != nil {
 			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
@@ -2874,6 +2966,8 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 			})
 		}
 	}
+
+	// trigger finalize
 	h.r.OnPacket(ctx, internal_type.FinalizeAssistantPacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizeAssistant(ctx context.Context, p internal_type.FinalizeAssistantPacket) {
@@ -2903,62 +2997,6 @@ func (h requestorDispatchHandler) HandleFinalizeAssistant(ctx context.Context, p
 func (h requestorDispatchHandler) HandleFinalizationCompleted(ctx context.Context, p internal_type.FinalizationCompletedPacket) {
 	_ = h.r.sessionLifecycle.Transition(adapter_lifecycle.EventDisconnectCompleted)
 	h.r.cancelSession()
-}
-
-func (h requestorDispatchHandler) HandleExecuteAnalysis(ctx context.Context, p internal_type.ExecuteAnalysisPacket) {
-	if len(h.r.assistantAnalyseExecutors) == 0 {
-		return
-	}
-	source := variable.NewCommunicationSource(h.r)
-	registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
-	for _, initializedAnalysis := range h.r.assistantAnalyseExecutors {
-		if h.r.IsConditionAllowed(initializedAnalysis.Options(), "analysis.condition") {
-			arguments, err := initializedAnalysis.Arguments()
-			if err != nil {
-				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-					ContextID: p.ContextID,
-					Scope:     internal_type.ObservabilityRecordScopeConversation,
-					Record: observability.RecordLog{
-						Level:   observability.LevelError,
-						Message: "Analysis argument resolution failed; analysis cannot run",
-						Attributes: observability.Attributes{
-							"component":  observability.ComponentConversation.String(),
-							"operation":  "build_analysis_arguments",
-							"packet":     "ExecuteAnalysisPacket",
-							"context_id": p.ContextID,
-							"name":       initializedAnalysis.Name(),
-							"event":      utils.ConversationCompleted.Get(),
-							"error":      err.Error(),
-							"error_type": fmt.Sprintf("%T", err),
-						},
-					},
-				})
-				continue
-			}
-			p.Arguments = registry.Apply(arguments, source, variable.ResolveContext{Event: utils.ConversationCompleted.Get()})
-			if err := initializedAnalysis.Execute(ctx, p); err != nil {
-				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-					ContextID: p.ContextID,
-					Scope:     internal_type.ObservabilityRecordScopeConversation,
-					Record: observability.RecordLog{
-						Level:   observability.LevelError,
-						Message: "Analysis execution failed; post-call analysis may be missing",
-						Attributes: observability.Attributes{
-							"component":  observability.ComponentConversation.String(),
-							"operation":  "execute_analysis",
-							"packet":     "ExecuteAnalysisPacket",
-							"context_id": p.ContextID,
-							"name":       initializedAnalysis.Name(),
-							"event":      utils.ConversationCompleted.Get(),
-							"error":      err.Error(),
-							"error_type": fmt.Sprintf("%T", err),
-						},
-					},
-				})
-			}
-		}
-
-	}
 }
 
 func (h requestorDispatchHandler) callInputNormalizer(ctx context.Context, vl internal_type.EndOfSpeechPacket) error {

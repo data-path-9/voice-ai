@@ -58,7 +58,6 @@ type DispatchHandler interface {
 	HandleInitializeConversation(context.Context, internal_type.InitializeConversationPacket)
 	HandleInitializeSessionRuntime(context.Context, internal_type.InitializeSessionRuntimePacket)
 	HandleInitializeAuthentication(context.Context, internal_type.InitializeAuthenticationPacket)
-	HandleExecuteSessionAuthentication(context.Context, internal_type.ExecuteSessionAuthenticationPacket)
 	HandleSessionAuthenticationSucceeded(context.Context, internal_type.SessionAuthenticationSucceededPacket)
 	HandleInitializeSpeechToText(context.Context, internal_type.InitializeSpeechToTextPacket)
 	HandleInitializeTextToSpeech(context.Context, internal_type.InitializeTextToSpeechPacket)
@@ -92,7 +91,6 @@ type DispatchHandler interface {
 	HandleFinalizeConversation(context.Context, internal_type.FinalizeConversationPacket)
 	HandleFinalizeAssistant(context.Context, internal_type.FinalizeAssistantPacket)
 	HandleFinalizationCompleted(context.Context, internal_type.FinalizationCompletedPacket)
-	HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket)
 	HandleObservabilityRecordPacket(context.Context, internal_type.ObservabilityRecordPacket)
 }
 
@@ -189,8 +187,6 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleInitializeAuthentication(ctx, vl)
 	case internal_type.InitializeAssistantExecutorPacket:
 		handler.HandleInitializeAssistantExecutorPacket(ctx, vl)
-	case internal_type.ExecuteSessionAuthenticationPacket:
-		handler.HandleExecuteSessionAuthentication(ctx, vl)
 	case internal_type.SessionAuthenticationSucceededPacket:
 		handler.HandleSessionAuthenticationSucceeded(ctx, vl)
 	case internal_type.InitializeSpeechToTextPacket:
@@ -253,8 +249,6 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleFinalizeAssistant(ctx, vl)
 	case internal_type.FinalizationCompletedPacket:
 		handler.HandleFinalizationCompleted(ctx, vl)
-	case internal_type.ExecuteAnalysisPacket:
-		handler.HandleExecuteAnalysis(ctx, vl)
 	case internal_type.ObservabilityRecordPacket:
 		handler.HandleObservabilityRecordPacket(ctx, vl)
 	case internal_type.EndOfSpeechInterruptionPacket:
