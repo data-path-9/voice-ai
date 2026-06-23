@@ -17,11 +17,11 @@ import { Information } from '@carbon/icons-react';
 import { Slider } from '@/app/components/form/slider';
 import { APiHeader } from '@/app/components/external-api/api-header';
 import {
-  GetAssistantWebhook,
-  GetAssistantWebhookRequest,
+  GetAssistantConfiguration,
+  GetAssistantConfigurationRequest,
   Metadata,
-  UpdateAssistantWebhookRequest,
-  UpdateWebhook,
+  UpdateAssistantConfiguration,
+  UpdateAssistantConfigurationRequest,
 } from '@rapidaai/react';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import toast from 'react-hot-toast/headless';
@@ -86,7 +86,12 @@ const WEBHOOK_OPTION_KEYS = {
   retryStatusCodes: 'retry_status_codes',
   maxRetryCount: 'max_retry_count',
   timeoutSeconds: 'timeout_seconds',
+  events: 'assistant_events',
+  executionPriority: 'execution_priority',
+  description: 'description',
 };
+
+const webhookConfigurationType = 'webhook';
 
 const getEventGroupTitle = (
   group: WebhookEventGroup,
@@ -118,6 +123,9 @@ const buildWebhookOptions = ({
   retryOnStatus,
   maxRetries,
   requestTimeout,
+  priority,
+  events,
+  description,
 }: {
   method: string;
   endpoint: string;
@@ -125,6 +133,9 @@ const buildWebhookOptions = ({
   retryOnStatus: string[];
   maxRetries: number;
   requestTimeout: number;
+  priority: number;
+  events: string[];
+  description: string;
 }): Metadata[] => {
   return [
     { key: WEBHOOK_OPTION_KEYS.method, value: method || 'POST' },
@@ -139,6 +150,12 @@ const buildWebhookOptions = ({
       key: WEBHOOK_OPTION_KEYS.timeoutSeconds,
       value: String(requestTimeout || 0),
     },
+    { key: WEBHOOK_OPTION_KEYS.events, value: JSON.stringify(events || []) },
+    {
+      key: WEBHOOK_OPTION_KEYS.executionPriority,
+      value: String(priority || 0),
+    },
+    { key: WEBHOOK_OPTION_KEYS.description, value: description || '' },
   ].map(({ key, value }) => {
     const option = new Metadata();
     option.setKey(key);
@@ -183,12 +200,12 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
   useEffect(() => {
     const load = async () => {
       showLoader();
-      const request = new GetAssistantWebhookRequest();
+      const request = new GetAssistantConfigurationRequest();
       request.setAssistantid(assistantId);
       request.setId(webhookId!);
 
       try {
-        const res = await GetAssistantWebhook(connectionConfig, request, {
+        const res = await GetAssistantConfiguration(connectionConfig, request, {
           'x-auth-id': authId,
           authorization: token,
           'x-project-id': projectId,
@@ -211,7 +228,7 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
 
           setMethod(optionMap.get('http_method') || 'POST');
           setEndpoint(optionMap.get('http_url') || '');
-          setDescription(wb.getDescription());
+          setDescription(optionMap.get(WEBHOOK_OPTION_KEYS.description) || '');
           setRetryOnStatus(
             parseStringList(optionMap.get('retry_status_codes')),
           );
@@ -221,7 +238,10 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
           setRequestTimeout(
             Number.isFinite(optionsTimeout) ? optionsTimeout : 0,
           );
-          setPriority(wb.getExecutionpriority());
+          const optionsPriority = Number(
+            optionMap.get(WEBHOOK_OPTION_KEYS.executionPriority) || '0',
+          );
+          setPriority(Number.isFinite(optionsPriority) ? optionsPriority : 0);
           const optionsHeaders = parseStringMap(optionMap.get('http_headers'));
           setHeaders(
             Object.entries(optionsHeaders).map(([key, value]) => ({
@@ -229,7 +249,7 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
               value,
             })),
           );
-          setEvents(wb.getAssistanteventsList());
+          setEvents(parseStringList(optionMap.get(WEBHOOK_OPTION_KEYS.events)));
         }
       } catch {
         hideLoader();
@@ -271,13 +291,12 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
       return;
     }
     showLoader();
-    const request = new UpdateAssistantWebhookRequest();
+    const request = new UpdateAssistantConfigurationRequest();
     request.setAssistantid(assistantId);
     request.setId(webhookId!);
+    request.setConfigurationtype(webhookConfigurationType);
     request.setProvider('http');
-    request.setAssistanteventsList(events);
-    request.setExecutionpriority(priority);
-    request.setDescription(description);
+    request.setEnabled(true);
     request.setOptionsList(
       buildWebhookOptions({
         method,
@@ -286,15 +305,22 @@ export const UpdateAssistantWebhook: FC<{ assistantId: string }> = ({
         retryOnStatus,
         maxRetries,
         requestTimeout,
+        priority,
+        events,
+        description,
       }),
     );
 
     try {
-      const response = await UpdateWebhook(connectionConfig, request, {
-        'x-auth-id': authId,
-        authorization: token,
-        'x-project-id': projectId,
-      });
+      const response = await UpdateAssistantConfiguration(
+        connectionConfig,
+        request,
+        {
+          'x-auth-id': authId,
+          authorization: token,
+          'x-project-id': projectId,
+        },
+      );
 
       hideLoader();
       if (response?.getSuccess()) {

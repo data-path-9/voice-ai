@@ -22,12 +22,12 @@ import (
 func NewExecutor(
 	logger commons.Logger,
 	ctx context.Context,
-	authenticator *internal_assistant_entity.AssistantAuthentication,
+	authenticator *internal_assistant_entity.AssistantConfiguration,
 	callback internal_type.Callback,
 	caller internal_type.InternalCaller,
 ) (internal_type.AuthenticationExecutor, error) {
 	switch authenticator.Provider {
-	case internal_assistant_entity.AssistantAuthenticationProviderHTTP:
+	case "http":
 		return internal_authentication_http.NewExecutor(logger, ctx, authenticator, callback, caller)
 	default:
 		return nil, fmt.Errorf("authentication: unsupported executor type %q", authenticator.Provider)

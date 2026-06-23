@@ -11,6 +11,7 @@ import {
   Phone,
   ChartLine,
   DigitalIdentity,
+  ObjectStorage,
   CarbonIconType,
 } from '@carbon/icons-react';
 
@@ -66,8 +67,16 @@ export const assistantNavSections: AssistantNavSection[] = [
         path: 'version-history',
         children: [
           { key: 'versions-list', label: 'View all', path: 'version-history' },
-          { key: 'versions-create', label: 'Add new version', path: 'create-new-version' },
-          { key: 'versions-agentkit', label: 'Add AgentKit', path: 'create-agentkit-version' },
+          {
+            key: 'versions-create',
+            label: 'Add new version',
+            path: 'create-new-version',
+          },
+          {
+            key: 'versions-agentkit',
+            label: 'Add AgentKit',
+            path: 'create-agentkit-version',
+          },
         ],
       },
     ],
@@ -106,10 +115,26 @@ export const assistantNavSections: AssistantNavSection[] = [
         path: 'deployment',
         children: [
           { key: 'deployment-list', label: 'View all', path: 'deployment' },
-          { key: 'deployment-debugger', label: 'Add Debugger', path: 'deployment/debugger' },
-          { key: 'deployment-web', label: 'Add Web Widget', path: 'deployment/web' },
-          { key: 'deployment-api', label: 'Add SDK / API', path: 'deployment/api' },
-          { key: 'deployment-call', label: 'Add Phone Call', path: 'deployment/call' },
+          {
+            key: 'deployment-debugger',
+            label: 'Add Debugger',
+            path: 'deployment/debugger',
+          },
+          {
+            key: 'deployment-web',
+            label: 'Add Web Widget',
+            path: 'deployment/web',
+          },
+          {
+            key: 'deployment-api',
+            label: 'Add SDK / API',
+            path: 'deployment/api',
+          },
+          {
+            key: 'deployment-call',
+            label: 'Add Phone Call',
+            path: 'deployment/call',
+          },
         ],
       },
       {
@@ -119,7 +144,11 @@ export const assistantNavSections: AssistantNavSection[] = [
         path: 'configure-tool',
         children: [
           { key: 'tools-list', label: 'View all', path: 'configure-tool' },
-          { key: 'tools-create', label: 'Add tool', path: 'configure-tool/create' },
+          {
+            key: 'tools-create',
+            label: 'Add tool',
+            path: 'configure-tool/create',
+          },
         ],
       },
       {
@@ -128,8 +157,16 @@ export const assistantNavSections: AssistantNavSection[] = [
         icon: Webhook,
         path: 'configure-webhook',
         children: [
-          { key: 'webhooks-list', label: 'View all', path: 'configure-webhook' },
-          { key: 'webhooks-create', label: 'Add webhook', path: 'configure-webhook/create' },
+          {
+            key: 'webhooks-list',
+            label: 'View all',
+            path: 'configure-webhook',
+          },
+          {
+            key: 'webhooks-create',
+            label: 'Add webhook',
+            path: 'configure-webhook/create',
+          },
         ],
       },
       {
@@ -138,8 +175,30 @@ export const assistantNavSections: AssistantNavSection[] = [
         icon: Activity,
         path: 'configure-telemetry',
         children: [
-          { key: 'telemetry-list', label: 'View all', path: 'configure-telemetry' },
-          { key: 'telemetry-create', label: 'Add provider', path: 'configure-telemetry/create' },
+          {
+            key: 'telemetry-list',
+            label: 'View all',
+            path: 'configure-telemetry',
+          },
+          {
+            key: 'telemetry-create',
+            label: 'Add provider',
+            path: 'configure-telemetry/create',
+          },
+        ],
+      },
+      {
+        key: 'storage',
+        label: 'Storage',
+        icon: ObjectStorage,
+        path: 'configure-storage',
+        children: [
+          { key: 'storage-list', label: 'View all', path: 'configure-storage' },
+          {
+            key: 'storage-create',
+            label: 'Add storage',
+            path: 'configure-storage/create',
+          },
         ],
       },
       {
@@ -148,8 +207,16 @@ export const assistantNavSections: AssistantNavSection[] = [
         icon: ChartLine,
         path: 'configure-analysis',
         children: [
-          { key: 'analysis-list', label: 'View all', path: 'configure-analysis' },
-          { key: 'analysis-create', label: 'Add analysis', path: 'configure-analysis/create' },
+          {
+            key: 'analysis-list',
+            label: 'View all',
+            path: 'configure-analysis',
+          },
+          {
+            key: 'analysis-create',
+            label: 'Add analysis',
+            path: 'configure-analysis/create',
+          },
         ],
       },
     ],

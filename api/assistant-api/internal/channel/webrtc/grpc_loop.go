@@ -173,7 +173,7 @@ func (s *webrtcStreamer) runGrpcReader() {
 					Logger:      s.Logger,
 					ToolService: s.assistantToolService,
 				}),
-				collectors.NewWithAssistantWebhook(s.Ctx, s.Logger, s.auth, assistantID, s.webhookService, s.httpLogService),
+				collectors.NewWithWebhookConfiguration(s.Ctx, s.Logger, s.auth, assistantID, s.configurationService, s.httpLogService),
 			); err != nil {
 				s.Logger.Warnw("observability collector registration failed",
 					"component", "webrtc",

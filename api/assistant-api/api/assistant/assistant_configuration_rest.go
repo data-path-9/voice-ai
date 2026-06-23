@@ -1,0 +1,689 @@
+// Copyright (c) 2023-2025 RapidaAI
+// Author: Prashant Srivastav <prashant@rapida.ai>
+//
+// Licensed under GPL-2.0 with Rapida Additional Terms.
+// See LICENSE.md or contact sales@rapida.ai for commercial usage.
+package assistant_api
+
+import (
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	"github.com/rapidaai/openapi"
+	pkg_errors "github.com/rapidaai/pkg/errors"
+	"github.com/rapidaai/pkg/types"
+	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/pkg/validator"
+	"github.com/rapidaai/protos"
+)
+
+func (assistantApi *assistantGrpcApi) CreateAssistantConfigurationRest(c *gin.Context) {
+	auth, isAuthenticated := types.GetAuthPrinciple(c)
+	if !isAuthenticated {
+		platformError := pkg_errors.AssistantConfigurationUnauthenticated
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !auth.HasUser() || !auth.HasProject() || !auth.HasOrganization() {
+		platformError := pkg_errors.AssistantConfigurationMissingAuthScope
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	var req openapi.CreateAssistantConfigurationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		platformError := pkg_errors.AssistantConfigurationInvalidRequest
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	assistantId, err := strconv.ParseUint(req.AssistantId, 10, 64)
+	if err != nil || assistantId == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !validator.NotBlank(req.ConfigurationType) {
+		platformError := pkg_errors.AssistantConfigurationMissingType
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !validator.OneOf(
+		req.ConfigurationType,
+		string(internal_assistant_entity.AssistantConfigurationTypeAuthentication),
+		string(internal_assistant_entity.AssistantConfigurationTypeWebhook),
+		string(internal_assistant_entity.AssistantConfigurationTypeAnalysis),
+		string(internal_assistant_entity.AssistantConfigurationTypeTelemetry),
+		string(internal_assistant_entity.AssistantConfigurationTypeStorage),
+	) {
+		platformError := pkg_errors.AssistantConfigurationInvalidType
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !validator.NotBlank(req.Provider) {
+		platformError := pkg_errors.AssistantConfigurationMissingProvider
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if req.Options != nil {
+		for _, option := range *req.Options {
+			if !validator.NonNil(option.Key) || !validator.NotBlank(*option.Key) {
+				platformError := pkg_errors.AssistantConfigurationInvalidOption
+				c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+					Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+					Success: utils.Ptr(false),
+					Error: &openapi.Error{
+						ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+						ErrorMessage: utils.Ptr(platformError.Error),
+						HumanMessage: utils.Ptr(platformError.ErrorMessage),
+					},
+				})
+				return
+			}
+		}
+	}
+	options := assistantConfigurationOpenAPIOptions(req.Options)
+	configuration, err := assistantApi.assistantConfigService.Create(
+		c,
+		auth,
+		assistantId,
+		req.ConfigurationType,
+		req.Provider,
+		req.Enabled,
+		options,
+	)
+	if err != nil {
+		assistantApi.logger.Errorf("unable to create assistant configuration: %v", err)
+		platformError := pkg_errors.AssistantConfigurationCreate
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, openapi.GetAssistantConfigurationResponse{
+		Code:    utils.Ptr(int32(http.StatusOK)),
+		Success: utils.Ptr(true),
+		Data:    assistantConfigurationOpenAPI(configuration),
+	})
+}
+
+func (assistantApi *assistantGrpcApi) UpdateAssistantConfigurationRest(c *gin.Context) {
+	auth, isAuthenticated := types.GetAuthPrinciple(c)
+	if !isAuthenticated {
+		platformError := pkg_errors.AssistantConfigurationUnauthenticated
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !auth.HasUser() || !auth.HasProject() || !auth.HasOrganization() {
+		platformError := pkg_errors.AssistantConfigurationMissingAuthScope
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	assistantId, assistantErr := strconv.ParseUint(c.Param("assistantId"), 10, 64)
+	if assistantErr != nil || assistantId == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	configurationId, configurationErr := strconv.ParseUint(c.Param("id"), 10, 64)
+	if configurationErr != nil || configurationId == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidID
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	var req openapi.UpdateAssistantConfigurationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		platformError := pkg_errors.AssistantConfigurationInvalidRequest
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !validator.NotBlank(req.ConfigurationType) {
+		platformError := pkg_errors.AssistantConfigurationMissingType
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !validator.OneOf(
+		req.ConfigurationType,
+		string(internal_assistant_entity.AssistantConfigurationTypeAuthentication),
+		string(internal_assistant_entity.AssistantConfigurationTypeWebhook),
+		string(internal_assistant_entity.AssistantConfigurationTypeAnalysis),
+		string(internal_assistant_entity.AssistantConfigurationTypeTelemetry),
+		string(internal_assistant_entity.AssistantConfigurationTypeStorage),
+	) {
+		platformError := pkg_errors.AssistantConfigurationInvalidType
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !validator.NotBlank(req.Provider) {
+		platformError := pkg_errors.AssistantConfigurationMissingProvider
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if req.Options != nil {
+		for _, option := range *req.Options {
+			if !validator.NonNil(option.Key) || !validator.NotBlank(*option.Key) {
+				platformError := pkg_errors.AssistantConfigurationInvalidOption
+				c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+					Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+					Success: utils.Ptr(false),
+					Error: &openapi.Error{
+						ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+						ErrorMessage: utils.Ptr(platformError.Error),
+						HumanMessage: utils.Ptr(platformError.ErrorMessage),
+					},
+				})
+				return
+			}
+		}
+	}
+	options := assistantConfigurationOpenAPIOptions(req.Options)
+	configuration, err := assistantApi.assistantConfigService.Update(
+		c,
+		auth,
+		configurationId,
+		assistantId,
+		req.ConfigurationType,
+		req.Provider,
+		req.Enabled,
+		options,
+	)
+	if err != nil {
+		assistantApi.logger.Errorf("unable to update assistant configuration: %v", err)
+		platformError := pkg_errors.AssistantConfigurationUpdate
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, openapi.GetAssistantConfigurationResponse{
+		Code:    utils.Ptr(int32(http.StatusOK)),
+		Success: utils.Ptr(true),
+		Data:    assistantConfigurationOpenAPI(configuration),
+	})
+}
+
+func (assistantApi *assistantGrpcApi) GetAssistantConfigurationRest(c *gin.Context) {
+	auth, isAuthenticated := types.GetAuthPrinciple(c)
+	if !isAuthenticated {
+		platformError := pkg_errors.AssistantConfigurationUnauthenticated
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !auth.HasUser() || !auth.HasProject() || !auth.HasOrganization() {
+		platformError := pkg_errors.AssistantConfigurationMissingAuthScope
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	assistantId, assistantErr := strconv.ParseUint(c.Param("assistantId"), 10, 64)
+	if assistantErr != nil || assistantId == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	configurationId, configurationErr := strconv.ParseUint(c.Param("id"), 10, 64)
+	if configurationErr != nil || configurationId == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidID
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	configuration, err := assistantApi.assistantConfigService.Get(c, auth, configurationId, assistantId)
+	if err != nil {
+		assistantApi.logger.Errorf("unable to get assistant configuration: %v", err)
+		platformError := pkg_errors.AssistantConfigurationGet
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, openapi.GetAssistantConfigurationResponse{
+		Code:    utils.Ptr(int32(http.StatusOK)),
+		Success: utils.Ptr(true),
+		Data:    assistantConfigurationOpenAPI(configuration),
+	})
+}
+
+func (assistantApi *assistantGrpcApi) GetAllAssistantConfigurationRest(c *gin.Context) {
+	auth, isAuthenticated := types.GetAuthPrinciple(c)
+	if !isAuthenticated {
+		platformError := pkg_errors.AssistantConfigurationUnauthenticated
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !auth.HasUser() || !auth.HasProject() || !auth.HasOrganization() {
+		platformError := pkg_errors.AssistantConfigurationMissingAuthScope
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	assistantId, err := strconv.ParseUint(c.Param("assistantId"), 10, 64)
+	if err != nil || assistantId == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	configurationType := c.Query("configurationType")
+	if validator.NotBlank(configurationType) && !validator.OneOf(
+		configurationType,
+		string(internal_assistant_entity.AssistantConfigurationTypeAuthentication),
+		string(internal_assistant_entity.AssistantConfigurationTypeWebhook),
+		string(internal_assistant_entity.AssistantConfigurationTypeAnalysis),
+		string(internal_assistant_entity.AssistantConfigurationTypeTelemetry),
+		string(internal_assistant_entity.AssistantConfigurationTypeStorage),
+	) {
+		platformError := pkg_errors.AssistantConfigurationInvalidType
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	page, pageErr := strconv.ParseUint(c.DefaultQuery("page", "1"), 10, 32)
+	if pageErr != nil || page == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidRequest
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	pageSize, pageSizeErr := strconv.ParseUint(c.DefaultQuery("pageSize", "20"), 10, 32)
+	if pageSizeErr != nil || pageSize == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidRequest
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	cnt, configurations, err := assistantApi.assistantConfigService.GetAll(
+		c,
+		auth,
+		assistantId,
+		configurationType,
+		c.Query("provider"),
+		nil,
+		&protos.Paginate{
+			Page:     uint32(page),
+			PageSize: uint32(pageSize),
+		},
+	)
+	if err != nil {
+		assistantApi.logger.Errorf("unable to get assistant configurations: %v", err)
+		platformError := pkg_errors.AssistantConfigurationGetAll
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	out := make([]openapi.AssistantConfiguration, 0, len(configurations))
+	for _, configuration := range configurations {
+		mapped := assistantConfigurationOpenAPI(configuration)
+		if mapped != nil {
+			out = append(out, *mapped)
+		}
+	}
+	c.JSON(http.StatusOK, openapi.GetAllAssistantConfigurationResponse{
+		Code:    utils.Ptr(int32(http.StatusOK)),
+		Success: utils.Ptr(true),
+		Data:    &out,
+		Paginated: &openapi.Paginated{
+			CurrentPage: utils.Ptr(uint32(page)),
+			TotalItem:   utils.Ptr(uint32(cnt)),
+		},
+	})
+}
+
+func (assistantApi *assistantGrpcApi) DeleteAssistantConfigurationRest(c *gin.Context) {
+	auth, isAuthenticated := types.GetAuthPrinciple(c)
+	if !isAuthenticated {
+		platformError := pkg_errors.AssistantConfigurationUnauthenticated
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	if !auth.HasUser() || !auth.HasProject() || !auth.HasOrganization() {
+		platformError := pkg_errors.AssistantConfigurationMissingAuthScope
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	assistantId, assistantErr := strconv.ParseUint(c.Param("assistantId"), 10, 64)
+	if assistantErr != nil || assistantId == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	configurationId, configurationErr := strconv.ParseUint(c.Param("id"), 10, 64)
+	if configurationErr != nil || configurationId == 0 {
+		platformError := pkg_errors.AssistantConfigurationInvalidID
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	configuration, err := assistantApi.assistantConfigService.Delete(c, auth, configurationId, assistantId)
+	if err != nil {
+		assistantApi.logger.Errorf("unable to delete assistant configuration: %v", err)
+		platformError := pkg_errors.AssistantConfigurationDelete
+		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
+			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
+			Success: utils.Ptr(false),
+			Error: &openapi.Error{
+				ErrorCode:    utils.Ptr(openapi.Uint64String(platformError.CodeString())),
+				ErrorMessage: utils.Ptr(platformError.Error),
+				HumanMessage: utils.Ptr(platformError.ErrorMessage),
+			},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, openapi.GetAssistantConfigurationResponse{
+		Code:    utils.Ptr(int32(http.StatusOK)),
+		Success: utils.Ptr(true),
+		Data:    assistantConfigurationOpenAPI(configuration),
+	})
+}
+
+func assistantConfigurationOpenAPIOptions(options *[]openapi.Metadata) []*protos.Metadata {
+	if options == nil {
+		return nil
+	}
+	out := make([]*protos.Metadata, 0, len(*options))
+	for _, option := range *options {
+		if option.Key == nil {
+			continue
+		}
+		value := ""
+		if option.Value != nil {
+			value = *option.Value
+		}
+		out = append(out, &protos.Metadata{
+			Key:   *option.Key,
+			Value: value,
+		})
+	}
+	return out
+}
+
+func assistantConfigurationOpenAPI(configuration *internal_assistant_entity.AssistantConfiguration) *openapi.AssistantConfiguration {
+	if configuration == nil {
+		return nil
+	}
+	id := openapi.Uint64String(strconv.FormatUint(configuration.Id, 10))
+	assistantId := openapi.Uint64String(strconv.FormatUint(configuration.AssistantId, 10))
+	projectId := openapi.Uint64String(strconv.FormatUint(configuration.ProjectId, 10))
+	organizationId := openapi.Uint64String(strconv.FormatUint(configuration.OrganizationId, 10))
+	createdBy := openapi.Uint64String(strconv.FormatUint(configuration.CreatedBy, 10))
+	updatedBy := openapi.Uint64String(strconv.FormatUint(configuration.UpdatedBy, 10))
+	configurationType := string(configuration.ConfigurationType)
+	status := configuration.Status.String()
+	createdDate := time.Time(configuration.CreatedDate)
+	updatedDate := time.Time(configuration.UpdatedDate)
+	options := make([]openapi.Metadata, 0, len(configuration.Options))
+	for _, option := range configuration.Options {
+		if option == nil {
+			continue
+		}
+		options = append(options, openapi.Metadata{
+			Key:   utils.Ptr(option.Key),
+			Value: utils.Ptr(option.Value),
+		})
+	}
+	return &openapi.AssistantConfiguration{
+		Id:                &id,
+		AssistantId:       &assistantId,
+		ProjectId:         &projectId,
+		OrganizationId:    &organizationId,
+		ConfigurationType: &configurationType,
+		Provider:          &configuration.Provider,
+		Enabled:           &configuration.Enabled,
+		Options:           &options,
+		Status:            &status,
+		CreatedBy:         &createdBy,
+		UpdatedBy:         &updatedBy,
+		CreatedDate:       &createdDate,
+		UpdatedDate:       &updatedDate,
+	}
+}

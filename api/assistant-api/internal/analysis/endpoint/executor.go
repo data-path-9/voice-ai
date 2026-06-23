@@ -29,7 +29,7 @@ const (
 type runtimeExecutor struct {
 	logger       commons.Logger
 	caller       internal_type.InternalCaller
-	analysis     *internal_assistant_entity.AssistantAnalysis
+	analysis     *internal_assistant_entity.AssistantConfiguration
 	inputBuilder endpoint_client_builders.InputInvokeBuilder
 }
 
@@ -37,7 +37,7 @@ type runtimeExecutor struct {
 func NewExecutor(
 	logger commons.Logger,
 	_ context.Context,
-	analysis *internal_assistant_entity.AssistantAnalysis,
+	analysis *internal_assistant_entity.AssistantConfiguration,
 	caller internal_type.InternalCaller,
 ) (internal_type.AnalysisExecutor, error) {
 	return &runtimeExecutor{
@@ -49,7 +49,11 @@ func NewExecutor(
 }
 
 func (e *runtimeExecutor) Name() string {
-	return fmt.Sprintf("endpoint-analysis-%s", e.analysis.GetName())
+	name, _ := e.analysis.GetOptions().GetString("name")
+	if name == "" {
+		name = fmt.Sprintf("%d", e.analysis.Id)
+	}
+	return fmt.Sprintf("endpoint-analysis-%s", name)
 }
 
 func (e *runtimeExecutor) Options() utils.Option {
@@ -103,7 +107,11 @@ func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.Analy
 		parsed = map[string]interface{}{"result": response.GetData()[0]}
 	}
 
-	metadata := rapida_types.NewMetadata(fmt.Sprintf("analysis.%s", e.analysis.GetName()), parsed)
+	name, _ := e.analysis.GetOptions().GetString("name")
+	if name == "" {
+		name = fmt.Sprintf("%d", e.analysis.Id)
+	}
+	metadata := rapida_types.NewMetadata(fmt.Sprintf("analysis.%s", name), parsed)
 	return internal_type.AnalysisOutput{
 		Metadata: &protos.Metadata{Key: metadata.Key, Value: metadata.Value},
 	}, nil

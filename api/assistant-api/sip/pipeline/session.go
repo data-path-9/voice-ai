@@ -177,7 +177,7 @@ func (d *Dispatcher) createObserver(ctx context.Context, setup *CallSetupResult,
 				Logger:      d.logger,
 				ToolService: d.assistantToolService,
 			}),
-			collectors.NewWithAssistantWebhook(ctx, d.logger, auth, setup.AssistantID, d.webhookService, d.httpLogService),
+			collectors.NewWithWebhookConfiguration(ctx, d.logger, auth, setup.AssistantID, d.configurationService, d.httpLogService),
 			collectors.NewWithEnv(ctx, d.logger, d.assistantConfig),
 		),
 	)

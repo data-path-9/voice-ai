@@ -1,10 +1,17 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ConfigureAssistantWebhookPage } from '@/app/pages/assistant/actions/configure-assistant-webhook';
 import { useAssistantWebhookPageStore } from '@/app/pages/assistant/actions/store/use-webhook-page-store';
 
 const mockGetAssistantWebhook = jest.fn();
+const mockDeleteAssistantWebhook = jest.fn();
 const mockShowLoader = jest.fn();
 const mockHideLoader = jest.fn();
 
@@ -51,9 +58,7 @@ jest.mock('@/app/components/carbon/button', () => ({
     renderIcon: _renderIcon,
     iconDescription: _iconDescription,
     ...props
-  }: any) => (
-    <button {...props}>{children || 'icon'}</button>
-  ),
+  }: any) => <button {...props}>{children || 'icon'}</button>,
   PrimaryButton: ({ children, renderIcon: _renderIcon, ...props }: any) => (
     <button {...props}>{children || 'primary'}</button>
   ),
@@ -96,10 +101,14 @@ jest.mock('@carbon/react', () => {
       children,
       hasIconOnly: _hasIconOnly,
       renderIcon: _renderIcon,
-      iconDescription: _iconDescription,
+      iconDescription,
       ...props
     }: any) =>
-      React.createElement('button', props, children || 'button'),
+      React.createElement(
+        'button',
+        { 'aria-label': iconDescription, ...props },
+        children || iconDescription || 'button',
+      ),
     TableBatchActions: Div,
     TableBatchAction: ({ children, ...props }: any) =>
       React.createElement('button', props, children || 'action'),
@@ -110,26 +119,54 @@ jest.mock('@carbon/react', () => {
       hideLabel: _hideLabel,
       ...props
     }: any) =>
-      React.createElement('input', { ...props, type: 'radio', checked, onChange }),
+      React.createElement('input', {
+        ...props,
+        type: 'radio',
+        checked,
+        onChange,
+      }),
     Breadcrumb: Div,
     BreadcrumbItem: ({ children, ...props }: any) =>
       React.createElement('a', props, children),
+    ComposedModal: ({ children, open }: any) =>
+      open ? React.createElement('div', { role: 'dialog' }, children) : null,
+    ModalBody: Div,
+    ModalFooter: Div,
+    ModalHeader: ({ title }: any) => React.createElement('div', null, title),
     Link: ({ children, href, ...props }: any) =>
       React.createElement('a', { href, ...props }, children),
     Tag: ({ children }: any) => React.createElement('span', null, children),
+    OverflowMenu: Div,
+    OverflowMenuItem: ({ itemText, onClick, disabled }: any) =>
+      React.createElement(
+        'button',
+        { disabled, onClick },
+        itemText || 'action',
+      ),
+    preview__ShapeIndicator: ({ label }: any) =>
+      React.createElement('span', null, label),
   };
 });
 
 jest.mock('react-hot-toast/headless', () => ({
   error: jest.fn(),
+  success: jest.fn(),
 }));
 
 const makeWebhook = (id: string) =>
   ({
     getId: () => id,
-    getOptionsList: () => [],
-    getAssistanteventsList: () => ['conversation.begin'],
-    getExecutionpriority: () => 1,
+    getOptionsList: () => [
+      {
+        getKey: () => 'assistant_events',
+        getValue: () => '["conversation.begin"]',
+      },
+      {
+        getKey: () => 'execution_priority',
+        getValue: () => '1',
+      },
+    ],
+    getEnabled: () => true,
     getStatus: () => 'ACTIVE',
     getCreateddate: () => undefined,
   }) as any;
@@ -144,16 +181,21 @@ describe('ConfigureAssistantWebhookPage listing', () => {
       totalCount: 1,
       criteria: [],
       getAssistantWebhook: mockGetAssistantWebhook as any,
+      deleteAssistantWebhook: mockDeleteAssistantWebhook as any,
     });
   });
 
   it('refetches when page changes from pagination', async () => {
     render(<ConfigureAssistantWebhookPage />);
 
-    await waitFor(() => expect(mockGetAssistantWebhook).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockGetAssistantWebhook).toHaveBeenCalledTimes(1),
+    );
     fireEvent.click(screen.getByTestId('change-page'));
 
-    await waitFor(() => expect(mockGetAssistantWebhook).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(mockGetAssistantWebhook).toHaveBeenCalledTimes(2),
+    );
     expect(useAssistantWebhookPageStore.getState().page).toBe(2);
   });
 
@@ -161,11 +203,43 @@ describe('ConfigureAssistantWebhookPage listing', () => {
     useAssistantWebhookPageStore.setState({ page: 4 });
     render(<ConfigureAssistantWebhookPage />);
 
-    await waitFor(() => expect(mockGetAssistantWebhook).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockGetAssistantWebhook).toHaveBeenCalledTimes(1),
+    );
     fireEvent.click(screen.getByTestId('change-page-size'));
 
-    await waitFor(() => expect(mockGetAssistantWebhook).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(mockGetAssistantWebhook).toHaveBeenCalledTimes(2),
+    );
     expect(useAssistantWebhookPageStore.getState().page).toBe(1);
     expect(useAssistantWebhookPageStore.getState().pageSize).toBe(50);
+  });
+
+  it('opens confirmation before deleting webhook', async () => {
+    render(<ConfigureAssistantWebhookPage />);
+
+    await waitFor(() =>
+      expect(mockGetAssistantWebhook).toHaveBeenCalledTimes(1),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('Delete webhook?');
+    expect(mockDeleteAssistantWebhook).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Delete',
+      }),
+    );
+
+    expect(mockDeleteAssistantWebhook).toHaveBeenCalledWith(
+      'assistant-1',
+      'w-1',
+      'p1',
+      't1',
+      'u1',
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 });

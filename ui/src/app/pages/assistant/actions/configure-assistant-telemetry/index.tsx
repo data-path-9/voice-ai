@@ -10,14 +10,17 @@ import { EmptyState } from '@/app/components/carbon/empty-state';
 import { CreateAssistantTelemetry } from './create-assistant-telemetry';
 import { UpdateAssistantTelemetry } from './update-assistant-telemetry';
 import { useAssistantTelemetryPageStore } from '@/app/pages/assistant/actions/store/use-telemetry-page-store';
-import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
 import { TELEMETRY_PROVIDER } from '@/providers';
 import { IconOnlyButton, PrimaryButton } from '@/app/components/carbon/button';
-import { Tag } from '@carbon/react';
+import { CarbonShapeIndicator } from '@/app/components/carbon/shape-indicator';
 import {
   Breadcrumb,
   BreadcrumbItem,
   Button,
+  ComposedModal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
   Table,
   TableHead,
   TableRow,
@@ -27,10 +30,16 @@ import {
   TableToolbar,
   TableToolbarContent,
   TableToolbarSearch,
-  TableBatchActions,
-  TableBatchAction,
-  RadioButton,
+  OverflowMenu,
+  OverflowMenuItem,
+  Tag,
 } from '@carbon/react';
+import { AssistantConfiguration, Metadata } from '@rapidaai/react';
+import { Pagination } from '@/app/components/carbon/pagination';
+import {
+  ScrollableTableSection,
+  TableSection,
+} from '@/app/components/sections/table-section';
 
 export function ConfigureAssistantTelemetryPage() {
   const { assistantId } = useParams();
@@ -59,6 +68,18 @@ const providerNameByCode = new Map(
   TELEMETRY_PROVIDER.map(p => [p.code, p.name]),
 );
 
+const getOptionValue = (options: Metadata[], key: string) =>
+  options.find(option => option.getKey() === key)?.getValue() || '';
+
+const getTelemetryTarget = (telemetry: AssistantConfiguration) => {
+  return getOptionValue(telemetry.getOptionsList(), 'endpoint') || '-';
+};
+
+type TelemetryAction = {
+  kind: 'enable' | 'disable' | 'delete';
+  telemetry: AssistantConfiguration;
+};
+
 const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
   assistantId,
 }) => {
@@ -67,17 +88,12 @@ const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
   const { authId, token, projectId } = useCurrentCredential();
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedTelemetryId, setSelectedTelemetryId] = useState<string | null>(
-    null,
-  );
-  const { showDialog, ConfirmDialogComponent } = useConfirmDialog({
-    title: 'Delete telemetry?',
-    content: 'This telemetry provider will be removed from the assistant.',
-  });
+  const [pendingTelemetryAction, setPendingTelemetryAction] =
+    useState<TelemetryAction | null>(null);
 
   useEffect(() => {
     get();
-  }, []);
+  }, [assistantId, projectId, token, authId, action.page, action.pageSize]);
 
   const get = () => {
     setLoading(true);
@@ -110,6 +126,33 @@ const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
       },
       () => {
         toast.success('Telemetry provider deleted successfully');
+        setPendingTelemetryAction(null);
+        get();
+      },
+    );
+  };
+
+  const updateTelemetryEnabled = (
+    telemetry: AssistantConfiguration,
+    enabled: boolean,
+  ) => {
+    setLoading(true);
+    action.updateAssistantTelemetryEnabled(
+      assistantId,
+      telemetry,
+      enabled,
+      projectId,
+      token,
+      authId,
+      e => {
+        toast.error(e);
+        setLoading(false);
+      },
+      () => {
+        toast.success(
+          `Telemetry ${enabled ? 'enabled' : 'disabled'} successfully`,
+        );
+        setPendingTelemetryAction(null);
         get();
       },
     );
@@ -118,9 +161,10 @@ const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
   const filteredTelemetries = searchTerm.trim()
     ? action.telemetries.filter(row =>
         [
-          row.getProvidertype(),
-          String(row.getOptionsList().length),
-          row.getEnabled() ? 'connected' : 'inactive',
+          providerNameByCode.get(row.getProvider()) || row.getProvider(),
+          row.getConfigurationtype(),
+          getTelemetryTarget(row),
+          row.getEnabled() ? 'enabled' : 'disabled',
         ]
           .join(' ')
           .toLowerCase()
@@ -128,13 +172,66 @@ const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
       )
     : action.telemetries;
 
-  const selectedTelemetry = filteredTelemetries.find(
-    row => row.getId() === selectedTelemetryId,
-  );
+  const modalTitle =
+    pendingTelemetryAction?.kind === 'enable'
+      ? 'Enable telemetry?'
+      : pendingTelemetryAction?.kind === 'disable'
+        ? 'Disable telemetry?'
+        : 'Delete telemetry?';
+  const modalContent =
+    pendingTelemetryAction?.kind === 'enable'
+      ? 'Telemetry will start being pushed to this provider.'
+      : pendingTelemetryAction?.kind === 'disable'
+        ? 'Telemetry will stop being pushed to this provider until it is enabled again.'
+        : 'This telemetry provider will be removed from the assistant.';
+  const modalPrimaryLabel =
+    pendingTelemetryAction?.kind === 'enable'
+      ? 'Enable'
+      : pendingTelemetryAction?.kind === 'disable'
+        ? 'Disable'
+        : 'Delete';
 
   return (
-    <div className="flex flex-col w-full flex-1 overflow-auto">
-      <ConfirmDialogComponent />
+    <div className="h-full flex flex-col flex-1">
+      <ComposedModal
+        open={Boolean(pendingTelemetryAction)}
+        onClose={() => setPendingTelemetryAction(null)}
+        size="sm"
+        danger={pendingTelemetryAction?.kind !== 'enable'}
+      >
+        <ModalHeader title={modalTitle} />
+        <ModalBody>
+          <p>{modalContent}</p>
+        </ModalBody>
+        <ModalFooter danger={pendingTelemetryAction?.kind !== 'enable'}>
+          <Button
+            kind="secondary"
+            size="md"
+            onClick={() => setPendingTelemetryAction(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            kind={
+              pendingTelemetryAction?.kind === 'enable' ? 'primary' : 'danger'
+            }
+            size="md"
+            onClick={() => {
+              if (!pendingTelemetryAction) return;
+              if (pendingTelemetryAction.kind === 'delete') {
+                deleteTelemetry(pendingTelemetryAction.telemetry.getId());
+                return;
+              }
+              updateTelemetryEnabled(
+                pendingTelemetryAction.telemetry,
+                pendingTelemetryAction.kind === 'enable',
+              );
+            }}
+          >
+            {modalPrimaryLabel}
+          </Button>
+        </ModalFooter>
+      </ComposedModal>
 
       {/* Page header */}
       <div className="px-4 pt-4 pb-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
@@ -151,41 +248,6 @@ const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
       </div>
 
       <TableToolbar>
-        <TableBatchActions
-          shouldShowBatchActions={!!selectedTelemetry}
-          totalSelected={selectedTelemetry ? 1 : 0}
-          totalCount={filteredTelemetries.length}
-          onCancel={() => setSelectedTelemetryId(null)}
-          className="[&_[class*=divider]]:hidden [&_.cds--btn]:transition-colors [&_.cds--btn:hover]:!bg-primary [&_.cds--btn:hover]:!text-white"
-        >
-          {selectedTelemetry && (
-            <>
-              <TableBatchAction
-                renderIcon={Edit}
-                kind="ghost"
-                onClick={() => {
-                  navigation.goToEditAssistantTelemetry(
-                    assistantId,
-                    selectedTelemetry.getId(),
-                  );
-                  setSelectedTelemetryId(null);
-                }}
-              >
-                Edit telemetry
-              </TableBatchAction>
-              <TableBatchAction
-                renderIcon={TrashCan}
-                kind="ghost"
-                onClick={() => {
-                  showDialog(() => deleteTelemetry(selectedTelemetry.getId()));
-                  setSelectedTelemetryId(null);
-                }}
-              >
-                Delete telemetry
-              </TableBatchAction>
-            </>
-          )}
-        </TableBatchActions>
         <TableToolbarContent>
           <TableToolbarSearch
             placeholder="Search telemetry..."
@@ -208,111 +270,130 @@ const ConfigureAssistantTelemetry: FC<{ assistantId: string }> = ({
         </TableToolbarContent>
       </TableToolbar>
 
-      {loading ? (
-        <div className="flex flex-col flex-1 items-center justify-center">
-          <SectionLoader />
-        </div>
-      ) : action.telemetries.length > 0 && filteredTelemetries.length > 0 ? (
-        <div className="overflow-auto flex-1">
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeader className="!w-12" />
-                <TableHeader>Provider</TableHeader>
-                <TableHeader>Options</TableHeader>
-                <TableHeader>Enabled</TableHeader>
-                <TableHeader>Created</TableHeader>
-                <TableHeader>Actions</TableHeader>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredTelemetries.map(row => {
-                const providerType = row.getProvidertype();
-                const providerName =
-                  providerNameByCode.get(providerType) || providerType;
-                const selected = row.getId() === selectedTelemetryId;
-                return (
-                  <TableRow
-                    key={row.getId()}
-                    isSelected={selected}
-                    onClick={() =>
-                      setSelectedTelemetryId(selected ? null : row.getId())
-                    }
-                    className="cursor-pointer"
-                  >
-                    <TableCell
-                      className="!w-12 !pr-0"
-                      onClick={e => e.stopPropagation()}
-                    >
-                      <RadioButton
-                        id={`telemetry-select-${row.getId()}`}
-                        name="telemetry-select"
-                        labelText=""
-                        hideLabel
-                        checked={selected}
-                        onChange={() =>
-                          setSelectedTelemetryId(selected ? null : row.getId())
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="text-sm">{providerName}</TableCell>
-                    <TableCell className="text-sm">{String(row.getOptionsList().length)}</TableCell>
-                    <TableCell className="text-sm">
-                      <Tag type={row.getEnabled() ? 'green' : 'gray'} size="sm">
-                        {row.getEnabled() ? 'Yes' : 'No'}
-                      </Tag>
-                    </TableCell>
-                    <TableCell className="text-[13px] whitespace-nowrap">
-                      {row.getCreateddate()
-                        ? toHumanReadableDateTime(row.getCreateddate()!)
-                        : '—'}
-                    </TableCell>
-                    <TableCell className="text-sm" onClick={e => e.stopPropagation()}>
-                      <div className="flex items-center gap-0">
-                        <Button
-                          hasIconOnly
-                          renderIcon={Edit}
-                          iconDescription="Edit telemetry"
-                          kind="ghost"
-                          size="sm"
-                          onClick={() =>
-                            navigation.goToEditAssistantTelemetry(
-                              assistantId,
-                              row.getId(),
-                            )
-                          }
-                        />
-                        <Button
-                          hasIconOnly
-                          renderIcon={TrashCan}
-                          iconDescription="Delete telemetry"
-                          kind="danger--ghost"
-                          size="sm"
-                          onClick={() =>
-                            showDialog(() => deleteTelemetry(row.getId()))
-                          }
-                        />
-                      </div>
-                    </TableCell>
+      <TableSection>
+        {loading ? (
+          <div className="flex flex-col flex-1 items-center justify-center">
+            <SectionLoader />
+          </div>
+        ) : action.telemetries.length > 0 && filteredTelemetries.length > 0 ? (
+          <>
+            <ScrollableTableSection>
+              <Table className="min-w-max">
+                <TableHead>
+                  <TableRow>
+                    <TableHeader>Provider</TableHeader>
+                    <TableHeader>Type</TableHeader>
+                    <TableHeader>Target</TableHeader>
+                    <TableHeader>Status</TableHeader>
+                    <TableHeader>Created</TableHeader>
+                    <TableHeader>Actions</TableHeader>
                   </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      ) : action.telemetries.length > 0 ? (
-        <EmptyState
-          icon={Activity}
-          title="No telemetry providers found"
-          subtitle="No telemetry provider matched your search."
-        />
-      ) : (
-        <EmptyState
-          icon={Activity}
-          title="No telemetry providers"
-          subtitle="Any telemetry providers you add will be listed here."
-        />
-      )}
+                </TableHead>
+                <TableBody>
+                  {filteredTelemetries.map(row => {
+                    const provider = row.getProvider();
+                    const providerName =
+                      providerNameByCode.get(provider) || provider;
+                    return (
+                      <TableRow key={row.getId()}>
+                        <TableCell className="text-sm">
+                          {providerName}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          <Tag type="blue" size="sm">
+                            {row.getConfigurationtype() || 'telemetry'}
+                          </Tag>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {getTelemetryTarget(row)}
+                        </TableCell>
+                        <TableCell className="text-sm whitespace-nowrap">
+                          <CarbonShapeIndicator
+                            kind={row.getEnabled() ? 'stable' : 'draft'}
+                            label={row.getEnabled() ? 'Enabled' : 'Disabled'}
+                            textSize={14}
+                          />
+                        </TableCell>
+                        <TableCell className="text-[13px] whitespace-nowrap">
+                          {row.getCreateddate()
+                            ? toHumanReadableDateTime(row.getCreateddate()!)
+                            : '-'}
+                        </TableCell>
+                        <TableCell
+                          className="text-sm"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <OverflowMenu
+                            size="sm"
+                            flipped
+                            aria-label="Telemetry actions"
+                          >
+                            <OverflowMenuItem
+                              itemText="Edit"
+                              onClick={() =>
+                                navigation.goToEditAssistantTelemetry(
+                                  assistantId,
+                                  row.getId(),
+                                )
+                              }
+                            />
+                            <OverflowMenuItem
+                              itemText={row.getEnabled() ? 'Disable' : 'Enable'}
+                              onClick={() =>
+                                setPendingTelemetryAction({
+                                  kind: row.getEnabled() ? 'disable' : 'enable',
+                                  telemetry: row,
+                                })
+                              }
+                            />
+                            <OverflowMenuItem
+                              itemText="Delete"
+                              isDelete
+                              onClick={() =>
+                                setPendingTelemetryAction({
+                                  kind: 'delete',
+                                  telemetry: row,
+                                })
+                              }
+                            />
+                          </OverflowMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </ScrollableTableSection>
+            <Pagination
+              totalItems={action.totalCount}
+              page={action.page}
+              pageSize={action.pageSize}
+              pageSizes={[10, 20, 50]}
+              onChange={({ page: newPage, pageSize: newSize }) => {
+                if (newSize !== action.pageSize) {
+                  action.setPageSize(newSize);
+                  return;
+                }
+                action.setPage(newPage);
+              }}
+            />
+          </>
+        ) : action.telemetries.length > 0 ? (
+          <EmptyState
+            className="w-full"
+            icon={Activity}
+            title="No telemetry providers found"
+            subtitle="No telemetry provider matched your search."
+          />
+        ) : (
+          <EmptyState
+            className="w-full"
+            icon={Activity}
+            title="No telemetry providers"
+            subtitle="Any telemetry providers you add will be listed here."
+          />
+        )}
+      </TableSection>
     </div>
   );
 };

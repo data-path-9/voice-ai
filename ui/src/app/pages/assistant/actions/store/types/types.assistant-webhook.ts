@@ -1,4 +1,4 @@
-import { AssistantWebhook } from '@rapidaai/react';
+import { AssistantConfiguration } from '@rapidaai/react';
 import { ColumnarType, PaginatedType } from '@/types';
 
 /**
@@ -9,7 +9,7 @@ export type AssistantWebhookProperty = {
   /**
    * list of activity log
    */
-  webhooks: AssistantWebhook[];
+  webhooks: AssistantConfiguration[];
 };
 
 /**
@@ -21,7 +21,7 @@ export type AssistantWebhookType = {
    * @param ep
    * @returns
    */
-  onChangeAssistantWebhooks: (ep: AssistantWebhook[]) => void;
+  onChangeAssistantWebhooks: (ep: AssistantConfiguration[]) => void;
   /**
    *
    * @param projectId
@@ -37,7 +37,7 @@ export type AssistantWebhookType = {
     token: string,
     userId: string,
     onError: (err: string) => void,
-    onSuccess: (e: AssistantWebhook[]) => void,
+    onSuccess: (e: AssistantConfiguration[]) => void,
   ) => void;
 
   /**
@@ -58,7 +58,17 @@ export type AssistantWebhookType = {
     token: string,
     userId: string,
     onError: (err: string) => void,
-    onSuccess: (e: AssistantWebhook) => void,
+    onSuccess: (e: AssistantConfiguration) => void,
+  ) => void;
+  updateAssistantWebhookEnabled: (
+    assistantId: string,
+    webhook: AssistantConfiguration,
+    enabled: boolean,
+    projectId: string,
+    token: string,
+    userId: string,
+    onError: (err: string) => void,
+    onSuccess: (e: AssistantConfiguration) => void,
   ) => void;
   /**
    * clear everything

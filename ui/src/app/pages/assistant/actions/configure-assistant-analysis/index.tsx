@@ -2,7 +2,7 @@ import React, { FC, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { toHumanReadableDateTime } from '@/utils/date';
-import { Add, Renew, ChartLine, Edit, TrashCan } from '@carbon/icons-react';
+import { Add, Renew, ChartLine } from '@carbon/icons-react';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import { useRapidaStore } from '@/hooks';
 import { SectionLoader } from '@/app/components/loader/section-loader';
@@ -12,6 +12,7 @@ import { CreateAssistantAnalysis } from '@/app/pages/assistant/actions/configure
 import { useAssistantAnalysisPageStore } from '@/app/pages/assistant/actions/store/use-analysis-page-store';
 import { UpdateAssistantAnalysis } from '@/app/pages/assistant/actions/configure-assistant-analysis/update-assistant-analysis';
 import { IconOnlyButton, PrimaryButton } from '@/app/components/carbon/button';
+import { CarbonShapeIndicator } from '@/app/components/carbon/shape-indicator';
 import { Pagination } from '@/app/components/carbon/pagination';
 import {
   Breadcrumb,
@@ -26,9 +27,12 @@ import {
   TableToolbar,
   TableToolbarContent,
   TableToolbarSearch,
-  TableBatchActions,
-  TableBatchAction,
-  RadioButton,
+  ComposedModal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  OverflowMenu,
+  OverflowMenuItem,
 } from '@carbon/react';
 import { TableSection } from '@/app/components/sections/table-section';
 
@@ -50,6 +54,19 @@ const getAnalysisEndpointId = (row: any): string =>
 
 const getAnalysisEndpointVersion = (row: any): string =>
   getAnalysisOptionMap(row).get('endpoint_version') || 'latest';
+
+const getAnalysisName = (row: any): string =>
+  getAnalysisOptionMap(row).get('name') || '';
+
+const getAnalysisPriority = (row: any): number => {
+  const value = Number(getAnalysisOptionMap(row).get('execution_priority'));
+  return Number.isFinite(value) ? value : 0;
+};
+
+type AnalysisAction = {
+  kind: 'enable' | 'disable' | 'delete';
+  analysis: any;
+};
 
 export function ConfigureAssistantAnalysisPage() {
   const { assistantId } = useParams();
@@ -82,9 +99,8 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
   const { authId, token, projectId } = useCurrentCredential();
   const { loading, showLoader, hideLoader } = useRapidaStore();
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(
-    null,
-  );
+  const [pendingAnalysisAction, setPendingAnalysisAction] =
+    useState<AnalysisAction | null>(null);
 
   const get = () => {
     showLoader('block');
@@ -105,7 +121,7 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
 
   useEffect(() => {
     get();
-  }, []);
+  }, [assistantId, projectId, token, authId, axtion.page, axtion.pageSize]);
 
   const deleteAssistantAnalysis = (assistantId: string, analysisId: string) => {
     showLoader('block');
@@ -120,6 +136,31 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
         hideLoader();
       },
       () => {
+        toast.success('Analysis deleted successfully');
+        setPendingAnalysisAction(null);
+        get();
+      },
+    );
+  };
+
+  const updateAnalysisEnabled = (analysis: any, enabled: boolean) => {
+    showLoader('block');
+    axtion.updateAssistantAnalysisEnabled(
+      assistantId,
+      analysis,
+      enabled,
+      projectId,
+      token,
+      authId,
+      e => {
+        toast.error(e);
+        hideLoader();
+      },
+      () => {
+        toast.success(
+          `Analysis ${enabled ? 'enabled' : 'disabled'} successfully`,
+        );
+        setPendingAnalysisAction(null);
         get();
       },
     );
@@ -128,10 +169,11 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
   const filteredAnalyses = searchTerm.trim()
     ? axtion.analysises.filter(row =>
         [
-          row.getName(),
+          getAnalysisName(row),
           getAnalysisEndpointId(row),
           getAnalysisEndpointVersion(row),
-          row.getExecutionpriority(),
+          getAnalysisPriority(row),
+          row.getEnabled() ? 'enabled' : 'disabled',
           row.getStatus(),
         ]
           .join(' ')
@@ -140,9 +182,24 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
       )
     : axtion.analysises;
 
-  const selectedAnalysis = filteredAnalyses.find(
-    row => row.getId() === selectedAnalysisId,
-  );
+  const modalTitle =
+    pendingAnalysisAction?.kind === 'enable'
+      ? 'Enable analysis?'
+      : pendingAnalysisAction?.kind === 'disable'
+        ? 'Disable analysis?'
+        : 'Delete analysis?';
+  const modalContent =
+    pendingAnalysisAction?.kind === 'enable'
+      ? 'This analysis will run when assistant finalization triggers it.'
+      : pendingAnalysisAction?.kind === 'disable'
+        ? 'This analysis will stop running until it is enabled again.'
+        : 'This analysis configuration will be removed from the assistant.';
+  const modalPrimaryLabel =
+    pendingAnalysisAction?.kind === 'enable'
+      ? 'Enable'
+      : pendingAnalysisAction?.kind === 'disable'
+        ? 'Disable'
+        : 'Delete';
 
   if (loading) {
     return (
@@ -154,6 +211,46 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
 
   return (
     <div className="h-full flex flex-col flex-1">
+      <ComposedModal
+        open={Boolean(pendingAnalysisAction)}
+        onClose={() => setPendingAnalysisAction(null)}
+        size="sm"
+        danger={pendingAnalysisAction?.kind !== 'enable'}
+      >
+        <ModalHeader title={modalTitle} />
+        <ModalBody>
+          <p>{modalContent}</p>
+        </ModalBody>
+        <ModalFooter danger={pendingAnalysisAction?.kind !== 'enable'}>
+          <Button
+            kind="secondary"
+            size="md"
+            onClick={() => setPendingAnalysisAction(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            kind={pendingAnalysisAction?.kind === 'enable' ? 'primary' : 'danger'}
+            size="md"
+            onClick={() => {
+              if (!pendingAnalysisAction) return;
+              if (pendingAnalysisAction.kind === 'delete') {
+                deleteAssistantAnalysis(
+                  assistantId,
+                  pendingAnalysisAction.analysis.getId(),
+                );
+                return;
+              }
+              updateAnalysisEnabled(
+                pendingAnalysisAction.analysis,
+                pendingAnalysisAction.kind === 'enable',
+              );
+            }}
+          >
+            {modalPrimaryLabel}
+          </Button>
+        </ModalFooter>
+      </ComposedModal>
       <div className="px-4 pt-4 pb-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
         <div>
           <Breadcrumb noTrailingSlash className="mb-2">
@@ -167,43 +264,6 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
         </div>
       </div>
       <TableToolbar>
-        <TableBatchActions
-          shouldShowBatchActions={!!selectedAnalysis}
-          totalSelected={selectedAnalysis ? 1 : 0}
-          totalCount={filteredAnalyses.length}
-          onCancel={() => setSelectedAnalysisId(null)}
-        >
-          {selectedAnalysis && (
-            <>
-              <TableBatchAction
-                renderIcon={Edit}
-                
-                onClick={() => {
-                  navigation.goToEditAssistantAnalysis(
-                    assistantId,
-                    selectedAnalysis.getId(),
-                  );
-                  setSelectedAnalysisId(null);
-                }}
-              >
-                Edit analysis
-              </TableBatchAction>
-              <TableBatchAction
-                renderIcon={TrashCan}
-                
-                onClick={() => {
-                  deleteAssistantAnalysis(
-                    assistantId,
-                    selectedAnalysis.getId(),
-                  );
-                  setSelectedAnalysisId(null);
-                }}
-              >
-                Delete analysis
-              </TableBatchAction>
-            </>
-          )}
-        </TableBatchActions>
         <TableToolbarContent>
           <TableToolbarSearch
             placeholder="Search analysis..."
@@ -231,43 +291,22 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableHeader className="!w-12" />
                   <TableHeader>Name</TableHeader>
                   <TableHeader>Endpoint</TableHeader>
                   <TableHeader>Version</TableHeader>
                   <TableHeader>Priority</TableHeader>
+                  <TableHeader>Status</TableHeader>
                   <TableHeader>Date</TableHeader>
                   <TableHeader>Action</TableHeader>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {filteredAnalyses.map(row => {
-                  const selected = selectedAnalysisId === row.getId();
                   return (
-                    <TableRow
-                      key={row.getId()}
-                      isSelected={selected}
-                      onClick={() =>
-                        setSelectedAnalysisId(selected ? null : row.getId())
-                      }
-                      className="cursor-pointer"
-                    >
-                      <TableCell
-                        className="!w-12 !pr-0"
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <RadioButton
-                          id={`analysis-select-${row.getId()}`}
-                          name="analysis-select"
-                          labelText=""
-                          hideLabel
-                          checked={selected}
-                          onChange={() =>
-                            setSelectedAnalysisId(selected ? null : row.getId())
-                          }
-                        />
+                    <TableRow key={row.getId()}>
+                      <TableCell className="text-sm">
+                        {getAnalysisName(row)}
                       </TableCell>
-                      <TableCell className="text-sm">{row.getName()}</TableCell>
                       <TableCell className="text-sm">
                         <span className="font-mono text-[13px]">
                           {getAnalysisEndpointId(row) || '—'}
@@ -277,21 +316,31 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
                         {getAnalysisEndpointVersion(row)}
                       </TableCell>
                       <TableCell className="text-sm">
-                        {row.getExecutionpriority()}
+                        {getAnalysisPriority(row)}
+                      </TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        <CarbonShapeIndicator
+                          kind={row.getEnabled() ? 'stable' : 'draft'}
+                          label={row.getEnabled() ? 'Enabled' : 'Disabled'}
+                          textSize={14}
+                        />
                       </TableCell>
                       <TableCell className="text-[13px] whitespace-nowrap">
                         {row.getCreateddate()
                           ? toHumanReadableDateTime(row.getCreateddate()!)
                           : '—'}
                       </TableCell>
-                      <TableCell className="text-sm" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-0">
-                          <Button
-                            hasIconOnly
-                            renderIcon={Edit}
-                            iconDescription="Edit analysis"
-                            kind="ghost"
-                            size="sm"
+                      <TableCell
+                        className="text-sm"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <OverflowMenu
+                          size="sm"
+                          flipped
+                          aria-label="Analysis actions"
+                        >
+                          <OverflowMenuItem
+                            itemText="Edit"
                             onClick={() =>
                               navigation.goToEditAssistantAnalysis(
                                 assistantId,
@@ -299,17 +348,26 @@ const ConfigureAssistantAnalysis: FC<{ assistantId: string }> = ({
                               )
                             }
                           />
-                          <Button
-                            hasIconOnly
-                            renderIcon={TrashCan}
-                            iconDescription="Delete analysis"
-                            kind="danger--ghost"
-                            size="sm"
+                          <OverflowMenuItem
+                            itemText={row.getEnabled() ? 'Disable' : 'Enable'}
                             onClick={() =>
-                              deleteAssistantAnalysis(assistantId, row.getId())
+                              setPendingAnalysisAction({
+                                kind: row.getEnabled() ? 'disable' : 'enable',
+                                analysis: row,
+                              })
                             }
                           />
-                        </div>
+                          <OverflowMenuItem
+                            itemText="Delete"
+                            isDelete
+                            onClick={() =>
+                              setPendingAnalysisAction({
+                                kind: 'delete',
+                                analysis: row,
+                              })
+                            }
+                          />
+                        </OverflowMenu>
                       </TableCell>
                     </TableRow>
                   );

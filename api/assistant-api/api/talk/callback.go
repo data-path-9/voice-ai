@@ -51,7 +51,7 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 
 	auth := cc.ToAuth()
 	observer := cApi.Observability(c, auth, observability.WithGracePeriod())
-	if err := observer.AddCollectors(collectors.NewWithAssistantWebhook(c, cApi.logger, auth, cc.AssistantID, cApi.webhookService, cApi.httpLogService)); err != nil {
+	if err := observer.AddCollectors(collectors.NewWithWebhookConfiguration(c, cApi.logger, auth, cc.AssistantID, cApi.configurationService, cApi.httpLogService)); err != nil {
 		cApi.logger.Warnw("observability collector registration failed",
 			"component", "callback",
 			"operation", "add_assistant_collectors",
@@ -202,7 +202,7 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 	if statusInfo != nil {
 		auth := cc.ToAuth()
 		observer := cApi.Observability(c, auth, observability.WithGracePeriod())
-		if err := observer.AddCollectors(collectors.NewWithAssistantWebhook(c, cApi.logger, auth, cc.AssistantID, cApi.webhookService, cApi.httpLogService)); err != nil {
+		if err := observer.AddCollectors(collectors.NewWithWebhookConfiguration(c, cApi.logger, auth, cc.AssistantID, cApi.configurationService, cApi.httpLogService)); err != nil {
 			cApi.logger.Warnw("observability collector registration failed",
 				"component", "callback",
 				"operation", "add_assistant_collectors",

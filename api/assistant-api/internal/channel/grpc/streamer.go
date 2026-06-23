@@ -31,7 +31,7 @@ type unidirectionalStreamer struct {
 	observer observability.Recorder
 
 	auth                 types.SimplePrinciple
-	webhookService       internal_services.AssistantWebhookService
+	configurationService internal_services.AssistantConfigurationService
 	httpLogService       internal_services.AssistantHTTPLogService
 	assistantToolService internal_services.AssistantToolService
 }
@@ -42,7 +42,7 @@ type StreamerOptions struct {
 	Server               protos.TalkService_AssistantTalkServer
 	Observer             observability.Recorder
 	Auth                 types.SimplePrinciple
-	WebhookService       internal_services.AssistantWebhookService
+	ConfigurationService internal_services.AssistantConfigurationService
 	HTTPLogService       internal_services.AssistantHTTPLogService
 	AssistantToolService internal_services.AssistantToolService
 }
@@ -79,9 +79,9 @@ func WithAuth(auth types.SimplePrinciple) FuncOption {
 	}
 }
 
-func WithWebhookService(webhookService internal_services.AssistantWebhookService) FuncOption {
+func WithAssistantConfigurationService(configurationService internal_services.AssistantConfigurationService) FuncOption {
 	return func(options *StreamerOptions) {
-		options.WebhookService = webhookService
+		options.ConfigurationService = configurationService
 	}
 }
 
@@ -108,7 +108,7 @@ func New(opts ...FuncOption) (internal_type.Streamer, error) {
 		server:               options.Server,
 		observer:             options.Observer,
 		auth:                 options.Auth,
-		webhookService:       options.WebhookService,
+		configurationService: options.ConfigurationService,
 		httpLogService:       options.HTTPLogService,
 		assistantToolService: options.AssistantToolService,
 	}, nil
@@ -147,7 +147,7 @@ func (uds *unidirectionalStreamer) Recv() (internal_type.Stream, error) {
 					Logger:      uds.logger,
 					ToolService: uds.assistantToolService,
 				}),
-				collectors.NewWithAssistantWebhook(uds.ctx, uds.logger, uds.auth, assistantID, uds.webhookService, uds.httpLogService)); err != nil {
+				collectors.NewWithWebhookConfiguration(uds.ctx, uds.logger, uds.auth, assistantID, uds.configurationService, uds.httpLogService)); err != nil {
 				uds.logger.Warnw("observability collector registration failed",
 					"component", "grpc",
 					"operation", "add_assistant_collectors",

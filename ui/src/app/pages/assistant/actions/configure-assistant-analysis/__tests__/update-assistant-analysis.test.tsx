@@ -3,7 +3,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import { UpdateAssistantAnalysis } from '@/app/pages/assistant/actions/configure-assistant-analysis/update-assistant-analysis';
-import { GetAssistantAnalysis, UpdateAnalysis } from '@rapidaai/react';
+import {
+  GetAssistantConfiguration,
+  UpdateAssistantConfiguration,
+} from '@rapidaai/react';
 import toast from 'react-hot-toast/headless';
 
 const mockGoBack = jest.fn();
@@ -15,9 +18,7 @@ let mockParams: Record<string, string | undefined> = {
 };
 
 jest.mock('@rapidaai/react', () => ({
-  ConnectionConfig: class ConnectionConfig {
-    constructor(_: unknown) {}
-  },
+  ConnectionConfig: class ConnectionConfig {},
   Metadata: class Metadata {
     key = '';
     value = '';
@@ -34,41 +35,58 @@ jest.mock('@rapidaai/react', () => ({
       return this.value;
     }
   },
-  GetAssistantAnalysisRequest: class GetAssistantAnalysisRequest {
+  GetAssistantConfigurationRequest: class GetAssistantConfigurationRequest {
     id = '';
     assistantId = '';
     setId(v: string) {
       this.id = v;
     }
+    getId() {
+      return this.id;
+    }
     setAssistantid(v: string) {
       this.assistantId = v;
     }
+    getAssistantid() {
+      return this.assistantId;
+    }
   },
-  UpdateAssistantAnalysisRequest: class UpdateAssistantAnalysisRequest {
+  UpdateAssistantConfigurationRequest: class UpdateAssistantConfigurationRequest {
     id = '';
     assistantId = '';
     provider = '';
-    name = '';
-    description = '';
-    executionPriority = 0;
+    configurationType = '';
+    enabled = false;
     optionsList: any[] = [];
     setId(v: string) {
       this.id = v;
     }
+    getId() {
+      return this.id;
+    }
     setAssistantid(v: string) {
       this.assistantId = v;
     }
-    setName(v: string) {
-      this.name = v;
+    getAssistantid() {
+      return this.assistantId;
     }
     setProvider(v: string) {
       this.provider = v;
     }
-    setDescription(v: string) {
-      this.description = v;
+    getProvider() {
+      return this.provider;
     }
-    setExecutionpriority(v: number) {
-      this.executionPriority = v;
+    setConfigurationtype(v: string) {
+      this.configurationType = v;
+    }
+    getConfigurationtype() {
+      return this.configurationType;
+    }
+    setEnabled(v: boolean) {
+      this.enabled = v;
+    }
+    getEnabled() {
+      return this.enabled;
     }
     setOptionsList(v: any[]) {
       this.optionsList = v;
@@ -77,8 +95,8 @@ jest.mock('@rapidaai/react', () => ({
       return this.optionsList;
     }
   },
-  GetAssistantAnalysis: jest.fn(),
-  UpdateAnalysis: jest.fn(),
+  GetAssistantConfiguration: jest.fn(),
+  UpdateAssistantConfiguration: jest.fn(),
 }));
 
 jest.mock('react-hot-toast/headless', () => ({
@@ -307,39 +325,47 @@ describe('UpdateAssistantAnalysis', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockParams = { analysisId: 'analysis-1' };
-    (GetAssistantAnalysis as jest.Mock).mockImplementation(
-      () =>
-        Promise.resolve({
-          getData: () => ({
-            getName: () => 'loaded-analysis',
-            getDescription: () => 'loaded-description',
-            getExecutionpriority: () => 3,
-            getOptionsList: () => [
-              {
-                getKey: () => 'endpoint_id',
-                getValue: () => 'endpoint-1',
-              },
-              {
-                getKey: () => 'endpoint_version',
-                getValue: () => 'latest',
-              },
-              {
-                getKey: () => 'endpoint_parameters',
-                getValue: () =>
-                  JSON.stringify({
-                    'conversation.messages': 'messages',
-                  }),
-              },
-              {
-                getKey: () => 'analysis.condition',
-                getValue: () =>
-                  JSON.stringify([
-                    { key: 'source', condition: '=', value: 'all' },
-                  ]),
-              },
-            ],
-          }),
+    (GetAssistantConfiguration as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        getData: () => ({
+          getOptionsList: () => [
+            {
+              getKey: () => 'name',
+              getValue: () => 'loaded-analysis',
+            },
+            {
+              getKey: () => 'description',
+              getValue: () => 'loaded-description',
+            },
+            {
+              getKey: () => 'execution_priority',
+              getValue: () => '3',
+            },
+            {
+              getKey: () => 'endpoint_id',
+              getValue: () => 'endpoint-1',
+            },
+            {
+              getKey: () => 'endpoint_version',
+              getValue: () => 'latest',
+            },
+            {
+              getKey: () => 'endpoint_parameters',
+              getValue: () =>
+                JSON.stringify({
+                  'conversation.messages': 'messages',
+                }),
+            },
+            {
+              getKey: () => 'analysis.condition',
+              getValue: () =>
+                JSON.stringify([
+                  { key: 'source', condition: '=', value: 'all' },
+                ]),
+            },
+          ],
         }),
+      }),
     );
   });
 
@@ -347,7 +373,7 @@ describe('UpdateAssistantAnalysis', () => {
     render(<UpdateAssistantAnalysis assistantId="assistant-1" />);
 
     await waitFor(() => {
-      expect(GetAssistantAnalysis).toHaveBeenCalled();
+      expect(GetAssistantConfiguration).toHaveBeenCalled();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Pick endpoint' }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -358,7 +384,7 @@ describe('UpdateAssistantAnalysis', () => {
     render(<UpdateAssistantAnalysis assistantId="assistant-1" />);
 
     await waitFor(() => {
-      expect(GetAssistantAnalysis).toHaveBeenCalled();
+      expect(GetAssistantConfiguration).toHaveBeenCalled();
     });
 
     const removeButtons = screen.getAllByRole('button', { name: 'Remove' });
@@ -371,12 +397,14 @@ describe('UpdateAssistantAnalysis', () => {
   });
 
   it('updates analysis successfully and navigates back to analysis listing', async () => {
-    (UpdateAnalysis as jest.Mock).mockResolvedValue({ getSuccess: () => true });
+    (UpdateAssistantConfiguration as jest.Mock).mockResolvedValue({
+      getSuccess: () => true,
+    });
 
     render(<UpdateAssistantAnalysis assistantId="assistant-1" />);
 
     await waitFor(() => {
-      expect(GetAssistantAnalysis).toHaveBeenCalled();
+      expect(GetAssistantConfiguration).toHaveBeenCalled();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Pick endpoint' }));
@@ -384,7 +412,7 @@ describe('UpdateAssistantAnalysis', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Update analysis' }));
 
     await waitFor(() => {
-      expect(UpdateAnalysis).toHaveBeenCalled();
+      expect(UpdateAssistantConfiguration).toHaveBeenCalled();
     });
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith(
@@ -397,7 +425,7 @@ describe('UpdateAssistantAnalysis', () => {
   });
 
   it('shows human error message when update response is unsuccessful', async () => {
-    (UpdateAnalysis as jest.Mock).mockResolvedValue({
+    (UpdateAssistantConfiguration as jest.Mock).mockResolvedValue({
       getSuccess: () => false,
       getError: () => ({ getHumanmessage: () => 'Invalid analysis name' }),
     });
@@ -405,7 +433,7 @@ describe('UpdateAssistantAnalysis', () => {
     render(<UpdateAssistantAnalysis assistantId="assistant-1" />);
 
     await waitFor(() => {
-      expect(GetAssistantAnalysis).toHaveBeenCalled();
+      expect(GetAssistantConfiguration).toHaveBeenCalled();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Pick endpoint' }));
@@ -418,11 +446,13 @@ describe('UpdateAssistantAnalysis', () => {
   });
 
   it('supports add and edit for parameter mapping before update', async () => {
-    (UpdateAnalysis as jest.Mock).mockResolvedValue({ getSuccess: () => true });
+    (UpdateAssistantConfiguration as jest.Mock).mockResolvedValue({
+      getSuccess: () => true,
+    });
 
     render(<UpdateAssistantAnalysis assistantId="assistant-1" />);
 
-    await waitFor(() => expect(GetAssistantAnalysis).toHaveBeenCalled());
+    await waitFor(() => expect(GetAssistantConfiguration).toHaveBeenCalled());
 
     fireEvent.change(
       document.getElementById('tool-condition-key') as HTMLElement,
@@ -436,12 +466,9 @@ describe('UpdateAssistantAnalysis', () => {
         target: { value: 'text' },
       },
     );
-    fireEvent.change(
-      document.getElementById('param-key-0') as HTMLElement,
-      {
-        target: { value: 'id' },
-      },
-    );
+    fireEvent.change(document.getElementById('param-key-0') as HTMLElement, {
+      target: { value: 'id' },
+    });
     fireEvent.change(document.getElementById('param-val-0') as HTMLElement, {
       target: { value: 'conversationId' },
     });
@@ -449,12 +476,9 @@ describe('UpdateAssistantAnalysis', () => {
     fireEvent.change(document.getElementById('param-type-1') as HTMLElement, {
       target: { value: 'assistant' },
     });
-    fireEvent.change(
-      document.getElementById('param-key-1') as HTMLElement,
-      {
-        target: { value: 'name' },
-      },
-    );
+    fireEvent.change(document.getElementById('param-key-1') as HTMLElement, {
+      target: { value: 'name' },
+    });
     fireEvent.change(document.getElementById('param-val-1') as HTMLElement, {
       target: { value: 'assistantName' },
     });
@@ -463,14 +487,25 @@ describe('UpdateAssistantAnalysis', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     fireEvent.click(screen.getByRole('button', { name: 'Update analysis' }));
 
-    await waitFor(() => expect(UpdateAnalysis).toHaveBeenCalled());
-    const request = (UpdateAnalysis as jest.Mock).mock.calls[0][1];
+    await waitFor(() =>
+      expect(UpdateAssistantConfiguration).toHaveBeenCalled(),
+    );
+    const request = (UpdateAssistantConfiguration as jest.Mock).mock
+      .calls[0][1];
+    expect(request.getAssistantid()).toBe('assistant-1');
+    expect(request.getId()).toBe('analysis-1');
+    expect(request.getConfigurationtype()).toBe('analysis');
+    expect(request.getProvider()).toBe('endpoint');
+    expect(request.getEnabled()).toBe(true);
     const mappedParams = request.getOptionsList().map((option: any) => ({
       key: option.getKey(),
       value: option.getValue(),
     }));
     expect(mappedParams).toEqual(
       expect.arrayContaining([
+        { key: 'name', value: 'loaded-analysis' },
+        { key: 'description', value: 'loaded-description' },
+        { key: 'execution_priority', value: '3' },
         { key: 'endpoint_id', value: 'endpoint-2' },
         { key: 'endpoint_version', value: 'latest' },
         {
@@ -497,7 +532,7 @@ describe('UpdateAssistantAnalysis', () => {
   it('blocks reserved analysis option mapping key', async () => {
     render(<UpdateAssistantAnalysis assistantId="assistant-1" />);
 
-    await waitFor(() => expect(GetAssistantAnalysis).toHaveBeenCalled());
+    await waitFor(() => expect(GetAssistantConfiguration).toHaveBeenCalled());
 
     fireEvent.change(document.getElementById('param-type-0') as HTMLElement, {
       target: { value: 'option' },
@@ -515,6 +550,6 @@ describe('UpdateAssistantAnalysis', () => {
         'option.endpoint_parameters is reserved and managed by analysis options.',
       ),
     ).toBeInTheDocument();
-    expect(UpdateAnalysis).not.toHaveBeenCalled();
+    expect(UpdateAssistantConfiguration).not.toHaveBeenCalled();
   });
 });

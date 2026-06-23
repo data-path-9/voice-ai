@@ -130,7 +130,7 @@ func (d *OutboundDispatcher) NewStatusReporter(contextID string) internal_type.P
 				}),
 				collectors.NewWithEnv(ctx, d.logger, d.cfg)),
 		)
-		if err := observer.AddCollectors(collectors.NewWithAssistantWebhook(ctx, d.logger, auth, currentCallContext.AssistantID, d.webhookService, d.httpLogService)); err != nil {
+		if err := observer.AddCollectors(collectors.NewWithWebhookConfiguration(ctx, d.logger, auth, currentCallContext.AssistantID, d.configurationService, d.httpLogService)); err != nil {
 			d.logger.Warnw("observability collector registration failed",
 				"component", "call",
 				"operation", "add_assistant_collectors",

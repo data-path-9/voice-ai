@@ -70,7 +70,6 @@ type genericRequestor struct {
 	// service
 	assistantService     internal_services.AssistantService
 	conversationService  internal_services.AssistantConversationService
-	webhookService       internal_services.AssistantWebhookService
 	httpLogService       internal_services.AssistantHTTPLogService
 	knowledgeService     internal_services.KnowledgeService
 	assistantToolService internal_services.AssistantToolService
@@ -155,7 +154,6 @@ func NewGenericRequestor(
 		assistantService:     internal_assistant_service.NewAssistantService(config, logger, postgres, opensearch),
 		knowledgeService:     internal_knowledge_service.NewKnowledgeService(config, logger, postgres, storage),
 		conversationService:  internal_assistant_service.NewAssistantConversationService(logger, postgres, storage),
-		webhookService:       internal_assistant_service.NewAssistantWebhookService(logger, postgres, storage),
 		httpLogService:       internal_assistant_service.NewAssistantHTTPLogService(logger, postgres, storage),
 		assistantToolService: internal_assistant_service.NewAssistantToolService(logger, postgres, storage),
 		//

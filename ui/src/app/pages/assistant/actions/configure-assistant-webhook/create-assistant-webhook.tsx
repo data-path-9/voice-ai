@@ -16,8 +16,8 @@ import { Information } from '@carbon/icons-react';
 import { Slider } from '@/app/components/form/slider';
 import { APiHeader } from '@/app/components/external-api/api-header';
 import {
-  CreateAssistantWebhookRequest,
-  CreateWebhook,
+  CreateAssistantConfiguration,
+  CreateAssistantConfigurationRequest,
   Metadata,
 } from '@rapidaai/react';
 import { useCurrentCredential } from '@/hooks/use-credential';
@@ -44,7 +44,12 @@ const WEBHOOK_OPTION_KEYS = {
   retryStatusCodes: 'retry_status_codes',
   maxRetryCount: 'max_retry_count',
   timeoutSeconds: 'timeout_seconds',
+  events: 'assistant_events',
+  executionPriority: 'execution_priority',
+  description: 'description',
 };
+
+const webhookConfigurationType = 'webhook';
 
 const getEventGroupTitle = (
   group: WebhookEventGroup,
@@ -76,6 +81,9 @@ const buildWebhookOptions = ({
   retryOnStatus,
   maxRetries,
   requestTimeout,
+  priority,
+  events,
+  description,
 }: {
   method: string;
   endpoint: string;
@@ -83,6 +91,9 @@ const buildWebhookOptions = ({
   retryOnStatus: string[];
   maxRetries: number;
   requestTimeout: number;
+  priority: number;
+  events: string[];
+  description: string;
 }): Metadata[] => {
   return [
     { key: WEBHOOK_OPTION_KEYS.method, value: method || 'POST' },
@@ -97,6 +108,12 @@ const buildWebhookOptions = ({
       key: WEBHOOK_OPTION_KEYS.timeoutSeconds,
       value: String(requestTimeout || 0),
     },
+    { key: WEBHOOK_OPTION_KEYS.events, value: JSON.stringify(events || []) },
+    {
+      key: WEBHOOK_OPTION_KEYS.executionPriority,
+      value: String(priority || 0),
+    },
+    { key: WEBHOOK_OPTION_KEYS.description, value: description || '' },
   ].map(({ key, value }) => {
     const option = new Metadata();
     option.setKey(key);
@@ -168,12 +185,11 @@ export const CreateAssistantWebhook: FC<{ assistantId: string }> = ({
       return;
     }
     showLoader();
-    const request = new CreateAssistantWebhookRequest();
+    const request = new CreateAssistantConfigurationRequest();
     request.setAssistantid(assistantId);
+    request.setConfigurationtype(webhookConfigurationType);
     request.setProvider('http');
-    request.setAssistanteventsList(events);
-    request.setExecutionpriority(priority);
-    request.setDescription(description);
+    request.setEnabled(true);
     request.setOptionsList(
       buildWebhookOptions({
         method,
@@ -182,15 +198,22 @@ export const CreateAssistantWebhook: FC<{ assistantId: string }> = ({
         retryOnStatus,
         maxRetries,
         requestTimeout,
+        priority,
+        events,
+        description,
       }),
     );
 
     try {
-      const response = await CreateWebhook(connectionConfig, request, {
-        'x-auth-id': authId,
-        authorization: token,
-        'x-project-id': projectId,
-      });
+      const response = await CreateAssistantConfiguration(
+        connectionConfig,
+        request,
+        {
+          'x-auth-id': authId,
+          authorization: token,
+          'x-project-id': projectId,
+        },
+      );
 
       hideLoader();
       if (response?.getSuccess()) {

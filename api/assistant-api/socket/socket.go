@@ -51,7 +51,7 @@ type audioSocketEngine struct {
 	vaultClient                  web_client.VaultClient
 	callcontext                  internal_callcontext.Store
 	assistantConversationService internal_services.AssistantConversationService
-	webhookService               internal_services.AssistantWebhookService
+	configurationService         internal_services.AssistantConfigurationService
 	httpLogService               internal_services.AssistantHTTPLogService
 	assistantToolService         internal_services.AssistantToolService
 }
@@ -72,7 +72,7 @@ func NewAudioSocketEngine(cfg *config.AssistantConfig, logger commons.Logger,
 		callcontext:                  internal_callcontext.NewStore(postgres, logger),
 		vaultClient:                  web_client.NewVaultClientGRPC(&cfg.AppConfig, logger, redis),
 		assistantConversationService: internal_assistant_service.NewAssistantConversationService(logger, postgres, fileStorage),
-		webhookService:               internal_assistant_service.NewAssistantWebhookService(logger, postgres, fileStorage),
+		configurationService:         internal_assistant_service.NewAssistantConfigurationService(logger, postgres),
 		httpLogService:               internal_assistant_service.NewAssistantHTTPLogService(logger, postgres, fileStorage),
 		assistantToolService:         internal_assistant_service.NewAssistantToolService(logger, postgres, fileStorage),
 	}
@@ -93,7 +93,7 @@ func (m *audioSocketEngine) Connect(ctx context.Context) error {
 		channel_pipeline.WithLogger(m.logger),
 		channel_pipeline.WithConversationService(m.assistantConversationService),
 		channel_pipeline.WithAssistantService(internal_assistant_service.NewAssistantService(m.cfg, m.logger, m.postgres, m.opensearch)),
-		channel_pipeline.WithWebhookService(m.webhookService),
+		channel_pipeline.WithAssistantConfigurationService(m.configurationService),
 		channel_pipeline.WithHTTPLogService(m.httpLogService),
 		channel_pipeline.WithAssistantToolService(m.assistantToolService),
 	)
