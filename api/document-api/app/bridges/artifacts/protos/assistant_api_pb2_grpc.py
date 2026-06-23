@@ -3,12 +3,11 @@
 import grpc
 import warnings
 
-import app.bridges.artifacts.protos.assistant_analysis_pb2 as assistant__analysis__pb2
 import app.bridges.artifacts.protos.assistant_api_pb2 as assistant__api__pb2
+import app.bridges.artifacts.protos.assistant_http_log_pb2 as assistant__http__log__pb2
 import app.bridges.artifacts.protos.assistant_knowledge_pb2 as assistant__knowledge__pb2
 import app.bridges.artifacts.protos.assistant_provider_pb2 as assistant__provider__pb2
 import app.bridges.artifacts.protos.assistant_tool_pb2 as assistant__tool__pb2
-import app.bridges.artifacts.protos.assistant_webhook_pb2 as assistant__webhook__pb2
 import app.bridges.artifacts.protos.common_pb2 as common__pb2
 
 GRPC_GENERATED_VERSION = '1.78.0'
@@ -100,45 +99,30 @@ class AssistantServiceStub(object):
                 request_serializer=assistant__api__pb2.GetAllMessageRequest.SerializeToString,
                 response_deserializer=assistant__api__pb2.GetAllMessageResponse.FromString,
                 _registered_method=True)
-        self.GetAssistantTelemetryProvider = channel.unary_unary(
-                '/assistant_api.AssistantService/GetAssistantTelemetryProvider',
-                request_serializer=assistant__api__pb2.GetAssistantTelemetryProviderRequest.SerializeToString,
-                response_deserializer=assistant__api__pb2.GetAssistantTelemetryProviderResponse.FromString,
+        self.GetAssistantConfiguration = channel.unary_unary(
+                '/assistant_api.AssistantService/GetAssistantConfiguration',
+                request_serializer=assistant__api__pb2.GetAssistantConfigurationRequest.SerializeToString,
+                response_deserializer=assistant__api__pb2.GetAssistantConfigurationResponse.FromString,
                 _registered_method=True)
-        self.GetAllAssistantTelemetryProvider = channel.unary_unary(
-                '/assistant_api.AssistantService/GetAllAssistantTelemetryProvider',
-                request_serializer=assistant__api__pb2.GetAllAssistantTelemetryProviderRequest.SerializeToString,
-                response_deserializer=assistant__api__pb2.GetAllAssistantTelemetryProviderResponse.FromString,
+        self.GetAllAssistantConfiguration = channel.unary_unary(
+                '/assistant_api.AssistantService/GetAllAssistantConfiguration',
+                request_serializer=assistant__api__pb2.GetAllAssistantConfigurationRequest.SerializeToString,
+                response_deserializer=assistant__api__pb2.GetAllAssistantConfigurationResponse.FromString,
                 _registered_method=True)
-        self.CreateAssistantTelemetryProvider = channel.unary_unary(
-                '/assistant_api.AssistantService/CreateAssistantTelemetryProvider',
-                request_serializer=assistant__api__pb2.CreateAssistantTelemetryProviderRequest.SerializeToString,
-                response_deserializer=assistant__api__pb2.GetAssistantTelemetryProviderResponse.FromString,
+        self.CreateAssistantConfiguration = channel.unary_unary(
+                '/assistant_api.AssistantService/CreateAssistantConfiguration',
+                request_serializer=assistant__api__pb2.CreateAssistantConfigurationRequest.SerializeToString,
+                response_deserializer=assistant__api__pb2.GetAssistantConfigurationResponse.FromString,
                 _registered_method=True)
-        self.UpdateAssistantTelemetryProvider = channel.unary_unary(
-                '/assistant_api.AssistantService/UpdateAssistantTelemetryProvider',
-                request_serializer=assistant__api__pb2.UpdateAssistantTelemetryProviderRequest.SerializeToString,
-                response_deserializer=assistant__api__pb2.GetAssistantTelemetryProviderResponse.FromString,
+        self.UpdateAssistantConfiguration = channel.unary_unary(
+                '/assistant_api.AssistantService/UpdateAssistantConfiguration',
+                request_serializer=assistant__api__pb2.UpdateAssistantConfigurationRequest.SerializeToString,
+                response_deserializer=assistant__api__pb2.GetAssistantConfigurationResponse.FromString,
                 _registered_method=True)
-        self.DeleteAssistantTelemetryProvider = channel.unary_unary(
-                '/assistant_api.AssistantService/DeleteAssistantTelemetryProvider',
-                request_serializer=assistant__api__pb2.DeleteAssistantTelemetryProviderRequest.SerializeToString,
-                response_deserializer=assistant__api__pb2.GetAssistantTelemetryProviderResponse.FromString,
-                _registered_method=True)
-        self.CreateAssistantAuthentication = channel.unary_unary(
-                '/assistant_api.AssistantService/CreateAssistantAuthentication',
-                request_serializer=assistant__api__pb2.CreateAssistantAuthenticationRequest.SerializeToString,
-                response_deserializer=assistant__api__pb2.GetAssistantAuthenticationResponse.FromString,
-                _registered_method=True)
-        self.GetAssistantAuthentication = channel.unary_unary(
-                '/assistant_api.AssistantService/GetAssistantAuthentication',
-                request_serializer=assistant__api__pb2.GetAssistantAuthenticationRequest.SerializeToString,
-                response_deserializer=assistant__api__pb2.GetAssistantAuthenticationResponse.FromString,
-                _registered_method=True)
-        self.DisableAssistantAuthentication = channel.unary_unary(
-                '/assistant_api.AssistantService/DisableAssistantAuthentication',
-                request_serializer=assistant__api__pb2.DisableAssistantAuthenticationRequest.SerializeToString,
-                response_deserializer=assistant__api__pb2.GetAssistantAuthenticationResponse.FromString,
+        self.DeleteAssistantConfiguration = channel.unary_unary(
+                '/assistant_api.AssistantService/DeleteAssistantConfiguration',
+                request_serializer=assistant__api__pb2.DeleteAssistantConfigurationRequest.SerializeToString,
+                response_deserializer=assistant__api__pb2.GetAssistantConfigurationResponse.FromString,
                 _registered_method=True)
         self.GetAllAssistantConversation = channel.unary_unary(
                 '/assistant_api.AssistantService/GetAllAssistantConversation',
@@ -152,43 +136,18 @@ class AssistantServiceStub(object):
                 _registered_method=True)
         self.GetAssistantHTTPLog = channel.unary_unary(
                 '/assistant_api.AssistantService/GetAssistantHTTPLog',
-                request_serializer=assistant__webhook__pb2.GetAssistantHTTPLogRequest.SerializeToString,
-                response_deserializer=assistant__webhook__pb2.GetAssistantHTTPLogResponse.FromString,
+                request_serializer=assistant__http__log__pb2.GetAssistantHTTPLogRequest.SerializeToString,
+                response_deserializer=assistant__http__log__pb2.GetAssistantHTTPLogResponse.FromString,
                 _registered_method=True)
         self.GetAllAssistantHTTPLog = channel.unary_unary(
                 '/assistant_api.AssistantService/GetAllAssistantHTTPLog',
-                request_serializer=assistant__webhook__pb2.GetAllAssistantHTTPLogRequest.SerializeToString,
-                response_deserializer=assistant__webhook__pb2.GetAllAssistantHTTPLogResponse.FromString,
+                request_serializer=assistant__http__log__pb2.GetAllAssistantHTTPLogRequest.SerializeToString,
+                response_deserializer=assistant__http__log__pb2.GetAllAssistantHTTPLogResponse.FromString,
                 _registered_method=True)
         self.RetryAssistantHTTPLog = channel.unary_unary(
                 '/assistant_api.AssistantService/RetryAssistantHTTPLog',
-                request_serializer=assistant__webhook__pb2.RetryAssistantHTTPLogRequest.SerializeToString,
-                response_deserializer=assistant__webhook__pb2.GetAssistantHTTPLogResponse.FromString,
-                _registered_method=True)
-        self.GetAllAssistantWebhook = channel.unary_unary(
-                '/assistant_api.AssistantService/GetAllAssistantWebhook',
-                request_serializer=assistant__webhook__pb2.GetAllAssistantWebhookRequest.SerializeToString,
-                response_deserializer=assistant__webhook__pb2.GetAllAssistantWebhookResponse.FromString,
-                _registered_method=True)
-        self.GetAssistantWebhook = channel.unary_unary(
-                '/assistant_api.AssistantService/GetAssistantWebhook',
-                request_serializer=assistant__webhook__pb2.GetAssistantWebhookRequest.SerializeToString,
-                response_deserializer=assistant__webhook__pb2.GetAssistantWebhookResponse.FromString,
-                _registered_method=True)
-        self.CreateAssistantWebhook = channel.unary_unary(
-                '/assistant_api.AssistantService/CreateAssistantWebhook',
-                request_serializer=assistant__webhook__pb2.CreateAssistantWebhookRequest.SerializeToString,
-                response_deserializer=assistant__webhook__pb2.GetAssistantWebhookResponse.FromString,
-                _registered_method=True)
-        self.UpdateAssistantWebhook = channel.unary_unary(
-                '/assistant_api.AssistantService/UpdateAssistantWebhook',
-                request_serializer=assistant__webhook__pb2.UpdateAssistantWebhookRequest.SerializeToString,
-                response_deserializer=assistant__webhook__pb2.GetAssistantWebhookResponse.FromString,
-                _registered_method=True)
-        self.DeleteAssistantWebhook = channel.unary_unary(
-                '/assistant_api.AssistantService/DeleteAssistantWebhook',
-                request_serializer=assistant__webhook__pb2.DeleteAssistantWebhookRequest.SerializeToString,
-                response_deserializer=assistant__webhook__pb2.GetAssistantWebhookResponse.FromString,
+                request_serializer=assistant__http__log__pb2.RetryAssistantHTTPLogRequest.SerializeToString,
+                response_deserializer=assistant__http__log__pb2.GetAssistantHTTPLogResponse.FromString,
                 _registered_method=True)
         self.GetAssistantToolLog = channel.unary_unary(
                 '/assistant_api.AssistantService/GetAssistantToolLog',
@@ -199,31 +158,6 @@ class AssistantServiceStub(object):
                 '/assistant_api.AssistantService/GetAllAssistantToolLog',
                 request_serializer=assistant__tool__pb2.GetAllAssistantToolLogRequest.SerializeToString,
                 response_deserializer=assistant__tool__pb2.GetAllAssistantToolLogResponse.FromString,
-                _registered_method=True)
-        self.GetAssistantAnalysis = channel.unary_unary(
-                '/assistant_api.AssistantService/GetAssistantAnalysis',
-                request_serializer=assistant__analysis__pb2.GetAssistantAnalysisRequest.SerializeToString,
-                response_deserializer=assistant__analysis__pb2.GetAssistantAnalysisResponse.FromString,
-                _registered_method=True)
-        self.UpdateAssistantAnalysis = channel.unary_unary(
-                '/assistant_api.AssistantService/UpdateAssistantAnalysis',
-                request_serializer=assistant__analysis__pb2.UpdateAssistantAnalysisRequest.SerializeToString,
-                response_deserializer=assistant__analysis__pb2.GetAssistantAnalysisResponse.FromString,
-                _registered_method=True)
-        self.CreateAssistantAnalysis = channel.unary_unary(
-                '/assistant_api.AssistantService/CreateAssistantAnalysis',
-                request_serializer=assistant__analysis__pb2.CreateAssistantAnalysisRequest.SerializeToString,
-                response_deserializer=assistant__analysis__pb2.GetAssistantAnalysisResponse.FromString,
-                _registered_method=True)
-        self.DeleteAssistantAnalysis = channel.unary_unary(
-                '/assistant_api.AssistantService/DeleteAssistantAnalysis',
-                request_serializer=assistant__analysis__pb2.DeleteAssistantAnalysisRequest.SerializeToString,
-                response_deserializer=assistant__analysis__pb2.GetAssistantAnalysisResponse.FromString,
-                _registered_method=True)
-        self.GetAllAssistantAnalysis = channel.unary_unary(
-                '/assistant_api.AssistantService/GetAllAssistantAnalysis',
-                request_serializer=assistant__analysis__pb2.GetAllAssistantAnalysisRequest.SerializeToString,
-                response_deserializer=assistant__analysis__pb2.GetAllAssistantAnalysisResponse.FromString,
                 _registered_method=True)
         self.CreateAssistantTool = channel.unary_unary(
                 '/assistant_api.AssistantService/CreateAssistantTool',
@@ -352,49 +286,31 @@ class AssistantServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetAssistantTelemetryProvider(self, request, context):
+    def GetAssistantConfiguration(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetAllAssistantTelemetryProvider(self, request, context):
+    def GetAllAssistantConfiguration(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def CreateAssistantTelemetryProvider(self, request, context):
+    def CreateAssistantConfiguration(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def UpdateAssistantTelemetryProvider(self, request, context):
+    def UpdateAssistantConfiguration(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def DeleteAssistantTelemetryProvider(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CreateAssistantAuthentication(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetAssistantAuthentication(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def DisableAssistantAuthentication(self, request, context):
+    def DeleteAssistantConfiguration(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -431,36 +347,6 @@ class AssistantServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetAllAssistantWebhook(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetAssistantWebhook(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CreateAssistantWebhook(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def UpdateAssistantWebhook(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def DeleteAssistantWebhook(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def GetAssistantToolLog(self, request, context):
         """tool log
         """
@@ -469,37 +355,6 @@ class AssistantServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def GetAllAssistantToolLog(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetAssistantAnalysis(self, request, context):
-        """analysis
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def UpdateAssistantAnalysis(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CreateAssistantAnalysis(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def DeleteAssistantAnalysis(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetAllAssistantAnalysis(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -630,45 +485,30 @@ def add_AssistantServiceServicer_to_server(servicer, server):
                     request_deserializer=assistant__api__pb2.GetAllMessageRequest.FromString,
                     response_serializer=assistant__api__pb2.GetAllMessageResponse.SerializeToString,
             ),
-            'GetAssistantTelemetryProvider': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAssistantTelemetryProvider,
-                    request_deserializer=assistant__api__pb2.GetAssistantTelemetryProviderRequest.FromString,
-                    response_serializer=assistant__api__pb2.GetAssistantTelemetryProviderResponse.SerializeToString,
+            'GetAssistantConfiguration': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAssistantConfiguration,
+                    request_deserializer=assistant__api__pb2.GetAssistantConfigurationRequest.FromString,
+                    response_serializer=assistant__api__pb2.GetAssistantConfigurationResponse.SerializeToString,
             ),
-            'GetAllAssistantTelemetryProvider': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAllAssistantTelemetryProvider,
-                    request_deserializer=assistant__api__pb2.GetAllAssistantTelemetryProviderRequest.FromString,
-                    response_serializer=assistant__api__pb2.GetAllAssistantTelemetryProviderResponse.SerializeToString,
+            'GetAllAssistantConfiguration': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAllAssistantConfiguration,
+                    request_deserializer=assistant__api__pb2.GetAllAssistantConfigurationRequest.FromString,
+                    response_serializer=assistant__api__pb2.GetAllAssistantConfigurationResponse.SerializeToString,
             ),
-            'CreateAssistantTelemetryProvider': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateAssistantTelemetryProvider,
-                    request_deserializer=assistant__api__pb2.CreateAssistantTelemetryProviderRequest.FromString,
-                    response_serializer=assistant__api__pb2.GetAssistantTelemetryProviderResponse.SerializeToString,
+            'CreateAssistantConfiguration': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateAssistantConfiguration,
+                    request_deserializer=assistant__api__pb2.CreateAssistantConfigurationRequest.FromString,
+                    response_serializer=assistant__api__pb2.GetAssistantConfigurationResponse.SerializeToString,
             ),
-            'UpdateAssistantTelemetryProvider': grpc.unary_unary_rpc_method_handler(
-                    servicer.UpdateAssistantTelemetryProvider,
-                    request_deserializer=assistant__api__pb2.UpdateAssistantTelemetryProviderRequest.FromString,
-                    response_serializer=assistant__api__pb2.GetAssistantTelemetryProviderResponse.SerializeToString,
+            'UpdateAssistantConfiguration': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateAssistantConfiguration,
+                    request_deserializer=assistant__api__pb2.UpdateAssistantConfigurationRequest.FromString,
+                    response_serializer=assistant__api__pb2.GetAssistantConfigurationResponse.SerializeToString,
             ),
-            'DeleteAssistantTelemetryProvider': grpc.unary_unary_rpc_method_handler(
-                    servicer.DeleteAssistantTelemetryProvider,
-                    request_deserializer=assistant__api__pb2.DeleteAssistantTelemetryProviderRequest.FromString,
-                    response_serializer=assistant__api__pb2.GetAssistantTelemetryProviderResponse.SerializeToString,
-            ),
-            'CreateAssistantAuthentication': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateAssistantAuthentication,
-                    request_deserializer=assistant__api__pb2.CreateAssistantAuthenticationRequest.FromString,
-                    response_serializer=assistant__api__pb2.GetAssistantAuthenticationResponse.SerializeToString,
-            ),
-            'GetAssistantAuthentication': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAssistantAuthentication,
-                    request_deserializer=assistant__api__pb2.GetAssistantAuthenticationRequest.FromString,
-                    response_serializer=assistant__api__pb2.GetAssistantAuthenticationResponse.SerializeToString,
-            ),
-            'DisableAssistantAuthentication': grpc.unary_unary_rpc_method_handler(
-                    servicer.DisableAssistantAuthentication,
-                    request_deserializer=assistant__api__pb2.DisableAssistantAuthenticationRequest.FromString,
-                    response_serializer=assistant__api__pb2.GetAssistantAuthenticationResponse.SerializeToString,
+            'DeleteAssistantConfiguration': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteAssistantConfiguration,
+                    request_deserializer=assistant__api__pb2.DeleteAssistantConfigurationRequest.FromString,
+                    response_serializer=assistant__api__pb2.GetAssistantConfigurationResponse.SerializeToString,
             ),
             'GetAllAssistantConversation': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAllAssistantConversation,
@@ -682,43 +522,18 @@ def add_AssistantServiceServicer_to_server(servicer, server):
             ),
             'GetAssistantHTTPLog': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAssistantHTTPLog,
-                    request_deserializer=assistant__webhook__pb2.GetAssistantHTTPLogRequest.FromString,
-                    response_serializer=assistant__webhook__pb2.GetAssistantHTTPLogResponse.SerializeToString,
+                    request_deserializer=assistant__http__log__pb2.GetAssistantHTTPLogRequest.FromString,
+                    response_serializer=assistant__http__log__pb2.GetAssistantHTTPLogResponse.SerializeToString,
             ),
             'GetAllAssistantHTTPLog': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAllAssistantHTTPLog,
-                    request_deserializer=assistant__webhook__pb2.GetAllAssistantHTTPLogRequest.FromString,
-                    response_serializer=assistant__webhook__pb2.GetAllAssistantHTTPLogResponse.SerializeToString,
+                    request_deserializer=assistant__http__log__pb2.GetAllAssistantHTTPLogRequest.FromString,
+                    response_serializer=assistant__http__log__pb2.GetAllAssistantHTTPLogResponse.SerializeToString,
             ),
             'RetryAssistantHTTPLog': grpc.unary_unary_rpc_method_handler(
                     servicer.RetryAssistantHTTPLog,
-                    request_deserializer=assistant__webhook__pb2.RetryAssistantHTTPLogRequest.FromString,
-                    response_serializer=assistant__webhook__pb2.GetAssistantHTTPLogResponse.SerializeToString,
-            ),
-            'GetAllAssistantWebhook': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAllAssistantWebhook,
-                    request_deserializer=assistant__webhook__pb2.GetAllAssistantWebhookRequest.FromString,
-                    response_serializer=assistant__webhook__pb2.GetAllAssistantWebhookResponse.SerializeToString,
-            ),
-            'GetAssistantWebhook': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAssistantWebhook,
-                    request_deserializer=assistant__webhook__pb2.GetAssistantWebhookRequest.FromString,
-                    response_serializer=assistant__webhook__pb2.GetAssistantWebhookResponse.SerializeToString,
-            ),
-            'CreateAssistantWebhook': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateAssistantWebhook,
-                    request_deserializer=assistant__webhook__pb2.CreateAssistantWebhookRequest.FromString,
-                    response_serializer=assistant__webhook__pb2.GetAssistantWebhookResponse.SerializeToString,
-            ),
-            'UpdateAssistantWebhook': grpc.unary_unary_rpc_method_handler(
-                    servicer.UpdateAssistantWebhook,
-                    request_deserializer=assistant__webhook__pb2.UpdateAssistantWebhookRequest.FromString,
-                    response_serializer=assistant__webhook__pb2.GetAssistantWebhookResponse.SerializeToString,
-            ),
-            'DeleteAssistantWebhook': grpc.unary_unary_rpc_method_handler(
-                    servicer.DeleteAssistantWebhook,
-                    request_deserializer=assistant__webhook__pb2.DeleteAssistantWebhookRequest.FromString,
-                    response_serializer=assistant__webhook__pb2.GetAssistantWebhookResponse.SerializeToString,
+                    request_deserializer=assistant__http__log__pb2.RetryAssistantHTTPLogRequest.FromString,
+                    response_serializer=assistant__http__log__pb2.GetAssistantHTTPLogResponse.SerializeToString,
             ),
             'GetAssistantToolLog': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAssistantToolLog,
@@ -729,31 +544,6 @@ def add_AssistantServiceServicer_to_server(servicer, server):
                     servicer.GetAllAssistantToolLog,
                     request_deserializer=assistant__tool__pb2.GetAllAssistantToolLogRequest.FromString,
                     response_serializer=assistant__tool__pb2.GetAllAssistantToolLogResponse.SerializeToString,
-            ),
-            'GetAssistantAnalysis': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAssistantAnalysis,
-                    request_deserializer=assistant__analysis__pb2.GetAssistantAnalysisRequest.FromString,
-                    response_serializer=assistant__analysis__pb2.GetAssistantAnalysisResponse.SerializeToString,
-            ),
-            'UpdateAssistantAnalysis': grpc.unary_unary_rpc_method_handler(
-                    servicer.UpdateAssistantAnalysis,
-                    request_deserializer=assistant__analysis__pb2.UpdateAssistantAnalysisRequest.FromString,
-                    response_serializer=assistant__analysis__pb2.GetAssistantAnalysisResponse.SerializeToString,
-            ),
-            'CreateAssistantAnalysis': grpc.unary_unary_rpc_method_handler(
-                    servicer.CreateAssistantAnalysis,
-                    request_deserializer=assistant__analysis__pb2.CreateAssistantAnalysisRequest.FromString,
-                    response_serializer=assistant__analysis__pb2.GetAssistantAnalysisResponse.SerializeToString,
-            ),
-            'DeleteAssistantAnalysis': grpc.unary_unary_rpc_method_handler(
-                    servicer.DeleteAssistantAnalysis,
-                    request_deserializer=assistant__analysis__pb2.DeleteAssistantAnalysisRequest.FromString,
-                    response_serializer=assistant__analysis__pb2.GetAssistantAnalysisResponse.SerializeToString,
-            ),
-            'GetAllAssistantAnalysis': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetAllAssistantAnalysis,
-                    request_deserializer=assistant__analysis__pb2.GetAllAssistantAnalysisRequest.FromString,
-                    response_serializer=assistant__analysis__pb2.GetAllAssistantAnalysisResponse.SerializeToString,
             ),
             'CreateAssistantTool': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateAssistantTool,
@@ -1141,7 +931,7 @@ class AssistantService(object):
             _registered_method=True)
 
     @staticmethod
-    def GetAssistantTelemetryProvider(request,
+    def GetAssistantConfiguration(request,
             target,
             options=(),
             channel_credentials=None,
@@ -1154,9 +944,9 @@ class AssistantService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/assistant_api.AssistantService/GetAssistantTelemetryProvider',
-            assistant__api__pb2.GetAssistantTelemetryProviderRequest.SerializeToString,
-            assistant__api__pb2.GetAssistantTelemetryProviderResponse.FromString,
+            '/assistant_api.AssistantService/GetAssistantConfiguration',
+            assistant__api__pb2.GetAssistantConfigurationRequest.SerializeToString,
+            assistant__api__pb2.GetAssistantConfigurationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1168,7 +958,7 @@ class AssistantService(object):
             _registered_method=True)
 
     @staticmethod
-    def GetAllAssistantTelemetryProvider(request,
+    def GetAllAssistantConfiguration(request,
             target,
             options=(),
             channel_credentials=None,
@@ -1181,9 +971,9 @@ class AssistantService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/assistant_api.AssistantService/GetAllAssistantTelemetryProvider',
-            assistant__api__pb2.GetAllAssistantTelemetryProviderRequest.SerializeToString,
-            assistant__api__pb2.GetAllAssistantTelemetryProviderResponse.FromString,
+            '/assistant_api.AssistantService/GetAllAssistantConfiguration',
+            assistant__api__pb2.GetAllAssistantConfigurationRequest.SerializeToString,
+            assistant__api__pb2.GetAllAssistantConfigurationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1195,7 +985,7 @@ class AssistantService(object):
             _registered_method=True)
 
     @staticmethod
-    def CreateAssistantTelemetryProvider(request,
+    def CreateAssistantConfiguration(request,
             target,
             options=(),
             channel_credentials=None,
@@ -1208,9 +998,9 @@ class AssistantService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/assistant_api.AssistantService/CreateAssistantTelemetryProvider',
-            assistant__api__pb2.CreateAssistantTelemetryProviderRequest.SerializeToString,
-            assistant__api__pb2.GetAssistantTelemetryProviderResponse.FromString,
+            '/assistant_api.AssistantService/CreateAssistantConfiguration',
+            assistant__api__pb2.CreateAssistantConfigurationRequest.SerializeToString,
+            assistant__api__pb2.GetAssistantConfigurationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1222,7 +1012,7 @@ class AssistantService(object):
             _registered_method=True)
 
     @staticmethod
-    def UpdateAssistantTelemetryProvider(request,
+    def UpdateAssistantConfiguration(request,
             target,
             options=(),
             channel_credentials=None,
@@ -1235,9 +1025,9 @@ class AssistantService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/assistant_api.AssistantService/UpdateAssistantTelemetryProvider',
-            assistant__api__pb2.UpdateAssistantTelemetryProviderRequest.SerializeToString,
-            assistant__api__pb2.GetAssistantTelemetryProviderResponse.FromString,
+            '/assistant_api.AssistantService/UpdateAssistantConfiguration',
+            assistant__api__pb2.UpdateAssistantConfigurationRequest.SerializeToString,
+            assistant__api__pb2.GetAssistantConfigurationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1249,7 +1039,7 @@ class AssistantService(object):
             _registered_method=True)
 
     @staticmethod
-    def DeleteAssistantTelemetryProvider(request,
+    def DeleteAssistantConfiguration(request,
             target,
             options=(),
             channel_credentials=None,
@@ -1262,90 +1052,9 @@ class AssistantService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/assistant_api.AssistantService/DeleteAssistantTelemetryProvider',
-            assistant__api__pb2.DeleteAssistantTelemetryProviderRequest.SerializeToString,
-            assistant__api__pb2.GetAssistantTelemetryProviderResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CreateAssistantAuthentication(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/CreateAssistantAuthentication',
-            assistant__api__pb2.CreateAssistantAuthenticationRequest.SerializeToString,
-            assistant__api__pb2.GetAssistantAuthenticationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetAssistantAuthentication(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/GetAssistantAuthentication',
-            assistant__api__pb2.GetAssistantAuthenticationRequest.SerializeToString,
-            assistant__api__pb2.GetAssistantAuthenticationResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def DisableAssistantAuthentication(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/DisableAssistantAuthentication',
-            assistant__api__pb2.DisableAssistantAuthenticationRequest.SerializeToString,
-            assistant__api__pb2.GetAssistantAuthenticationResponse.FromString,
+            '/assistant_api.AssistantService/DeleteAssistantConfiguration',
+            assistant__api__pb2.DeleteAssistantConfigurationRequest.SerializeToString,
+            assistant__api__pb2.GetAssistantConfigurationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1425,8 +1134,8 @@ class AssistantService(object):
             request,
             target,
             '/assistant_api.AssistantService/GetAssistantHTTPLog',
-            assistant__webhook__pb2.GetAssistantHTTPLogRequest.SerializeToString,
-            assistant__webhook__pb2.GetAssistantHTTPLogResponse.FromString,
+            assistant__http__log__pb2.GetAssistantHTTPLogRequest.SerializeToString,
+            assistant__http__log__pb2.GetAssistantHTTPLogResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1452,8 +1161,8 @@ class AssistantService(object):
             request,
             target,
             '/assistant_api.AssistantService/GetAllAssistantHTTPLog',
-            assistant__webhook__pb2.GetAllAssistantHTTPLogRequest.SerializeToString,
-            assistant__webhook__pb2.GetAllAssistantHTTPLogResponse.FromString,
+            assistant__http__log__pb2.GetAllAssistantHTTPLogRequest.SerializeToString,
+            assistant__http__log__pb2.GetAllAssistantHTTPLogResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1479,143 +1188,8 @@ class AssistantService(object):
             request,
             target,
             '/assistant_api.AssistantService/RetryAssistantHTTPLog',
-            assistant__webhook__pb2.RetryAssistantHTTPLogRequest.SerializeToString,
-            assistant__webhook__pb2.GetAssistantHTTPLogResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetAllAssistantWebhook(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/GetAllAssistantWebhook',
-            assistant__webhook__pb2.GetAllAssistantWebhookRequest.SerializeToString,
-            assistant__webhook__pb2.GetAllAssistantWebhookResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetAssistantWebhook(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/GetAssistantWebhook',
-            assistant__webhook__pb2.GetAssistantWebhookRequest.SerializeToString,
-            assistant__webhook__pb2.GetAssistantWebhookResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CreateAssistantWebhook(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/CreateAssistantWebhook',
-            assistant__webhook__pb2.CreateAssistantWebhookRequest.SerializeToString,
-            assistant__webhook__pb2.GetAssistantWebhookResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def UpdateAssistantWebhook(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/UpdateAssistantWebhook',
-            assistant__webhook__pb2.UpdateAssistantWebhookRequest.SerializeToString,
-            assistant__webhook__pb2.GetAssistantWebhookResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def DeleteAssistantWebhook(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/DeleteAssistantWebhook',
-            assistant__webhook__pb2.DeleteAssistantWebhookRequest.SerializeToString,
-            assistant__webhook__pb2.GetAssistantWebhookResponse.FromString,
+            assistant__http__log__pb2.RetryAssistantHTTPLogRequest.SerializeToString,
+            assistant__http__log__pb2.GetAssistantHTTPLogResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1670,141 +1244,6 @@ class AssistantService(object):
             '/assistant_api.AssistantService/GetAllAssistantToolLog',
             assistant__tool__pb2.GetAllAssistantToolLogRequest.SerializeToString,
             assistant__tool__pb2.GetAllAssistantToolLogResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetAssistantAnalysis(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/GetAssistantAnalysis',
-            assistant__analysis__pb2.GetAssistantAnalysisRequest.SerializeToString,
-            assistant__analysis__pb2.GetAssistantAnalysisResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def UpdateAssistantAnalysis(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/UpdateAssistantAnalysis',
-            assistant__analysis__pb2.UpdateAssistantAnalysisRequest.SerializeToString,
-            assistant__analysis__pb2.GetAssistantAnalysisResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CreateAssistantAnalysis(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/CreateAssistantAnalysis',
-            assistant__analysis__pb2.CreateAssistantAnalysisRequest.SerializeToString,
-            assistant__analysis__pb2.GetAssistantAnalysisResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def DeleteAssistantAnalysis(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/DeleteAssistantAnalysis',
-            assistant__analysis__pb2.DeleteAssistantAnalysisRequest.SerializeToString,
-            assistant__analysis__pb2.GetAssistantAnalysisResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetAllAssistantAnalysis(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/assistant_api.AssistantService/GetAllAssistantAnalysis',
-            assistant__analysis__pb2.GetAllAssistantAnalysisRequest.SerializeToString,
-            assistant__analysis__pb2.GetAllAssistantAnalysisResponse.FromString,
             options,
             channel_credentials,
             insecure,

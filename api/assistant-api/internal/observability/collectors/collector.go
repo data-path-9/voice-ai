@@ -35,12 +35,12 @@ func NewWithEnv(ctx context.Context, logger commons.Logger, config *assistant_co
 	return nil
 }
 
-func NewWithAssistantTelemetry(ctx context.Context, logger commons.Logger, auth types.SimplePrinciple, assistantID uint64, assistantTelemetryService internal_services.AssistantTelemetryProviderService) observability.Collector {
+func NewWithAssistantTelemetry(ctx context.Context, logger commons.Logger, auth types.SimplePrinciple, assistantID uint64, assistantConfigurationService internal_services.AssistantConfigurationService) observability.Collector {
 	collector, err := telemetry.New(ctx, telemetry.Config{
-		Logger:                    logger,
-		Auth:                      auth,
-		AssistantID:               assistantID,
-		AssistantTelemetryService: assistantTelemetryService,
+		Logger:                        logger,
+		Auth:                          auth,
+		AssistantID:                   assistantID,
+		AssistantConfigurationService: assistantConfigurationService,
 	})
 	if err != nil {
 		return nil
@@ -51,13 +51,13 @@ func NewWithAssistantTelemetry(ctx context.Context, logger commons.Logger, auth 
 	return collector
 }
 
-func NewWithAssistantWebhook(ctx context.Context, logger commons.Logger, auth types.SimplePrinciple, assistantID uint64, assistantWebhookService internal_services.AssistantWebhookService, httpLogService internal_services.AssistantHTTPLogService) observability.Collector {
+func NewWithWebhookConfiguration(ctx context.Context, logger commons.Logger, auth types.SimplePrinciple, assistantID uint64, assistantConfigurationService internal_services.AssistantConfigurationService, httpLogService internal_services.AssistantHTTPLogService) observability.Collector {
 	collector := webhook.New(ctx, webhook.Config{
-		Logger:                  logger,
-		Auth:                    auth,
-		AssistantID:             assistantID,
-		AssistantWebhookService: assistantWebhookService,
-		HTTPLogService:          httpLogService,
+		Logger:                        logger,
+		Auth:                          auth,
+		AssistantID:                   assistantID,
+		AssistantConfigurationService: assistantConfigurationService,
+		HTTPLogService:                httpLogService,
 	})
 	if _, ok := collector.(observability.NoopCollector); ok {
 		return nil

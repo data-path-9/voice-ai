@@ -30,7 +30,7 @@ func (d *Dispatcher) runInboundCall(ctx context.Context, v CallReceivedPipeline)
 			Logger:      d.logger,
 			ToolService: d.assistantToolService,
 		}),
-		collectors.NewWithAssistantWebhook(ctx, d.logger, v.Auth, v.AssistantID, d.webhookService, d.httpLogService)); err != nil {
+		collectors.NewWithWebhookConfiguration(ctx, d.logger, v.Auth, v.AssistantID, d.configurationService, d.httpLogService)); err != nil {
 		d.logger.Warnw("observability collector registration failed",
 			"component", "call",
 			"operation", "add_assistant_collectors",

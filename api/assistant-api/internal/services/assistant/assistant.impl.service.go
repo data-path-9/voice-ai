@@ -8,12 +8,12 @@ package internal_assistant_service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/rapidaai/api/assistant-api/config"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
-	internal_telemetry_entity "github.com/rapidaai/api/assistant-api/internal/entity/telemetry"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/connectors"
@@ -207,41 +207,27 @@ func (eService *assistantService) Get(ctx context.Context,
 			})
 	}
 
-	if opts.InjectTelemetryProvider {
-		wg.Add(1)
-		utils.Go(ctx,
-			func() {
-				defer wg.Done()
-				var providers []*internal_telemetry_entity.AssistantTelemetryProvider
-				tx := db.Preload("Options", "status = ?", type_enums.RECORD_ACTIVE).
-					Where("assistant_id = ? AND enabled = true", assistantId).
-					Find(&providers)
-				if tx.Error != nil {
-					eService.logger.Warnf("unable to find assistant telemetry providers with error %+v", tx.Error)
-					return
-				}
-				assistant.AssistantTelemetryProviders = providers
-
-			})
-	}
-
 	if opts.InjectAuthentication {
 		wg.Add(1)
 		utils.Go(ctx,
 			func() {
 				defer wg.Done()
-				var authentication *internal_assistant_entity.AssistantAuthentication
-				tx := db.Preload("AssistantAuthenticationOption", "status = ?", type_enums.RECORD_ACTIVE).
-					Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE).
+				var configAuthentication *internal_assistant_entity.AssistantConfiguration
+				configTx := db.Preload("Options", "status = ?", type_enums.RECORD_ACTIVE).
+					Where("assistant_id = ? AND configuration_type = ? AND enabled = true AND status = ?",
+						assistantId,
+						internal_assistant_entity.AssistantConfigurationTypeAuthentication,
+						type_enums.RECORD_ACTIVE,
+					).
 					Order(clause.OrderByColumn{
 						Column: clause.Column{Name: "created_date"},
 						Desc:   true,
 					}).
-					First(&authentication)
-				if tx.Error != nil {
+					First(&configAuthentication)
+				if configTx.Error != nil {
 					return
 				}
-				assistant.AssistantAuthentication = authentication
+				assistant.AuthenticationConfiguration = configAuthentication
 			})
 	}
 
@@ -442,39 +428,29 @@ func (eService *assistantService) Get(ctx context.Context,
 			})
 	}
 
-	if opts.InjectWebhook {
-		wg.Add(1)
-		utils.Go(ctx,
-			func() {
-				defer wg.Done()
-				var webhooks []*internal_assistant_entity.AssistantWebhook
-				tx := db.
-					Preload("AssistantWebhookOption", "status = ?", type_enums.RECORD_ACTIVE).
-					Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE.String()).
-					Order("execution_priority DESC").
-					Find(&webhooks)
-				if tx.Error != nil {
-					return
-				}
-				assistant.AssistantWebhooks = webhooks
-			})
-	}
-
 	if opts.InjectAnalysis {
 		wg.Add(1)
 		utils.Go(ctx,
 			func() {
 				defer wg.Done()
-				var analysis []*internal_assistant_entity.AssistantAnalysis
+				var analysisConfigurations []*internal_assistant_entity.AssistantConfiguration
 				tx := db.
-					Preload("AssistantAnalysisOption", "status = ?", type_enums.RECORD_ACTIVE).
-					Where("assistant_id = ? AND status = ?", assistantId, type_enums.RECORD_ACTIVE.String()).
-					Order("execution_priority DESC").
-					Find(&analysis)
+					Preload("Options", "status = ?", type_enums.RECORD_ACTIVE).
+					Where("assistant_id = ? AND configuration_type = ? AND enabled = true AND status = ?",
+						assistantId,
+						internal_assistant_entity.AssistantConfigurationTypeAnalysis,
+						type_enums.RECORD_ACTIVE,
+					).
+					Find(&analysisConfigurations)
 				if tx.Error != nil {
 					return
 				}
-				assistant.AssistantAnalyses = analysis
+				sort.SliceStable(analysisConfigurations, func(i, j int) bool {
+					left, _ := analysisConfigurations[i].GetOptions().GetUint64("execution_priority")
+					right, _ := analysisConfigurations[j].GetOptions().GetUint64("execution_priority")
+					return left > right
+				})
+				assistant.AnalysisConfigurations = analysisConfigurations
 			})
 	}
 	wg.Wait()

@@ -211,6 +211,7 @@
         "featureList": [
             "stt",
             "tts",
+            "storage",
             "external"
         ],
         "configurations": [
@@ -231,6 +232,29 @@
             }
         ],
         "website": "https://aws.amazon.com"
+    },
+    {
+        "code": "azure",
+        "name": "Azure Storage",
+        "description": "Azure Storage provides cloud object storage for blobs and files.",
+        "image": "https://cdn-01.rapida.ai/providers/198796716894742122.png",
+        "featureList": [
+            "storage",
+            "external"
+        ],
+        "configurations": [
+            {
+                "name": "account_name",
+                "type": "string",
+                "label": "Account Name"
+            },
+            {
+                "name": "account_key",
+                "type": "string",
+                "label": "Account Key"
+            }
+        ],
+        "website": "https://azure.microsoft.com/en-us/products/storage"
     },
     {
         "code": "azure-speech-service",

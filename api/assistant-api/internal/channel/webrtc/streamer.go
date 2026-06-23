@@ -85,7 +85,7 @@ type webrtcStreamer struct {
 	observer observability.Recorder
 
 	auth                 types.SimplePrinciple
-	webhookService       internal_services.AssistantWebhookService
+	configurationService internal_services.AssistantConfigurationService
 	httpLogService       internal_services.AssistantHTTPLogService
 	assistantToolService internal_services.AssistantToolService
 }
@@ -97,7 +97,7 @@ type StreamerOptions struct {
 	ServerConfig         *assistant_config.WebRTCConfig
 	Observer             observability.Recorder
 	Auth                 types.SimplePrinciple
-	WebhookService       internal_services.AssistantWebhookService
+	ConfigurationService internal_services.AssistantConfigurationService
 	HTTPLogService       internal_services.AssistantHTTPLogService
 	AssistantToolService internal_services.AssistantToolService
 }
@@ -140,9 +140,9 @@ func WithAuth(auth types.SimplePrinciple) FuncOption {
 	}
 }
 
-func WithWebhookService(webhookService internal_services.AssistantWebhookService) FuncOption {
+func WithAssistantConfigurationService(configurationService internal_services.AssistantConfigurationService) FuncOption {
 	return func(options *StreamerOptions) {
-		options.WebhookService = webhookService
+		options.ConfigurationService = configurationService
 	}
 }
 
@@ -304,7 +304,7 @@ func New(opts ...FuncOption) (internal_type.Streamer, error) {
 		flushAudioCh:         make(chan struct{}, 1),
 		observer:             options.Observer,
 		auth:                 options.Auth,
-		webhookService:       options.WebhookService,
+		configurationService: options.ConfigurationService,
 		httpLogService:       options.HTTPLogService,
 		assistantToolService: options.AssistantToolService,
 		ambientMixer:         ambientMixer,

@@ -1643,7 +1643,7 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		Scope:     internal_type.ObservabilityRecordScopeConversation,
 		Record:    observability.NewConversationEventRecord(observability.RecordingStarted, nil),
 	})
-	for _, analysis := range h.r.assistant.AssistantAnalyses {
+	for _, analysis := range h.r.assistant.AnalysisConfigurations {
 		exec, err := internal_analysis.NewExecutor(h.r.logger, ctx, analysis, h.r)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -1656,8 +1656,8 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		h.r.assistantAnalyseExecutors = append(h.r.assistantAnalyseExecutors, exec)
 	}
 
-	if h.r.assistant.AssistantAuthentication != nil {
-		authExec, err := internal_authentication.NewExecutor(h.r.logger, ctx, h.r.assistant.AssistantAuthentication, h.r, h.r)
+	if h.r.assistant.AuthenticationConfiguration != nil {
+		authExec, err := internal_authentication.NewExecutor(h.r.logger, ctx, h.r.assistant.AuthenticationConfiguration, h.r, h.r)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,

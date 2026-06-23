@@ -1,4 +1,4 @@
-import { AssistantAnalysis } from '@rapidaai/react';
+import { AssistantConfiguration } from '@rapidaai/react';
 import { ColumnarType, PaginatedType } from '@/types';
 
 /**
@@ -9,7 +9,7 @@ export type AssistantAnalysisProperty = {
   /**
    * list of activity log
    */
-  analysises: AssistantAnalysis[];
+  analysises: AssistantConfiguration[];
 };
 
 /**
@@ -21,7 +21,7 @@ export type AssistantAnalysisType = {
    * @param ep
    * @returns
    */
-  onChangeAssistantAnalysises: (ep: AssistantAnalysis[]) => void;
+  onChangeAssistantAnalysises: (ep: AssistantConfiguration[]) => void;
   /**
    *
    * @param projectId
@@ -37,7 +37,7 @@ export type AssistantAnalysisType = {
     token: string,
     userId: string,
     onError: (err: string) => void,
-    onSuccess: (e: AssistantAnalysis[]) => void,
+    onSuccess: (e: AssistantConfiguration[]) => void,
   ) => void;
 
   /**
@@ -58,7 +58,17 @@ export type AssistantAnalysisType = {
     token: string,
     userId: string,
     onError: (err: string) => void,
-    onSuccess: (e: AssistantAnalysis) => void,
+    onSuccess: (e: AssistantConfiguration) => void,
+  ) => void;
+  updateAssistantAnalysisEnabled: (
+    assistantId: string,
+    analysis: AssistantConfiguration,
+    enabled: boolean,
+    projectId: string,
+    token: string,
+    userId: string,
+    onError: (err: string) => void,
+    onSuccess: (e: AssistantConfiguration) => void,
   ) => void;
   /**
    * clear everything

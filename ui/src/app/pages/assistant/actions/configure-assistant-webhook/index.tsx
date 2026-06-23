@@ -11,9 +11,10 @@ import { EmptyState } from '@/app/components/carbon/empty-state';
 import { UpdateAssistantWebhook } from '@/app/pages/assistant/actions/configure-assistant-webhook/update-assistant-webhook';
 import { useAssistantWebhookPageStore } from '@/app/pages/assistant/actions/store/use-webhook-page-store';
 import { IconOnlyButton, PrimaryButton } from '@/app/components/carbon/button';
+import { CarbonShapeIndicator } from '@/app/components/carbon/shape-indicator';
 import { UrlTableCell } from '@/app/components/carbon/url-table-cell';
 import { Pagination } from '@/app/components/carbon/pagination';
-import { Add, Renew, Webhook, Edit, TrashCan } from '@carbon/icons-react';
+import { Add, Renew, Webhook } from '@carbon/icons-react';
 import { Tag } from '@carbon/react';
 import {
   Table,
@@ -26,11 +27,14 @@ import {
   TableToolbarContent,
   TableToolbarSearch,
   Button,
-  TableBatchActions,
-  TableBatchAction,
-  RadioButton,
   Breadcrumb,
   BreadcrumbItem,
+  ComposedModal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  OverflowMenu,
+  OverflowMenuItem,
 } from '@carbon/react';
 import {
   ScrollableTableSection,
@@ -57,7 +61,18 @@ const getWebhookUrl = (row: any): string =>
   getWebhookOptionMap(row).get('http_url') || '';
 
 const getWebhookEvents = (row: any): string[] =>
-  row?.getAssistanteventsList?.() || [];
+  parseStringList(getWebhookOptionMap(row).get('assistant_events'));
+
+const parseStringList = (raw?: string): string[] => {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item): item is string => typeof item === 'string');
+    }
+  } catch {}
+  return [];
+};
 
 const getWebhookRetryCount = (row: any): number => {
   const value = Number(getWebhookOptionMap(row).get('max_retry_count'));
@@ -67,6 +82,16 @@ const getWebhookRetryCount = (row: any): number => {
 const getWebhookTimeoutSecond = (row: any): number => {
   const value = Number(getWebhookOptionMap(row).get('timeout_seconds'));
   return Number.isFinite(value) ? value : 0;
+};
+
+const getWebhookPriority = (row: any): number => {
+  const value = Number(getWebhookOptionMap(row).get('execution_priority'));
+  return Number.isFinite(value) ? value : 0;
+};
+
+type WebhookAction = {
+  kind: 'enable' | 'disable' | 'delete';
+  webhook: any;
 };
 
 export function ConfigureAssistantWebhookPage() {
@@ -100,9 +125,8 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
   const { authId, token, projectId } = useCurrentCredential();
   const { loading, showLoader, hideLoader } = useRapidaStore();
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedWebhookId, setSelectedWebhookId] = useState<string | null>(
-    null,
-  );
+  const [pendingWebhookAction, setPendingWebhookAction] =
+    useState<WebhookAction | null>(null);
 
   useEffect(() => {
     showLoader('block');
@@ -138,6 +162,29 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
         hideLoader();
       },
       v => {
+        toast.success('Webhook deleted successfully');
+        setPendingWebhookAction(null);
+        get();
+      },
+    );
+  };
+
+  const updateWebhookEnabled = (webhook: any, enabled: boolean) => {
+    showLoader('block');
+    axtion.updateAssistantWebhookEnabled(
+      assistantId,
+      webhook,
+      enabled,
+      projectId,
+      token,
+      authId,
+      e => {
+        toast.error(e);
+        hideLoader();
+      },
+      () => {
+        toast.success(`Webhook ${enabled ? 'enabled' : 'disabled'} successfully`);
+        setPendingWebhookAction(null);
         get();
       },
     );
@@ -148,7 +195,8 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
         [
           getWebhookMethod(row),
           getWebhookUrl(row),
-          row.getExecutionpriority(),
+          getWebhookPriority(row),
+          row.getEnabled() ? 'enabled' : 'disabled',
           row.getStatus(),
           ...getWebhookEvents(row),
         ]
@@ -158,9 +206,24 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
       )
     : axtion.webhooks;
 
-  const selectedWebhook = filteredWebhooks.find(
-    row => row.getId() === selectedWebhookId,
-  );
+  const modalTitle =
+    pendingWebhookAction?.kind === 'enable'
+      ? 'Enable webhook?'
+      : pendingWebhookAction?.kind === 'disable'
+        ? 'Disable webhook?'
+        : 'Delete webhook?';
+  const modalContent =
+    pendingWebhookAction?.kind === 'enable'
+      ? 'This webhook will start receiving matching assistant events.'
+      : pendingWebhookAction?.kind === 'disable'
+        ? 'This webhook will stop receiving assistant events until it is enabled again.'
+        : 'This webhook configuration will be removed from the assistant.';
+  const modalPrimaryLabel =
+    pendingWebhookAction?.kind === 'enable'
+      ? 'Enable'
+      : pendingWebhookAction?.kind === 'disable'
+        ? 'Disable'
+        : 'Delete';
 
   if (loading) {
     return (
@@ -172,6 +235,46 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
 
   return (
     <div className="h-full flex flex-col flex-1">
+      <ComposedModal
+        open={Boolean(pendingWebhookAction)}
+        onClose={() => setPendingWebhookAction(null)}
+        size="sm"
+        danger={pendingWebhookAction?.kind !== 'enable'}
+      >
+        <ModalHeader title={modalTitle} />
+        <ModalBody>
+          <p>{modalContent}</p>
+        </ModalBody>
+        <ModalFooter danger={pendingWebhookAction?.kind !== 'enable'}>
+          <Button
+            kind="secondary"
+            size="md"
+            onClick={() => setPendingWebhookAction(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            kind={pendingWebhookAction?.kind === 'enable' ? 'primary' : 'danger'}
+            size="md"
+            onClick={() => {
+              if (!pendingWebhookAction) return;
+              if (pendingWebhookAction.kind === 'delete') {
+                deleteAssistantWebhook(
+                  assistantId,
+                  pendingWebhookAction.webhook.getId(),
+                );
+                return;
+              }
+              updateWebhookEnabled(
+                pendingWebhookAction.webhook,
+                pendingWebhookAction.kind === 'enable',
+              );
+            }}
+          >
+            {modalPrimaryLabel}
+          </Button>
+        </ModalFooter>
+      </ComposedModal>
       <div className="px-4 pt-4 pb-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
         <div>
           <Breadcrumb noTrailingSlash className="mb-2">
@@ -185,41 +288,6 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
         </div>
       </div>
       <TableToolbar>
-        <TableBatchActions
-          shouldShowBatchActions={!!selectedWebhook}
-          totalSelected={selectedWebhook ? 1 : 0}
-          totalCount={filteredWebhooks.length}
-          onCancel={() => setSelectedWebhookId(null)}
-          className="[&_[class*=divider]]:hidden [&_.cds--btn]:transition-colors [&_.cds--btn:hover]:!bg-primary [&_.cds--btn:hover]:!text-white"
-        >
-          {selectedWebhook && (
-            <>
-              <TableBatchAction
-                renderIcon={Edit}
-                kind="ghost"
-                onClick={() => {
-                  navigation.goToEditAssistantWebhook(
-                    assistantId,
-                    selectedWebhook.getId(),
-                  );
-                  setSelectedWebhookId(null);
-                }}
-              >
-                Edit webhook
-              </TableBatchAction>
-              <TableBatchAction
-                renderIcon={TrashCan}
-                kind="ghost"
-                onClick={() => {
-                  deleteAssistantWebhook(assistantId, selectedWebhook.getId());
-                  setSelectedWebhookId(null);
-                }}
-              >
-                Delete webhook
-              </TableBatchAction>
-            </>
-          )}
-        </TableBatchActions>
         <TableToolbarContent>
           <TableToolbarSearch
             placeholder="Search webhooks..."
@@ -248,45 +316,20 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
               <Table className="min-w-max">
                 <TableHead>
                   <TableRow>
-                    <TableHeader className="!w-12" />
                     <TableHeader>Endpoint</TableHeader>
                     <TableHeader>Events</TableHeader>
                     <TableHeader>Retries</TableHeader>
                     <TableHeader>Timeout (s)</TableHeader>
                     <TableHeader>Priority</TableHeader>
+                    <TableHeader>Status</TableHeader>
                     <TableHeader>Date</TableHeader>
                     <TableHeader>Actions</TableHeader>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filteredWebhooks.map(row => {
-                    const selected = selectedWebhookId === row.getId();
                     return (
-                      <TableRow
-                        key={row.getId()}
-                        isSelected={selected}
-                        onClick={() =>
-                          setSelectedWebhookId(selected ? null : row.getId())
-                        }
-                        className="cursor-pointer"
-                      >
-                        <TableCell
-                          className="!w-12 !pr-0"
-                          onClick={e => e.stopPropagation()}
-                        >
-                          <RadioButton
-                            id={`webhook-select-${row.getId()}`}
-                            name="webhook-select"
-                            labelText=""
-                            hideLabel
-                            checked={selected}
-                            onChange={() =>
-                              setSelectedWebhookId(
-                                selected ? null : row.getId(),
-                              )
-                            }
-                          />
-                        </TableCell>
+                      <TableRow key={row.getId()}>
                         <UrlTableCell
                           url={getWebhookUrl(row)}
                           prefix={
@@ -312,7 +355,14 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
                           {getWebhookTimeoutSecond(row)}
                         </TableCell>
                         <TableCell className="text-sm">
-                          {row.getExecutionpriority()}
+                          {getWebhookPriority(row)}
+                        </TableCell>
+                        <TableCell className="text-sm whitespace-nowrap">
+                          <CarbonShapeIndicator
+                            kind={row.getEnabled() ? 'stable' : 'draft'}
+                            label={row.getEnabled() ? 'Enabled' : 'Disabled'}
+                            textSize={14}
+                          />
                         </TableCell>
                         <TableCell className="text-[13px] whitespace-nowrap">
                           {row.getCreateddate()
@@ -323,13 +373,13 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
                           className="text-sm"
                           onClick={e => e.stopPropagation()}
                         >
-                          <div className="flex items-center gap-0">
-                            <Button
-                              hasIconOnly
-                              renderIcon={Edit}
-                              iconDescription="Edit webhook"
-                              kind="ghost"
-                              size="sm"
+                          <OverflowMenu
+                            size="sm"
+                            flipped
+                            aria-label="Webhook actions"
+                          >
+                            <OverflowMenuItem
+                              itemText="Edit"
                               onClick={() =>
                                 navigation.goToEditAssistantWebhook(
                                   assistantId,
@@ -337,17 +387,26 @@ const ConfigureAssistantWebhook: FC<{ assistantId: string }> = ({
                                 )
                               }
                             />
-                            <Button
-                              hasIconOnly
-                              renderIcon={TrashCan}
-                              iconDescription="Delete webhook"
-                              kind="danger--ghost"
-                              size="sm"
+                            <OverflowMenuItem
+                              itemText={row.getEnabled() ? 'Disable' : 'Enable'}
                               onClick={() =>
-                                deleteAssistantWebhook(assistantId, row.getId())
+                                setPendingWebhookAction({
+                                  kind: row.getEnabled() ? 'disable' : 'enable',
+                                  webhook: row,
+                                })
                               }
                             />
-                          </div>
+                            <OverflowMenuItem
+                              itemText="Delete"
+                              isDelete
+                              onClick={() =>
+                                setPendingWebhookAction({
+                                  kind: 'delete',
+                                  webhook: row,
+                                })
+                              }
+                            />
+                          </OverflowMenu>
                         </TableCell>
                       </TableRow>
                     );

@@ -2,7 +2,6 @@ import { useAssistantWebhookPageStore } from '@/app/pages/assistant/actions/stor
 
 jest.mock('@rapidaai/react', () => {
   class ConnectionConfig {
-    constructor(_: unknown) {}
     static WithDebugger(config: unknown) {
       return config;
     }
@@ -10,10 +9,10 @@ jest.mock('@rapidaai/react', () => {
 
   return {
     ConnectionConfig,
-    GetAllAssistantWebhook: jest.fn(),
-    DeleteAssistantWebhook: jest.fn(),
-    GetAllAssistantWebhookRequest: class {},
-    DeleteAssistantWebhookRequest: class {},
+    GetAllAssistantConfiguration: jest.fn(),
+    DeleteAssistantConfiguration: jest.fn(),
+    GetAllAssistantConfigurationRequest: class {},
+    DeleteAssistantConfigurationRequest: class {},
     Paginate: class {},
     Criteria: class {},
   };
@@ -43,4 +42,3 @@ describe('useAssistantWebhookPageStore', () => {
     ]);
   });
 });
-

@@ -35,7 +35,7 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 			Logger:      d.logger,
 			ToolService: d.assistantToolService,
 		}),
-		collectors.NewWithAssistantWebhook(ctx, d.logger, auth, v.CallContext.AssistantID, d.webhookService, d.httpLogService),
+		collectors.NewWithWebhookConfiguration(ctx, d.logger, auth, v.CallContext.AssistantID, d.configurationService, d.httpLogService),
 	); err != nil {
 		d.logger.Warnw("observability collector registration failed",
 			"component", "call",

@@ -49,7 +49,7 @@ type Dispatcher struct {
 	assistantService             internal_services.AssistantService
 	assistantConversationService internal_services.AssistantConversationService
 	assistantToolService         internal_services.AssistantToolService
-	webhookService               internal_services.AssistantWebhookService
+	configurationService         internal_services.AssistantConfigurationService
 	httpLogService               internal_services.AssistantHTTPLogService
 	callContextStore             callcontext.Store
 	postgres                     connectors.PostgresConnector
@@ -84,7 +84,7 @@ type DispatcherOptions struct {
 	AssistantService             internal_services.AssistantService
 	AssistantConversationService internal_services.AssistantConversationService
 	AssistantToolService         internal_services.AssistantToolService
-	WebhookService               internal_services.AssistantWebhookService
+	ConfigurationService         internal_services.AssistantConfigurationService
 	HTTPLogService               internal_services.AssistantHTTPLogService
 	CallContextStore             callcontext.Store
 	Postgres                     connectors.PostgresConnector
@@ -137,9 +137,9 @@ func WithAssistantToolService(assistantToolService internal_services.AssistantTo
 	}
 }
 
-func WithWebhookService(webhookService internal_services.AssistantWebhookService) DispatcherOption {
+func WithAssistantConfigurationService(configurationService internal_services.AssistantConfigurationService) DispatcherOption {
 	return func(options *DispatcherOptions) {
-		options.WebhookService = webhookService
+		options.ConfigurationService = configurationService
 	}
 }
 
@@ -204,7 +204,7 @@ func New(opts ...DispatcherOption) *Dispatcher {
 		assistantService:             options.AssistantService,
 		assistantConversationService: options.AssistantConversationService,
 		assistantToolService:         options.AssistantToolService,
-		webhookService:               options.WebhookService,
+		configurationService:         options.ConfigurationService,
 		httpLogService:               options.HTTPLogService,
 		callContextStore:             options.CallContextStore,
 		postgres:                     options.Postgres,

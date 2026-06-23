@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,11 +40,11 @@ const (
 type runtimeExecutor struct {
 	logger        commons.Logger
 	callback      internal_type.Callback
-	authenticator *internal_assistant_entity.AssistantAuthentication
+	authenticator *internal_assistant_entity.AssistantConfiguration
 }
 
 // NewExecutor creates a fully wired HTTP authentication executor.
-func NewExecutor(logger commons.Logger, _ context.Context, authenticator *internal_assistant_entity.AssistantAuthentication, callback internal_type.Callback, _ internal_type.InternalCaller) (internal_type.AuthenticationExecutor, error) {
+func NewExecutor(logger commons.Logger, _ context.Context, authenticator *internal_assistant_entity.AssistantConfiguration, callback internal_type.Callback, _ internal_type.InternalCaller) (internal_type.AuthenticationExecutor, error) {
 	return &runtimeExecutor{
 		logger:        logger,
 		callback:      callback,
@@ -52,7 +53,7 @@ func NewExecutor(logger commons.Logger, _ context.Context, authenticator *intern
 }
 
 func (e *runtimeExecutor) Name() string {
-	return string(e.authenticator.Provider)
+	return e.authenticator.Provider
 }
 
 func (e *runtimeExecutor) Options() utils.Option {
@@ -81,9 +82,11 @@ func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.Authe
 		headers = h
 	}
 
-	timeout := auth.TimeoutMs
-	if timeout == 0 {
-		timeout = 5000
+	timeout := uint64(5000)
+	if raw, err := auth.GetOptions().GetString("timeout_ms"); err == nil && raw != "" {
+		if parsed, err := strconv.ParseUint(raw, 10, 64); err == nil && parsed > 0 {
+			timeout = parsed
+		}
 	}
 
 	client := rest.NewRestClientWithConfig(url, headers, uint32(timeout/1000))
@@ -96,7 +99,16 @@ func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.Authe
 	if err != nil {
 		errMsg := err.Error()
 		e.onCreateLog(ctx, input.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_FAILED, 0, &errMsg, requestPayload, nil)
-		if auth.FailBehavior == FailBehaviorAllow {
+		failBehavior := FailBehaviorBlock
+		if raw, err := auth.GetOptions().GetString("fail_behavior"); err == nil {
+			switch strings.ToLower(strings.TrimSpace(raw)) {
+			case "do_nothing", "do-nothing", "none", "allow":
+				failBehavior = FailBehaviorAllow
+			case "block":
+				failBehavior = FailBehaviorBlock
+			}
+		}
+		if failBehavior == FailBehaviorAllow {
 			e.logger.Warnw("authentication failed, allowing due to fail_behavior=allow", "url", url, "error", err)
 			return internal_type.AuthenticationOutput{
 				Authenticated: false,
@@ -108,7 +120,16 @@ func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.Authe
 		errMsg := fmt.Sprintf("authentication: endpoint returned status %d", response.StatusCode)
 		e.onCreateLog(ctx, input.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_FAILED, int64(response.StatusCode), &errMsg, requestPayload, response.Body)
 
-		if auth.FailBehavior == FailBehaviorAllow {
+		failBehavior := FailBehaviorBlock
+		if raw, err := auth.GetOptions().GetString("fail_behavior"); err == nil {
+			switch strings.ToLower(strings.TrimSpace(raw)) {
+			case "do_nothing", "do-nothing", "none", "allow":
+				failBehavior = FailBehaviorAllow
+			case "block":
+				failBehavior = FailBehaviorBlock
+			}
+		}
+		if failBehavior == FailBehaviorAllow {
 			e.logger.Warnw("authentication returned non-2xx, allowing due to fail_behavior=allow",
 				"url", url, "status", response.StatusCode)
 			return internal_type.AuthenticationOutput{

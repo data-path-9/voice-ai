@@ -46,8 +46,18 @@ func AssistantApiRoute(
 	apiv1 := engine.Group("v1/assistant")
 	createAssistantRestHandler := assistantServiceServer.(interface {
 		CreateAssistantRest(*gin.Context)
+		CreateAssistantConfigurationRest(*gin.Context)
+		UpdateAssistantConfigurationRest(*gin.Context)
+		GetAssistantConfigurationRest(*gin.Context)
+		GetAllAssistantConfigurationRest(*gin.Context)
+		DeleteAssistantConfigurationRest(*gin.Context)
 	})
 	apiv1.POST("/create-assistant", createAssistantRestHandler.CreateAssistantRest)
+	apiv1.POST("/configurations", createAssistantRestHandler.CreateAssistantConfigurationRest)
+	apiv1.GET("/configurations/:assistantId", createAssistantRestHandler.GetAllAssistantConfigurationRest)
+	apiv1.GET("/configurations/:assistantId/:id", createAssistantRestHandler.GetAssistantConfigurationRest)
+	apiv1.PATCH("/configurations/:assistantId/:id", createAssistantRestHandler.UpdateAssistantConfigurationRest)
+	apiv1.DELETE("/configurations/:assistantId/:id", createAssistantRestHandler.DeleteAssistantConfigurationRest)
 }
 
 func AssistantDeploymentApiRoute(Cfg *config.AssistantConfig,

@@ -30,6 +30,9 @@ import {
   DeploymentConfigureAssistantTelemetryPage,
   DeploymentCreateAssistantTelemetryPage,
   DeploymentUpdateAssistantTelemetryPage,
+  DeploymentConfigureAssistantStoragePage,
+  DeploymentCreateAssistantStoragePage,
+  DeploymentUpdateAssistantStoragePage,
   DeploymentConfigureAssistantAuthenticationPage,
   DeploymentCreateAssistantAuthenticationPage,
   DeploymentUpdateAssistantAuthenticationPage,
@@ -204,6 +207,18 @@ export function DeploymentRoute() {
           <Route
             path={'configure-telemetry/:telemetryId'}
             element={<DeploymentUpdateAssistantTelemetryPage />}
+          />
+          <Route
+            path={'configure-storage/'}
+            element={<DeploymentConfigureAssistantStoragePage />}
+          />
+          <Route
+            path={'configure-storage/create'}
+            element={<DeploymentCreateAssistantStoragePage />}
+          />
+          <Route
+            path={'configure-storage/:storageId'}
+            element={<DeploymentUpdateAssistantStoragePage />}
           />
           <Route
             path={'deployment/'}

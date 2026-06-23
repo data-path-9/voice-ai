@@ -40,34 +40,34 @@ const (
 )
 
 type Config struct {
-	Logger                  commons.Logger
-	Auth                    types.SimplePrinciple
-	AssistantID             uint64
-	AssistantWebhookService internal_services.AssistantWebhookService
-	HTTPLogService          internal_services.AssistantHTTPLogService
+	Logger                        commons.Logger
+	Auth                          types.SimplePrinciple
+	AssistantID                   uint64
+	AssistantConfigurationService internal_services.AssistantConfigurationService
+	HTTPLogService                internal_services.AssistantHTTPLogService
 }
 
 type Collector struct {
-	logger                  commons.Logger
-	auth                    types.SimplePrinciple
-	assistantID             uint64
-	assistantWebhookService internal_services.AssistantWebhookService
-	httpLogService          internal_services.AssistantHTTPLogService
-	webhooks                []*internal_assistant_entity.AssistantWebhook
-	webhooksLoaded          bool
-	mu                      sync.Mutex
+	logger                        commons.Logger
+	auth                          types.SimplePrinciple
+	assistantID                   uint64
+	assistantConfigurationService internal_services.AssistantConfigurationService
+	httpLogService                internal_services.AssistantHTTPLogService
+	webhooks                      []*internal_assistant_entity.AssistantConfiguration
+	webhooksLoaded                bool
+	mu                            sync.Mutex
 }
 
 func New(_ context.Context, config Config) observability.Collector {
-	if config.Auth == nil || config.AssistantWebhookService == nil || config.HTTPLogService == nil {
+	if config.Auth == nil || config.AssistantConfigurationService == nil || config.HTTPLogService == nil {
 		return observability.NoopCollector{}
 	}
 	return &Collector{
-		logger:                  config.Logger,
-		auth:                    config.Auth,
-		assistantID:             config.AssistantID,
-		assistantWebhookService: config.AssistantWebhookService,
-		httpLogService:          config.HTTPLogService,
+		logger:                        config.Logger,
+		auth:                          config.Auth,
+		assistantID:                   config.AssistantID,
+		assistantConfigurationService: config.AssistantConfigurationService,
+		httpLogService:                config.HTTPLogService,
 	}
 }
 
@@ -86,11 +86,11 @@ func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ ob
 	if !validator.NonNil(c) {
 		return nil
 	}
-	assistantWebhooks, err := c.assistantWebhooks(ctx)
+	webhookConfigurations, err := c.webhookConfigurations(ctx)
 	if err != nil {
 		return err
 	}
-	if !validator.NotEmpty(assistantWebhooks) {
+	if !validator.NotEmpty(webhookConfigurations) {
 		return nil
 	}
 	webhookEventPayload := map[string]interface{}{}
@@ -102,14 +102,14 @@ func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ ob
 	}
 
 	var webhookErrors []error
-	for _, assistantWebhook := range assistantWebhooks {
-		if !c.shouldSend(assistantWebhook, webhookRecord.Event.String()) {
+	for _, webhookConfiguration := range webhookConfigurations {
+		if !c.shouldSend(webhookConfiguration, webhookRecord.Event.String()) {
 			continue
 		}
-		if err := c.send(ctx, scope, assistantWebhook, webhookRecord.Event.String(), webhookRecord.ContextID, webhookEventPayload); err != nil {
+		if err := c.send(ctx, scope, webhookConfiguration, webhookRecord.Event.String(), webhookRecord.ContextID, webhookEventPayload); err != nil {
 			webhookErrors = append(webhookErrors, err)
 			if validator.NonNil(c.logger) {
-				c.logger.Warnw("observability webhook failed", "webhookID", assistantWebhook.Id, "event", webhookRecord.Event.String(), "error", err)
+				c.logger.Warnw("observability webhook failed", "webhookID", webhookConfiguration.Id, "event", webhookRecord.Event.String(), "error", err)
 			}
 		}
 	}
@@ -120,37 +120,48 @@ func (c *Collector) Close(context.Context) error {
 	return nil
 }
 
-func (c *Collector) assistantWebhooks(ctx context.Context) ([]*internal_assistant_entity.AssistantWebhook, error) {
+func (c *Collector) webhookConfigurations(ctx context.Context) ([]*internal_assistant_entity.AssistantConfiguration, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.webhooksLoaded {
 		return c.webhooks, nil
 	}
 
-	_, assistantWebhooks, err := c.assistantWebhookService.GetAll(ctx, c.auth, c.assistantID, nil, &protos.Paginate{})
+	_, webhookConfigurations, err := c.assistantConfigurationService.GetAll(
+		ctx,
+		c.auth,
+		c.assistantID,
+		string(internal_assistant_entity.AssistantConfigurationTypeWebhook),
+		"",
+		nil,
+		&protos.Paginate{},
+	)
 	if err != nil {
 		if validator.NonNil(c.logger) {
 			c.logger.Warnw("observability webhook load failed", "assistantID", c.assistantID, "error", err)
 		}
 		return nil, err
 	}
-	c.webhooks = append([]*internal_assistant_entity.AssistantWebhook(nil), assistantWebhooks...)
+	c.webhooks = append([]*internal_assistant_entity.AssistantConfiguration(nil), webhookConfigurations...)
 	c.webhooksLoaded = true
 	return c.webhooks, nil
 }
 
-func (c *Collector) shouldSend(assistantWebhook *internal_assistant_entity.AssistantWebhook, eventName string) bool {
-	if !validator.NonNil(assistantWebhook) || !validator.NotBlank(eventName) {
+func (c *Collector) shouldSend(webhookConfiguration *internal_assistant_entity.AssistantConfiguration, eventName string) bool {
+	if !validator.NonNil(webhookConfiguration) || !validator.NotBlank(eventName) {
 		return false
 	}
-	if _, err := internal_assistant_entity.NewAssistantWebhookProvider(string(assistantWebhook.Provider)); err != nil {
+	if !webhookConfiguration.Enabled {
 		return false
 	}
-	return slices.Contains(assistantWebhook.GetAssistantEvents(), eventName)
+	if webhookConfiguration.Provider != "http" {
+		return false
+	}
+	return slices.Contains(webhookConfiguration.GetOptions().GetStringSlice("assistant_events"), eventName)
 }
 
-func (c *Collector) send(ctx context.Context, scope observability.Scope, assistantWebhook *internal_assistant_entity.AssistantWebhook, webhookEventName string, webhookContextID string, webhookPayload map[string]interface{}) error {
-	webhookOptions := assistantWebhook.GetOptions()
+func (c *Collector) send(ctx context.Context, scope observability.Scope, webhookConfiguration *internal_assistant_entity.AssistantConfiguration, webhookEventName string, webhookContextID string, webhookPayload map[string]interface{}) error {
+	webhookOptions := webhookConfiguration.GetOptions()
 	webhookHTTPMethod, err := webhookOptions.GetString(WebhookOptionHTTPMethodKey)
 	if err != nil || !validator.NotBlank(webhookHTTPMethod) {
 		webhookHTTPMethod = http.MethodPost
@@ -159,7 +170,7 @@ func (c *Collector) send(ctx context.Context, scope observability.Scope, assista
 
 	webhookHTTPURL, _ := webhookOptions.GetString(WebhookOptionHTTPURLKey)
 	if !validator.NotBlank(webhookHTTPURL) {
-		return fmt.Errorf("observability webhook: http_url is required for webhook %d", assistantWebhook.Id)
+		return fmt.Errorf("observability webhook: http_url is required for webhook %d", webhookConfiguration.Id)
 	}
 
 	webhookHTTPHeaders, err := webhookOptions.GetStringMap(WebhookOptionHTTPHeadersKey)
@@ -277,7 +288,7 @@ func (c *Collector) send(ctx context.Context, scope observability.Scope, assista
 			ctx,
 			c.auth,
 			"webhook",
-			assistantWebhook.Id,
+			webhookConfiguration.Id,
 			webhookEventName,
 			webhookContextID,
 			webhookAssistantID,
@@ -292,7 +303,7 @@ func (c *Collector) send(ctx context.Context, scope observability.Scope, assista
 			webhookRequestPayload,
 			webhookResponsePayload,
 		); recordWebhookRequestLogError != nil && validator.NonNil(c.logger) {
-			c.logger.Warnw("observability webhook request log record failed", "webhookID", assistantWebhook.Id, "event", webhookEventName, "error", recordWebhookRequestLogError)
+			c.logger.Warnw("observability webhook request log record failed", "webhookID", webhookConfiguration.Id, "event", webhookEventName, "error", recordWebhookRequestLogError)
 		}
 
 		if shouldRetryWebhook {

@@ -47,7 +47,7 @@ type ConversationApi struct {
 	channelPipeline              *channel_pipeline.Dispatcher
 	assistantConversationService internal_services.AssistantConversationService
 	assistantService             internal_services.AssistantService
-	webhookService               internal_services.AssistantWebhookService
+	configurationService         internal_services.AssistantConfigurationService
 	httpLogService               internal_services.AssistantHTTPLogService
 	assistantToolService         internal_services.AssistantToolService
 	vaultClient                  web_client.VaultClient
@@ -92,7 +92,7 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 	assistantService := internal_assistant_service.NewAssistantService(cfg, logger, postgres, opensearch)
 	fileStorage := storage_files.NewStorage(cfg.AssetStoreConfig, logger)
 	conversationService := internal_assistant_service.NewAssistantConversationService(logger, postgres, fileStorage)
-	webhookService := internal_assistant_service.NewAssistantWebhookService(logger, postgres, fileStorage)
+	configurationService := internal_assistant_service.NewAssistantConfigurationService(logger, postgres)
 	httpLogService := internal_assistant_service.NewAssistantHTTPLogService(logger, postgres, fileStorage)
 	assistantToolService := internal_assistant_service.NewAssistantToolService(logger, postgres, fileStorage)
 	inbound := channel_telephony.NewInboundDispatcher(
@@ -111,7 +111,7 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 		channel_telephony.WithOutboundVaultClient(vaultClient),
 		channel_telephony.WithOutboundAssistantService(assistantService),
 		channel_telephony.WithOutboundConversationService(conversationService),
-		channel_telephony.WithOutboundWebhookService(webhookService),
+		channel_telephony.WithOutboundAssistantConfigurationService(configurationService),
 		channel_telephony.WithOutboundHTTPLogService(httpLogService),
 		channel_telephony.WithOutboundTelephonyOption(channel_telephony.TelephonyOption{SIPServer: sipServer}),
 	)
@@ -126,7 +126,7 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 		inboundDispatcher:            inbound,
 		assistantConversationService: conversationService,
 		assistantService:             assistantService,
-		webhookService:               webhookService,
+		configurationService:         configurationService,
 		httpLogService:               httpLogService,
 		assistantToolService:         assistantToolService,
 		storage:                      fileStorage,
@@ -138,7 +138,7 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 			channel_pipeline.WithOutboundDispatcher(outbound),
 			channel_pipeline.WithConversationService(conversationService),
 			channel_pipeline.WithAssistantService(assistantService),
-			channel_pipeline.WithWebhookService(webhookService),
+			channel_pipeline.WithAssistantConfigurationService(configurationService),
 			channel_pipeline.WithHTTPLogService(httpLogService),
 			channel_pipeline.WithAssistantToolService(assistantToolService),
 		),
@@ -214,7 +214,7 @@ func (cApi *ConversationGrpcApi) AssistantTalk(stream assistant_api.TalkService_
 		internal_grpc.WithServer(stream),
 		internal_grpc.WithObserver(observabilityRecorder),
 		internal_grpc.WithAuth(auth),
-		internal_grpc.WithWebhookService(cApi.webhookService),
+		internal_grpc.WithAssistantConfigurationService(cApi.configurationService),
 		internal_grpc.WithHTTPLogService(cApi.httpLogService),
 		internal_grpc.WithAssistantToolService(cApi.assistantToolService),
 	)
@@ -268,7 +268,7 @@ func (cApi *ConversationGrpcApi) WebTalk(stream assistant_api.WebRTC_WebTalkServ
 		internal_webrtc.WithServerConfig(cApi.cfg.WebRTCConfig),
 		internal_webrtc.WithObserver(observabilityRecorder),
 		internal_webrtc.WithAuth(auth),
-		internal_webrtc.WithWebhookService(cApi.webhookService),
+		internal_webrtc.WithAssistantConfigurationService(cApi.configurationService),
 		internal_webrtc.WithHTTPLogService(cApi.httpLogService),
 		internal_webrtc.WithAssistantToolService(cApi.assistantToolService),
 	)

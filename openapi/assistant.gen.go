@@ -48,6 +48,23 @@ type AssistantApiDeployment struct {
 	Status                *string                  `json:"status,omitempty"`
 }
 
+// AssistantConfiguration defines model for AssistantConfiguration.
+type AssistantConfiguration struct {
+	AssistantId       *Uint64String `json:"assistantId,omitempty"`
+	ConfigurationType *string       `json:"configurationType,omitempty"`
+	CreatedBy         *Uint64String `json:"createdBy,omitempty"`
+	CreatedDate       *time.Time    `json:"createdDate,omitempty"`
+	Enabled           *bool         `json:"enabled,omitempty"`
+	Id                *Uint64String `json:"id,omitempty"`
+	Options           *[]Metadata   `json:"options,omitempty"`
+	OrganizationId    *Uint64String `json:"organizationId,omitempty"`
+	ProjectId         *Uint64String `json:"projectId,omitempty"`
+	Provider          *string       `json:"provider,omitempty"`
+	Status            *string       `json:"status,omitempty"`
+	UpdatedBy         *Uint64String `json:"updatedBy,omitempty"`
+	UpdatedDate       *time.Time    `json:"updatedDate,omitempty"`
+}
+
 // AssistantDebuggerDeployment defines model for AssistantDebuggerDeployment.
 type AssistantDebuggerDeployment struct {
 	AssistantId           *Uint64String            `json:"assistantId,omitempty"`
@@ -193,6 +210,15 @@ type CreateAssistantApiDeploymentRequest struct {
 	MaxSessionDuration    *uint64                         `json:"maxSessionDuration,omitempty"`
 	Mistake               *string                         `json:"mistake,omitempty"`
 	OutputAudio           *DeploymentAudioProviderRequest `json:"outputAudio,omitempty"`
+}
+
+// CreateAssistantConfigurationRequest defines model for CreateAssistantConfigurationRequest.
+type CreateAssistantConfigurationRequest struct {
+	AssistantId       Uint64String `json:"assistantId"`
+	ConfigurationType string       `json:"configurationType"`
+	Enabled           bool         `json:"enabled"`
+	Options           *[]Metadata  `json:"options,omitempty"`
+	Provider          string       `json:"provider"`
 }
 
 // CreateAssistantDebuggerDeploymentRequest defines model for CreateAssistantDebuggerDeploymentRequest.
@@ -350,6 +376,18 @@ type GetAllAssistantApiDeploymentResponse struct {
 	Success   *bool      `json:"success,omitempty"`
 }
 
+// GetAllAssistantConfigurationResponse defines model for GetAllAssistantConfigurationResponse.
+type GetAllAssistantConfigurationResponse struct {
+	Code *int32                    `json:"code,omitempty"`
+	Data *[]AssistantConfiguration `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error     *Error     `json:"error,omitempty"`
+	Paginated *Paginated `json:"paginated,omitempty"`
+	Success   *bool      `json:"success,omitempty"`
+}
+
 // GetAllAssistantDebuggerDeploymentResponse defines model for GetAllAssistantDebuggerDeploymentResponse.
 type GetAllAssistantDebuggerDeploymentResponse struct {
 	Code *int32                         `json:"code,omitempty"`
@@ -402,6 +440,17 @@ type GetAllAssistantWhatsappDeploymentResponse struct {
 type GetAssistantApiDeploymentResponse struct {
 	Code *int32                  `json:"code,omitempty"`
 	Data *AssistantApiDeployment `json:"data,omitempty"`
+
+	// Error Platform error response details. `errorCode` is a stable platform error code.
+	// See `PlatformErrorCode` for documented code/message mappings.
+	Error   *Error `json:"error,omitempty"`
+	Success *bool  `json:"success,omitempty"`
+}
+
+// GetAssistantConfigurationResponse defines model for GetAssistantConfigurationResponse.
+type GetAssistantConfigurationResponse struct {
+	Code *int32                  `json:"code,omitempty"`
+	Data *AssistantConfiguration `json:"data,omitempty"`
 
 	// Error Platform error response details. `errorCode` is a stable platform error code.
 	// See `PlatformErrorCode` for documented code/message mappings.
@@ -476,6 +525,14 @@ type TextPrompt struct {
 	Role    *string `json:"role,omitempty"`
 }
 
+// UpdateAssistantConfigurationRequest defines model for UpdateAssistantConfigurationRequest.
+type UpdateAssistantConfigurationRequest struct {
+	ConfigurationType string      `json:"configurationType"`
+	Enabled           bool        `json:"enabled"`
+	Options           *[]Metadata `json:"options,omitempty"`
+	Provider          string      `json:"provider"`
+}
+
 // Variable defines model for Variable.
 type Variable struct {
 	DefaultValue *string       `json:"defaultValue,omitempty"`
@@ -529,6 +586,14 @@ type GetAllAssistantWhatsappDeploymentParams struct {
 	Criterias *string `form:"criterias,omitempty" json:"criterias,omitempty"`
 }
 
+// GetAllAssistantConfigurationParams defines parameters for GetAllAssistantConfiguration.
+type GetAllAssistantConfigurationParams struct {
+	ConfigurationType *string `form:"configurationType,omitempty" json:"configurationType,omitempty"`
+	Provider          *string `form:"provider,omitempty" json:"provider,omitempty"`
+	Page              *uint32 `form:"page,omitempty" json:"page,omitempty"`
+	PageSize          *uint32 `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+}
+
 // CreateAssistantApiDeploymentJSONRequestBody defines body for CreateAssistantApiDeployment for application/json ContentType.
 type CreateAssistantApiDeploymentJSONRequestBody = CreateAssistantApiDeploymentRequest
 
@@ -543,6 +608,12 @@ type CreateAssistantWebpluginDeploymentJSONRequestBody = CreateAssistantWebplugi
 
 // CreateAssistantWhatsappDeploymentJSONRequestBody defines body for CreateAssistantWhatsappDeployment for application/json ContentType.
 type CreateAssistantWhatsappDeploymentJSONRequestBody = CreateAssistantWhatsappDeploymentRequest
+
+// CreateAssistantConfigurationJSONRequestBody defines body for CreateAssistantConfiguration for application/json ContentType.
+type CreateAssistantConfigurationJSONRequestBody = CreateAssistantConfigurationRequest
+
+// UpdateAssistantConfigurationJSONRequestBody defines body for UpdateAssistantConfiguration for application/json ContentType.
+type UpdateAssistantConfigurationJSONRequestBody = UpdateAssistantConfigurationRequest
 
 // CreateAssistantJSONRequestBody defines body for CreateAssistant for application/json ContentType.
 type CreateAssistantJSONRequestBody = CreateAssistantRequest

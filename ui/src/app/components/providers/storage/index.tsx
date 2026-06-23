@@ -1,39 +1,65 @@
 import { Metadata, VaultCredential } from '@rapidaai/react';
-import { Dropdown } from '@/app/components/dropdown';
-import { FormLabel } from '@/app/components/form-label';
-import { FieldSet } from '@/app/components/form/fieldset';
-import {
-  ConfigureAwsStorage,
-  ValidateAwsStorageOptions,
-} from '@/app/components/providers/storage/aws';
-import {
-  ConfigureAzureStorage,
-  ValidateAzureStorageOptions,
-} from '@/app/components/providers/storage/azure';
-import {
-  ConfigureGoogleStorage,
-  ValidateGoogleCloudStorageOptions,
-} from '@/app/components/providers/storage/google';
-import { cn } from '@/utils';
 import { CredentialDropdown } from '@/app/components/dropdown/credential-dropdown';
 import { useCallback } from 'react';
 import { ProviderComponentProps } from '@/app/components/providers';
 import { STORAGE_PROVIDER } from '@/providers';
+import { Dropdown } from '@carbon/react';
+import { Stack } from '@/app/components/carbon/form';
+import { loadProviderConfig } from '@/providers/config-loader';
+import {
+  getDefaultsFromConfig,
+  validateFromConfig,
+} from '@/providers/config-defaults';
+import { ConfigRenderer } from '@/app/components/providers/config-renderer';
+
+export const GetDefaultStorageConfigIfInvalid = (
+  provider: string,
+  parameters: Metadata[],
+): Metadata[] => {
+  const config = loadProviderConfig(provider);
+  if (!config?.storage) return [];
+  const normalized = getDefaultsFromConfig(
+    config,
+    'storage',
+    parameters,
+    provider,
+    { includeCredential: false },
+  );
+  const credentialValue =
+    parameters.find(p => p.getKey() === 'rapida.credential_id')?.getValue() ??
+    '';
+  const credential = new Metadata();
+  credential.setKey('rapida.credential_id');
+  credential.setValue(credentialValue);
+  return [credential, ...normalized];
+};
 
 export const ValidateStorageOptions = (
   provider: string,
   parameters: Metadata[],
 ): boolean => {
-  switch (provider) {
-    case 'azure-cloud':
-      return ValidateAzureStorageOptions(parameters);
-    case 'google-cloud':
-      return ValidateGoogleCloudStorageOptions(parameters);
-    case 'aws-cloud':
-      return ValidateAwsStorageOptions(parameters);
-    default:
-      return false;
-  }
+  const config = loadProviderConfig(provider);
+  if (!config?.storage) return false;
+  return !validateFromConfig(config, 'storage', provider, parameters);
+};
+
+export const ConfigureStorageComponent: React.FC<ProviderComponentProps> = ({
+  provider,
+  parameters,
+  onChangeParameter,
+}) => {
+  const config = loadProviderConfig(provider);
+  if (!config?.storage) return null;
+
+  return (
+    <ConfigRenderer
+      provider={provider}
+      category="storage"
+      config={config.storage}
+      parameters={parameters}
+      onParameterChange={onChangeParameter}
+    />
+  );
 };
 
 /**
@@ -68,100 +94,49 @@ export const CloudStorageProvider: React.FC<ProviderComponentProps> = ({
     onChangeParameter(updatedParams);
   };
 
-  const renderConfigComponent = () => {
-    switch (provider) {
-      case 'azure-cloud':
-        return (
-          <ConfigureAzureStorage
-            parameters={parameters || []}
-            onParameterChange={(params: Metadata[]) =>
-              onChangeParameter(params)
-            }
-          />
-        );
-      case 'google-cloud':
-        return (
-          <ConfigureGoogleStorage
-            parameters={parameters || []}
-            onParameterChange={(params: Metadata[]) =>
-              onChangeParameter(params)
-            }
-          />
-        );
+  const selectedProvider =
+    STORAGE_PROVIDER.find(x => x.code === provider) || null;
 
-      case 'aws-cloud':
-        return (
-          <ConfigureAwsStorage
-            parameters={parameters || []}
-            onParameterChange={(params: Metadata[]) =>
-              onChangeParameter(params)
-            }
-          />
-        );
-
-      default:
-        return null;
-    }
-  };
   return (
-    <div className={cn('px-6 pb-6 pt-2 flex gap-8 pl-8')}>
-      <div className="flex flex-col gap-6 w-full max-w-6xl">
-        <FieldSet className="relative col-span-1">
-          <FormLabel>Provider</FormLabel>
-          <Dropdown
-            className="bg-light-background max-w-full dark:bg-gray-950"
-            currentValue={STORAGE_PROVIDER.find(x => x.code === provider)}
-            setValue={v => {
-              onChangeProvider(v.code);
-            }}
-            allValue={STORAGE_PROVIDER}
-            placeholder="Select storage provide"
-            option={c => {
-              return (
-                <span className="inline-flex items-center gap-2 sm:gap-2.5 max-w-full text-sm font-medium">
-                  <img
-                    alt=""
-                    loading="lazy"
-                    width={16}
-                    height={16}
-                    className="sm:h-4 sm:w-4 w-4 h-4 align-middle block shrink-0"
-                    src={c.image}
-                  />
-                  <span className="truncate capitalize">{c.name}</span>
-                </span>
-              );
-            }}
-            label={c => {
-              return (
-                <span className="inline-flex items-center gap-2 sm:gap-2.5 max-w-full text-sm font-medium">
-                  <img
-                    alt=""
-                    loading="lazy"
-                    width={16}
-                    height={16}
-                    className="sm:h-4 sm:w-4 w-4 h-4 align-middle block shrink-0"
-                    src={c.image}
-                  />
-                  <span className="truncate capitalize">{c.name}</span>
-                </span>
-              );
-            }}
-          />
-        </FieldSet>
-        {provider && (
-          <CredentialDropdown
-            className="bg-light-background max-w-full dark:bg-gray-950"
-            onChangeCredential={(c: VaultCredential) => {
-              updateParameter('rapida.credential_id', c.getId());
-            }}
-            currentCredential={getParamValue('rapida.credential_id')}
-            provider={provider}
-          />
-        )}
+    <Stack gap={6}>
+      <Dropdown
+        id="storage-provider"
+        titleText="Storage provider"
+        label="Select storage provider"
+        items={STORAGE_PROVIDER}
+        selectedItem={selectedProvider}
+        itemToString={(item: any) => item?.name || ''}
+        onChange={({ selectedItem }: any) => {
+          if (!selectedItem) return;
+          onChangeProvider(selectedItem.code);
+          onChangeParameter(
+            GetDefaultStorageConfigIfInvalid(
+              selectedItem.code,
+              parameters || [],
+            ),
+          );
+        }}
+        helperText="Select a storage provider for assistant recordings."
+      />
+      {provider && (
+        <CredentialDropdown
+          onChangeCredential={(c: VaultCredential) => {
+            updateParameter('rapida.credential_id', c.getId());
+          }}
+          currentCredential={getParamValue('rapida.credential_id')}
+          provider={provider}
+        />
+      )}
+      {provider && (
         <div className="grid grid-cols-3 gap-x-6 gap-y-3">
-          {renderConfigComponent()}
+          <ConfigureStorageComponent
+            parameters={parameters || []}
+            provider={provider}
+            onChangeParameter={onChangeParameter}
+            onChangeProvider={onChangeProvider}
+          />
         </div>
-      </div>
-    </div>
+      )}
+    </Stack>
   );
 };

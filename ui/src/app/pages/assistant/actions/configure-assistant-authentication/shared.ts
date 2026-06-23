@@ -8,6 +8,8 @@ export const AUTH_OPTION_ENDPOINT = 'http_url';
 export const AUTH_OPTION_HEADERS = 'http_headers';
 export const AUTH_OPTION_BODY = 'http_body';
 export const AUTH_OPTION_CONDITION = 'authentication.condition';
+export const AUTH_OPTION_FAIL_BEHAVIOR = 'fail_behavior';
+export const AUTH_OPTION_TIMEOUT_MS = 'timeout_ms';
 export const FAIL_BEHAVIOR_BLOCK = 'BLOCK';
 export const FAIL_BEHAVIOR_DO_NOTHING = 'DO_NOTHING';
 
@@ -75,6 +77,3 @@ export const toOptionMap = (options: Metadata[] = []) =>
     },
     {} as Record<string, string>,
   );
-
-export const getAuthenticationStatus = (data: any) =>
-  (data?.getStatus?.() || '').toLowerCase();

@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import { CreateAssistantAnalysis } from '@/app/pages/assistant/actions/configure-assistant-analysis/create-assistant-analysis';
-import { CreateAnalysis } from '@rapidaai/react';
+import { CreateAssistantConfiguration } from '@rapidaai/react';
 import toast from 'react-hot-toast/headless';
 
 const mockGoBack = jest.fn();
@@ -12,9 +12,7 @@ const mockGoToConfigureAssistantAnalysis = jest.fn();
 let mockEndpointIdToPick = 'endpoint-1';
 
 jest.mock('@rapidaai/react', () => ({
-  ConnectionConfig: class ConnectionConfig {
-    constructor(_: unknown) {}
-  },
+  ConnectionConfig: class ConnectionConfig {},
   Metadata: class Metadata {
     key = '';
     value = '';
@@ -31,27 +29,35 @@ jest.mock('@rapidaai/react', () => ({
       return this.value;
     }
   },
-  CreateAssistantAnalysisRequest: class CreateAssistantAnalysisRequest {
+  CreateAssistantConfigurationRequest: class CreateAssistantConfigurationRequest {
     assistantId = '';
     provider = '';
-    name = '';
-    description = '';
-    executionPriority = 0;
+    configurationType = '';
+    enabled = false;
     optionsList: any[] = [];
     setAssistantid(v: string) {
       this.assistantId = v;
     }
-    setName(v: string) {
-      this.name = v;
+    getAssistantid() {
+      return this.assistantId;
     }
     setProvider(v: string) {
       this.provider = v;
     }
-    setDescription(v: string) {
-      this.description = v;
+    getProvider() {
+      return this.provider;
     }
-    setExecutionpriority(v: number) {
-      this.executionPriority = v;
+    setConfigurationtype(v: string) {
+      this.configurationType = v;
+    }
+    getConfigurationtype() {
+      return this.configurationType;
+    }
+    setEnabled(v: boolean) {
+      this.enabled = v;
+    }
+    getEnabled() {
+      return this.enabled;
     }
     setOptionsList(v: any[]) {
       this.optionsList = v;
@@ -60,7 +66,7 @@ jest.mock('@rapidaai/react', () => ({
       return this.optionsList;
     }
   },
-  CreateAnalysis: jest.fn(),
+  CreateAssistantConfiguration: jest.fn(),
 }));
 
 jest.mock('react-hot-toast/headless', () => ({
@@ -230,11 +236,13 @@ describe('CreateAssistantAnalysis', () => {
         'Please select a valid endpoint to be executed for analysis.',
       ),
     ).toBeInTheDocument();
-    expect(CreateAnalysis).not.toHaveBeenCalled();
+    expect(CreateAssistantConfiguration).not.toHaveBeenCalled();
   });
 
   it('creates analysis successfully and navigates back to analysis listing', async () => {
-    (CreateAnalysis as jest.Mock).mockResolvedValue({ getSuccess: () => true });
+    (CreateAssistantConfiguration as jest.Mock).mockResolvedValue({
+      getSuccess: () => true,
+    });
 
     render(<CreateAssistantAnalysis assistantId="assistant-1" />);
 
@@ -243,7 +251,7 @@ describe('CreateAssistantAnalysis', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Configure analysis' }));
 
     await waitFor(() => {
-      expect(CreateAnalysis).toHaveBeenCalled();
+      expect(CreateAssistantConfiguration).toHaveBeenCalled();
     });
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith(
@@ -256,7 +264,7 @@ describe('CreateAssistantAnalysis', () => {
   });
 
   it('shows human error message when create API returns unsuccessful response', async () => {
-    (CreateAnalysis as jest.Mock).mockResolvedValue({
+    (CreateAssistantConfiguration as jest.Mock).mockResolvedValue({
       getSuccess: () => false,
       getError: () => ({ getHumanmessage: () => 'Name already used' }),
     });
@@ -271,7 +279,9 @@ describe('CreateAssistantAnalysis', () => {
   });
 
   it('supports add and edit for parameter mapping before create', async () => {
-    (CreateAnalysis as jest.Mock).mockResolvedValue({ getSuccess: () => true });
+    (CreateAssistantConfiguration as jest.Mock).mockResolvedValue({
+      getSuccess: () => true,
+    });
 
     render(<CreateAssistantAnalysis assistantId="assistant-1" />);
 
@@ -292,12 +302,9 @@ describe('CreateAssistantAnalysis', () => {
     fireEvent.change(document.getElementById('param-type-1') as HTMLElement, {
       target: { value: 'assistant' },
     });
-    fireEvent.change(
-      document.getElementById('param-key-1') as HTMLElement,
-      {
-        target: { value: 'name' },
-      },
-    );
+    fireEvent.change(document.getElementById('param-key-1') as HTMLElement, {
+      target: { value: 'name' },
+    });
     fireEvent.change(document.getElementById('param-val-1') as HTMLElement, {
       target: { value: 'assistantName' },
     });
@@ -305,14 +312,24 @@ describe('CreateAssistantAnalysis', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     fireEvent.click(screen.getByRole('button', { name: 'Configure analysis' }));
 
-    await waitFor(() => expect(CreateAnalysis).toHaveBeenCalled());
-    const request = (CreateAnalysis as jest.Mock).mock.calls[0][1];
+    await waitFor(() =>
+      expect(CreateAssistantConfiguration).toHaveBeenCalled(),
+    );
+    const request = (CreateAssistantConfiguration as jest.Mock).mock
+      .calls[0][1];
+    expect(request.getAssistantid()).toBe('assistant-1');
+    expect(request.getConfigurationtype()).toBe('analysis');
+    expect(request.getProvider()).toBe('endpoint');
+    expect(request.getEnabled()).toBe(true);
     const mappedParams = request.getOptionsList().map((option: any) => ({
       key: option.getKey(),
       value: option.getValue(),
     }));
     expect(mappedParams).toEqual(
       expect.arrayContaining([
+        { key: 'name', value: 'analysis-default' },
+        { key: 'description', value: '' },
+        { key: 'execution_priority', value: '0' },
         { key: 'endpoint_id', value: 'endpoint-1' },
         { key: 'endpoint_version', value: 'latest' },
         {
@@ -356,6 +373,6 @@ describe('CreateAssistantAnalysis', () => {
         'option.endpoint_parameters is reserved and managed by analysis options.',
       ),
     ).toBeInTheDocument();
-    expect(CreateAnalysis).not.toHaveBeenCalled();
+    expect(CreateAssistantConfiguration).not.toHaveBeenCalled();
   });
 });

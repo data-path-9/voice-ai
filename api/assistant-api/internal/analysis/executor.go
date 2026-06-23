@@ -22,11 +22,11 @@ import (
 func NewExecutor(
 	logger commons.Logger,
 	ctx context.Context,
-	analysis *internal_assistant_entity.AssistantAnalysis,
+	analysis *internal_assistant_entity.AssistantConfiguration,
 	caller internal_type.InternalCaller,
 ) (internal_type.AnalysisExecutor, error) {
 	switch analysis.Provider {
-	case internal_assistant_entity.AssistantAnalysisProviderEndpoint:
+	case "endpoint":
 		return internal_analysis_endpoint.NewExecutor(logger, ctx, analysis, caller)
 	default:
 		return nil, fmt.Errorf("analysis: unsupported executor type %q", analysis.Provider)

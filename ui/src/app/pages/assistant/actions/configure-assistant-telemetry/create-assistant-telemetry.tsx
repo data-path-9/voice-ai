@@ -1,18 +1,18 @@
 import React, { FC, useState } from 'react';
-import { CreateAssistantTelemetryProvider, Metadata } from '@rapidaai/react';
+import {
+  CreateAssistantConfiguration,
+  CreateAssistantConfigurationRequest,
+  Metadata,
+} from '@rapidaai/react';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import { useRapidaStore } from '@/hooks';
 import { connectionConfig } from '@/configs';
 import toast from 'react-hot-toast/headless';
-import {
-  PrimaryButton,
-  SecondaryButton,
-} from '@/app/components/carbon/button';
+import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import { Stack } from '@/app/components/carbon/form';
 import { Notification } from '@/app/components/carbon/notification';
-import { ButtonSet, Breadcrumb, BreadcrumbItem } from '@carbon/react';
-import { InputCheckbox } from '@/app/components/carbon/form/input-checkbox';
+import { ButtonSet } from '@carbon/react';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
 import { TelemetryProvider } from '@/app/components/providers/telemetry';
 import {
@@ -20,6 +20,9 @@ import {
   ValidateTelemetry,
 } from '@/app/components/providers/telemetry/provider';
 import { TELEMETRY_PROVIDER } from '@/providers';
+import { InputGroup } from '@/app/components/input-group';
+
+const telemetryConfigurationType = 'telemetry';
 
 export const CreateAssistantTelemetry: FC<{ assistantId: string }> = ({
   assistantId,
@@ -34,7 +37,6 @@ export const CreateAssistantTelemetry: FC<{ assistantId: string }> = ({
   const [parameters, setParameters] = useState<Metadata[]>(() =>
     GetDefaultTelemetryIfInvalid(defaultProvider, []),
   );
-  const [enabled, setEnabled] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
 
   const onChangeProvider = (providerCode: string) => {
@@ -53,19 +55,21 @@ export const CreateAssistantTelemetry: FC<{ assistantId: string }> = ({
       return;
     }
 
+    const request = new CreateAssistantConfigurationRequest();
+    request.setAssistantid(assistantId);
+    request.setConfigurationtype(telemetryConfigurationType);
+    request.setProvider(provider);
+    request.setEnabled(true);
+    request.setOptionsList(parameters);
+
     showLoader();
-    CreateAssistantTelemetryProvider(
-      connectionConfig,
-      assistantId,
-      provider,
-      enabled,
-      parameters,
-      (err, response) => {
+    CreateAssistantConfiguration(connectionConfig, request, {
+      'x-auth-id': authId,
+      authorization: token,
+      'x-project-id': projectId,
+    })
+      .then(response => {
         hideLoader();
-        if (err) {
-          setErrorMessage('Unable to create telemetry provider. Please try again.');
-          return;
-        }
         if (response?.getSuccess()) {
           toast.success('Telemetry provider created successfully');
           navigator.goToAssistantTelemetry(assistantId);
@@ -75,62 +79,68 @@ export const CreateAssistantTelemetry: FC<{ assistantId: string }> = ({
           response?.getError()?.getHumanmessage() ||
             'Unable to create telemetry provider. Please try again.',
         );
-      },
-      {
-        'x-auth-id': authId,
-        authorization: token,
-        'x-project-id': projectId,
-      },
-    );
+      })
+      .catch(() => {
+        hideLoader();
+        setErrorMessage(
+          'Unable to create telemetry provider. Please try again.',
+        );
+      });
   };
 
   return (
     <>
       <ConfirmDialogComponent />
-      <div className="flex flex-col flex-1 min-h-0 bg-white dark:bg-gray-900">
-        {/* Header */}
-        <div className="px-8 pt-6 pb-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
-          <Breadcrumb noTrailingSlash className="mb-2">
-            <BreadcrumbItem href={`/deployment/assistant/${assistantId}/configure-telemetry`}>
-              Telemetry
-            </BreadcrumbItem>
-          </Breadcrumb>
-          <h1 className="text-xl font-light tracking-tight">Create Telemetry Provider</h1>
-        </div>
+      <section className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col bg-white dark:bg-gray-900">
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+            <div className="flex flex-col flex-1">
+              <header className="px-8 pt-8 pb-6 border-b border-gray-200 dark:border-gray-800">
+                <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 leading-tight">
+                  Telemetry
+                </h1>
+                <p className="text-sm text-gray-500 dark:text-gray-500 mt-1.5 leading-relaxed">
+                  Configure the provider and destination.
+                </p>
+              </header>
 
-        {/* Form */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="px-8 pt-6 pb-8 max-w-4xl">
-            <Stack gap={6}>
-              <TelemetryProvider
-                provider={provider}
-                onChangeProvider={onChangeProvider}
-                parameters={parameters}
-                onChangeParameter={setParameters}
+              <div className="pb-8 flex flex-col">
+                <InputGroup title="Destination">
+                  <Stack gap={6}>
+                    <TelemetryProvider
+                      provider={provider}
+                      onChangeProvider={onChangeProvider}
+                      parameters={parameters}
+                      onChangeParameter={setParameters}
+                    />
+                  </Stack>
+                </InputGroup>
+              </div>
+            </div>
+          </div>
+
+          <div className="shrink-0">
+            {errorMessage && (
+              <Notification
+                kind="error"
+                title="Error"
+                subtitle={errorMessage}
               />
-              <InputCheckbox
-                checked={enabled}
-                onChange={e => setEnabled(e.target.checked)}
+            )}
+            <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
+              <SecondaryButton
+                size="lg"
+                onClick={() => showDialog(navigator.goBack)}
               >
-                Enable this telemetry provider
-              </InputCheckbox>
-              {errorMessage && (
-                <Notification kind="error" title="Error" subtitle={errorMessage} />
-              )}
-            </Stack>
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton size="lg" isLoading={loading} onClick={onSubmit}>
+                Configure telemetry
+              </PrimaryButton>
+            </ButtonSet>
           </div>
         </div>
-
-        {/* Footer */}
-        <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-          <SecondaryButton size="lg" onClick={() => showDialog(navigator.goBack)}>
-            Cancel
-          </SecondaryButton>
-          <PrimaryButton size="lg" isLoading={loading} onClick={onSubmit}>
-            Save telemetry
-          </PrimaryButton>
-        </ButtonSet>
-      </div>
+      </section>
     </>
   );
 };

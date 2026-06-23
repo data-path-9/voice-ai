@@ -32,7 +32,7 @@ func (d *Dispatcher) runOutbound(ctx context.Context, v OutboundRequestedPipelin
 			Logger:      d.logger,
 			ToolService: d.assistantToolService,
 		}),
-		collectors.NewWithAssistantWebhook(ctx, d.logger, v.Auth, v.AssistantID, d.webhookService, d.httpLogService),
+		collectors.NewWithWebhookConfiguration(ctx, d.logger, v.Auth, v.AssistantID, d.configurationService, d.httpLogService),
 	); err != nil {
 		d.logger.Warnw("observability collector registration failed",
 			"component", "call",

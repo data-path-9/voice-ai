@@ -38,6 +38,192 @@ paths:
             application/json:
               schema:
                 $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant/configurations:
+    post:
+      operationId: createAssistantConfiguration
+      summary: Create assistant configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssistantConfigurationRequest"
+      responses:
+        "200":
+          description: Assistant configuration created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantConfigurationResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant/configurations/{assistantId}:
+    get:
+      operationId: getAllAssistantConfiguration
+      summary: Get assistant configurations
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+        - name: configurationType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: provider
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        "200":
+          description: Assistant configurations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAllAssistantConfigurationResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+  /v1/assistant/configurations/{assistantId}/{id}:
+    get:
+      operationId: getAssistantConfiguration
+      summary: Get assistant configuration
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+      responses:
+        "200":
+          description: Assistant configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantConfigurationResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateAssistantConfiguration
+      summary: Update assistant configuration
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAssistantConfigurationRequest"
+      responses:
+        "200":
+          description: Assistant configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantConfigurationResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAssistantConfiguration
+      summary: Delete assistant configuration
+      parameters:
+        - name: assistantId
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "./common.yaml#/components/schemas/Uint64String"
+      responses:
+        "200":
+          description: Assistant configuration deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAssistantConfigurationResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthenticated request
+          content:
+            application/json:
+              schema:
+                $ref: "./common.yaml#/components/schemas/ErrorResponse"
   /v1/assistant-deployment/create-debugger-deployment:
     post:
       operationId: createAssistantDebuggerDeployment
@@ -1656,3 +1842,103 @@ components:
             $ref: "./common.yaml#/components/schemas/Metadata"
         status:
           type: string
+    AssistantConfiguration:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        projectId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        organizationId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        configurationType:
+          type: string
+        provider:
+          type: string
+        enabled:
+          type: boolean
+        options:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+        status:
+          type: string
+        createdBy:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        updatedBy:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        createdDate:
+          type: string
+          format: date-time
+        updatedDate:
+          type: string
+          format: date-time
+    CreateAssistantConfigurationRequest:
+      type: object
+      required:
+        - assistantId
+        - configurationType
+        - enabled
+        - provider
+      properties:
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        configurationType:
+          type: string
+        provider:
+          type: string
+        enabled:
+          type: boolean
+          default: true
+        options:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+    UpdateAssistantConfigurationRequest:
+      type: object
+      required:
+        - configurationType
+        - enabled
+        - provider
+      properties:
+        configurationType:
+          type: string
+        provider:
+          type: string
+        enabled:
+          type: boolean
+          default: true
+        options:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/Metadata"
+    GetAssistantConfigurationResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/AssistantConfiguration"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+    GetAllAssistantConfigurationResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantConfiguration"
+        error:
+          $ref: "./common.yaml#/components/schemas/Error"
+        paginated:
+          $ref: "./common.yaml#/components/schemas/Paginated"
