@@ -55,8 +55,7 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 			v.CallContext.CallerNumber, v.CallContext.FromNumber, v.CallContext.Direction, v.CallContext.Provider,
 			v.CallContext.ChannelUUID, contextID, "", "", // codec/sampleRate set by streamer
 		),
-	})
-	_ = v.Observer.Record(ctx, scope, observability.RecordEvent{
+	}, observability.RecordEvent{
 		Component: observability.ComponentCall,
 		Event:     observability.CallStarted,
 		Attributes: observability.Attributes{
@@ -84,8 +83,7 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 				"channel_uuid": v.CallContext.ChannelUUID,
 			},
 		},
-	})
-	_ = v.Observer.Record(ctx, scope, observability.RecordLog{
+	}, observability.RecordLog{
 		Level:   observability.LevelDebug,
 		Message: "Pipeline session connected",
 		Attributes: observability.Attributes{
