@@ -59,20 +59,61 @@ type silenceBasedEndOfSpeech struct {
 	eosStartedAt time.Time
 }
 
-func NewSilenceBasedEndOfSpeech(
-	_ commons.Logger,
-	onPacket func(context.Context, ...internal_type.Packet) error,
-	opts utils.Option,
-) (internal_type.EndOfSpeechExecutor, error) {
+type options struct {
+	ctx      context.Context
+	logger   commons.Logger
+	onPacket func(context.Context, ...internal_type.Packet) error
+	options  utils.Option
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
+	return func(options *options) {
+		options.onPacket = onPacket
+	}
+}
+
+func WithOptions(opts utils.Option) Option {
+	return func(options *options) {
+		options.options = opts
+	}
+}
+
+func New(opts ...Option) (internal_type.EndOfSpeechExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+	if options.onPacket == nil {
+		return nil, fmt.Errorf("%s: onPacket is required", silenceBasedEndOfSpeechName)
+	}
 	start := time.Now()
 	silenceTimeout := defaultSilenceTimeout
-	if value, err := opts.GetFloat64(optSilenceTimeout); err == nil {
+	if value, err := options.options.GetFloat64(optSilenceTimeout); err == nil {
 		silenceTimeout = time.Duration(value) * time.Millisecond
 	}
 
 	endOfSpeech := &silenceBasedEndOfSpeech{
-		onPacket:       onPacket,
-		opts:           opts,
+		onPacket:       options.onPacket,
+		opts:           options.options,
 		silenceTimeout: silenceTimeout,
 		commandCh:      make(chan workerCommand, 32),
 		stopCh:         make(chan struct{}),
@@ -81,27 +122,25 @@ func NewSilenceBasedEndOfSpeech(
 	}
 
 	go endOfSpeech.worker()
-	if endOfSpeech.onPacket != nil {
-		_ = endOfSpeech.onPacket(context.Background(),
-			internal_type.ObservabilityMetricRecordPacket{
-				Scope:  internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.NewMetricEOSInitLatencyMs(time.Since(start), observability.Attributes{"provider": endOfSpeech.Name()}),
-			},
-			internal_type.ObservabilityLogRecordPacket{
-				Scope: internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.RecordLog{
-					Level:   observability.LevelInfo,
-					Message: fmt.Sprintf("%s: initialization completed", endOfSpeech.Name()),
-					Attributes: observability.Attributes{
-						"component": observability.ComponentEOS.String(),
-						"provider":  endOfSpeech.Name(),
-						"options":   observability.AttributeValue(endOfSpeech.Options()),
-					},
-					OccurredAt: time.Now(),
+	_ = endOfSpeech.onPacket(options.ctx,
+		internal_type.ObservabilityMetricRecordPacket{
+			Scope:  internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewMetricEOSInitLatencyMs(time.Since(start), observability.Attributes{"provider": endOfSpeech.Name()}),
+		},
+		internal_type.ObservabilityLogRecordPacket{
+			Scope: internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.RecordLog{
+				Level:   observability.LevelInfo,
+				Message: fmt.Sprintf("%s: initialization completed", endOfSpeech.Name()),
+				Attributes: observability.Attributes{
+					"component": observability.ComponentEOS.String(),
+					"provider":  endOfSpeech.Name(),
+					"options":   observability.AttributeValue(endOfSpeech.Options()),
 				},
+				OccurredAt: time.Now(),
 			},
-		)
-	}
+		},
+	)
 	return endOfSpeech, nil
 }
 

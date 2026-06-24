@@ -92,7 +92,7 @@ func TestHandleModeSwitchInitializeVoiceActivityDetection_ConfigError_EmitsModeS
 	assert.Nil(t, r.vadExecutor)
 }
 
-func TestHandleModeSwitchInitializeVoiceActivityDetection_GetVADError_EmitsModeSwitchError(t *testing.T) {
+func TestHandleModeSwitchInitializeVoiceActivityDetection_VADError_EmitsModeSwitchError(t *testing.T) {
 	r := newDispatchHandlerVADTestRequestor(t)
 	r.assistant = &internal_assistant_entity.Assistant{
 		AssistantDebuggerDeployment: &internal_assistant_entity.AssistantDebuggerDeployment{

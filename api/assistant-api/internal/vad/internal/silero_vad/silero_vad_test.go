@@ -45,7 +45,7 @@ func getModelPath() string {
 func newSileroOrSkip(t *testing.T, threshold float64, cb func(ctx context.Context, pkt ...internal_type.Packet) error) *SileroVAD {
 	logger, _ := commons.NewApplicationLogger()
 	opts := newTestOptions(t, threshold)
-	vad, err := NewSileroVAD(t.Context(), logger, cb, opts)
+	vad, err := newSileroVADForTest(t.Context(), logger, cb, opts)
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 			t.Skipf("silero model missing at %s", getModelPath())
@@ -81,7 +81,7 @@ func generateNoise(samples int) internal_type.UserAudioReceivedPacket {
 
 // Core functionality tests
 
-func TestNewSileroVAD_DefaultThreshold(t *testing.T) {
+func TestNew_DefaultThreshold(t *testing.T) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 
 	vad := newSileroOrSkip(t, -1, callback)
@@ -97,7 +97,7 @@ func TestSileroVAD_Name(t *testing.T) {
 	assert.Equal(t, "silero_vad", vad.Name())
 }
 
-func TestNewSileroVAD_EmitsInitializationObservability(t *testing.T) {
+func TestNew_EmitsInitializationObservability(t *testing.T) {
 	var packets []internal_type.Packet
 	callback := func(_ context.Context, pkt ...internal_type.Packet) error {
 		packets = append(packets, pkt...)
@@ -216,7 +216,7 @@ func TestSileroVAD_Close_Idempotent(t *testing.T) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	opts := newTestOptions(t, 0.5)
 
-	vad, err := NewSileroVAD(t.Context(), logger, callback, opts)
+	vad, err := newSileroVADForTest(t.Context(), logger, callback, opts)
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 			t.Skipf("silero model missing at %s", getModelPath())
@@ -238,7 +238,7 @@ func TestSileroVAD_Close_EmitsDurationUsageAndClosedEvent(t *testing.T) {
 	}
 	opts := newTestOptions(t, 0.5)
 
-	vad, err := NewSileroVAD(t.Context(), logger, callback, opts)
+	vad, err := newSileroVADForTest(t.Context(), logger, callback, opts)
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 			t.Skipf("silero model missing at %s", getModelPath())

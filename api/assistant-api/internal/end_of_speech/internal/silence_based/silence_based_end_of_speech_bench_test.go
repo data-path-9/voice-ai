@@ -24,7 +24,7 @@ import (
 func BenchmarkAnalyze_UserInput(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{}))
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -40,7 +40,7 @@ func BenchmarkAnalyze_UserInput(b *testing.B) {
 func BenchmarkAnalyze_SystemInput(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -57,7 +57,7 @@ func BenchmarkAnalyze_SystemInput(b *testing.B) {
 func BenchmarkAnalyze_STTInput(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -74,7 +74,7 @@ func BenchmarkAnalyze_STTInput(b *testing.B) {
 func BenchmarkAnalyze_NoWait(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{}))
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -94,7 +94,7 @@ func BenchmarkAnalyze_NoWait(b *testing.B) {
 func BenchmarkAnalyze_Concurrent(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -112,7 +112,7 @@ func BenchmarkAnalyze_Concurrent(b *testing.B) {
 func BenchmarkAnalyze_ConcurrentHighContention(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -131,7 +131,7 @@ func BenchmarkAnalyze_ConcurrentHighContention(b *testing.B) {
 func BenchmarkAnalyze_ConcurrentMixedInputs(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -163,7 +163,7 @@ func BenchmarkAnalyze_ConcurrentMixedInputs(b *testing.B) {
 func BenchmarkAnalyze_STTIncomplete(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 150.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 150.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -180,7 +180,7 @@ func BenchmarkAnalyze_STTIncomplete(b *testing.B) {
 func BenchmarkAnalyze_STTComplete(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 150.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 150.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -197,7 +197,7 @@ func BenchmarkAnalyze_STTComplete(b *testing.B) {
 func BenchmarkAnalyze_STTFormatting(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 150.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 150.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -218,7 +218,7 @@ func BenchmarkAnalyze_STTFormatting(b *testing.B) {
 func BenchmarkAnalyze_STTHighFrequency(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 150.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 150.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -240,7 +240,7 @@ func BenchmarkAnalyze_STTHighFrequency(b *testing.B) {
 func BenchmarkAnalyze_RapidFireInputs(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -257,7 +257,7 @@ func BenchmarkAnalyze_RapidFireInputs(b *testing.B) {
 func BenchmarkAnalyze_LargePayloads(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -280,7 +280,7 @@ func BenchmarkAnalyze_LargePayloads(b *testing.B) {
 func BenchmarkAnalyze_EmptyInputs(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -297,7 +297,7 @@ func BenchmarkAnalyze_EmptyInputs(b *testing.B) {
 func BenchmarkAnalyze_ContextCancellation(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -313,7 +313,7 @@ func BenchmarkAnalyze_ContextCancellation(b *testing.B) {
 func BenchmarkAnalyze_GenerationInvalidation(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -335,7 +335,7 @@ func BenchmarkAnalyze_GenerationInvalidation(b *testing.B) {
 func BenchmarkAnalyze_HighThroughput(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -363,7 +363,7 @@ func BenchmarkAnalyze_SustainedLoad(b *testing.B) {
 		atomic.AddInt64(&callCount, 1)
 		return nil
 	}
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -385,7 +385,7 @@ func BenchmarkAnalyze_MultipleServices(b *testing.B) {
 	// Create 10 service instances
 	services := make([]internal_type.EndOfSpeechExecutor, 10)
 	for i := 0; i < 10; i++ {
-		svc, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+		svc, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 		services[i] = svc
 	}
 
@@ -409,7 +409,7 @@ func BenchmarkAnalyze_MultipleServices(b *testing.B) {
 func BenchmarkAnalyze_RaceDetectionConcurrent(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -442,7 +442,7 @@ func BenchmarkAnalyze_RaceDetectionWithCallback(b *testing.B) {
 		return nil
 	}
 
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 50.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 50.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -464,7 +464,7 @@ func BenchmarkAnalyze_RaceDetectionWithCallback(b *testing.B) {
 func BenchmarkMemory_UserInputAlloc(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -479,7 +479,7 @@ func BenchmarkMemory_UserInputAlloc(b *testing.B) {
 func BenchmarkMemory_STTInputAlloc(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -494,7 +494,7 @@ func BenchmarkMemory_STTInputAlloc(b *testing.B) {
 func BenchmarkMemory_ConcurrentAlloc(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{"microphone.eos.timeout": 100.0}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -521,7 +521,7 @@ func BenchmarkAnalyze_STTHandling(b *testing.B) {
 func BenchmarkBufferAppend(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
-	svcIface, _ := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{}))
+	svcIface, _ := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -59,7 +59,11 @@ const (
 	PacketNameInitializeAssistant                        PacketName = "InitializeAssistantPacket"
 	PacketNameInitializeConversation                     PacketName = "InitializeConversationPacket"
 	PacketNameInitializeSessionRuntime                   PacketName = "InitializeSessionRuntimePacket"
+	PacketNameInitializeConversationRecordingExecutor    PacketName = "InitializeConversationRecordingExecutorPacket"
+	PacketNameInitializeArtifactPushExecutor             PacketName = "InitializeArtifactPushExecutorPacket"
+	PacketNameInitializeAnalysisExecutor                 PacketName = "InitializeAnalysisExecutorPacket"
 	PacketNameInitializeAuthentication                   PacketName = "InitializeAuthenticationPacket"
+	PacketNameExecuteAuthentication                      PacketName = "ExecuteAuthenticationPacket"
 	PacketNameSessionAuthenticationSucceeded             PacketName = "SessionAuthenticationSucceededPacket"
 	PacketNameSessionAuthenticationFailed                PacketName = "SessionAuthenticationFailedPacket"
 	PacketNameInitializeSpeechToText                     PacketName = "InitializeSpeechToTextPacket"
@@ -91,8 +95,12 @@ const (
 	PacketNameFinalizeTextToSpeech                       PacketName = "FinalizeTextToSpeechPacket"
 	PacketNameFinalizeSpeechToText                       PacketName = "FinalizeSpeechToTextPacket"
 	PacketNameFinalizeAuthentication                     PacketName = "FinalizeAuthenticationPacket"
+	PacketNameFinalizeConversationRecordingExecutor      PacketName = "FinalizeConversationRecordingExecutorPacket"
 	PacketNameFinalizeSessionRuntime                     PacketName = "FinalizeSessionRuntimePacket"
+	PacketNameFinalizeArtifactPushExecutor               PacketName = "FinalizeArtifactPushExecutorPacket"
+	PacketNameExecuteAnalysis                            PacketName = "ExecuteAnalysisPacket"
 	PacketNameFinalizeConversation                       PacketName = "FinalizeConversationPacket"
+	PacketNameFinalizeAnalysisExecutor                   PacketName = "FinalizeAnalysisExecutorPacket"
 	PacketNameFinalizeAssistant                          PacketName = "FinalizeAssistantPacket"
 	PacketNameFinalizationCompleted                      PacketName = "FinalizationCompletedPacket"
 	PacketNameStartIdleTimeout                           PacketName = "StartIdleTimeoutPacket"
@@ -494,7 +502,40 @@ func (f InitializeSessionRuntimePacket) PacketName() PacketName {
 	return PacketNameInitializeSessionRuntime
 }
 
-// InitializeAuthenticationPacket starts session authentication stage.
+// InitializeConversationRecordingExecutorPacket initializes the conversation recording executor.
+type InitializeConversationRecordingExecutorPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeConversationRecordingExecutorPacket) ContextId() string { return f.ContextID }
+func (f InitializeConversationRecordingExecutorPacket) PacketName() PacketName {
+	return PacketNameInitializeConversationRecordingExecutor
+}
+
+// InitializeArtifactPushExecutorPacket initializes external artifact push executors.
+type InitializeArtifactPushExecutorPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeArtifactPushExecutorPacket) ContextId() string { return f.ContextID }
+func (f InitializeArtifactPushExecutorPacket) PacketName() PacketName {
+	return PacketNameInitializeArtifactPushExecutor
+}
+
+// InitializeAnalysisExecutorPacket initializes post-conversation analysis executors.
+type InitializeAnalysisExecutorPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f InitializeAnalysisExecutorPacket) ContextId() string { return f.ContextID }
+func (f InitializeAnalysisExecutorPacket) PacketName() PacketName {
+	return PacketNameInitializeAnalysisExecutor
+}
+
+// InitializeAuthenticationPacket initializes the session authentication executor.
 type InitializeAuthenticationPacket struct {
 	ContextID string
 	Config    *protos.ConversationInitialization
@@ -503,6 +544,17 @@ type InitializeAuthenticationPacket struct {
 func (f InitializeAuthenticationPacket) ContextId() string { return f.ContextID }
 func (f InitializeAuthenticationPacket) PacketName() PacketName {
 	return PacketNameInitializeAuthentication
+}
+
+// ExecuteAuthenticationPacket executes session authentication.
+type ExecuteAuthenticationPacket struct {
+	ContextID string
+	Config    *protos.ConversationInitialization
+}
+
+func (f ExecuteAuthenticationPacket) ContextId() string { return f.ContextID }
+func (f ExecuteAuthenticationPacket) PacketName() PacketName {
+	return PacketNameExecuteAuthentication
 }
 
 // SessionAuthenticationSucceededPacket carries successful auth output.
@@ -868,8 +920,9 @@ func (f ModeSwitchFinalizeDenoisePacket) IsAsync() bool { return true }
 // Finalization chain:
 // FinalizeBehavior → FinalizeEndOfSpeech → FinalizeVoiceActivityDetection
 // → FinalizeTextToSpeech → FinalizeSpeechToText → FinalizeAuthentication
-// → FinalizeSessionRuntime → AnalysisStart → ExecuteAnalysis* → AnalysisDone
-// → FinalizeConversation → FinalizeAssistant → FinalizationCompleted
+// → FinalizeConversationRecordingExecutor → FinalizeSessionRuntime
+// → FinalizeArtifactPushExecutor → ExecuteAnalysis → FinalizeConversation
+// → FinalizeAnalysisExecutor → FinalizeAssistant → FinalizationCompleted
 // Each handler enqueues the next phase to backgroundCh, forming an ordered chain.
 // =============================================================================
 
@@ -925,7 +978,17 @@ func (f FinalizeAuthenticationPacket) PacketName() PacketName {
 	return PacketNameFinalizeAuthentication
 }
 
-// FinalizeSessionRuntimePacket finalizes runtime resources and recording.
+// FinalizeConversationRecordingExecutorPacket finalizes conversation recording.
+type FinalizeConversationRecordingExecutorPacket struct {
+	ContextID string
+}
+
+func (f FinalizeConversationRecordingExecutorPacket) ContextId() string { return f.ContextID }
+func (f FinalizeConversationRecordingExecutorPacket) PacketName() PacketName {
+	return PacketNameFinalizeConversationRecordingExecutor
+}
+
+// FinalizeSessionRuntimePacket finalizes runtime resources.
 type FinalizeSessionRuntimePacket struct {
 	ContextID string
 }
@@ -935,6 +998,24 @@ func (f FinalizeSessionRuntimePacket) PacketName() PacketName {
 	return PacketNameFinalizeSessionRuntime
 }
 
+// FinalizeArtifactPushExecutorPacket finalizes external artifact push executors.
+type FinalizeArtifactPushExecutorPacket struct {
+	ContextID string
+}
+
+func (f FinalizeArtifactPushExecutorPacket) ContextId() string { return f.ContextID }
+func (f FinalizeArtifactPushExecutorPacket) PacketName() PacketName {
+	return PacketNameFinalizeArtifactPushExecutor
+}
+
+// ExecuteAnalysisPacket executes post-conversation analysis.
+type ExecuteAnalysisPacket struct {
+	ContextID string
+}
+
+func (f ExecuteAnalysisPacket) ContextId() string      { return f.ContextID }
+func (f ExecuteAnalysisPacket) PacketName() PacketName { return PacketNameExecuteAnalysis }
+
 // FinalizeConversationPacket finalizes conversation-level collectors/events.
 type FinalizeConversationPacket struct {
 	ContextID string
@@ -942,6 +1023,16 @@ type FinalizeConversationPacket struct {
 
 func (f FinalizeConversationPacket) ContextId() string      { return f.ContextID }
 func (f FinalizeConversationPacket) PacketName() PacketName { return PacketNameFinalizeConversation }
+
+// FinalizeAnalysisExecutorPacket finalizes post-conversation analysis executors.
+type FinalizeAnalysisExecutorPacket struct {
+	ContextID string
+}
+
+func (f FinalizeAnalysisExecutorPacket) ContextId() string { return f.ContextID }
+func (f FinalizeAnalysisExecutorPacket) PacketName() PacketName {
+	return PacketNameFinalizeAnalysisExecutor
+}
 
 // FinalizeAssistantPacket finalizes assistant runtime resources.
 type FinalizeAssistantPacket struct {

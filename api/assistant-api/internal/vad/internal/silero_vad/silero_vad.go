@@ -74,23 +74,63 @@ type SileroVAD struct {
 // Constructor
 // -----------------------------------------------------------------------------
 
-// NewSileroVAD creates a new SileroVAD instance.
+type options struct {
+	ctx      context.Context
+	logger   commons.Logger
+	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error
+	options  utils.Option
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithOnPacket(onPacket func(ctx context.Context, pkt ...internal_type.Packet) error) Option {
+	return func(options *options) {
+		options.onPacket = onPacket
+	}
+}
+
+func WithOptions(opts utils.Option) Option {
+	return func(options *options) {
+		options.options = opts
+	}
+}
+
+// New creates a new SileroVAD instance.
 // Input audio must be 16 kHz LINEAR16 mono — the platform's internal format.
 // The VAD will automatically close when the provided context is cancelled,
 // ensuring safe cleanup of CGO resources.
-func NewSileroVAD(
-	ctx context.Context,
-	logger commons.Logger,
-	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error,
-	options utils.Option,
-) (internal_type.VoiceActivityDetectorExecutor, error) {
+func New(opts ...Option) (internal_type.VoiceActivityDetectorExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+	if options.onPacket == nil {
+		return nil, fmt.Errorf("%s: onPacket is required", vadName)
+	}
 	start := time.Now()
 
 	// Initialize detector
-	detector, err := createDetector(options)
+	detector, err := createDetector(options.options)
 	if err != nil {
-		if onPacket != nil {
-			_ = onPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+		if options.onPacket != nil {
+			_ = options.onPacket(options.ctx, internal_type.ObservabilityLogRecordPacket{
 				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
 					Level:   observability.LevelError,
@@ -98,7 +138,7 @@ func NewSileroVAD(
 					Attributes: observability.Attributes{
 						"component": observability.ComponentVAD.String(),
 						"provider":  vadName,
-						"options":   observability.AttributeValue(options),
+						"options":   observability.AttributeValue(options.options),
 					},
 					OccurredAt: time.Now(),
 				},
@@ -106,11 +146,11 @@ func NewSileroVAD(
 		}
 		return nil, fmt.Errorf("failed to create silero detector: %w", err)
 	}
-	converter, err := internal_audio_resampler.GetConverter(logger)
+	converter, err := internal_audio_resampler.GetConverter(options.logger)
 	if err != nil {
 		detector.Destroy()
-		if onPacket != nil {
-			_ = onPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+		if options.onPacket != nil {
+			_ = options.onPacket(options.ctx, internal_type.ObservabilityLogRecordPacket{
 				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
 					Level:   observability.LevelError,
@@ -118,7 +158,7 @@ func NewSileroVAD(
 					Attributes: observability.Attributes{
 						"component": observability.ComponentVAD.String(),
 						"provider":  vadName,
-						"options":   observability.AttributeValue(options),
+						"options":   observability.AttributeValue(options.options),
 					},
 					OccurredAt: time.Now(),
 				},
@@ -128,9 +168,9 @@ func NewSileroVAD(
 	}
 
 	svad := &SileroVAD{
-		logger:       logger,
-		onPacket:     onPacket,
-		opts:         options,
+		logger:       options.logger,
+		onPacket:     options.onPacket,
+		opts:         options.options,
 		detector:     detector,
 		converter:    converter,
 		isTerminated: false,
@@ -138,12 +178,12 @@ func NewSileroVAD(
 	}
 
 	go func() {
-		<-ctx.Done()
+		<-options.ctx.Done()
 		_ = svad.Close(context.Background())
 	}()
 
-	if onPacket != nil {
-		_ = onPacket(ctx,
+	if options.onPacket != nil {
+		_ = options.onPacket(options.ctx,
 			internal_type.ObservabilityMetricRecordPacket{
 				Scope:  internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.NewMetricVADInitLatencyMs(time.Since(start), observability.Attributes{"provider": svad.Name()}),

@@ -20,10 +20,10 @@ func MockVADCallback(ctx context.Context, p ...internal_type.Packet) error {
 	return nil
 }
 
-func TestGetVAD_SILERO_VAD(t *testing.T) {
+func TestNewVAD_SILERO_VAD(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	vad, err := GetVAD(t.Context(), logger, func(ctx context.Context, p ...internal_type.Packet) error { return nil }, map[string]interface{}{
+	vad, err := newVADForTest(t.Context(), logger, func(ctx context.Context, p ...internal_type.Packet) error { return nil }, map[string]interface{}{
 		OptionsKeyVadProvider: SILERO_VAD,
 	})
 
@@ -32,39 +32,40 @@ func TestGetVAD_SILERO_VAD(t *testing.T) {
 	assert.Equal(t, "silero_vad", vad.Name())
 }
 
-func TestGetVAD_InvalidIdentifier(t *testing.T) {
+func TestNewVAD_InvalidIdentifier(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	vad, err := GetVAD(t.Context(), logger, MockVADCallback, map[string]interface{}{
+	vad, err := newVADForTest(t.Context(), logger, MockVADCallback, map[string]interface{}{
 		OptionsKeyVadProvider: "invalid_vad",
 	})
 
-	require.NoError(t, err, "GetVAD should default to SILERO_VAD for invalid identifier")
+	require.NoError(t, err, "New should default to SILERO_VAD for invalid identifier")
 	require.NotNil(t, vad)
 	assert.NotEmpty(t, vad.Name())
 }
 
-func TestGetVAD_WithNilCallback(t *testing.T) {
+func TestNewVAD_WithNilCallback(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	vad, err := GetVAD(t.Context(), logger, nil, map[string]interface{}{
-		OptionsKeyVadProvider: SILERO_VAD,
-	})
+	vad, err := New(
+		WithContext(t.Context()),
+		WithLogger(logger),
+		WithOptions(map[string]interface{}{
+			OptionsKeyVadProvider: SILERO_VAD,
+		}),
+	)
 
-	if err != nil {
-		t.Logf("GetVAD returned error with nil callback: %v", err)
-	} else if vad != nil {
-		t.Logf("GetVAD returned VAD instance with nil callback")
-	}
+	require.Error(t, err)
+	require.Nil(t, vad)
 }
 
-func TestGetVAD_ConsistentResults(t *testing.T) {
+func TestNewVAD_ConsistentResults(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	vad1, err1 := GetVAD(t.Context(), logger, MockVADCallback, map[string]interface{}{
+	vad1, err1 := newVADForTest(t.Context(), logger, MockVADCallback, map[string]interface{}{
 		OptionsKeyVadProvider: SILERO_VAD,
 	})
-	vad2, err2 := GetVAD(t.Context(), logger, MockVADCallback, map[string]interface{}{
+	vad2, err2 := newVADForTest(t.Context(), logger, MockVADCallback, map[string]interface{}{
 		OptionsKeyVadProvider: SILERO_VAD,
 	})
 
@@ -76,17 +77,17 @@ func TestGetVAD_ConsistentResults(t *testing.T) {
 	assert.NotEmpty(t, vad2.Name())
 }
 
-func TestGetVAD_AllIdentifiers(t *testing.T) {
+func TestNewVAD_AllIdentifiers(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
 	for _, identifier := range []VADIdentifier{SILERO_VAD, TEN_VAD} {
 		t.Run(string(identifier), func(t *testing.T) {
-			vad, err := GetVAD(t.Context(), logger, MockVADCallback, map[string]interface{}{
+			vad, err := newVADForTest(t.Context(), logger, MockVADCallback, map[string]interface{}{
 				OptionsKeyVadProvider: identifier,
 			})
 
-			require.NoError(t, err, "GetVAD should not error for identifier: %s", identifier)
-			require.NotNil(t, vad, "GetVAD should return VAD instance for identifier: %s", identifier)
+			require.NoError(t, err, "New should not error for identifier: %s", identifier)
+			require.NotNil(t, vad, "New should return VAD instance for identifier: %s", identifier)
 			assert.NotEmpty(t, vad.Name())
 		})
 	}
@@ -97,23 +98,23 @@ func TestVADIdentifier_String(t *testing.T) {
 	assert.Equal(t, "ten_vad", string(TEN_VAD))
 }
 
-func BenchmarkGetVAD_SILERO_VAD(b *testing.B) {
+func BenchmarkNewVAD_SILERO_VAD(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = GetVAD(b.Context(), logger, MockVADCallback, map[string]interface{}{
+		_, _ = newVADForTest(b.Context(), logger, MockVADCallback, map[string]interface{}{
 			OptionsKeyVadProvider: SILERO_VAD,
 		})
 	}
 }
 
-func BenchmarkGetVAD_TEN_VAD(b *testing.B) {
+func BenchmarkNewVAD_TEN_VAD(b *testing.B) {
 	logger, _ := commons.NewApplicationLogger()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = GetVAD(b.Context(), logger, MockVADCallback, map[string]interface{}{
+		_, _ = newVADForTest(b.Context(), logger, MockVADCallback, map[string]interface{}{
 			OptionsKeyVadProvider: TEN_VAD,
 		})
 	}

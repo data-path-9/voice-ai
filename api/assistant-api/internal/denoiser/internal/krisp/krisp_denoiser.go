@@ -7,6 +7,7 @@ package internal_denoiser_krisp
 
 import (
 	"context"
+	"errors"
 
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
@@ -19,8 +20,50 @@ type krispDenoiser struct {
 	options  utils.Option
 }
 
-func NewKrispDenoiser(ctx context.Context, logger commons.Logger, onPacket func(context.Context, ...internal_type.Packet) error, options utils.Option) (internal_type.VoiceDenoiserExecutor, error) {
-	return &krispDenoiser{logger: logger, onPacket: onPacket, options: options}, nil
+type options struct {
+	ctx      context.Context
+	logger   commons.Logger
+	onPacket func(context.Context, ...internal_type.Packet) error
+	options  utils.Option
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
+	return func(options *options) {
+		options.onPacket = onPacket
+	}
+}
+
+func WithOptions(opts utils.Option) Option {
+	return func(options *options) {
+		options.options = opts
+	}
+}
+
+func New(opts ...Option) (internal_type.VoiceDenoiserExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.onPacket == nil {
+		return nil, errors.New("krisp-denoiser: onPacket is required")
+	}
+	return &krispDenoiser{logger: options.logger, onPacket: options.onPacket, options: options.options}, nil
 }
 
 func (krisp *krispDenoiser) Name() string {

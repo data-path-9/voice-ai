@@ -23,13 +23,65 @@ const (
 	DenoiserOptionsKeyProvider                    = "microphone.denoising.provider"
 )
 
-// logger, audioConfig, onPacket, opts
-func GetDenoiser(ctx context.Context, logger commons.Logger, onPacket func(context.Context, ...internal_type.Packet) error, options utils.Option) (internal_type.VoiceDenoiserExecutor, error) {
-	provider, _ := options.GetString(DenoiserOptionsKeyProvider)
+type options struct {
+	ctx      context.Context
+	logger   commons.Logger
+	onPacket func(context.Context, ...internal_type.Packet) error
+	options  utils.Option
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
+	return func(options *options) {
+		options.onPacket = onPacket
+	}
+}
+
+func WithOptions(opts utils.Option) Option {
+	return func(options *options) {
+		options.options = opts
+	}
+}
+
+func New(opts ...Option) (internal_type.VoiceDenoiserExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+
+	provider, _ := options.options.GetString(DenoiserOptionsKeyProvider)
 	switch DenoiserIdentifier(provider) {
 	case KRISP:
-		return internal_denoiser_krisp.NewKrispDenoiser(ctx, logger, onPacket, options)
+		return internal_denoiser_krisp.New(
+			internal_denoiser_krisp.WithContext(options.ctx),
+			internal_denoiser_krisp.WithLogger(options.logger),
+			internal_denoiser_krisp.WithOnPacket(options.onPacket),
+			internal_denoiser_krisp.WithOptions(options.options),
+		)
 	default:
-		return internal_denoiser_rnnoise.NewRnnoiseDenoiser(ctx, logger, onPacket, options)
+		return internal_denoiser_rnnoise.New(
+			internal_denoiser_rnnoise.WithContext(options.ctx),
+			internal_denoiser_rnnoise.WithLogger(options.logger),
+			internal_denoiser_rnnoise.WithOnPacket(options.onPacket),
+			internal_denoiser_rnnoise.WithOptions(options.options),
+		)
 	}
 }
