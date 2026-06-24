@@ -33,6 +33,8 @@ const (
 )
 
 type awsExecutor struct {
+	ctx           context.Context
+	contextID     string
 	logger        commons.Logger
 	configuration *internal_assistant_entity.AssistantConfiguration
 	caller        internal_type.InternalCaller
@@ -40,20 +42,105 @@ type awsExecutor struct {
 	onPacket      func(context.Context, ...internal_type.Packet) error
 }
 
-func NewAWSExecutor(
-	logger commons.Logger,
-	configuration *internal_assistant_entity.AssistantConfiguration,
-	caller internal_type.InternalCaller,
-	auth types.SimplePrinciple,
-	onPacket func(context.Context, ...internal_type.Packet) error,
-) internal_type.ArtifactPushExecutor {
-	return &awsExecutor{
-		logger:        logger,
-		configuration: configuration,
-		caller:        caller,
-		auth:          auth,
-		onPacket:      onPacket,
+type AWSOption func(*awsExecutor)
+
+func WithAWSContext(ctx context.Context) AWSOption {
+	return func(executor *awsExecutor) {
+		executor.ctx = ctx
 	}
+}
+
+func WithAWSContextID(contextID string) AWSOption {
+	return func(executor *awsExecutor) {
+		executor.contextID = contextID
+	}
+}
+
+func WithAWSLogger(logger commons.Logger) AWSOption {
+	return func(executor *awsExecutor) {
+		executor.logger = logger
+	}
+}
+
+func WithAWSConfiguration(configuration *internal_assistant_entity.AssistantConfiguration) AWSOption {
+	return func(executor *awsExecutor) {
+		executor.configuration = configuration
+	}
+}
+
+func WithAWSCaller(caller internal_type.InternalCaller) AWSOption {
+	return func(executor *awsExecutor) {
+		executor.caller = caller
+	}
+}
+
+func WithAWSAuth(auth types.SimplePrinciple) AWSOption {
+	return func(executor *awsExecutor) {
+		executor.auth = auth
+	}
+}
+
+func WithAWSOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) AWSOption {
+	return func(executor *awsExecutor) {
+		executor.onPacket = onPacket
+	}
+}
+
+func NewAWS(opts ...AWSOption) (internal_type.ArtifactPushExecutor, error) {
+	executor := &awsExecutor{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(executor)
+		}
+	}
+	if executor.ctx == nil {
+		executor.ctx = context.Background()
+	}
+	start := time.Now()
+	if executor.configuration == nil {
+		return nil, fmt.Errorf("artifact push storage aws: configuration is required")
+	}
+	if executor.onPacket == nil {
+		return nil, fmt.Errorf("artifact push storage aws: onPacket is required")
+	}
+	credentialID, _ := executor.configuration.GetOptions().GetUint64(awsOptionCredentialIDKey)
+	if credentialID != 0 {
+		if executor.caller == nil {
+			return nil, fmt.Errorf("artifact push storage aws: caller is required when credential_id is configured")
+		}
+		if executor.auth == nil {
+			return nil, fmt.Errorf("artifact push storage aws: auth is required when credential_id is configured")
+		}
+	}
+	_ = executor.onPacket(executor.ctx,
+		internal_type.ObservabilityMetricRecordPacket{
+			ContextID: executor.contextID,
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewMetricStorageInitLatencyMs(time.Since(start), observability.Attributes{
+				"provider":         executor.configuration.Provider,
+				"configuration_id": fmt.Sprintf("%d", executor.configuration.Id),
+				"executor":         executor.Name(),
+			}),
+		},
+		internal_type.ObservabilityLogRecordPacket{
+			ContextID: executor.contextID,
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.RecordLog{
+				Level:   observability.LevelInfo,
+				Message: fmt.Sprintf("%s: initialization completed", executor.Name()),
+				Attributes: observability.Attributes{
+					"component":        observability.ComponentStorage.String(),
+					"operation":        "initialize_executor",
+					"provider":         executor.configuration.Provider,
+					"configuration_id": fmt.Sprintf("%d", executor.configuration.Id),
+					"context_id":       executor.contextID,
+					"options":          observability.AttributeValue(executor.configuration.GetOptions()),
+				},
+				OccurredAt: time.Now(),
+			},
+		},
+	)
+	return executor, nil
 }
 
 func (e *awsExecutor) Name() string {

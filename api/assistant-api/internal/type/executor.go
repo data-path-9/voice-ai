@@ -34,10 +34,9 @@ type SyncExecutor[I any, O any] interface {
 }
 
 type AnalysisInput struct {
-	ContextID      string
-	Arguments      map[string]interface{}
-	ConversationID uint64
-	Auth           types.SimplePrinciple
+	ContextID string
+	Arguments map[string]interface{}
+	Auth      types.SimplePrinciple
 }
 
 type AnalysisOutput struct {
@@ -86,7 +85,9 @@ type ArtifactPushOutput struct {
 
 // Typed interfaces for each concrete executor.
 type LLMExecutor interface {
-	Executor[Packet]
+	Name() string
+	Execute(ctx context.Context, communication Communication, packet Packet) error
+	Close(ctx context.Context) error
 }
 
 type AnalysisExecutor interface {
@@ -111,4 +112,14 @@ type VoiceActivityDetectorExecutor interface {
 
 type VoiceDenoiserExecutor interface {
 	Executor[DenoiseAudioPacket]
+}
+
+type ConversationRecordingAudio struct {
+	UserAudio      []byte
+	AssistantAudio []byte
+	MixedAudio     []byte
+}
+
+type ConversationRecordingExecutor interface {
+	Executor[Packet]
 }

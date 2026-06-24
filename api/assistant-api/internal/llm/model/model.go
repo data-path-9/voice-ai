@@ -44,25 +44,84 @@ type modelAssistantExecutor struct {
 	ctxCancel     context.CancelFunc
 }
 
-func NewModelAssistantExecutor(logger commons.Logger) *modelAssistantExecutor {
-	return &modelAssistantExecutor{
-		logger:       logger,
-		inputBuilder: integration_client_builders.NewChatInputBuilder(logger),
-		toolExecutor: internal_agent_tool.NewToolExecutor(logger),
-		history:      NewConversationHistory(),
+type options struct {
+	ctx           context.Context
+	logger        commons.Logger
+	communication internal_type.Communication
+	configuration *protos.ConversationInitialization
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
 	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithCommunication(communication internal_type.Communication) Option {
+	return func(options *options) {
+		options.communication = communication
+	}
+}
+
+func WithConfiguration(configuration *protos.ConversationInitialization) Option {
+	return func(options *options) {
+		options.configuration = configuration
+	}
+}
+
+func New(opts ...Option) (*modelAssistantExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+	if options.communication == nil {
+		return nil, errors.New("model: communication is required")
+	}
+	if options.configuration == nil {
+		return nil, errors.New("model: configuration is required")
+	}
+	if options.communication.Assistant() == nil {
+		return nil, errors.New("model: assistant is required")
+	}
+	if options.communication.Assistant().AssistantProviderModel == nil {
+		return nil, errors.New("model: provider configuration is required")
+	}
+	executor := &modelAssistantExecutor{
+		logger:       options.logger,
+		history:      NewConversationHistory(),
+		inputBuilder: integration_client_builders.NewChatInputBuilder(options.logger),
+	}
+	if err := executor.initialize(options.ctx, options.communication, options.configuration); err != nil {
+		_ = executor.Close(options.ctx)
+		return nil, err
+	}
+	return executor, nil
 }
 
 func (e *modelAssistantExecutor) Name() string { return "model" }
 
 // =============================================================================
-// Initialize / Close
+// Lifecycle
 // =============================================================================
 
-func (e *modelAssistantExecutor) Initialize(ctx context.Context, communication internal_type.Communication, cfg *protos.ConversationInitialization) error {
+func (e *modelAssistantExecutor) initialize(ctx context.Context, communication internal_type.Communication, cfg *protos.ConversationInitialization) error {
 	start := time.Now()
 	g, gCtx := errgroup.WithContext(ctx)
 	var providerCredential *protos.VaultCredential
+	var toolExecutor internal_agent_tool.ToolExecutor
 
 	g.Go(func() error {
 		credentialID, err := communication.Assistant().AssistantProviderModel.GetOptions().GetUint64("rapida.credential_id")
@@ -77,7 +136,16 @@ func (e *modelAssistantExecutor) Initialize(ctx context.Context, communication i
 		return nil
 	})
 	g.Go(func() error {
-		return e.toolExecutor.Initialize(gCtx, communication)
+		initializedToolExecutor, err := internal_agent_tool.New(
+			internal_agent_tool.WithContext(gCtx),
+			internal_agent_tool.WithLogger(e.logger),
+			internal_agent_tool.WithCommunication(communication),
+		)
+		if err != nil {
+			return err
+		}
+		toolExecutor = initializedToolExecutor
+		return nil
 	})
 	if err := g.Wait(); err != nil {
 		communication.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
@@ -99,6 +167,7 @@ func (e *modelAssistantExecutor) Initialize(ctx context.Context, communication i
 	}
 
 	e.providerCredential = providerCredential
+	e.toolExecutor = toolExecutor
 	// Keep integration stream lifecycle independent from the short init deadline.
 	// Initialization still respects ctx via open/send gating below.
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())

@@ -15,9 +15,16 @@ import (
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+type agentkitTransport struct {
+	conn         *grpc.ClientConn
+	stream       grpc.BidiStreamingClient[protos.TalkInput, protos.TalkOutput]
+	listenerDone chan struct{}
+}
 
 func (e *agentkitExecutor) clearTransportLocked() agentkitTransport {
 	transport := e.transport
@@ -55,6 +62,7 @@ func (e *agentkitExecutor) listen(ctx context.Context, comm internal_type.Commun
 			if closing {
 				return
 			}
+
 			switch {
 			case errors.Is(err, io.EOF):
 				comm.OnPacket(ctx, internal_type.LLMToolCallPacket{

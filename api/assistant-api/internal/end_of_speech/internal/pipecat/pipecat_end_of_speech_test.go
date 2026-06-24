@@ -1021,7 +1021,7 @@ func TestEOS_ObservabilityEvent_Initialized(t *testing.T) {
 		return nil
 	}
 
-	eos, err := NewPipecatEndOfSpeech(logger, callback, utils.Option{})
+	eos, err := newPipecatEndOfSpeechForTest(context.Background(), logger, callback, utils.Option{})
 	require.NoError(t, err)
 	defer func() { _ = eos.Close(context.Background()) }()
 
@@ -1183,7 +1183,7 @@ func TestEOS_ObservabilityEvent_Lifecycle(t *testing.T) {
 		return nil
 	}
 
-	eos, err := NewPipecatEndOfSpeech(logger, callback, utils.Option{})
+	eos, err := newPipecatEndOfSpeechForTest(context.Background(), logger, callback, utils.Option{})
 	require.NoError(t, err)
 
 	require.NoError(t, eos.Execute(context.Background(), internal_type.UserTextReceivedPacket{
@@ -1771,7 +1771,7 @@ func TestEOS_FinalSTTInferenceFailure_DoesNotUseSilenceTimeout(t *testing.T) {
 func TestEOS_FactoryCreationFails_NoModel(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 	// With a bogus model path, should fail
-	_, err := NewPipecatEndOfSpeech(logger,
+	_, err := newPipecatEndOfSpeechForTest(context.Background(), logger,
 		func(context.Context, ...internal_type.Packet) error { return nil },
 		utils.Option{"microphone.eos.pipecat.model_path": "/nonexistent/model.onnx"})
 	assert.Error(t, err)

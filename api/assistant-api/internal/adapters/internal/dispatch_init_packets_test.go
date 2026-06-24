@@ -88,6 +88,7 @@ type recordingAuthenticationExecutor struct {
 	err          error
 	input        internal_type.AuthenticationInput
 	executeCalls int
+	closeCalls   int
 }
 
 func (e *recordingAuthenticationExecutor) Name() string {
@@ -109,20 +110,31 @@ func (e *recordingAuthenticationExecutor) Execute(_ context.Context, input inter
 }
 
 func (e *recordingAuthenticationExecutor) Close(context.Context) error {
+	e.closeCalls++
 	return nil
 }
 
 func runFinalizeDataFlow(requestor *genericRequestor, contextID string) []internal_type.PacketName {
 	handler := requestorDispatchHandler{r: requestor}
-	handler.HandleFinalizeSessionRuntime(context.Background(), internal_type.FinalizeSessionRuntimePacket{ContextID: contextID})
+	handler.HandleFinalizeAuthentication(context.Background(), internal_type.FinalizeAuthenticationPacket{ContextID: contextID})
 
 	packetNames := make([]internal_type.PacketName, 0)
 	for len(requestor.channels.DataChannel()) > 0 {
 		envelope := <-requestor.channels.DataChannel()
 		packetNames = append(packetNames, envelope.Pkt.PacketName())
 		switch packet := envelope.Pkt.(type) {
+		case internal_type.FinalizeConversationRecordingExecutorPacket:
+			handler.HandleFinalizeConversationRecordingExecutor(envelope.Ctx, packet)
+		case internal_type.FinalizeSessionRuntimePacket:
+			handler.HandleFinalizeSessionRuntime(envelope.Ctx, packet)
+		case internal_type.FinalizeArtifactPushExecutorPacket:
+			handler.HandleFinalizeArtifactPushExecutor(envelope.Ctx, packet)
+		case internal_type.ExecuteAnalysisPacket:
+			handler.HandleExecuteAnalysis(envelope.Ctx, packet)
 		case internal_type.FinalizeConversationPacket:
 			handler.HandleFinalizeConversation(envelope.Ctx, packet)
+		case internal_type.FinalizeAnalysisExecutorPacket:
+			handler.HandleFinalizeAnalysisExecutor(envelope.Ctx, packet)
 		case internal_type.FinalizeAssistantPacket:
 			handler.HandleFinalizeAssistant(envelope.Ctx, packet)
 		case internal_type.FinalizationCompletedPacket:
@@ -140,7 +152,11 @@ func TestInitializationPackets_RouteToBootstrapChannel(t *testing.T) {
 		internal_type.InitializeAssistantPacket{ContextID: "ctx", Config: conversationInitialization},
 		internal_type.InitializeConversationPacket{ContextID: "ctx", Config: conversationInitialization},
 		internal_type.InitializeSessionRuntimePacket{ContextID: "ctx", Config: conversationInitialization},
+		internal_type.InitializeConversationRecordingExecutorPacket{ContextID: "ctx", Config: conversationInitialization},
+		internal_type.InitializeArtifactPushExecutorPacket{ContextID: "ctx", Config: conversationInitialization},
+		internal_type.InitializeAnalysisExecutorPacket{ContextID: "ctx", Config: conversationInitialization},
 		internal_type.InitializeAuthenticationPacket{ContextID: "ctx", Config: conversationInitialization},
+		internal_type.ExecuteAuthenticationPacket{ContextID: "ctx", Config: conversationInitialization},
 		internal_type.SessionAuthenticationSucceededPacket{ContextID: "ctx", Initialization: conversationInitialization},
 		internal_type.SessionAuthenticationFailedPacket{ContextID: "ctx", Initialization: conversationInitialization, Error: initializationError},
 		internal_type.InitializeSpeechToTextPacket{ContextID: "ctx", Config: conversationInitialization},
@@ -179,7 +195,36 @@ func TestInitializationPackets_RouteToBootstrapChannel(t *testing.T) {
 	}
 }
 
-func TestHandleInitializeAuthentication_ExecutesAuthenticationSynchronously(t *testing.T) {
+func TestHandleInitializeAuthentication_QueuesAuthenticationExecution(t *testing.T) {
+	requestorChannels := adapter_channel.NewRequestorChannels()
+	initialization := &protos.ConversationInitialization{
+		StreamMode: protos.StreamMode_STREAM_MODE_TEXT,
+	}
+	requestor := &genericRequestor{
+		assistant:        &internal_assistant_entity.Assistant{},
+		messageLifecycle: adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle: adapter_lifecycle.NewSessionLifecycleWithState(adapter_lifecycle.StateInitializing),
+		dispatchRoute:    adapter_router.NewDispatchRoute(adapter_router.NewRoutePolicy(), requestorChannels),
+		channels:         requestorChannels,
+	}
+
+	requestorDispatchHandler{r: requestor}.HandleInitializeAuthentication(context.Background(), internal_type.InitializeAuthenticationPacket{
+		ContextID: "ctx-auth",
+		Config:    initialization,
+	})
+
+	select {
+	case envelope := <-requestor.channels.BootstrapChannel():
+		packet, ok := envelope.Pkt.(internal_type.ExecuteAuthenticationPacket)
+		require.True(t, ok)
+		assert.Equal(t, "ctx-auth", packet.ContextID)
+		assert.Same(t, initialization, packet.Config)
+	default:
+		t.Fatalf("expected execute authentication packet")
+	}
+}
+
+func TestHandleExecuteAuthentication_ExecutesAuthenticationSynchronously(t *testing.T) {
 	requestorChannels := adapter_channel.NewRequestorChannels()
 	initialization := &protos.ConversationInitialization{
 		StreamMode: protos.StreamMode_STREAM_MODE_TEXT,
@@ -209,7 +254,7 @@ func TestHandleInitializeAuthentication_ExecutesAuthenticationSynchronously(t *t
 		channels:               requestorChannels,
 	}
 
-	requestorDispatchHandler{r: requestor}.HandleInitializeAuthentication(context.Background(), internal_type.InitializeAuthenticationPacket{
+	requestorDispatchHandler{r: requestor}.HandleExecuteAuthentication(context.Background(), internal_type.ExecuteAuthenticationPacket{
 		ContextID: "ctx-auth",
 		Config:    initialization,
 	})
@@ -240,7 +285,7 @@ func TestHandleInitializeAuthentication_ExecutesAuthenticationSynchronously(t *t
 	}
 }
 
-func TestHandleInitializeAuthentication_ExecutionErrorEnqueuesFailedPacket(t *testing.T) {
+func TestHandleExecuteAuthentication_ExecutionErrorEnqueuesFailedPacket(t *testing.T) {
 	requestorChannels := adapter_channel.NewRequestorChannels()
 	authError := errors.New("authentication: endpoint returned status 401")
 	authentication := &recordingAuthenticationExecutor{
@@ -255,7 +300,7 @@ func TestHandleInitializeAuthentication_ExecutionErrorEnqueuesFailedPacket(t *te
 		channels:               requestorChannels,
 	}
 
-	requestorDispatchHandler{r: requestor}.HandleInitializeAuthentication(context.Background(), internal_type.InitializeAuthenticationPacket{
+	requestorDispatchHandler{r: requestor}.HandleExecuteAuthentication(context.Background(), internal_type.ExecuteAuthenticationPacket{
 		ContextID: "ctx-auth-failed",
 		Config:    &protos.ConversationInitialization{},
 	})
@@ -268,6 +313,33 @@ func TestHandleInitializeAuthentication_ExecutionErrorEnqueuesFailedPacket(t *te
 		assert.ErrorIs(t, packet.Error, authError)
 	default:
 		t.Fatalf("expected authentication failed packet")
+	}
+}
+
+func TestHandleFinalizeAuthentication_ClosesExecutorAndQueuesRecordingFinalization(t *testing.T) {
+	requestorChannels := adapter_channel.NewRequestorChannels()
+	authentication := &recordingAuthenticationExecutor{}
+	requestor := &genericRequestor{
+		authenticationExecutor: authentication,
+		messageLifecycle:       adapter_lifecycle.NewMessageLifecycle(),
+		sessionLifecycle:       adapter_lifecycle.NewSessionLifecycleWithState(adapter_lifecycle.StateInitializing),
+		dispatchRoute:          adapter_router.NewDispatchRoute(adapter_router.NewRoutePolicy(), requestorChannels),
+		channels:               requestorChannels,
+	}
+
+	requestorDispatchHandler{r: requestor}.HandleFinalizeAuthentication(context.Background(), internal_type.FinalizeAuthenticationPacket{
+		ContextID: "ctx-auth-finalize",
+	})
+
+	assert.Equal(t, 1, authentication.closeCalls)
+	assert.Nil(t, requestor.authenticationExecutor)
+	select {
+	case envelope := <-requestor.channels.DataChannel():
+		packet, ok := envelope.Pkt.(internal_type.FinalizeConversationRecordingExecutorPacket)
+		require.True(t, ok)
+		assert.Equal(t, "ctx-auth-finalize", packet.ContextID)
+	default:
+		t.Fatalf("expected finalize conversation recording executor packet")
 	}
 }
 
@@ -452,7 +524,7 @@ func TestHandleFinalizeSessionRuntime_QueuesConversationFinalization(t *testing.
 	}
 
 	assert.Equal(t, []internal_type.PacketName{
-		internal_type.PacketNameFinalizeConversation,
+		internal_type.PacketNameFinalizeArtifactPushExecutor,
 	}, packetNames)
 	assert.Empty(t, requestor.channels.BackgroundChannel())
 }
@@ -499,9 +571,27 @@ func TestHandleFinalizeConversation_RecordsCompletedWebhookBeforeClosingAnalysis
 	requestor.assistant.Id = 101
 	requestor.assistantConversation.Id = 303
 
-	requestorDispatchHandler{r: requestor}.HandleFinalizeConversation(context.Background(), internal_type.FinalizeConversationPacket{
+	handler := requestorDispatchHandler{r: requestor}
+	handler.HandleExecuteAnalysis(context.Background(), internal_type.ExecuteAnalysisPacket{
 		ContextID: "ctx-final-webhook",
 	})
+
+	select {
+	case envelope := <-requestor.channels.DataChannel():
+		packet, ok := envelope.Pkt.(internal_type.FinalizeConversationPacket)
+		require.True(t, ok)
+		handler.HandleFinalizeConversation(envelope.Ctx, packet)
+	default:
+		t.Fatalf("expected FinalizeConversationPacket")
+	}
+	select {
+	case envelope := <-requestor.channels.DataChannel():
+		packet, ok := envelope.Pkt.(internal_type.FinalizeAnalysisExecutorPacket)
+		require.True(t, ok)
+		handler.HandleFinalizeAnalysisExecutor(envelope.Ctx, packet)
+	default:
+		t.Fatalf("expected FinalizeAnalysisExecutorPacket")
+	}
 
 	require.Equal(t, []string{"analysis-execute", "record-webhook", "analysis-close"}, order)
 	assert.Equal(t, 1, analysis.executeCalls)
@@ -572,9 +662,9 @@ func TestHandleFinalizeConversation_RecordsCompletedWebhookWithoutAnalysis(t *te
 	assert.Equal(t, "completed", webhookRecord.Payload["status"])
 	select {
 	case envelope := <-requestor.channels.DataChannel():
-		assert.Equal(t, internal_type.PacketNameFinalizeAssistant, envelope.Pkt.PacketName())
+		assert.Equal(t, internal_type.PacketNameFinalizeAnalysisExecutor, envelope.Pkt.PacketName())
 	default:
-		t.Fatalf("expected FinalizeAssistantPacket")
+		t.Fatalf("expected FinalizeAnalysisExecutorPacket")
 	}
 }
 
@@ -618,7 +708,12 @@ func TestFinalizeFlow_WithAnalysis_RunsAnalysisThenWebhookThenEnds(t *testing.T)
 	packetNames := runFinalizeDataFlow(requestor, "ctx-final-flow")
 
 	assert.Equal(t, []internal_type.PacketName{
+		internal_type.PacketNameFinalizeConversationRecordingExecutor,
+		internal_type.PacketNameFinalizeSessionRuntime,
+		internal_type.PacketNameFinalizeArtifactPushExecutor,
+		internal_type.PacketNameExecuteAnalysis,
 		internal_type.PacketNameFinalizeConversation,
+		internal_type.PacketNameFinalizeAnalysisExecutor,
 		internal_type.PacketNameFinalizeAssistant,
 		internal_type.PacketNameFinalizationCompleted,
 	}, packetNames)
@@ -657,7 +752,12 @@ func TestFinalizeFlow_WithoutAnalysis_RecordsWebhookThenEnds(t *testing.T) {
 	packetNames := runFinalizeDataFlow(requestor, "ctx-final-flow-no-analysis")
 
 	assert.Equal(t, []internal_type.PacketName{
+		internal_type.PacketNameFinalizeConversationRecordingExecutor,
+		internal_type.PacketNameFinalizeSessionRuntime,
+		internal_type.PacketNameFinalizeArtifactPushExecutor,
+		internal_type.PacketNameExecuteAnalysis,
 		internal_type.PacketNameFinalizeConversation,
+		internal_type.PacketNameFinalizeAnalysisExecutor,
 		internal_type.PacketNameFinalizeAssistant,
 		internal_type.PacketNameFinalizationCompleted,
 	}, packetNames)
@@ -691,7 +791,12 @@ func TestFinalizeFlow_WithoutAnalysisAndWebhookRecorder_EndsWithoutWebhook(t *te
 	packetNames := runFinalizeDataFlow(requestor, "ctx-final-flow-no-webhook")
 
 	assert.Equal(t, []internal_type.PacketName{
+		internal_type.PacketNameFinalizeConversationRecordingExecutor,
+		internal_type.PacketNameFinalizeSessionRuntime,
+		internal_type.PacketNameFinalizeArtifactPushExecutor,
+		internal_type.PacketNameExecuteAnalysis,
 		internal_type.PacketNameFinalizeConversation,
+		internal_type.PacketNameFinalizeAnalysisExecutor,
 		internal_type.PacketNameFinalizeAssistant,
 		internal_type.PacketNameFinalizationCompleted,
 	}, packetNames)

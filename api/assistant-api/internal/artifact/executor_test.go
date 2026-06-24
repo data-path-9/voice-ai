@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	gorm_models "github.com/rapidaai/pkg/models/gorm"
 )
@@ -39,8 +40,17 @@ func testConfig(provider string, options map[string]interface{}) *internal_assis
 	return cfg
 }
 
+func testOnPacket(context.Context, ...internal_type.Packet) error {
+	return nil
+}
+
 func TestNewExecutor_SupportsOnlyAWSAndAzureStorage(t *testing.T) {
-	awsExec, err := NewExecutor(testLogger(t), context.Background(), testConfig(providerAWS, nil), nil, nil, nil)
+	awsExec, err := New(
+		WithContext(context.Background()),
+		WithLogger(testLogger(t)),
+		WithConfiguration(testConfig(providerAWS, nil)),
+		WithOnPacket(testOnPacket),
+	)
 	if err != nil {
 		t.Fatalf("new aws executor: %v", err)
 	}
@@ -48,7 +58,12 @@ func TestNewExecutor_SupportsOnlyAWSAndAzureStorage(t *testing.T) {
 		t.Fatalf("aws executor name = %q, want %q", got, want)
 	}
 
-	azureExec, err := NewExecutor(testLogger(t), context.Background(), testConfig(providerAzureStorage, nil), nil, nil, nil)
+	azureExec, err := New(
+		WithContext(context.Background()),
+		WithLogger(testLogger(t)),
+		WithConfiguration(testConfig(providerAzureStorage, nil)),
+		WithOnPacket(testOnPacket),
+	)
 	if err != nil {
 		t.Fatalf("new azure-storage executor: %v", err)
 	}
@@ -56,7 +71,12 @@ func TestNewExecutor_SupportsOnlyAWSAndAzureStorage(t *testing.T) {
 		t.Fatalf("azure executor name = %q, want %q", got, want)
 	}
 
-	if _, err := NewExecutor(testLogger(t), context.Background(), testConfig("s3", nil), nil, nil, nil); err == nil {
+	if _, err := New(
+		WithContext(context.Background()),
+		WithLogger(testLogger(t)),
+		WithConfiguration(testConfig("s3", nil)),
+		WithOnPacket(testOnPacket),
+	); err == nil {
 		t.Fatalf("new s3 executor error = nil, want unsupported provider error")
 	}
 }

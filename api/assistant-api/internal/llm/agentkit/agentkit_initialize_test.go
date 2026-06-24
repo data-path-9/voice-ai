@@ -152,7 +152,7 @@ func TestInitialize_ReturnsErrorWhenConnectionFails(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
-	err := e.Initialize(ctx, comm, &protos.ConversationInitialization{})
+	err := e.initialize(ctx, comm, &protos.ConversationInitialization{})
 	require.Error(t, err)
 	assert.True(
 		t,
@@ -163,7 +163,7 @@ func TestInitialize_ReturnsErrorWhenConnectionFails(t *testing.T) {
 
 	e.stateMu.RLock()
 	defer e.stateMu.RUnlock()
-	assert.False(t, e.closing, "Initialize should reset closing state before connecting")
+	assert.False(t, e.closing, "initialize should reset closing state before connecting")
 	assert.Nil(t, e.transport.stream)
 	assert.Nil(t, e.transport.conn)
 	assert.Nil(t, e.transport.listenerDone)
@@ -207,7 +207,7 @@ func TestInitialize_SendsInitializationAndEmitsInitializedEvent(t *testing.T) {
 		Url: addr,
 	}, 3003)
 
-	err := e.Initialize(context.Background(), comm, &protos.ConversationInitialization{})
+	err := e.initialize(context.Background(), comm, &protos.ConversationInitialization{})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = e.Close(context.Background())

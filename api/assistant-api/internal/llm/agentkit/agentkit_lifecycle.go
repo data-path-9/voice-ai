@@ -26,7 +26,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func (e *agentkitExecutor) Initialize(ctx context.Context, comm internal_type.Communication, cfg *protos.ConversationInitialization) error {
+func (e *agentkitExecutor) initialize(ctx context.Context, comm internal_type.Communication, cfg *protos.ConversationInitialization) error {
 	start := time.Now()
 	provider := comm.Assistant().AssistantProviderAgentkit
 

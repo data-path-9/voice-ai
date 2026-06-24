@@ -63,7 +63,7 @@ func TestTimerFiresAndCallbackCalled(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 150.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestSystemInputTriggersTimer(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 200.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestEmptySpeechIgnored(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 150.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestSilenceBasedEndOfSpeech_ObservabilityEventShape(t *testing.T) {
 		return nil
 	}
 
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{}))
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{}))
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestSilenceBasedEndOfSpeech_ObservabilityLifecycleEvents(t *testing.T) {
 		return nil
 	}
 
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{}))
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{}))
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestSilenceBasedEndOfSpeech_KeepsMetrics(t *testing.T) {
 		return nil
 	}
 
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{}))
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{}))
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestSilenceBasedEndOfSpeech_MetricUsesLastTimerArm(t *testing.T) {
 		return nil
 	}
 
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{
 		"microphone.eos.timeout": 120.0,
 	}))
 	if err != nil {
@@ -490,7 +490,7 @@ func TestSilenceBasedEndOfSpeech_RespectsExplicitEmptyConcat(t *testing.T) {
 		return nil
 	}
 
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, newTestOpts(map[string]any{
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, newTestOpts(map[string]any{
 		"microphone.eos.timeout": 80.0,
 	}))
 	if err != nil {
@@ -556,7 +556,7 @@ func TestConcurrentAnalyze(t *testing.T) {
 		return nil
 	}
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -595,7 +595,7 @@ func TestContextCancelStillFiresCallback(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 150.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -635,7 +635,7 @@ func TestSTTLanguagePreservedInEndOfSpeechPacket(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -674,7 +674,7 @@ func TestSTTLanguage_UsesLatestNonEmptyAcrossChunks(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 120.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -721,7 +721,7 @@ func TestSTTLanguage_LastChunkWithoutLanguageRetainsPrevious(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 120.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -771,7 +771,7 @@ func TestHandleSTTInput_IncompleteSTT(t *testing.T) {
 
 	timeout := 150.0
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": timeout})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -825,7 +825,7 @@ func TestHandleSTTInput_CompleteSTTNoActivity(t *testing.T) {
 
 	timeout := 120.0
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": timeout})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -875,7 +875,7 @@ func TestHandleSTTInput_DifferentTextCompleteSTT(t *testing.T) {
 
 	timeout := 100.0
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": timeout})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -930,7 +930,7 @@ func TestHandleSTTInput_ActivityAfterUserInput(t *testing.T) {
 
 	timeout := 150.0
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": timeout})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -987,7 +987,7 @@ func TestCallbackFiresOnlyOnce(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1053,7 +1053,7 @@ func TestNewInputInvalidatesPreviousCallback(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 300.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1125,7 +1125,7 @@ func TestUserInputImmediateTrigger(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 1000.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1221,7 +1221,7 @@ func TestSystemInputExtendsTimer(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 200.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1275,7 +1275,7 @@ func TestSTTInputExtendsTimer(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 150.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1322,7 +1322,7 @@ func TestGenerationInvalidation(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 500.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1382,7 +1382,7 @@ func TestContextCancellation(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 200.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1428,7 +1428,7 @@ func TestCallbackReceivesCorrectData(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1459,7 +1459,7 @@ func TestRaceConditionUnderConcurrentInput(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 50.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1498,7 +1498,7 @@ func TestServiceName(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1517,7 +1517,7 @@ func TestServiceClose(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1613,7 +1613,7 @@ func TestConcurrentMixedInputTypes(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1675,7 +1675,7 @@ func TestHighFrequencySTTUpdates(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 150.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1733,7 +1733,7 @@ func TestUserInputInterruptsActiveSTT(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 500.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1787,7 +1787,7 @@ func TestMultipleUtteranceSequence(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1852,7 +1852,7 @@ func TestConcurrentUtterancesRapid(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 80.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1907,7 +1907,7 @@ func TestConcurrentInputsDuringReset(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 50.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -1972,7 +1972,7 @@ func TestStressLoadWithManyInputs(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 50.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -2036,7 +2036,7 @@ func TestContextCancellationUnderConcurrentLoad(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -2091,7 +2091,7 @@ func TestFormattedTextOptimizationUnderConcurrency(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 200.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -2182,7 +2182,7 @@ func TestGenerationCounterPreventsStaleCallbacks(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -2233,7 +2233,7 @@ func TestNormalizationConsistency(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 100.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -2288,7 +2288,7 @@ func TestEdgeCaseRapidResetCycles(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 30.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -2339,7 +2339,7 @@ func TestSingleCallbackForContinuousSpeechWithInterimAndFinal(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 500.0}) // 500ms timeout
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -2420,7 +2420,7 @@ func TestInterimPacketsOnlyExtendTimer(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 200.0})
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -2469,7 +2469,7 @@ func TestInterimPacketsResetTimerContinuously(t *testing.T) {
 	}
 
 	opts := newTestOpts(map[string]any{"microphone.eos.timeout": 300.0}) // 300ms timeout
-	svcIface, err := NewSilenceBasedEndOfSpeech(logger, callback, opts)
+	svcIface, err := newSilenceBasedEndOfSpeechForTest(context.Background(), logger, callback, opts)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}

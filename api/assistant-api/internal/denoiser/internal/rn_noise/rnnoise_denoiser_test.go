@@ -67,7 +67,7 @@ func TestRnnoiseDenoiser_ObservabilityInitRecords(t *testing.T) {
 	var packets []internal_type.Packet
 	opts := utils.Option{"microphone.denoising.provider": rnNoiseDenoiserName}
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {
@@ -114,7 +114,7 @@ func TestRnnoiseDenoiser_ObservabilityCloseRecords(t *testing.T) {
 	logger := testLogger(t)
 	var packets []internal_type.Packet
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {
@@ -232,7 +232,7 @@ func TestRnnoiseDenoiser_PreservesLengthOnFirstChunk(t *testing.T) {
 	logger := testLogger(t)
 	var packets []internal_type.Packet
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {
@@ -263,7 +263,7 @@ func TestRnnoiseDenoiser_EmitsNonSilentAudio(t *testing.T) {
 	logger := testLogger(t)
 	var packets []internal_type.Packet
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {
@@ -308,7 +308,7 @@ func TestRnnoiseDenoiser_PreservesLengthAcrossCalls(t *testing.T) {
 	logger := testLogger(t)
 	var packets []internal_type.Packet
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {

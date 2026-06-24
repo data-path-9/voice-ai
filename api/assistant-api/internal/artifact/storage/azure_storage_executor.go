@@ -34,6 +34,8 @@ const (
 )
 
 type azureStorageExecutor struct {
+	ctx           context.Context
+	contextID     string
 	logger        commons.Logger
 	configuration *internal_assistant_entity.AssistantConfiguration
 	caller        internal_type.InternalCaller
@@ -41,20 +43,105 @@ type azureStorageExecutor struct {
 	onPacket      func(context.Context, ...internal_type.Packet) error
 }
 
-func NewAzureStorageExecutor(
-	logger commons.Logger,
-	configuration *internal_assistant_entity.AssistantConfiguration,
-	caller internal_type.InternalCaller,
-	auth types.SimplePrinciple,
-	onPacket func(context.Context, ...internal_type.Packet) error,
-) internal_type.ArtifactPushExecutor {
-	return &azureStorageExecutor{
-		logger:        logger,
-		configuration: configuration,
-		caller:        caller,
-		auth:          auth,
-		onPacket:      onPacket,
+type AzureStorageOption func(*azureStorageExecutor)
+
+func WithAzureStorageContext(ctx context.Context) AzureStorageOption {
+	return func(executor *azureStorageExecutor) {
+		executor.ctx = ctx
 	}
+}
+
+func WithAzureStorageContextID(contextID string) AzureStorageOption {
+	return func(executor *azureStorageExecutor) {
+		executor.contextID = contextID
+	}
+}
+
+func WithAzureStorageLogger(logger commons.Logger) AzureStorageOption {
+	return func(executor *azureStorageExecutor) {
+		executor.logger = logger
+	}
+}
+
+func WithAzureStorageConfiguration(configuration *internal_assistant_entity.AssistantConfiguration) AzureStorageOption {
+	return func(executor *azureStorageExecutor) {
+		executor.configuration = configuration
+	}
+}
+
+func WithAzureStorageCaller(caller internal_type.InternalCaller) AzureStorageOption {
+	return func(executor *azureStorageExecutor) {
+		executor.caller = caller
+	}
+}
+
+func WithAzureStorageAuth(auth types.SimplePrinciple) AzureStorageOption {
+	return func(executor *azureStorageExecutor) {
+		executor.auth = auth
+	}
+}
+
+func WithAzureStorageOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) AzureStorageOption {
+	return func(executor *azureStorageExecutor) {
+		executor.onPacket = onPacket
+	}
+}
+
+func NewAzureStorage(opts ...AzureStorageOption) (internal_type.ArtifactPushExecutor, error) {
+	executor := &azureStorageExecutor{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(executor)
+		}
+	}
+	if executor.ctx == nil {
+		executor.ctx = context.Background()
+	}
+	start := time.Now()
+	if executor.configuration == nil {
+		return nil, fmt.Errorf("artifact push storage azure-storage: configuration is required")
+	}
+	if executor.onPacket == nil {
+		return nil, fmt.Errorf("artifact push storage azure-storage: onPacket is required")
+	}
+	credentialID, _ := executor.configuration.GetOptions().GetUint64(azureStorageOptionCredentialIDKey)
+	if credentialID != 0 {
+		if executor.caller == nil {
+			return nil, fmt.Errorf("artifact push storage azure-storage: caller is required when credential_id is configured")
+		}
+		if executor.auth == nil {
+			return nil, fmt.Errorf("artifact push storage azure-storage: auth is required when credential_id is configured")
+		}
+	}
+	_ = executor.onPacket(executor.ctx,
+		internal_type.ObservabilityMetricRecordPacket{
+			ContextID: executor.contextID,
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewMetricStorageInitLatencyMs(time.Since(start), observability.Attributes{
+				"provider":         executor.configuration.Provider,
+				"configuration_id": fmt.Sprintf("%d", executor.configuration.Id),
+				"executor":         executor.Name(),
+			}),
+		},
+		internal_type.ObservabilityLogRecordPacket{
+			ContextID: executor.contextID,
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.RecordLog{
+				Level:   observability.LevelInfo,
+				Message: fmt.Sprintf("%s: initialization completed", executor.Name()),
+				Attributes: observability.Attributes{
+					"component":        observability.ComponentStorage.String(),
+					"operation":        "initialize_executor",
+					"provider":         executor.configuration.Provider,
+					"configuration_id": fmt.Sprintf("%d", executor.configuration.Id),
+					"context_id":       executor.contextID,
+					"options":          observability.AttributeValue(executor.configuration.GetOptions()),
+				},
+				OccurredAt: time.Now(),
+			},
+		},
+	)
+	return executor, nil
 }
 
 func (e *azureStorageExecutor) Name() string {

@@ -9,9 +9,11 @@ package internal_artifact
 import (
 	"context"
 	"fmt"
+	"time"
 
 	internal_artifact_storage "github.com/rapidaai/api/assistant-api/internal/artifact/storage"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
@@ -22,20 +24,128 @@ const (
 	providerAzureStorage = "azure-storage"
 )
 
-func NewExecutor(
-	logger commons.Logger,
-	_ context.Context,
-	configuration *internal_assistant_entity.AssistantConfiguration,
-	caller internal_type.InternalCaller,
-	auth types.SimplePrinciple,
-	onPacket func(context.Context, ...internal_type.Packet) error,
-) (internal_type.ArtifactPushExecutor, error) {
-	switch configuration.Provider {
+type options struct {
+	ctx           context.Context
+	contextID     string
+	logger        commons.Logger
+	configuration *internal_assistant_entity.AssistantConfiguration
+	caller        internal_type.InternalCaller
+	auth          types.SimplePrinciple
+	onPacket      func(context.Context, ...internal_type.Packet) error
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithContextID(contextID string) Option {
+	return func(options *options) {
+		options.contextID = contextID
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithConfiguration(configuration *internal_assistant_entity.AssistantConfiguration) Option {
+	return func(options *options) {
+		options.configuration = configuration
+	}
+}
+
+func WithCaller(caller internal_type.InternalCaller) Option {
+	return func(options *options) {
+		options.caller = caller
+	}
+}
+
+func WithAuth(auth types.SimplePrinciple) Option {
+	return func(options *options) {
+		options.auth = auth
+	}
+}
+
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
+	return func(options *options) {
+		options.onPacket = onPacket
+	}
+}
+
+func New(opts ...Option) (internal_type.ArtifactPushExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+	start := time.Now()
+	if options.configuration == nil {
+		return nil, fmt.Errorf("artifact push storage: configuration is required")
+	}
+	switch options.configuration.Provider {
 	case providerAWS:
-		return internal_artifact_storage.NewAWSExecutor(logger, configuration, caller, auth, onPacket), nil
+		return internal_artifact_storage.NewAWS(
+			internal_artifact_storage.WithAWSContext(options.ctx),
+			internal_artifact_storage.WithAWSContextID(options.contextID),
+			internal_artifact_storage.WithAWSLogger(options.logger),
+			internal_artifact_storage.WithAWSConfiguration(options.configuration),
+			internal_artifact_storage.WithAWSCaller(options.caller),
+			internal_artifact_storage.WithAWSAuth(options.auth),
+			internal_artifact_storage.WithAWSOnPacket(options.onPacket),
+		)
 	case providerAzureStorage:
-		return internal_artifact_storage.NewAzureStorageExecutor(logger, configuration, caller, auth, onPacket), nil
+		return internal_artifact_storage.NewAzureStorage(
+			internal_artifact_storage.WithAzureStorageContext(options.ctx),
+			internal_artifact_storage.WithAzureStorageContextID(options.contextID),
+			internal_artifact_storage.WithAzureStorageLogger(options.logger),
+			internal_artifact_storage.WithAzureStorageConfiguration(options.configuration),
+			internal_artifact_storage.WithAzureStorageCaller(options.caller),
+			internal_artifact_storage.WithAzureStorageAuth(options.auth),
+			internal_artifact_storage.WithAzureStorageOnPacket(options.onPacket),
+		)
 	default:
-		return nil, fmt.Errorf("artifact push storage: unsupported provider %q", configuration.Provider)
+		err := fmt.Errorf("artifact push storage: unsupported provider %q", options.configuration.Provider)
+		if options.onPacket != nil {
+			_ = options.onPacket(options.ctx,
+				internal_type.ObservabilityMetricRecordPacket{
+					ContextID: options.contextID,
+					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Record: observability.NewMetricStorageInitLatencyMs(time.Since(start), observability.Attributes{
+						"provider":         options.configuration.Provider,
+						"configuration_id": fmt.Sprintf("%d", options.configuration.Id),
+						"status":           "failed",
+					}),
+				},
+				internal_type.ObservabilityLogRecordPacket{
+					ContextID: options.contextID,
+					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Record: observability.RecordLog{
+						Level:   observability.LevelError,
+						Message: "External artifact storage executor initialization failed",
+						Attributes: observability.Attributes{
+							"component":        observability.ComponentStorage.String(),
+							"operation":        "initialize_executor",
+							"provider":         options.configuration.Provider,
+							"configuration_id": fmt.Sprintf("%d", options.configuration.Id),
+							"context_id":       options.contextID,
+							"error":            err.Error(),
+							"error_type":       fmt.Sprintf("%T", err),
+						},
+						OccurredAt: time.Now(),
+					},
+				},
+			)
+		}
+		return nil, err
 	}
 }

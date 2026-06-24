@@ -13,11 +13,6 @@ import (
 )
 
 type ToolExecutor interface {
-
-	// init tool executor
-	//  get all the tools that is required for the assistant and intialize or do the dirty work that
-	// optimize the execution or etc
-	Initialize(ctx context.Context, communication internal_type.Communication) error
 	/**
 	 * GetFunctionDefinitions retrieves function definitions based on the provided communication.
 	 *

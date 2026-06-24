@@ -34,7 +34,7 @@ func newTestOptions(tb testing.TB, threshold float64) utils.Option {
 func newFireRedOrSkip(t *testing.T, threshold float64, cb func(ctx context.Context, pkt ...internal_type.Packet) error) *FireRedVAD {
 	logger, _ := commons.NewApplicationLogger()
 	opts := newTestOptions(t, threshold)
-	vad, err := NewFireRedVAD(t.Context(), logger, cb, opts)
+	vad, err := newFireRedVADForTest(t.Context(), logger, cb, opts)
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 			t.Skipf("firered model not available: %v", err)
@@ -70,7 +70,7 @@ func generateNoise(samples int) internal_type.UserAudioReceivedPacket {
 
 // Core functionality tests
 
-func TestNewFireRedVAD_DefaultThreshold(t *testing.T) {
+func TestNew_DefaultThreshold(t *testing.T) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 
 	vad := newFireRedOrSkip(t, -1, callback)
@@ -88,7 +88,7 @@ func TestFireRedVAD_Name(t *testing.T) {
 	assert.Equal(t, "firered_vad", vad.Name())
 }
 
-func TestNewFireRedVAD_EmitsInitializationObservability(t *testing.T) {
+func TestNew_EmitsInitializationObservability(t *testing.T) {
 	var packets []internal_type.Packet
 	callback := func(_ context.Context, pkt ...internal_type.Packet) error {
 		packets = append(packets, pkt...)
@@ -207,7 +207,7 @@ func TestFireRedVAD_Close_Idempotent(t *testing.T) {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	opts := newTestOptions(t, 0.5)
 
-	vad, err := NewFireRedVAD(t.Context(), logger, callback, opts)
+	vad, err := newFireRedVADForTest(t.Context(), logger, callback, opts)
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 			t.Skipf("firered model not available: %v", err)
@@ -229,7 +229,7 @@ func TestFireRedVAD_Close_EmitsDurationUsageAndClosedEvent(t *testing.T) {
 	}
 	opts := newTestOptions(t, 0.5)
 
-	vad, err := NewFireRedVAD(t.Context(), logger, callback, opts)
+	vad, err := newFireRedVADForTest(t.Context(), logger, callback, opts)
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 			t.Skipf("firered model not available: %v", err)

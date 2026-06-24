@@ -23,7 +23,7 @@ func newBenchmarkFireRedVAD(b *testing.B, threshold float64) *FireRedVAD {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	opts := newTestOptions(b, threshold)
 
-	vad, err := NewFireRedVAD(b.Context(), logger, callback, opts)
+	vad, err := newFireRedVADForTest(b.Context(), logger, callback, opts)
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 			b.Skipf("firered model not available: %v", err)
@@ -192,7 +192,7 @@ func BenchmarkFireRedVAD_Process_Parallel_2Streams(b *testing.B) {
 	vads := make([]*FireRedVAD, 2)
 	for i := 0; i < 2; i++ {
 		callback := func(context.Context, ...internal_type.Packet) error { return nil }
-		vad, err := NewFireRedVAD(b.Context(), logger, callback, opts)
+		vad, err := newFireRedVADForTest(b.Context(), logger, callback, opts)
 		if err != nil {
 			if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 				b.Skipf("firered model not available: %v", err)
@@ -227,7 +227,7 @@ func BenchmarkFireRedVAD_Process_Parallel_8Streams(b *testing.B) {
 	vads := make([]*FireRedVAD, 8)
 	for i := 0; i < 8; i++ {
 		callback := func(context.Context, ...internal_type.Packet) error { return nil }
-		vad, err := NewFireRedVAD(b.Context(), logger, callback, opts)
+		vad, err := newFireRedVADForTest(b.Context(), logger, callback, opts)
 		if err != nil {
 			if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 				b.Skipf("firered model not available: %v", err)
@@ -321,7 +321,7 @@ func BenchmarkFireRedVAD_Initialization(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		vad, err := NewFireRedVAD(b.Context(), logger, callback, opts)
+		vad, err := newFireRedVADForTest(b.Context(), logger, callback, opts)
 		if err != nil {
 			if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
 				b.Skipf("firered model not available: %v", err)

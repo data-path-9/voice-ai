@@ -1297,22 +1297,16 @@ func (h requestorDispatchHandler) HandleConversationRecordingCompleted(ctx conte
 		Scope:     internal_type.ObservabilityRecordScopeConversation,
 		Record:    observability.NewConversationEventRecord(observability.RecordingCompleted, nil),
 	})
-	if len(h.r.artifactPushExecutors) > 0 {
-		input := internal_type.ArtifactPushInput{
-			ContextID: p.ContextID,
-			Artifacts: []internal_type.ArtifactPushArtifact{
-				{Name: "user", Type: "recording", ContentType: "audio/wav", Content: p.Audio.UserAudio},
-				{Name: "assistant", Type: "recording", ContentType: "audio/wav", Content: p.Audio.AssistantAudio},
-				{Name: "conversation", Type: "recording", ContentType: "audio/wav", Content: p.Audio.MixedAudio},
-			},
-		}
+	if h.r.artifactPushExecutors != nil {
 		for _, artifactPushExecutor := range h.r.artifactPushExecutors {
-			if artifactPushExecutor == nil {
-				continue
-			}
-			if _, err := artifactPushExecutor.Execute(ctx, input); err != nil {
-				h.r.logger.Warnw("external artifact push failed", "executor", artifactPushExecutor.Name(), "error", err)
-			}
+			_, _ = artifactPushExecutor.Execute(ctx, internal_type.ArtifactPushInput{
+				ContextID: p.ContextID,
+				Artifacts: []internal_type.ArtifactPushArtifact{
+					{Name: "user", Type: "recording", ContentType: "audio/wav", Content: p.Audio.UserAudio},
+					{Name: "assistant", Type: "recording", ContentType: "audio/wav", Content: p.Audio.AssistantAudio},
+					{Name: "conversation", Type: "recording", ContentType: "audio/wav", Content: p.Audio.MixedAudio},
+				},
+			})
 		}
 	}
 	if err := h.r.CreateConversationRecording(ctx, p.Audio.UserAudio, p.Audio.AssistantAudio, p.Audio.MixedAudio); err != nil {
@@ -1648,33 +1642,67 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 		internal_type.InitializeSessionRuntimePacket{ContextID: vl.ContextID, Config: vl.Config})
 }
 func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Context, p internal_type.InitializeSessionRuntimePacket) {
-	h.r.artifactPushExecutors = make([]internal_type.ArtifactPushExecutor, 0, len(h.r.assistant.StorageConfigurations))
-	for _, storageConfiguration := range h.r.assistant.StorageConfigurations {
-		exec, err := internal_artifact.NewExecutor(h.r.logger, ctx, storageConfiguration, h.r, h.r.Auth(), h.r.OnPacket)
-		if err != nil {
-			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-				ContextID: p.ContextID,
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.RecordLog{
-					Level:   observability.LevelError,
-					Message: "External artifact storage executor initialization failed",
-					Attributes: observability.Attributes{
-						"component":        observability.ComponentStorage.String(),
-						"operation":        "initialize_executor",
-						"packet":           "InitializeSessionRuntimePacket",
-						"context_id":       p.ContextID,
-						"provider":         storageConfiguration.Provider,
-						"configuration_id": fmt.Sprintf("%d", storageConfiguration.Id),
-						"error":            err.Error(),
-						"error_type":       fmt.Sprintf("%T", err),
-					},
-				},
-			})
-			continue
-		}
-		h.r.artifactPushExecutors = append(h.r.artifactPushExecutors, exec)
+	// start running low dispatcher
+	go h.r.runLowDispatcher(h.r.sessionCtx)
+
+	// input normalizer
+	if err := h.r.inputNormalizer.Initialize(ctx, h.r, p.Config); err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageInputNormalizer,
+			Error:     err,
+		})
+		return
 	}
-	recordingExecutor, err := internal_audio_recorder.GetConversationRecordingExecutor(p.ContextID, h.r.OnPacket)
+
+	// output normalizer
+	if err := h.r.outputNormalizer.Initialize(ctx, h.r, p.Config); err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageOutputNormalizer,
+			Error:     err,
+		})
+		return
+	}
+
+	//
+	h.r.OnPacket(
+		ctx,
+		internal_type.ObservabilityMetricRecordPacket{
+			ContextID: p.ContextID,
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewConversationMetricRecord([]*protos.Metric{{
+				Name:        type_enums.CONVERSATION_STATUS.String(),
+				Value:       type_enums.CONVERSATION_IN_PROGRESS.String(),
+				Description: "Conversation is currently in progress",
+			}}),
+		},
+		internal_type.InitializeConversationRecordingExecutorPacket{
+			ContextID: p.ContextID,
+			Config:    p.Config,
+		},
+		internal_type.InitializeArtifactPushExecutorPacket{
+			ContextID: p.ContextID,
+			Config:    p.Config,
+		},
+		internal_type.InitializeAnalysisExecutorPacket{
+			ContextID: p.ContextID,
+			Config:    p.Config,
+		},
+		internal_type.InitializeAuthenticationPacket{
+			ContextID: p.ContextID,
+			Config:    p.Config,
+		},
+	)
+
+}
+
+func (h requestorDispatchHandler) HandleInitializeConversationRecordingExecutor(ctx context.Context, p internal_type.InitializeConversationRecordingExecutorPacket) {
+	recordingExecutor, err := internal_audio_recorder.New(
+		internal_audio_recorder.WithContext(ctx),
+		internal_audio_recorder.WithContextID(p.ContextID),
+		internal_audio_recorder.WithOnPacket(h.r.OnPacket),
+	)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -1684,13 +1712,38 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		return
 	}
 	h.r.conversationRecordingExecutor = recordingExecutor
-	h.r.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
-		ContextID: p.ContextID,
-		Scope:     internal_type.ObservabilityRecordScopeConversation,
-		Record:    observability.NewConversationEventRecord(observability.RecordingStarted, nil),
-	})
+}
+
+func (h requestorDispatchHandler) HandleInitializeArtifactPushExecutor(ctx context.Context, p internal_type.InitializeArtifactPushExecutorPacket) {
+	h.r.artifactPushExecutors = make([]internal_type.ArtifactPushExecutor, 0, len(h.r.assistant.StorageConfigurations))
+	for _, storageConfiguration := range h.r.assistant.StorageConfigurations {
+		exec, err := internal_artifact.New(
+			internal_artifact.WithContext(ctx),
+			internal_artifact.WithContextID(p.ContextID),
+			internal_artifact.WithLogger(h.r.logger),
+			internal_artifact.WithConfiguration(storageConfiguration),
+			internal_artifact.WithCaller(h.r),
+			internal_artifact.WithAuth(h.r.Auth()),
+			internal_artifact.WithOnPacket(h.r.OnPacket),
+		)
+		if err != nil {
+			continue
+		}
+		h.r.artifactPushExecutors = append(h.r.artifactPushExecutors, exec)
+	}
+}
+
+func (h requestorDispatchHandler) HandleInitializeAnalysisExecutor(ctx context.Context, p internal_type.InitializeAnalysisExecutorPacket) {
+	h.r.assistantAnalyseExecutors = make([]internal_type.AnalysisExecutor, 0, len(h.r.assistant.AnalysisConfigurations))
 	for _, analysis := range h.r.assistant.AnalysisConfigurations {
-		exec, err := internal_analysis.NewExecutor(h.r.logger, ctx, analysis, h.r)
+		exec, err := internal_analysis.New(
+			internal_analysis.WithLogger(h.r.logger),
+			internal_analysis.WithContext(ctx),
+			internal_analysis.WithContextID(p.ContextID),
+			internal_analysis.WithConfiguration(analysis),
+			internal_analysis.WithCaller(h.r),
+			internal_analysis.WithOnPacket(h.r.OnPacket),
+		)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,
@@ -1701,9 +1754,19 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 		}
 		h.r.assistantAnalyseExecutors = append(h.r.assistantAnalyseExecutors, exec)
 	}
+}
 
+func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Context, p internal_type.InitializeAuthenticationPacket) {
 	if h.r.assistant.AuthenticationConfiguration != nil {
-		authExec, err := internal_authentication.NewExecutor(h.r.logger, ctx, h.r.assistant.AuthenticationConfiguration, h.r, h.r)
+		authExecutor, err := internal_authentication.New(
+			internal_authentication.WithLogger(h.r.logger),
+			internal_authentication.WithContext(ctx),
+			internal_authentication.WithContextID(p.ContextID),
+			internal_authentication.WithConfiguration(h.r.assistant.AuthenticationConfiguration),
+			internal_authentication.WithCallback(h.r),
+			internal_authentication.WithCaller(h.r),
+			internal_authentication.WithOnPacket(h.r.OnPacket),
+		)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,
@@ -1712,55 +1775,15 @@ func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Con
 			})
 			return
 		}
-		h.r.authenticationExecutor = authExec
+		h.r.authenticationExecutor = authExecutor
 	}
-
-	if err := h.r.inputNormalizer.Initialize(ctx, h.r, p.Config); err != nil {
-		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
-			ContextID: p.ContextID,
-			Stage:     internal_type.InitializationStageInputNormalizer,
-			Error:     err,
-		})
-		return
-	}
-
-	if err := h.r.outputNormalizer.Initialize(ctx, h.r, p.Config); err != nil {
-		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
-			ContextID: p.ContextID,
-			Stage:     internal_type.InitializationStageOutputNormalizer,
-			Error:     err,
-		})
-		return
-	}
-
-	// start accepting input as conversation is inilize properly
-	go h.r.runLowDispatcher(h.r.sessionCtx)
-	if h.r.metrics == nil {
-		h.r.metrics = make(map[string]*protos.Metric)
-	}
-	h.r.metrics[type_enums.CONVERSATION_STATUS.String()] = &protos.Metric{
-		Name:        type_enums.CONVERSATION_STATUS.String(),
-		Value:       type_enums.CONVERSATION_IN_PROGRESS.String(),
-		Description: "Conversation is currently in progress",
-	}
-	h.r.OnPacket(ctx,
-		internal_type.ObservabilityMetricRecordPacket{
-			ContextID: p.ContextID,
-			Scope:     internal_type.ObservabilityRecordScopeConversation,
-			Record: observability.NewConversationMetricRecord([]*protos.Metric{{
-				Name:        type_enums.CONVERSATION_STATUS.String(),
-				Value:       type_enums.CONVERSATION_IN_PROGRESS.String(),
-				Description: "Conversation is currently in progress",
-			}}),
-		},
-		internal_type.InitializeAuthenticationPacket{
-			ContextID: p.ContextID,
-			Config:    p.Config,
-		},
-	)
-
+	h.r.OnPacket(ctx, internal_type.ExecuteAuthenticationPacket{
+		ContextID: p.ContextID,
+		Config:    p.Config,
+	})
 }
-func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Context, p internal_type.InitializeAuthenticationPacket) {
+
+func (h requestorDispatchHandler) HandleExecuteAuthentication(ctx context.Context, p internal_type.ExecuteAuthenticationPacket) {
 	if h.r.authenticationExecutor == nil {
 		h.r.OnPacket(ctx, internal_type.SessionAuthenticationSucceededPacket{
 			ContextID:      p.ContextID,
@@ -1795,7 +1818,7 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 					Attributes: observability.Attributes{
 						"component":  observability.ComponentConversation.String(),
 						"operation":  "build_authentication_arguments",
-						"packet":     "InitializeSessionAuthenticationPacket",
+						"packet":     "ExecuteAuthenticationPacket",
 						"context_id": p.ContextID,
 						"error":      err.Error(),
 						"error_type": fmt.Sprintf("%T", err),
@@ -1831,7 +1854,7 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 				Attributes: observability.Attributes{
 					"component":  observability.ComponentConversation.String(),
 					"operation":  "execute_authentication",
-					"packet":     "InitializeAuthenticationPacket",
+					"packet":     "ExecuteAuthenticationPacket",
 					"context_id": p.ContextID,
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
@@ -1947,7 +1970,13 @@ func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx conte
 }
 
 func (h requestorDispatchHandler) HandleInitializeAssistantExecutorPacket(ctx context.Context, p internal_type.InitializeAssistantExecutorPacket) {
-	assistantExec, err := internal_llm.NewExecutor(h.r.logger, ctx, h.r, p.Config)
+	assistantExec, err := internal_llm.New(
+		internal_llm.WithContext(ctx),
+		internal_llm.WithLogger(h.r.logger),
+		internal_llm.WithAssistant(h.r.Assistant()),
+		internal_llm.WithCommunication(h.r),
+		internal_llm.WithConfiguration(p.Config),
+	)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -2026,10 +2055,12 @@ func (h requestorDispatchHandler) HandleInitializeDenoise(ctx context.Context, p
 		return
 	}
 	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
-	denoise, err := internal_denoiser.GetDenoiser(
-		ctx, h.r.logger,
-		h.r.OnPacket,
-		options)
+	denoise, err := internal_denoiser.New(
+		internal_denoiser.WithContext(ctx),
+		internal_denoiser.WithLogger(h.r.logger),
+		internal_denoiser.WithOnPacket(h.r.OnPacket),
+		internal_denoiser.WithOptions(options),
+	)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -2108,7 +2139,12 @@ func (h requestorDispatchHandler) HandleInitializeVoiceActivityDetection(ctx con
 		}
 
 		options := utils.MergeMaps(h.r.options, cfg.GetOptions())
-		vad, err := internal_vad.GetVAD(ctx, h.r.logger, h.r.OnPacket, options)
+		vad, err := internal_vad.New(
+			internal_vad.WithContext(ctx),
+			internal_vad.WithLogger(h.r.logger),
+			internal_vad.WithOnPacket(h.r.OnPacket),
+			internal_vad.WithOptions(options),
+		)
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,
@@ -2132,10 +2168,12 @@ func (h requestorDispatchHandler) HandleInitializeEndOfSpeech(ctx context.Contex
 		return
 	}
 	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
-	endOfSpeech, err := internal_end_of_speech.GetEndOfSpeech(ctx,
-		h.r.logger,
-		h.r.OnPacket,
-		options)
+	endOfSpeech, err := internal_end_of_speech.New(
+		internal_end_of_speech.WithContext(ctx),
+		internal_end_of_speech.WithLogger(h.r.logger),
+		internal_end_of_speech.WithOnPacket(h.r.OnPacket),
+		internal_end_of_speech.WithOptions(options),
+	)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -2377,7 +2415,12 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeVoiceActivityDetecti
 		return
 	}
 	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
-	vad, err := internal_vad.GetVAD(ctx, h.r.logger, h.r.OnPacket, options)
+	vad, err := internal_vad.New(
+		internal_vad.WithContext(ctx),
+		internal_vad.WithLogger(h.r.logger),
+		internal_vad.WithOnPacket(h.r.OnPacket),
+		internal_vad.WithOptions(options),
+	)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID:  p.ContextID,
@@ -2401,9 +2444,12 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeDenoise(ctx context.
 	}
 
 	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
-	denoise, err := internal_denoiser.GetDenoiser(ctx, h.r.logger,
-		func(pctx context.Context, pkt ...internal_type.Packet) error { return h.r.OnPacket(pctx, pkt...) },
-		options)
+	denoise, err := internal_denoiser.New(
+		internal_denoiser.WithContext(ctx),
+		internal_denoiser.WithLogger(h.r.logger),
+		internal_denoiser.WithOnPacket(h.r.OnPacket),
+		internal_denoiser.WithOptions(options),
+	)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID:  p.ContextID,
@@ -2426,10 +2472,12 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeEndOfSpeech(ctx cont
 		return
 	}
 	options := utils.MergeMaps(h.r.options, cfg.GetOptions())
-	endOfSpeech, err := internal_end_of_speech.GetEndOfSpeech(ctx,
-		h.r.logger,
-		h.r.OnPacket,
-		options)
+	endOfSpeech, err := internal_end_of_speech.New(
+		internal_end_of_speech.WithContext(ctx),
+		internal_end_of_speech.WithLogger(h.r.logger),
+		internal_end_of_speech.WithOnPacket(h.r.OnPacket),
+		internal_end_of_speech.WithOptions(options),
+	)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID:  p.ContextID,
@@ -2758,8 +2806,55 @@ func (h requestorDispatchHandler) HandleFinalizeSpeechToText(ctx context.Context
 	h.r.OnPacket(ctx, internal_type.FinalizeAuthenticationPacket{ContextID: p.ContextID})
 }
 func (h requestorDispatchHandler) HandleFinalizeAuthentication(ctx context.Context, p internal_type.FinalizeAuthenticationPacket) {
+	if h.r.authenticationExecutor != nil {
+		if err := h.r.authenticationExecutor.Close(ctx); err != nil {
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Authentication executor close failed; shutdown may leave resources open",
+					Attributes: observability.Attributes{
+						"component":  observability.ComponentConversation.String(),
+						"operation":  "finalize",
+						"packet":     "FinalizeAuthenticationPacket",
+						"context_id": p.ContextID,
+						"error":      err.Error(),
+						"error_type": fmt.Sprintf("%T", err),
+					},
+				},
+			})
+		}
+		h.r.authenticationExecutor = nil
+	}
+	h.r.OnPacket(ctx, internal_type.FinalizeConversationRecordingExecutorPacket{ContextID: p.ContextID})
+}
+
+func (h requestorDispatchHandler) HandleFinalizeConversationRecordingExecutor(ctx context.Context, p internal_type.FinalizeConversationRecordingExecutorPacket) {
+	if conversationRecordingExecutor := h.r.conversationRecordingExecutor; conversationRecordingExecutor != nil {
+		if err := conversationRecordingExecutor.Close(ctx); err != nil {
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Recorded audio persistence failed; recording artifact may be incomplete",
+					Attributes: observability.Attributes{
+						"component":  observability.ComponentRecording.String(),
+						"operation":  "finalize",
+						"packet":     "FinalizeConversationRecordingExecutorPacket",
+						"context_id": p.ContextID,
+						"error":      err.Error(),
+						"error_type": fmt.Sprintf("%T", err),
+					},
+				},
+			})
+		}
+		h.r.conversationRecordingExecutor = nil
+	}
 	h.r.OnPacket(ctx, internal_type.FinalizeSessionRuntimePacket{ContextID: p.ContextID})
 }
+
 func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Context, p internal_type.FinalizeSessionRuntimePacket) {
 	var closeGroup sync.WaitGroup
 	if outputNormalizer := h.r.outputNormalizer; outputNormalizer != nil {
@@ -2779,53 +2874,22 @@ func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Conte
 			h.r.inputNormalizer = nil
 		})
 	}
-	//
-	if conversationRecordingExecutor := h.r.conversationRecordingExecutor; conversationRecordingExecutor != nil {
-		closeGroup.Add(1)
-		utils.Go(ctx, func() {
-			defer closeGroup.Done()
-			if err := conversationRecordingExecutor.Close(ctx); err != nil {
-				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-					ContextID: p.ContextID,
-					Scope:     internal_type.ObservabilityRecordScopeConversation,
-					Record: observability.RecordLog{
-						Level:   observability.LevelError,
-						Message: "Recorded audio persistence failed; recording artifact may be incomplete",
-						Attributes: observability.Attributes{
-							"component":  observability.ComponentRecording.String(),
-							"operation":  "finalize",
-							"packet":     "FinalizeSessionRuntimePacket",
-							"context_id": p.ContextID,
-							"error":      err.Error(),
-							"error_type": fmt.Sprintf("%T", err),
-						},
-					},
-				})
-			}
-			h.r.conversationRecordingExecutor = nil
-		})
-	}
-	if len(h.r.artifactPushExecutors) > 0 {
-		artifactPushExecutors := h.r.artifactPushExecutors
-		closeGroup.Add(1)
-		utils.Go(ctx, func() {
-			defer closeGroup.Done()
-			for _, artifactPushExecutor := range artifactPushExecutors {
-				artifactPushExecutor.Close(ctx)
-			}
-			h.r.artifactPushExecutors = nil
-		})
-	}
 	closeGroup.Wait()
-	h.r.OnPacket(ctx, internal_type.FinalizeConversationPacket{ContextID: p.ContextID})
+	h.r.OnPacket(ctx, internal_type.FinalizeArtifactPushExecutorPacket{ContextID: p.ContextID})
 
 }
-func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context, p internal_type.FinalizeConversationPacket) {
-	if len(h.r.assistantAnalyseExecutors) > 0 {
-		conversationID := uint64(0)
-		if h.r.Conversation() != nil {
-			conversationID = h.r.Conversation().Id
+func (h requestorDispatchHandler) HandleFinalizeArtifactPushExecutor(ctx context.Context, p internal_type.FinalizeArtifactPushExecutorPacket) {
+	if h.r.artifactPushExecutors != nil {
+		for _, artifactPushExecutor := range h.r.artifactPushExecutors {
+			_ = artifactPushExecutor.Close(ctx)
 		}
+		h.r.artifactPushExecutors = nil
+	}
+	h.r.OnPacket(ctx, internal_type.ExecuteAnalysisPacket{ContextID: p.ContextID})
+}
+
+func (h requestorDispatchHandler) HandleExecuteAnalysis(ctx context.Context, p internal_type.ExecuteAnalysisPacket) {
+	if h.r.assistantAnalyseExecutors != nil {
 		source := variable.NewCommunicationSource(h.r)
 		registry := internal_namespace.NewDefaultRegistry().With("event", &internal_namespace.EventNamespace{})
 		for _, initializedAnalysis := range h.r.assistantAnalyseExecutors {
@@ -2841,7 +2905,7 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 							Attributes: observability.Attributes{
 								"component":  observability.ComponentConversation.String(),
 								"operation":  "build_analysis_arguments",
-								"packet":     "FinalizeConversationPacket",
+								"packet":     "ExecuteAnalysisPacket",
 								"context_id": p.ContextID,
 								"name":       initializedAnalysis.Name(),
 								"event":      utils.ConversationCompleted.Get(),
@@ -2853,10 +2917,9 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 					continue
 				}
 				input := internal_type.AnalysisInput{
-					ContextID:      p.ContextID,
-					Arguments:      registry.Apply(arguments, source, variable.ResolveContext{Event: utils.ConversationCompleted.Get()}),
-					ConversationID: conversationID,
-					Auth:           h.r.auth,
+					ContextID: p.ContextID,
+					Arguments: registry.Apply(arguments, source, variable.ResolveContext{Event: utils.ConversationCompleted.Get()}),
+					Auth:      h.r.auth,
 				}
 				output, err := initializedAnalysis.Execute(ctx, input)
 				if err != nil {
@@ -2869,7 +2932,7 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 							Attributes: observability.Attributes{
 								"component":  observability.ComponentConversation.String(),
 								"operation":  "execute_analysis",
-								"packet":     "FinalizeConversationPacket",
+								"packet":     "ExecuteAnalysisPacket",
 								"context_id": p.ContextID,
 								"name":       initializedAnalysis.Name(),
 								"event":      utils.ConversationCompleted.Get(),
@@ -2880,25 +2943,21 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 					})
 					continue
 				}
-				metadata := output.Metadata
-				if metadata != nil && metadata.GetKey() != "" {
-					if h.r.metadata == nil {
-						h.r.metadata = make(map[string]interface{})
-					}
-					h.r.metadata[metadata.GetKey()] = metadata.GetValue()
-					metadataContextID := p.ContextID
-					if conversationID != 0 {
-						metadataContextID = fmt.Sprintf("%d", conversationID)
-					}
+				if output.Metadata != nil {
+					h.r.metadata[output.Metadata.GetKey()] = output.Metadata.GetValue()
 					h.r.OnPacket(ctx, internal_type.ObservabilityMetadataRecordPacket{
-						ContextID: metadataContextID,
+						ContextID: p.ContextID,
 						Scope:     internal_type.ObservabilityRecordScopeConversation,
-						Record:    observability.NewConversationMetadataRecord([]*protos.Metadata{metadata}),
+						Record:    observability.NewConversationMetadataRecord([]*protos.Metadata{output.Metadata}),
 					})
 				}
 			}
 		}
 	}
+	h.r.OnPacket(ctx, internal_type.FinalizeConversationPacket{ContextID: p.ContextID})
+}
+
+func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context, p internal_type.FinalizeConversationPacket) {
 	if h.r.metrics == nil {
 		h.r.metrics = make(map[string]*protos.Metric)
 	}
@@ -2954,54 +3013,37 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 		}
 	}
 
-	// running analysis to close
-	for _, analysis := range h.r.assistantAnalyseExecutors {
-		if err := analysis.Close(ctx); err != nil {
-			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-				ContextID: p.ContextID,
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.RecordLog{
-					Level:   observability.LevelError,
-					Message: "Analysis executor close failed; shutdown may leave resources open",
-					Attributes: observability.Attributes{
-						"component":  observability.ComponentConversation.String(),
-						"operation":  "finalize",
-						"packet":     "FinalizeConversationPacket",
-						"context_id": p.ContextID,
-						"name":       analysis.Name(),
-						"error":      err.Error(),
-						"error_type": fmt.Sprintf("%T", err),
-					},
-				},
-			})
-		}
-	}
+	h.r.OnPacket(ctx, internal_type.FinalizeAnalysisExecutorPacket{ContextID: p.ContextID})
+}
 
-	// assistant executor cleanup
-	if h.r.authenticationExecutor != nil {
-		if err := h.r.authenticationExecutor.Close(ctx); err != nil {
-			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-				ContextID: p.ContextID,
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.RecordLog{
-					Level:   observability.LevelError,
-					Message: "Authentication executor close failed; shutdown may leave resources open",
-					Attributes: observability.Attributes{
-						"component":  observability.ComponentConversation.String(),
-						"operation":  "finalize",
-						"packet":     "FinalizeConversationPacket",
-						"context_id": p.ContextID,
-						"error":      err.Error(),
-						"error_type": fmt.Sprintf("%T", err),
+func (h requestorDispatchHandler) HandleFinalizeAnalysisExecutor(ctx context.Context, p internal_type.FinalizeAnalysisExecutorPacket) {
+	if h.r.assistantAnalyseExecutors != nil {
+		for _, analysis := range h.r.assistantAnalyseExecutors {
+			if err := analysis.Close(ctx); err != nil {
+				h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+					ContextID: p.ContextID,
+					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Record: observability.RecordLog{
+						Level:   observability.LevelError,
+						Message: "Analysis executor close failed; shutdown may leave resources open",
+						Attributes: observability.Attributes{
+							"component":  observability.ComponentConversation.String(),
+							"operation":  "finalize",
+							"packet":     "FinalizeAnalysisExecutorPacket",
+							"context_id": p.ContextID,
+							"name":       analysis.Name(),
+							"error":      err.Error(),
+							"error_type": fmt.Sprintf("%T", err),
+						},
 					},
-				},
-			})
+				})
+			}
 		}
+		h.r.assistantAnalyseExecutors = nil
 	}
-
-	// trigger finalize
 	h.r.OnPacket(ctx, internal_type.FinalizeAssistantPacket{ContextID: p.ContextID})
 }
+
 func (h requestorDispatchHandler) HandleFinalizeAssistant(ctx context.Context, p internal_type.FinalizeAssistantPacket) {
 	if h.r.assistantExecutor != nil {
 		if err := h.r.assistantExecutor.Close(ctx); err != nil {

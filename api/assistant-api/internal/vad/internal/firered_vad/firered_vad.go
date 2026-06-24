@@ -56,21 +56,61 @@ type FireRedVAD struct {
 	vadStartedAt time.Time
 }
 
-// NewFireRedVAD creates a new FireRedVAD instance.
+type options struct {
+	ctx      context.Context
+	logger   commons.Logger
+	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error
+	options  utils.Option
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithOnPacket(onPacket func(ctx context.Context, pkt ...internal_type.Packet) error) Option {
+	return func(options *options) {
+		options.onPacket = onPacket
+	}
+}
+
+func WithOptions(opts utils.Option) Option {
+	return func(options *options) {
+		options.options = opts
+	}
+}
+
+// New creates a new FireRedVAD instance.
 // Input audio must be 16 kHz LINEAR16 mono — the platform's internal format.
-func NewFireRedVAD(
-	ctx context.Context,
-	logger commons.Logger,
-	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error,
-	options utils.Option,
-) (internal_type.VoiceActivityDetectorExecutor, error) {
+func New(opts ...Option) (internal_type.VoiceActivityDetectorExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+	if options.onPacket == nil {
+		return nil, fmt.Errorf("%s: onPacket is required", vadName)
+	}
 	start := time.Now()
 
 	modelPath := resolveModelPath()
 	detector, err := NewDetector(modelPath)
 	if err != nil {
-		if onPacket != nil {
-			_ = onPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+		if options.onPacket != nil {
+			_ = options.onPacket(options.ctx, internal_type.ObservabilityLogRecordPacket{
 				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
 					Level:   observability.LevelError,
@@ -78,7 +118,7 @@ func NewFireRedVAD(
 					Attributes: observability.Attributes{
 						"component": observability.ComponentVAD.String(),
 						"provider":  vadName,
-						"options":   observability.AttributeValue(options),
+						"options":   observability.AttributeValue(options.options),
 					},
 					OccurredAt: time.Now(),
 				},
@@ -87,12 +127,12 @@ func NewFireRedVAD(
 		return nil, fmt.Errorf("firered_vad: failed to create detector: %w", err)
 	}
 
-	ppCfg := resolvePostprocessorConfig(options)
+	ppCfg := resolvePostprocessorConfig(options.options)
 
 	vad := &FireRedVAD{
-		logger:        logger,
-		onPacket:      onPacket,
-		opts:          options,
+		logger:        options.logger,
+		onPacket:      options.onPacket,
+		opts:          options.options,
 		detector:      detector,
 		fbank:         NewFbankExtractor(),
 		postprocessor: NewPostprocessor(ppCfg),
@@ -102,12 +142,12 @@ func NewFireRedVAD(
 	}
 
 	go func() {
-		<-ctx.Done()
+		<-options.ctx.Done()
 		_ = vad.Close(context.Background())
 	}()
 
-	if onPacket != nil {
-		_ = onPacket(ctx,
+	if options.onPacket != nil {
+		_ = options.onPacket(options.ctx,
 			internal_type.ObservabilityMetricRecordPacket{
 				Scope:  internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.NewMetricVADInitLatencyMs(time.Since(start), observability.Attributes{"provider": vad.Name()}),

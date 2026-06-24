@@ -15,6 +15,7 @@ import (
 	"time"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/clients/rest"
 	"github.com/rapidaai/pkg/commons"
@@ -39,17 +40,110 @@ const (
 
 type runtimeExecutor struct {
 	logger        commons.Logger
+	ctx           context.Context
+	contextID     string
 	callback      internal_type.Callback
+	caller        internal_type.InternalCaller
 	authenticator *internal_assistant_entity.AssistantConfiguration
+	onPacket      func(context.Context, ...internal_type.Packet) error
 }
 
-// NewExecutor creates a fully wired HTTP authentication executor.
-func NewExecutor(logger commons.Logger, _ context.Context, authenticator *internal_assistant_entity.AssistantConfiguration, callback internal_type.Callback, _ internal_type.InternalCaller) (internal_type.AuthenticationExecutor, error) {
-	return &runtimeExecutor{
-		logger:        logger,
-		callback:      callback,
-		authenticator: authenticator,
-	}, nil
+type Option func(*runtimeExecutor)
+
+func WithLogger(logger commons.Logger) Option {
+	return func(executor *runtimeExecutor) {
+		executor.logger = logger
+	}
+}
+
+func WithContext(ctx context.Context) Option {
+	return func(executor *runtimeExecutor) {
+		executor.ctx = ctx
+	}
+}
+
+func WithContextID(contextID string) Option {
+	return func(executor *runtimeExecutor) {
+		executor.contextID = contextID
+	}
+}
+
+func WithConfiguration(authenticator *internal_assistant_entity.AssistantConfiguration) Option {
+	return func(executor *runtimeExecutor) {
+		executor.authenticator = authenticator
+	}
+}
+
+func WithCallback(callback internal_type.Callback) Option {
+	return func(executor *runtimeExecutor) {
+		executor.callback = callback
+	}
+}
+
+func WithCaller(caller internal_type.InternalCaller) Option {
+	return func(executor *runtimeExecutor) {
+		executor.caller = caller
+	}
+}
+
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
+	return func(executor *runtimeExecutor) {
+		executor.onPacket = onPacket
+	}
+}
+
+// New creates a fully wired HTTP authentication executor.
+func New(opts ...Option) (internal_type.AuthenticationExecutor, error) {
+	executor := &runtimeExecutor{ctx: context.Background()}
+	start := time.Now()
+	for _, opt := range opts {
+		if opt != nil {
+			opt(executor)
+		}
+	}
+	if executor.ctx == nil {
+		executor.ctx = context.Background()
+	}
+	if executor.callback != nil {
+		executor.onPacket = executor.callback.OnPacket
+	}
+	if executor.authenticator == nil {
+		return nil, fmt.Errorf("authentication http: configuration is required")
+	}
+	if executor.callback == nil {
+		return nil, fmt.Errorf("authentication http: callback is required")
+	}
+	if executor.onPacket != nil {
+		_ = executor.onPacket(executor.ctx,
+			internal_type.ObservabilityMetricRecordPacket{
+				ContextID: executor.contextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewMetricAuthenticationInitLatencyMs(time.Since(start), observability.Attributes{
+					"provider":         executor.authenticator.Provider,
+					"configuration_id": fmt.Sprintf("%d", executor.authenticator.Id),
+					"executor":         executor.Name(),
+				}),
+			},
+			internal_type.ObservabilityLogRecordPacket{
+				ContextID: executor.contextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelInfo,
+					Message: fmt.Sprintf("%s: initialization completed", executor.Name()),
+					Attributes: observability.Attributes{
+						"component":        observability.ComponentAuthentication.String(),
+						"operation":        "initialize_executor",
+						"provider":         executor.authenticator.Provider,
+						"configuration_id": fmt.Sprintf("%d", executor.authenticator.Id),
+						"context_id":       executor.contextID,
+						"options":          observability.AttributeValue(executor.Options()),
+					},
+					OccurredAt: time.Now(),
+				},
+			},
+		)
+	}
+	return executor, nil
 }
 
 func (e *runtimeExecutor) Name() string {

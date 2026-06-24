@@ -446,7 +446,7 @@ func TestLivekitEndOfSpeech_ObservabilityEventShape(t *testing.T) {
 		return nil
 	}
 
-	executor, err := NewLivekitEndOfSpeech(logger, callback, utils.Option{})
+	executor, err := newLivekitEndOfSpeechForTest(context.Background(), logger, callback, utils.Option{})
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestLivekitEndOfSpeech_ObservabilityLifecycleEvents(t *testing.T) {
 		return nil
 	}
 
-	executor, err := NewLivekitEndOfSpeech(logger, callback, utils.Option{})
+	executor, err := newLivekitEndOfSpeechForTest(context.Background(), logger, callback, utils.Option{})
 	require.NoError(t, err)
 
 	require.NoError(t, executor.Execute(context.Background(), internal_type.UserTextReceivedPacket{
