@@ -99,6 +99,7 @@ func (gr *genericRequestor) GetAssistant(
 		InjectTool:                   true,
 		InjectAnalysis:               true,
 		InjectAuthentication:         true,
+		InjectStorage:                true,
 		InjectConversations:          false,
 		InjectTag:                    false,
 	}

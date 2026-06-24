@@ -16,6 +16,7 @@ import (
 
 	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_analysis "github.com/rapidaai/api/assistant-api/internal/analysis"
+	internal_artifact "github.com/rapidaai/api/assistant-api/internal/artifact"
 	internal_audio "github.com/rapidaai/api/assistant-api/internal/audio"
 	internal_audio_recorder "github.com/rapidaai/api/assistant-api/internal/audio/recorder"
 	internal_authentication "github.com/rapidaai/api/assistant-api/internal/authentication"
@@ -1296,6 +1297,24 @@ func (h requestorDispatchHandler) HandleConversationRecordingCompleted(ctx conte
 		Scope:     internal_type.ObservabilityRecordScopeConversation,
 		Record:    observability.NewConversationEventRecord(observability.RecordingCompleted, nil),
 	})
+	if len(h.r.artifactPushExecutors) > 0 {
+		input := internal_type.ArtifactPushInput{
+			ContextID: p.ContextID,
+			Artifacts: []internal_type.ArtifactPushArtifact{
+				{Name: "user", Type: "recording", ContentType: "audio/wav", Content: p.Audio.UserAudio},
+				{Name: "assistant", Type: "recording", ContentType: "audio/wav", Content: p.Audio.AssistantAudio},
+				{Name: "conversation", Type: "recording", ContentType: "audio/wav", Content: p.Audio.MixedAudio},
+			},
+		}
+		for _, artifactPushExecutor := range h.r.artifactPushExecutors {
+			if artifactPushExecutor == nil {
+				continue
+			}
+			if _, err := artifactPushExecutor.Execute(ctx, input); err != nil {
+				h.r.logger.Warnw("external artifact push failed", "executor", artifactPushExecutor.Name(), "error", err)
+			}
+		}
+	}
 	if err := h.r.CreateConversationRecording(ctx, p.Audio.UserAudio, p.Audio.AssistantAudio, p.Audio.MixedAudio); err != nil {
 		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 			ContextID: p.ContextID,
@@ -1318,6 +1337,7 @@ func (h requestorDispatchHandler) HandleConversationRecordingCompleted(ctx conte
 		})
 	}
 }
+
 func (h requestorDispatchHandler) HandleMessageCreate(ctx context.Context, p internal_type.MessageCreatePacket) {
 	if err := h.r.onAddMessage(ctx, p); err != nil {
 		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
@@ -1628,6 +1648,32 @@ func (h requestorDispatchHandler) HandleInitializeConversation(ctx context.Conte
 		internal_type.InitializeSessionRuntimePacket{ContextID: vl.ContextID, Config: vl.Config})
 }
 func (h requestorDispatchHandler) HandleInitializeSessionRuntime(ctx context.Context, p internal_type.InitializeSessionRuntimePacket) {
+	h.r.artifactPushExecutors = make([]internal_type.ArtifactPushExecutor, 0, len(h.r.assistant.StorageConfigurations))
+	for _, storageConfiguration := range h.r.assistant.StorageConfigurations {
+		exec, err := internal_artifact.NewExecutor(h.r.logger, ctx, storageConfiguration, h.r, h.r.Auth(), h.r.OnPacket)
+		if err != nil {
+			h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				ContextID: p.ContextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "External artifact storage executor initialization failed",
+					Attributes: observability.Attributes{
+						"component":        observability.ComponentStorage.String(),
+						"operation":        "initialize_executor",
+						"packet":           "InitializeSessionRuntimePacket",
+						"context_id":       p.ContextID,
+						"provider":         storageConfiguration.Provider,
+						"configuration_id": fmt.Sprintf("%d", storageConfiguration.Id),
+						"error":            err.Error(),
+						"error_type":       fmt.Sprintf("%T", err),
+					},
+				},
+			})
+			continue
+		}
+		h.r.artifactPushExecutors = append(h.r.artifactPushExecutors, exec)
+	}
 	recordingExecutor, err := internal_audio_recorder.GetConversationRecordingExecutor(p.ContextID, h.r.OnPacket)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
@@ -2757,6 +2803,17 @@ func (h requestorDispatchHandler) HandleFinalizeSessionRuntime(ctx context.Conte
 				})
 			}
 			h.r.conversationRecordingExecutor = nil
+		})
+	}
+	if len(h.r.artifactPushExecutors) > 0 {
+		artifactPushExecutors := h.r.artifactPushExecutors
+		closeGroup.Add(1)
+		utils.Go(ctx, func() {
+			defer closeGroup.Done()
+			for _, artifactPushExecutor := range artifactPushExecutors {
+				artifactPushExecutor.Close(ctx)
+			}
+			h.r.artifactPushExecutors = nil
 		})
 	}
 	closeGroup.Wait()

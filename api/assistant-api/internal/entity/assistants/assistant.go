@@ -35,7 +35,8 @@ type Assistant struct {
 
 	AssistantTag *AssistantTag `json:"assistantTag" gorm:"foreignKey:AssistantId"`
 
-	AuthenticationConfiguration *AssistantConfiguration `json:"authenticationConfiguration" gorm:"-"`
+	AuthenticationConfiguration *AssistantConfiguration   `json:"authenticationConfiguration" gorm:"-"`
+	StorageConfigurations       []*AssistantConfiguration `json:"storageConfigurations" gorm:"-"`
 
 	// all the deployments only on need basis
 	AssistantDebuggerDeployment  *AssistantDebuggerDeployment                          `json:"debuggerDeployment"  gorm:"foreignKey:AssistantId"`

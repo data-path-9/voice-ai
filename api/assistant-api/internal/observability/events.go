@@ -26,6 +26,7 @@ const (
 	ComponentTool         ComponentName = "tool"
 	ComponentWebhook      ComponentName = "webhook"
 	ComponentRecording    ComponentName = "recording"
+	ComponentStorage      ComponentName = "storage"
 	ComponentSIP          ComponentName = "sip"
 	ComponentWebRTC       ComponentName = "webrtc"
 	ComponentUsage        ComponentName = "usage"

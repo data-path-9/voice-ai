@@ -453,6 +453,31 @@ func (eService *assistantService) Get(ctx context.Context,
 				assistant.AnalysisConfigurations = analysisConfigurations
 			})
 	}
+	if opts.InjectStorage {
+		wg.Add(1)
+		utils.Go(ctx,
+			func() {
+				defer wg.Done()
+				var storageConfigurations []*internal_assistant_entity.AssistantConfiguration
+				tx := db.
+					Preload("Options", "status = ?", type_enums.RECORD_ACTIVE).
+					Where("assistant_id = ? AND configuration_type = ? AND enabled = true AND status = ?",
+						assistantId,
+						internal_assistant_entity.AssistantConfigurationTypeStorage,
+						type_enums.RECORD_ACTIVE,
+					).
+					Find(&storageConfigurations)
+				if tx.Error != nil {
+					return
+				}
+				sort.SliceStable(storageConfigurations, func(i, j int) bool {
+					left, _ := storageConfigurations[i].GetOptions().GetUint64("execution_priority")
+					right, _ := storageConfigurations[j].GetOptions().GetUint64("execution_priority")
+					return left > right
+				})
+				assistant.StorageConfigurations = storageConfigurations
+			})
+	}
 	wg.Wait()
 	eService.logger.Benchmark("assistantService.Get", time.Since(start))
 	return assistant, nil

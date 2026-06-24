@@ -29,6 +29,7 @@ type GetAssistantOption struct {
 
 	InjectAnalysis       bool
 	InjectAuthentication bool
+	InjectStorage        bool
 }
 
 func NewDefaultGetAssistantOption() *GetAssistantOption {
@@ -44,6 +45,7 @@ func NewDefaultGetAssistantOption() *GetAssistantOption {
 		InjectTool:                   true,
 		InjectConversations:          true,
 		InjectAuthentication:         true,
+		InjectStorage:                true,
 	}
 }
 

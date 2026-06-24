@@ -13,10 +13,8 @@ import (
 	"github.com/rapidaai/protos"
 )
 
-// Executor is the generic contract for session-scoped executors.
-// P is the specific packet type the executor handles in Execute.
-// Construction (with full dependency wiring) happens in each implementation's
-// New<X>Executor function — there is no separate Initialize phase.
+// Executor is the generic contract for session-scoped packet handlers.
+// Construction is fully wired by each implementation's New<X>Executor.
 type Executor[P Packet] interface {
 	Name() string
 	Options() utils.Option
@@ -59,6 +57,33 @@ type AuthenticationOutput struct {
 	Options       map[string]interface{}
 }
 
+type ArtifactPushArtifact struct {
+	Name        string
+	Type        string
+	ContentType string
+	Content     []byte
+}
+
+type ArtifactPushInput struct {
+	ContextID string
+	Artifacts []ArtifactPushArtifact
+}
+
+type ArtifactPushResult struct {
+	Name           string
+	Type           string
+	ContentType    string
+	DestinationKey string
+	CompletePath   string
+	StorageType    string
+}
+
+type ArtifactPushOutput struct {
+	Provider        string
+	ConfigurationID uint64
+	Results         []ArtifactPushResult
+}
+
 // Typed interfaces for each concrete executor.
 type LLMExecutor interface {
 	Executor[Packet]
@@ -70,6 +95,10 @@ type AnalysisExecutor interface {
 
 type AuthenticationExecutor interface {
 	SyncExecutor[AuthenticationInput, AuthenticationOutput]
+}
+
+type ArtifactPushExecutor interface {
+	SyncExecutor[ArtifactPushInput, ArtifactPushOutput]
 }
 
 type EndOfSpeechExecutor interface {

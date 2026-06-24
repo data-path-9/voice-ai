@@ -107,6 +107,7 @@ type genericRequestor struct {
 	// executor
 	assistantAnalyseExecutors []internal_type.AnalysisExecutor
 	authenticationExecutor    internal_type.AuthenticationExecutor
+	artifactPushExecutors     []internal_type.ArtifactPushExecutor
 	assistantExecutor         internal_llm.AssistantExecutor
 	endOfSpeechExecutor       internal_type.EndOfSpeechExecutor
 	denoiserExecutor          internal_type.VoiceDenoiserExecutor
@@ -185,6 +186,7 @@ func NewGenericRequestor(
 		args:                      make(map[string]interface{}),
 		options:                   make(map[string]interface{}),
 		assistantAnalyseExecutors: make([]internal_type.AnalysisExecutor, 0),
+		artifactPushExecutors:     make([]internal_type.ArtifactPushExecutor, 0),
 		sessionCtx:                sessionCtx,
 		cancelSession:             cancelSession,
 		channels:                  channels,
