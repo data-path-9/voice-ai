@@ -72,6 +72,12 @@ func AllNonZero[T comparable](values ...T) bool {
 	return true
 }
 
+// NonZero returns true when value is not its zero value.
+func NonZero[T comparable](value T) bool {
+	var zero T
+	return value != zero
+}
+
 // OfAssistantDefinition returns true when an assistant definition has a valid
 // assistant ID and either no version or a valid version.
 func OfAssistantDefinition(assistant *protos.AssistantDefinition) bool {

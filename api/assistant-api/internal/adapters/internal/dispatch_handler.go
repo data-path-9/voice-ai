@@ -1719,7 +1719,6 @@ func (h requestorDispatchHandler) HandleInitializeArtifactPushExecutor(ctx conte
 	for _, storageConfiguration := range h.r.assistant.StorageConfigurations {
 		exec, err := internal_artifact.New(
 			internal_artifact.WithContext(ctx),
-			internal_artifact.WithContextID(p.ContextID),
 			internal_artifact.WithLogger(h.r.logger),
 			internal_artifact.WithConfiguration(storageConfiguration),
 			internal_artifact.WithCaller(h.r),
@@ -1739,7 +1738,6 @@ func (h requestorDispatchHandler) HandleInitializeAnalysisExecutor(ctx context.C
 		exec, err := internal_analysis.New(
 			internal_analysis.WithLogger(h.r.logger),
 			internal_analysis.WithContext(ctx),
-			internal_analysis.WithContextID(p.ContextID),
 			internal_analysis.WithConfiguration(analysis),
 			internal_analysis.WithCaller(h.r),
 			internal_analysis.WithOnPacket(h.r.OnPacket),
@@ -1761,7 +1759,6 @@ func (h requestorDispatchHandler) HandleInitializeAuthentication(ctx context.Con
 		authExecutor, err := internal_authentication.New(
 			internal_authentication.WithLogger(h.r.logger),
 			internal_authentication.WithContext(ctx),
-			internal_authentication.WithContextID(p.ContextID),
 			internal_authentication.WithConfiguration(h.r.assistant.AuthenticationConfiguration),
 			internal_authentication.WithCallback(h.r),
 			internal_authentication.WithCaller(h.r),

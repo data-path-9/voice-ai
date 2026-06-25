@@ -95,7 +95,7 @@ export const CreateAssistantTelemetry: FC<{ assistantId: string }> = ({
         <div className="flex-1 min-h-0 flex flex-col bg-white dark:bg-gray-900">
           <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
             <div className="flex flex-col flex-1">
-              <header className="px-8 pt-8 pb-6 border-b border-gray-200 dark:border-gray-800">
+              <header className="px-4 pt-8 pb-6 border-b border-gray-200 dark:border-gray-800">
                 <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 leading-tight">
                   Telemetry
                 </h1>

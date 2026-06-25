@@ -44,8 +44,8 @@ func (deploymentApi *AssistantDeploymentApi) GetAssistantApiDeploymentRest(c *gi
 		return
 	}
 
-	assistantId, err := strconv.ParseUint(c.Param("assistantId"), 10, 64)
-	if err != nil || assistantId == 0 {
+	assistantId, err := utils.StringToUint64(c.Param("assistantId"))
+	if err != nil || !validator.NonZero(assistantId) {
 		c.JSON(pkg_errors.GetAssistantApiDeploymentInvalidAssistantID.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(pkg_errors.GetAssistantApiDeploymentInvalidAssistantID.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),

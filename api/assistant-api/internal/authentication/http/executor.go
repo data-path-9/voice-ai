@@ -10,7 +10,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -33,9 +32,6 @@ const (
 	ResponseArgumentsKeyV1 = "args"
 	ResponseMetadataKey    = "metadata"
 	ResponseOptionsKey     = "options"
-
-	FailBehaviorBlock = "block"
-	FailBehaviorAllow = "allow"
 )
 
 type runtimeExecutor struct {
@@ -59,12 +55,6 @@ func WithLogger(logger commons.Logger) Option {
 func WithContext(ctx context.Context) Option {
 	return func(executor *runtimeExecutor) {
 		executor.ctx = ctx
-	}
-}
-
-func WithContextID(contextID string) Option {
-	return func(executor *runtimeExecutor) {
-		executor.contextID = contextID
 	}
 }
 
@@ -159,11 +149,11 @@ func (e *runtimeExecutor) Arguments() (map[string]string, error) {
 }
 
 // Execute runs authentication against the configured endpoint.
-func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.AuthenticationInput) (internal_type.AuthenticationOutput, error) {
+func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.AuthenticationInput) (*internal_type.AuthenticationOutput, error) {
 	auth := e.authenticator
 	url, err := auth.GetOptions().GetString(OptionHTTPURLKey)
 	if err != nil || url == "" {
-		return internal_type.AuthenticationOutput{}, fmt.Errorf("authentication: missing %s", OptionHTTPURLKey)
+		return nil, fmt.Errorf("authentication: missing %s", OptionHTTPURLKey)
 	}
 	method := "POST"
 	if m, err := auth.GetOptions().GetString(OptionHTTPMethodKey); err == nil && m != "" {
@@ -176,11 +166,9 @@ func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.Authe
 		headers = h
 	}
 
-	timeout := uint64(5000)
-	if raw, err := auth.GetOptions().GetString("timeout_ms"); err == nil && raw != "" {
-		if parsed, err := strconv.ParseUint(raw, 10, 64); err == nil && parsed > 0 {
-			timeout = parsed
-		}
+	timeout := uint32(5000)
+	if raw, err := auth.GetOptions().GetUint32("timeout_ms"); err == nil {
+		timeout = raw
 	}
 
 	client := rest.NewRestClientWithConfig(url, headers, uint32(timeout/1000))
@@ -188,53 +176,15 @@ func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.Authe
 	defer cancel()
 	startTime := time.Now()
 	requestPayload := e.createRequestPayload(url, method, headers, uint32(timeout), input.Arguments)
-	sourceRefID := auth.Id
 	response, err := e.send(callCtx, client, method, input.Arguments, headers)
 	if err != nil {
 		errMsg := err.Error()
-		e.onCreateLog(ctx, input.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_FAILED, 0, &errMsg, requestPayload, nil)
-		failBehavior := FailBehaviorBlock
-		if raw, err := auth.GetOptions().GetString("fail_behavior"); err == nil {
-			switch strings.ToLower(strings.TrimSpace(raw)) {
-			case "do_nothing", "do-nothing", "none", "allow":
-				failBehavior = FailBehaviorAllow
-			case "block":
-				failBehavior = FailBehaviorBlock
-			}
-		}
-		if failBehavior == FailBehaviorAllow {
-			e.logger.Warnw("authentication failed, allowing due to fail_behavior=allow", "url", url, "error", err)
-			return internal_type.AuthenticationOutput{
-				Authenticated: false,
-			}, nil
-		}
-		return internal_type.AuthenticationOutput{}, fmt.Errorf("authentication: request failed: %w", err)
+		e.onCreateLog(ctx, input.ContextID, url, method, e.authenticator.Id, startTime, type_enums.RECORD_FAILED, 0, &errMsg, requestPayload, nil)
+		return nil, fmt.Errorf("authentication: request failed: %w", err)
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		errMsg := fmt.Sprintf("authentication: endpoint returned status %d", response.StatusCode)
-		e.onCreateLog(ctx, input.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_FAILED, int64(response.StatusCode), &errMsg, requestPayload, response.Body)
 
-		failBehavior := FailBehaviorBlock
-		if raw, err := auth.GetOptions().GetString("fail_behavior"); err == nil {
-			switch strings.ToLower(strings.TrimSpace(raw)) {
-			case "do_nothing", "do-nothing", "none", "allow":
-				failBehavior = FailBehaviorAllow
-			case "block":
-				failBehavior = FailBehaviorBlock
-			}
-		}
-		if failBehavior == FailBehaviorAllow {
-			e.logger.Warnw("authentication returned non-2xx, allowing due to fail_behavior=allow",
-				"url", url, "status", response.StatusCode)
-			return internal_type.AuthenticationOutput{
-				Authenticated: false,
-			}, nil
-		}
-		return internal_type.AuthenticationOutput{}, fmt.Errorf("authentication: endpoint returned status %d", response.StatusCode)
-	}
-	e.onCreateLog(ctx, input.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, response.Body)
-	result := internal_type.AuthenticationOutput{
-		Authenticated: true,
+	result := &internal_type.AuthenticationOutput{
+		Authenticated: response.StatusCode >= 200 && response.StatusCode < 300,
 	}
 	if parsed, err := response.ToMap(); err == nil {
 		if args, ok := parsed[ResponseArgumentsKeyV1].(map[string]interface{}); ok {
@@ -248,6 +198,27 @@ func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.Authe
 		}
 		if options, ok := parsed[ResponseOptionsKey].(map[string]interface{}); ok {
 			result.Options = options
+		}
+	}
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		errMsg := fmt.Sprintf("authentication: endpoint returned status %d", response.StatusCode)
+		e.onCreateLog(ctx, input.ContextID, url, method, e.authenticator.Id, startTime, type_enums.RECORD_FAILED, int64(response.StatusCode), &errMsg, requestPayload, response.Body)
+		result.Authenticated = false
+	} else {
+		e.onCreateLog(ctx, input.ContextID, url, method, e.authenticator.Id, startTime, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, response.Body)
+	}
+
+	if !result.Authenticated {
+		failBehavior := "block"
+		if raw, err := auth.GetOptions().GetString("fail_behavior"); err == nil {
+			failBehavior = strings.ToLower(strings.TrimSpace(raw))
+		}
+		switch failBehavior {
+		case "do_nothing", "do-nothing", "none", "allow":
+			return result, nil
+		default:
+			return nil, fmt.Errorf("authentication: unauthenticated")
 		}
 	}
 

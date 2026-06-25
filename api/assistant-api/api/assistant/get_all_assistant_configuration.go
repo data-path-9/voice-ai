@@ -44,7 +44,7 @@ func (assistantApi *assistantGrpcApi) GetAllAssistantConfiguration(
 			},
 		}, errors.New(pkg_errors.AssistantConfigurationMissingAuthScope.Error)
 	}
-	if !validator.AllNonZero(req.GetAssistantId()) {
+	if !validator.NonZero(req.GetAssistantId()) {
 		return &protos.GetAllAssistantConfigurationResponse{
 			Code:    pkg_errors.AssistantConfigurationInvalidAssistantID.HTTPStatusCodeInt32(),
 			Success: false,

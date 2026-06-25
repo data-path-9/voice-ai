@@ -26,7 +26,6 @@ const (
 
 type options struct {
 	ctx           context.Context
-	contextID     string
 	logger        commons.Logger
 	configuration *internal_assistant_entity.AssistantConfiguration
 	caller        internal_type.InternalCaller
@@ -39,12 +38,6 @@ type Option func(*options)
 func WithContext(ctx context.Context) Option {
 	return func(options *options) {
 		options.ctx = ctx
-	}
-}
-
-func WithContextID(contextID string) Option {
-	return func(options *options) {
-		options.contextID = contextID
 	}
 }
 
@@ -96,7 +89,6 @@ func New(opts ...Option) (internal_type.ArtifactPushExecutor, error) {
 	case providerAWS:
 		return internal_artifact_storage.NewAWS(
 			internal_artifact_storage.WithAWSContext(options.ctx),
-			internal_artifact_storage.WithAWSContextID(options.contextID),
 			internal_artifact_storage.WithAWSLogger(options.logger),
 			internal_artifact_storage.WithAWSConfiguration(options.configuration),
 			internal_artifact_storage.WithAWSCaller(options.caller),
@@ -106,7 +98,6 @@ func New(opts ...Option) (internal_type.ArtifactPushExecutor, error) {
 	case providerAzure:
 		return internal_artifact_storage.NewAzureStorage(
 			internal_artifact_storage.WithAzureStorageContext(options.ctx),
-			internal_artifact_storage.WithAzureStorageContextID(options.contextID),
 			internal_artifact_storage.WithAzureStorageLogger(options.logger),
 			internal_artifact_storage.WithAzureStorageConfiguration(options.configuration),
 			internal_artifact_storage.WithAzureStorageCaller(options.caller),
@@ -118,8 +109,7 @@ func New(opts ...Option) (internal_type.ArtifactPushExecutor, error) {
 		if options.onPacket != nil {
 			_ = options.onPacket(options.ctx,
 				internal_type.ObservabilityMetricRecordPacket{
-					ContextID: options.contextID,
-					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Scope: internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.NewMetricStorageInitLatencyMs(time.Since(start), observability.Attributes{
 						"provider":         options.configuration.Provider,
 						"configuration_id": fmt.Sprintf("%d", options.configuration.Id),
@@ -127,8 +117,7 @@ func New(opts ...Option) (internal_type.ArtifactPushExecutor, error) {
 					}),
 				},
 				internal_type.ObservabilityLogRecordPacket{
-					ContextID: options.contextID,
-					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Scope: internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.RecordLog{
 						Level:   observability.LevelError,
 						Message: "External artifact storage executor initialization failed",
@@ -137,7 +126,6 @@ func New(opts ...Option) (internal_type.ArtifactPushExecutor, error) {
 							"operation":        "initialize_executor",
 							"provider":         options.configuration.Provider,
 							"configuration_id": fmt.Sprintf("%d", options.configuration.Id),
-							"context_id":       options.contextID,
 							"error":            err.Error(),
 							"error_type":       fmt.Sprintf("%T", err),
 						},

@@ -35,7 +35,6 @@ const (
 
 type azureStorageExecutor struct {
 	ctx           context.Context
-	contextID     string
 	logger        commons.Logger
 	configuration *internal_assistant_entity.AssistantConfiguration
 	caller        internal_type.InternalCaller
@@ -48,12 +47,6 @@ type AzureStorageOption func(*azureStorageExecutor)
 func WithAzureStorageContext(ctx context.Context) AzureStorageOption {
 	return func(executor *azureStorageExecutor) {
 		executor.ctx = ctx
-	}
-}
-
-func WithAzureStorageContextID(contextID string) AzureStorageOption {
-	return func(executor *azureStorageExecutor) {
-		executor.contextID = contextID
 	}
 }
 
@@ -115,8 +108,7 @@ func NewAzureStorage(opts ...AzureStorageOption) (internal_type.ArtifactPushExec
 	}
 	_ = executor.onPacket(executor.ctx,
 		internal_type.ObservabilityMetricRecordPacket{
-			ContextID: executor.contextID,
-			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Scope: internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.NewMetricStorageInitLatencyMs(time.Since(start), observability.Attributes{
 				"provider":         executor.configuration.Provider,
 				"configuration_id": fmt.Sprintf("%d", executor.configuration.Id),
@@ -124,8 +116,7 @@ func NewAzureStorage(opts ...AzureStorageOption) (internal_type.ArtifactPushExec
 			}),
 		},
 		internal_type.ObservabilityLogRecordPacket{
-			ContextID: executor.contextID,
-			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Scope: internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.RecordLog{
 				Level:   observability.LevelInfo,
 				Message: fmt.Sprintf("%s: initialization completed", executor.Name()),
@@ -134,7 +125,6 @@ func NewAzureStorage(opts ...AzureStorageOption) (internal_type.ArtifactPushExec
 					"operation":        "initialize_executor",
 					"provider":         executor.configuration.Provider,
 					"configuration_id": fmt.Sprintf("%d", executor.configuration.Id),
-					"context_id":       executor.contextID,
 					"options":          observability.AttributeValue(executor.configuration.GetOptions()),
 				},
 				OccurredAt: time.Now(),
@@ -164,7 +154,7 @@ func (e *azureStorageExecutor) Close(context.Context) error {
 	return nil
 }
 
-func (e *azureStorageExecutor) Execute(ctx context.Context, input internal_type.ArtifactPushInput) (internal_type.ArtifactPushOutput, error) {
+func (e *azureStorageExecutor) Execute(ctx context.Context, input internal_type.ArtifactPushInput) (*internal_type.ArtifactPushOutput, error) {
 	pushStartedAt := time.Now()
 	options := e.Options()
 	output := internal_type.ArtifactPushOutput{
@@ -204,7 +194,7 @@ func (e *azureStorageExecutor) Execute(ctx context.Context, input internal_type.
 					},
 				},
 			})
-			return output, executeErr
+			return nil, executeErr
 		}
 		credentialValues := credential.GetValue().AsMap()
 		if value, ok := credentialValues[azureStorageOptionContainerKey]; containerName == "" && ok {
@@ -251,7 +241,7 @@ func (e *azureStorageExecutor) Execute(ctx context.Context, input internal_type.
 				},
 			},
 		})
-		return output, executeErr
+		return nil, executeErr
 	}
 	if !validator.NotBlank(destinationAssetStoreConfig.AzureAuth.ConnectionString) &&
 		(!validator.NotBlank(destinationAssetStoreConfig.AzureAuth.AccountName) || !validator.NotBlank(destinationAssetStoreConfig.AzureAuth.AccountKey)) {
@@ -276,7 +266,7 @@ func (e *azureStorageExecutor) Execute(ctx context.Context, input internal_type.
 				},
 			},
 		})
-		return output, executeErr
+		return nil, executeErr
 	}
 
 	pushTimeout := azureStorageDefaultArtifactPushTimeout
@@ -329,7 +319,7 @@ func (e *azureStorageExecutor) Execute(ctx context.Context, input internal_type.
 					},
 				},
 			})
-			return output, executeErr
+			return nil, executeErr
 		}
 		output.Results = append(output.Results, internal_type.ArtifactPushResult{
 			Name:           artifact.Name,
@@ -359,5 +349,5 @@ func (e *azureStorageExecutor) Execute(ctx context.Context, input internal_type.
 			},
 		},
 	})
-	return output, nil
+	return &output, nil
 }

@@ -31,7 +31,6 @@ const (
 type runtimeExecutor struct {
 	logger       commons.Logger
 	ctx          context.Context
-	contextID    string
 	caller       internal_type.InternalCaller
 	analysis     *internal_assistant_entity.AssistantConfiguration
 	onPacket     func(context.Context, ...internal_type.Packet) error
@@ -49,12 +48,6 @@ func WithLogger(logger commons.Logger) Option {
 func WithContext(ctx context.Context) Option {
 	return func(executor *runtimeExecutor) {
 		executor.ctx = ctx
-	}
-}
-
-func WithContextID(contextID string) Option {
-	return func(executor *runtimeExecutor) {
-		executor.contextID = contextID
 	}
 }
 
@@ -98,8 +91,7 @@ func New(opts ...Option) (internal_type.AnalysisExecutor, error) {
 	if executor.onPacket != nil {
 		_ = executor.onPacket(executor.ctx,
 			internal_type.ObservabilityMetricRecordPacket{
-				ContextID: executor.contextID,
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.NewMetricAnalysisInitLatencyMs(time.Since(start), observability.Attributes{
 					"provider":         executor.analysis.Provider,
 					"configuration_id": fmt.Sprintf("%d", executor.analysis.Id),
@@ -107,8 +99,7 @@ func New(opts ...Option) (internal_type.AnalysisExecutor, error) {
 				}),
 			},
 			internal_type.ObservabilityLogRecordPacket{
-				ContextID: executor.contextID,
-				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
 					Level:   observability.LevelInfo,
 					Message: fmt.Sprintf("%s: initialization completed", executor.Name()),
@@ -117,7 +108,6 @@ func New(opts ...Option) (internal_type.AnalysisExecutor, error) {
 						"operation":        "initialize_executor",
 						"provider":         executor.analysis.Provider,
 						"configuration_id": fmt.Sprintf("%d", executor.analysis.Id),
-						"context_id":       executor.contextID,
 						"options":          observability.AttributeValue(executor.Options()),
 					},
 					OccurredAt: time.Now(),
@@ -153,14 +143,14 @@ func (e *runtimeExecutor) GetEndpointVersion() (string, error) {
 }
 
 // Execute runs one analysis and returns its metadata to the finalization flow.
-func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.AnalysisInput) (internal_type.AnalysisOutput, error) {
+func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.AnalysisInput) (*internal_type.AnalysisOutput, error) {
 	endpointID, err := e.GetEndpointId()
 	if err != nil {
-		return internal_type.AnalysisOutput{}, fmt.Errorf("failed to get endpoint ID: %w", err)
+		return nil, fmt.Errorf("failed to get endpoint ID: %w", err)
 	}
 	endpointVersion, err := e.GetEndpointVersion()
 	if err != nil {
-		return internal_type.AnalysisOutput{}, fmt.Errorf("failed to get endpoint version: %w", err)
+		return nil, fmt.Errorf("failed to get endpoint version: %w", err)
 	}
 	response, err := e.caller.DeploymentCaller().Invoke(
 		ctx,
@@ -176,10 +166,10 @@ func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.Analy
 		),
 	)
 	if err != nil {
-		return internal_type.AnalysisOutput{}, err
+		return nil, err
 	}
 	if !response.GetSuccess() || len(response.GetData()) == 0 {
-		return internal_type.AnalysisOutput{}, fmt.Errorf("empty response from endpoint")
+		return nil, fmt.Errorf("empty response from endpoint")
 	}
 
 	var parsed map[string]interface{}
@@ -192,7 +182,7 @@ func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.Analy
 		name = fmt.Sprintf("%d", e.analysis.Id)
 	}
 	metadata := rapida_types.NewMetadata(fmt.Sprintf("analysis.%s", name), parsed)
-	return internal_type.AnalysisOutput{
+	return &internal_type.AnalysisOutput{
 		Metadata: &protos.Metadata{Key: metadata.Key, Value: metadata.Value},
 	}, nil
 }

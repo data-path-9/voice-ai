@@ -62,8 +62,8 @@ func (assistantApi *assistantGrpcApi) CreateAssistantConfigurationRest(c *gin.Co
 		})
 		return
 	}
-	assistantId, err := strconv.ParseUint(req.AssistantId, 10, 64)
-	if err != nil || assistantId == 0 {
+	assistantId, err := utils.StringToUint64(req.AssistantId)
+	if err != nil || !validator.NonZero(assistantId) {
 		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
@@ -198,8 +198,8 @@ func (assistantApi *assistantGrpcApi) UpdateAssistantConfigurationRest(c *gin.Co
 		})
 		return
 	}
-	assistantId, assistantErr := strconv.ParseUint(c.Param("assistantId"), 10, 64)
-	if assistantErr != nil || assistantId == 0 {
+	assistantId, assistantErr := utils.StringToUint64(c.Param("assistantId"))
+	if assistantErr != nil || !validator.NonZero(assistantId) {
 		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
@@ -212,8 +212,8 @@ func (assistantApi *assistantGrpcApi) UpdateAssistantConfigurationRest(c *gin.Co
 		})
 		return
 	}
-	configurationId, configurationErr := strconv.ParseUint(c.Param("id"), 10, 64)
-	if configurationErr != nil || configurationId == 0 {
+	configurationId, configurationErr := utils.StringToUint64(c.Param("id"))
+	if configurationErr != nil || !validator.NonZero(configurationId) {
 		platformError := pkg_errors.AssistantConfigurationInvalidID
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
@@ -363,8 +363,8 @@ func (assistantApi *assistantGrpcApi) GetAssistantConfigurationRest(c *gin.Conte
 		})
 		return
 	}
-	assistantId, assistantErr := strconv.ParseUint(c.Param("assistantId"), 10, 64)
-	if assistantErr != nil || assistantId == 0 {
+	assistantId, assistantErr := utils.StringToUint64(c.Param("assistantId"))
+	if assistantErr != nil || !validator.NonZero(assistantId) {
 		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
@@ -377,8 +377,8 @@ func (assistantApi *assistantGrpcApi) GetAssistantConfigurationRest(c *gin.Conte
 		})
 		return
 	}
-	configurationId, configurationErr := strconv.ParseUint(c.Param("id"), 10, 64)
-	if configurationErr != nil || configurationId == 0 {
+	configurationId, configurationErr := utils.StringToUint64(c.Param("id"))
+	if configurationErr != nil || !validator.NonZero(configurationId) {
 		platformError := pkg_errors.AssistantConfigurationInvalidID
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
@@ -441,8 +441,8 @@ func (assistantApi *assistantGrpcApi) GetAllAssistantConfigurationRest(c *gin.Co
 		})
 		return
 	}
-	assistantId, err := strconv.ParseUint(c.Param("assistantId"), 10, 64)
-	if err != nil || assistantId == 0 {
+	assistantId, err := utils.StringToUint64(c.Param("assistantId"))
+	if err != nil || !validator.NonZero(assistantId) {
 		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
@@ -476,8 +476,8 @@ func (assistantApi *assistantGrpcApi) GetAllAssistantConfigurationRest(c *gin.Co
 		})
 		return
 	}
-	page, pageErr := strconv.ParseUint(c.DefaultQuery("page", "1"), 10, 32)
-	if pageErr != nil || page == 0 {
+	page, pageErr := utils.StringToUint32(c.DefaultQuery("page", "1"))
+	if pageErr != nil || !validator.NonZero(page) {
 		platformError := pkg_errors.AssistantConfigurationInvalidRequest
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
@@ -490,8 +490,8 @@ func (assistantApi *assistantGrpcApi) GetAllAssistantConfigurationRest(c *gin.Co
 		})
 		return
 	}
-	pageSize, pageSizeErr := strconv.ParseUint(c.DefaultQuery("pageSize", "20"), 10, 32)
-	if pageSizeErr != nil || pageSize == 0 {
+	pageSize, pageSizeErr := utils.StringToUint32(c.DefaultQuery("pageSize", "20"))
+	if pageSizeErr != nil || !validator.NonZero(pageSize) {
 		platformError := pkg_errors.AssistantConfigurationInvalidRequest
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
@@ -512,8 +512,8 @@ func (assistantApi *assistantGrpcApi) GetAllAssistantConfigurationRest(c *gin.Co
 		c.Query("provider"),
 		nil,
 		&protos.Paginate{
-			Page:     uint32(page),
-			PageSize: uint32(pageSize),
+			Page:     page,
+			PageSize: pageSize,
 		},
 	)
 	if err != nil {
@@ -542,7 +542,7 @@ func (assistantApi *assistantGrpcApi) GetAllAssistantConfigurationRest(c *gin.Co
 		Success: utils.Ptr(true),
 		Data:    &out,
 		Paginated: &openapi.Paginated{
-			CurrentPage: utils.Ptr(uint32(page)),
+			CurrentPage: utils.Ptr(page),
 			TotalItem:   utils.Ptr(uint32(cnt)),
 		},
 	})
@@ -576,8 +576,8 @@ func (assistantApi *assistantGrpcApi) DeleteAssistantConfigurationRest(c *gin.Co
 		})
 		return
 	}
-	assistantId, assistantErr := strconv.ParseUint(c.Param("assistantId"), 10, 64)
-	if assistantErr != nil || assistantId == 0 {
+	assistantId, assistantErr := utils.StringToUint64(c.Param("assistantId"))
+	if assistantErr != nil || !validator.NonZero(assistantId) {
 		platformError := pkg_errors.AssistantConfigurationInvalidAssistantID
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),
@@ -590,8 +590,8 @@ func (assistantApi *assistantGrpcApi) DeleteAssistantConfigurationRest(c *gin.Co
 		})
 		return
 	}
-	configurationId, configurationErr := strconv.ParseUint(c.Param("id"), 10, 64)
-	if configurationErr != nil || configurationId == 0 {
+	configurationId, configurationErr := utils.StringToUint64(c.Param("id"))
+	if configurationErr != nil || !validator.NonZero(configurationId) {
 		platformError := pkg_errors.AssistantConfigurationInvalidID
 		c.JSON(platformError.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(platformError.HTTPStatusCodeInt32()),

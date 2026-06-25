@@ -21,7 +21,6 @@ import (
 type options struct {
 	logger        commons.Logger
 	ctx           context.Context
-	contextID     string
 	authenticator *internal_assistant_entity.AssistantConfiguration
 	callback      internal_type.Callback
 	caller        internal_type.InternalCaller
@@ -39,12 +38,6 @@ func WithLogger(logger commons.Logger) Option {
 func WithContext(ctx context.Context) Option {
 	return func(options *options) {
 		options.ctx = ctx
-	}
-}
-
-func WithContextID(contextID string) Option {
-	return func(options *options) {
-		options.contextID = contextID
 	}
 }
 
@@ -95,7 +88,6 @@ func New(opts ...Option) (internal_type.AuthenticationExecutor, error) {
 		return internal_authentication_http.New(
 			internal_authentication_http.WithLogger(options.logger),
 			internal_authentication_http.WithContext(options.ctx),
-			internal_authentication_http.WithContextID(options.contextID),
 			internal_authentication_http.WithConfiguration(options.authenticator),
 			internal_authentication_http.WithCallback(options.callback),
 			internal_authentication_http.WithCaller(options.caller),
@@ -106,8 +98,7 @@ func New(opts ...Option) (internal_type.AuthenticationExecutor, error) {
 		if options.onPacket != nil {
 			_ = options.onPacket(options.ctx,
 				internal_type.ObservabilityMetricRecordPacket{
-					ContextID: options.contextID,
-					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Scope: internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.NewMetricAuthenticationInitLatencyMs(time.Since(start), observability.Attributes{
 						"provider":         options.authenticator.Provider,
 						"configuration_id": fmt.Sprintf("%d", options.authenticator.Id),
@@ -115,8 +106,7 @@ func New(opts ...Option) (internal_type.AuthenticationExecutor, error) {
 					}),
 				},
 				internal_type.ObservabilityLogRecordPacket{
-					ContextID: options.contextID,
-					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Scope: internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.RecordLog{
 						Level:   observability.LevelError,
 						Message: "authentication: initialization failed",
@@ -125,7 +115,6 @@ func New(opts ...Option) (internal_type.AuthenticationExecutor, error) {
 							"operation":        "initialize_executor",
 							"provider":         options.authenticator.Provider,
 							"configuration_id": fmt.Sprintf("%d", options.authenticator.Id),
-							"context_id":       options.contextID,
 							"error":            err.Error(),
 							"error_type":       fmt.Sprintf("%T", err),
 						},

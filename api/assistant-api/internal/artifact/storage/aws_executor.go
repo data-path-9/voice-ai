@@ -34,7 +34,6 @@ const (
 
 type awsExecutor struct {
 	ctx           context.Context
-	contextID     string
 	logger        commons.Logger
 	configuration *internal_assistant_entity.AssistantConfiguration
 	caller        internal_type.InternalCaller
@@ -47,12 +46,6 @@ type AWSOption func(*awsExecutor)
 func WithAWSContext(ctx context.Context) AWSOption {
 	return func(executor *awsExecutor) {
 		executor.ctx = ctx
-	}
-}
-
-func WithAWSContextID(contextID string) AWSOption {
-	return func(executor *awsExecutor) {
-		executor.contextID = contextID
 	}
 }
 
@@ -114,8 +107,7 @@ func NewAWS(opts ...AWSOption) (internal_type.ArtifactPushExecutor, error) {
 	}
 	_ = executor.onPacket(executor.ctx,
 		internal_type.ObservabilityMetricRecordPacket{
-			ContextID: executor.contextID,
-			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Scope: internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.NewMetricStorageInitLatencyMs(time.Since(start), observability.Attributes{
 				"provider":         executor.configuration.Provider,
 				"configuration_id": fmt.Sprintf("%d", executor.configuration.Id),
@@ -123,8 +115,7 @@ func NewAWS(opts ...AWSOption) (internal_type.ArtifactPushExecutor, error) {
 			}),
 		},
 		internal_type.ObservabilityLogRecordPacket{
-			ContextID: executor.contextID,
-			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Scope: internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.RecordLog{
 				Level:   observability.LevelInfo,
 				Message: fmt.Sprintf("%s: initialization completed", executor.Name()),
@@ -133,7 +124,6 @@ func NewAWS(opts ...AWSOption) (internal_type.ArtifactPushExecutor, error) {
 					"operation":        "initialize_executor",
 					"provider":         executor.configuration.Provider,
 					"configuration_id": fmt.Sprintf("%d", executor.configuration.Id),
-					"context_id":       executor.contextID,
 					"options":          observability.AttributeValue(executor.configuration.GetOptions()),
 				},
 				OccurredAt: time.Now(),
@@ -163,7 +153,7 @@ func (e *awsExecutor) Close(context.Context) error {
 	return nil
 }
 
-func (e *awsExecutor) Execute(ctx context.Context, input internal_type.ArtifactPushInput) (internal_type.ArtifactPushOutput, error) {
+func (e *awsExecutor) Execute(ctx context.Context, input internal_type.ArtifactPushInput) (*internal_type.ArtifactPushOutput, error) {
 	pushStartedAt := time.Now()
 	options := e.Options()
 	output := internal_type.ArtifactPushOutput{
@@ -204,7 +194,7 @@ func (e *awsExecutor) Execute(ctx context.Context, input internal_type.ArtifactP
 					},
 				},
 			})
-			return output, executeErr
+			return nil, executeErr
 		}
 		credentialValues := credential.GetValue().AsMap()
 		if value, ok := credentialValues[awsOptionBucketKey]; bucketName == "" && ok {
@@ -255,7 +245,7 @@ func (e *awsExecutor) Execute(ctx context.Context, input internal_type.ArtifactP
 				},
 			},
 		})
-		return output, executeErr
+		return nil, executeErr
 	}
 	if !validator.NotBlank(destinationAssetStoreConfig.Auth.Region) {
 		executeErr := fmt.Errorf("artifact push storage: region is required for %s", e.configuration.Provider)
@@ -279,7 +269,7 @@ func (e *awsExecutor) Execute(ctx context.Context, input internal_type.ArtifactP
 				},
 			},
 		})
-		return output, executeErr
+		return nil, executeErr
 	}
 
 	pushTimeout := awsDefaultArtifactPushTimeout
@@ -332,7 +322,7 @@ func (e *awsExecutor) Execute(ctx context.Context, input internal_type.ArtifactP
 					},
 				},
 			})
-			return output, executeErr
+			return nil, executeErr
 		}
 		output.Results = append(output.Results, internal_type.ArtifactPushResult{
 			Name:           artifact.Name,
@@ -362,5 +352,5 @@ func (e *awsExecutor) Execute(ctx context.Context, input internal_type.ArtifactP
 			},
 		},
 	})
-	return output, nil
+	return &output, nil
 }

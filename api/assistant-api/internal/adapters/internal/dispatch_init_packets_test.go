@@ -63,15 +63,15 @@ func (e *recordingAnalysisExecutor) Arguments() (map[string]string, error) {
 	return nil, nil
 }
 
-func (e *recordingAnalysisExecutor) Execute(_ context.Context, input internal_type.AnalysisInput) (internal_type.AnalysisOutput, error) {
+func (e *recordingAnalysisExecutor) Execute(_ context.Context, input internal_type.AnalysisInput) (*internal_type.AnalysisOutput, error) {
 	if e.order != nil {
 		*e.order = append(*e.order, "analysis-execute")
 	}
 	e.executeCalls++
 	if e.execute != nil {
-		return internal_type.AnalysisOutput{Metadata: e.execute(input)}, nil
+		return &internal_type.AnalysisOutput{Metadata: e.execute(input)}, nil
 	}
-	return internal_type.AnalysisOutput{}, nil
+	return &internal_type.AnalysisOutput{}, nil
 }
 
 func (e *recordingAnalysisExecutor) Close(context.Context) error {
@@ -84,7 +84,7 @@ func (e *recordingAnalysisExecutor) Close(context.Context) error {
 
 type recordingAuthenticationExecutor struct {
 	arguments    map[string]string
-	result       internal_type.AuthenticationOutput
+	result       *internal_type.AuthenticationOutput
 	err          error
 	input        internal_type.AuthenticationInput
 	executeCalls int
@@ -103,7 +103,7 @@ func (e *recordingAuthenticationExecutor) Arguments() (map[string]string, error)
 	return e.arguments, nil
 }
 
-func (e *recordingAuthenticationExecutor) Execute(_ context.Context, input internal_type.AuthenticationInput) (internal_type.AuthenticationOutput, error) {
+func (e *recordingAuthenticationExecutor) Execute(_ context.Context, input internal_type.AuthenticationInput) (*internal_type.AuthenticationOutput, error) {
 	e.input = input
 	e.executeCalls++
 	return e.result, e.err
@@ -233,7 +233,7 @@ func TestHandleExecuteAuthentication_ExecutesAuthenticationSynchronously(t *test
 		arguments: map[string]string{
 			"token": "abc",
 		},
-		result: internal_type.AuthenticationOutput{
+		result: &internal_type.AuthenticationOutput{
 			Authenticated: true,
 			Arguments: map[string]interface{}{
 				"user_id": "user-1",

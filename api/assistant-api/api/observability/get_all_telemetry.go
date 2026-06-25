@@ -17,6 +17,7 @@ import (
 
 	"github.com/rapidaai/pkg/exceptions"
 	"github.com/rapidaai/pkg/types"
+	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 )
 
@@ -243,7 +244,7 @@ func (api *observabilityGrpcApi) GetAllTelemetry(
 				return uint64(f)
 			}
 			if s, ok := v.(string); ok {
-				out, _ := strconv.ParseUint(s, 10, 64)
+				out, _ := utils.StringToUint64(s)
 				return out
 			}
 			return 0

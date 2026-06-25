@@ -370,20 +370,14 @@ const AuthenticationFormBase: FC<SharedAuthenticationFormProps> = ({
     <>
       <ConfirmDialogComponent />
       <div className="flex flex-col flex-1 min-h-0 bg-white dark:bg-gray-900">
-        <div className="px-4 pt-4 pb-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-          <div>
-            <Breadcrumb noTrailingSlash className="mb-2">
-              <BreadcrumbItem
-                href={`/deployment/assistant/${assistantId}/overview`}
-              >
-                Assistant
-              </BreadcrumbItem>
-            </Breadcrumb>
-            <h1 className="text-2xl font-light tracking-tight">
-              {hasAuthentication ? 'Edit Authentication' : 'Add Authentication'}
-            </h1>
-          </div>
-        </div>
+        <header className="px-4 pt-8 pb-6 border-b border-gray-200 dark:border-gray-800">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 leading-tight">
+            {hasAuthentication ? 'Edit Authentication' : 'Add Authentication'}
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-500 mt-1.5 leading-relaxed">
+            Configure the authentication for your assistant.
+          </p>
+        </header>
 
         <div className="flex-1 min-h-0 overflow-auto">
           <InputGroup title="Condition">

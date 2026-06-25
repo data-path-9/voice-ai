@@ -59,8 +59,12 @@ func TestAWSExecutor_ExecuteEmitsObservabilityLog(t *testing.T) {
 			{Name: "payload", Type: "json", ContentType: "application/json", Content: []byte(`{"ok":true}`)},
 		},
 	}
-	if _, err := exec.Execute(context.Background(), input); err == nil {
+	output, err := exec.Execute(context.Background(), input)
+	if err == nil {
 		t.Fatalf("execute error = nil, want destination config error")
+	}
+	if output != nil {
+		t.Fatalf("execute output = %#v, want nil on error", output)
 	}
 
 	if len(packets) != 1 {

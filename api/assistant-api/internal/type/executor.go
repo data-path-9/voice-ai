@@ -91,15 +91,15 @@ type LLMExecutor interface {
 }
 
 type AnalysisExecutor interface {
-	SyncExecutor[AnalysisInput, AnalysisOutput]
+	SyncExecutor[AnalysisInput, *AnalysisOutput]
 }
 
 type AuthenticationExecutor interface {
-	SyncExecutor[AuthenticationInput, AuthenticationOutput]
+	SyncExecutor[AuthenticationInput, *AuthenticationOutput]
 }
 
 type ArtifactPushExecutor interface {
-	SyncExecutor[ArtifactPushInput, ArtifactPushOutput]
+	SyncExecutor[ArtifactPushInput, *ArtifactPushOutput]
 }
 
 type EndOfSpeechExecutor interface {

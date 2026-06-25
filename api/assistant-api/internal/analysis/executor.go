@@ -19,12 +19,11 @@ import (
 )
 
 type options struct {
-	logger    commons.Logger
-	ctx       context.Context
-	contextID string
-	analysis  *internal_assistant_entity.AssistantConfiguration
-	caller    internal_type.InternalCaller
-	onPacket  func(context.Context, ...internal_type.Packet) error
+	logger   commons.Logger
+	ctx      context.Context
+	analysis *internal_assistant_entity.AssistantConfiguration
+	caller   internal_type.InternalCaller
+	onPacket func(context.Context, ...internal_type.Packet) error
 }
 
 type Option func(*options)
@@ -38,12 +37,6 @@ func WithLogger(logger commons.Logger) Option {
 func WithContext(ctx context.Context) Option {
 	return func(options *options) {
 		options.ctx = ctx
-	}
-}
-
-func WithContextID(contextID string) Option {
-	return func(options *options) {
-		options.contextID = contextID
 	}
 }
 
@@ -87,7 +80,6 @@ func New(opts ...Option) (internal_type.AnalysisExecutor, error) {
 		return internal_analysis_endpoint.New(
 			internal_analysis_endpoint.WithLogger(options.logger),
 			internal_analysis_endpoint.WithContext(options.ctx),
-			internal_analysis_endpoint.WithContextID(options.contextID),
 			internal_analysis_endpoint.WithConfiguration(options.analysis),
 			internal_analysis_endpoint.WithCaller(options.caller),
 			internal_analysis_endpoint.WithOnPacket(options.onPacket),
@@ -97,8 +89,7 @@ func New(opts ...Option) (internal_type.AnalysisExecutor, error) {
 		if options.onPacket != nil {
 			_ = options.onPacket(options.ctx,
 				internal_type.ObservabilityMetricRecordPacket{
-					ContextID: options.contextID,
-					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Scope: internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.NewMetricAnalysisInitLatencyMs(time.Since(start), observability.Attributes{
 						"provider":         options.analysis.Provider,
 						"configuration_id": fmt.Sprintf("%d", options.analysis.Id),
@@ -106,8 +97,7 @@ func New(opts ...Option) (internal_type.AnalysisExecutor, error) {
 					}),
 				},
 				internal_type.ObservabilityLogRecordPacket{
-					ContextID: options.contextID,
-					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Scope: internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.RecordLog{
 						Level:   observability.LevelError,
 						Message: "analysis: initialization failed",
@@ -116,7 +106,6 @@ func New(opts ...Option) (internal_type.AnalysisExecutor, error) {
 							"operation":        "initialize_executor",
 							"provider":         options.analysis.Provider,
 							"configuration_id": fmt.Sprintf("%d", options.analysis.Id),
-							"context_id":       options.contextID,
 							"error":            err.Error(),
 							"error_type":       fmt.Sprintf("%T", err),
 						},

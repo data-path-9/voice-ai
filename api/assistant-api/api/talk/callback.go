@@ -15,6 +15,7 @@ import (
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
+	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
@@ -25,8 +26,8 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing telephony provider"})
 		return
 	}
-	assistantID, err := strconv.ParseUint(c.Param("assistantId"), 10, 64)
-	if err != nil || !validator.AllNonZero(assistantID) {
+	assistantID, err := utils.StringToUint64(c.Param("assistantId"))
+	if err != nil || !validator.NonZero(assistantID) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assistantId"})
 		return
 	}

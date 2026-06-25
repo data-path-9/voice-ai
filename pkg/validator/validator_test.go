@@ -105,6 +105,15 @@ func TestAllNonZero(t *testing.T) {
 	}
 }
 
+func TestNonZero(t *testing.T) {
+	if !NonZero(uint64(1)) {
+		t.Fatal("expected non-zero uint64 to pass validation")
+	}
+	if NonZero(uint64(0)) {
+		t.Fatal("expected zero uint64 to fail validation")
+	}
+}
+
 func TestOfAssistantDefinition(t *testing.T) {
 	tests := []struct {
 		name      string
