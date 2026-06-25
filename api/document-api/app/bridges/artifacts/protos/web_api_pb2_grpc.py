@@ -688,6 +688,21 @@ class OrganizationServiceStub(object):
                 request_serializer=web__api__pb2.UpdateBillingInformationRequest.SerializeToString,
                 response_deserializer=common__pb2.BaseResponse.FromString,
                 _registered_method=True)
+        self.InviteUserToOrganization = channel.unary_unary(
+                '/web_api.OrganizationService/InviteUserToOrganization',
+                request_serializer=web__api__pb2.InviteUserToOrganizationRequest.SerializeToString,
+                response_deserializer=web__api__pb2.InviteUserToOrganizationResponse.FromString,
+                _registered_method=True)
+        self.UpdateUserOrganizationRole = channel.unary_unary(
+                '/web_api.OrganizationService/UpdateUserOrganizationRole',
+                request_serializer=web__api__pb2.UpdateUserOrganizationRoleRequest.SerializeToString,
+                response_deserializer=web__api__pb2.UpdateUserOrganizationRoleResponse.FromString,
+                _registered_method=True)
+        self.DeleteUserFromOrganization = channel.unary_unary(
+                '/web_api.OrganizationService/DeleteUserFromOrganization',
+                request_serializer=web__api__pb2.DeleteUserFromOrganizationRequest.SerializeToString,
+                response_deserializer=web__api__pb2.DeleteUserFromOrganizationResponse.FromString,
+                _registered_method=True)
 
 
 class OrganizationServiceServicer(object):
@@ -717,6 +732,24 @@ class OrganizationServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def InviteUserToOrganization(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateUserOrganizationRole(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteUserFromOrganization(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_OrganizationServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -739,6 +772,21 @@ def add_OrganizationServiceServicer_to_server(servicer, server):
                     servicer.UpdateBillingInformation,
                     request_deserializer=web__api__pb2.UpdateBillingInformationRequest.FromString,
                     response_serializer=common__pb2.BaseResponse.SerializeToString,
+            ),
+            'InviteUserToOrganization': grpc.unary_unary_rpc_method_handler(
+                    servicer.InviteUserToOrganization,
+                    request_deserializer=web__api__pb2.InviteUserToOrganizationRequest.FromString,
+                    response_serializer=web__api__pb2.InviteUserToOrganizationResponse.SerializeToString,
+            ),
+            'UpdateUserOrganizationRole': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateUserOrganizationRole,
+                    request_deserializer=web__api__pb2.UpdateUserOrganizationRoleRequest.FromString,
+                    response_serializer=web__api__pb2.UpdateUserOrganizationRoleResponse.SerializeToString,
+            ),
+            'DeleteUserFromOrganization': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteUserFromOrganization,
+                    request_deserializer=web__api__pb2.DeleteUserFromOrganizationRequest.FromString,
+                    response_serializer=web__api__pb2.DeleteUserFromOrganizationResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -859,6 +907,87 @@ class OrganizationService(object):
             metadata,
             _registered_method=True)
 
+    @staticmethod
+    def InviteUserToOrganization(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/web_api.OrganizationService/InviteUserToOrganization',
+            web__api__pb2.InviteUserToOrganizationRequest.SerializeToString,
+            web__api__pb2.InviteUserToOrganizationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateUserOrganizationRole(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/web_api.OrganizationService/UpdateUserOrganizationRole',
+            web__api__pb2.UpdateUserOrganizationRoleRequest.SerializeToString,
+            web__api__pb2.UpdateUserOrganizationRoleResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteUserFromOrganization(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/web_api.OrganizationService/DeleteUserFromOrganization',
+            web__api__pb2.DeleteUserFromOrganizationRequest.SerializeToString,
+            web__api__pb2.DeleteUserFromOrganizationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
 
 class ProjectServiceStub(object):
     """Missing associated documentation comment in .proto file."""
@@ -889,10 +1018,15 @@ class ProjectServiceStub(object):
                 request_serializer=web__api__pb2.GetAllProjectRequest.SerializeToString,
                 response_deserializer=web__api__pb2.GetAllProjectResponse.FromString,
                 _registered_method=True)
-        self.AddUsersToProject = channel.unary_unary(
-                '/web_api.ProjectService/AddUsersToProject',
-                request_serializer=web__api__pb2.AddUsersToProjectRequest.SerializeToString,
-                response_deserializer=web__api__pb2.AddUsersToProjectResponse.FromString,
+        self.AddUserToProjects = channel.unary_unary(
+                '/web_api.ProjectService/AddUserToProjects',
+                request_serializer=web__api__pb2.AddUserToProjectsRequest.SerializeToString,
+                response_deserializer=web__api__pb2.AddUserToProjectsResponse.FromString,
+                _registered_method=True)
+        self.DeleteUserFromProject = channel.unary_unary(
+                '/web_api.ProjectService/DeleteUserFromProject',
+                request_serializer=web__api__pb2.DeleteUserFromProjectRequest.SerializeToString,
+                response_deserializer=web__api__pb2.DeleteUserFromProjectResponse.FromString,
                 _registered_method=True)
         self.ArchiveProject = channel.unary_unary(
                 '/web_api.ProjectService/ArchiveProject',
@@ -938,7 +1072,13 @@ class ProjectServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def AddUsersToProject(self, request, context):
+    def AddUserToProjects(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteUserFromProject(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -985,10 +1125,15 @@ def add_ProjectServiceServicer_to_server(servicer, server):
                     request_deserializer=web__api__pb2.GetAllProjectRequest.FromString,
                     response_serializer=web__api__pb2.GetAllProjectResponse.SerializeToString,
             ),
-            'AddUsersToProject': grpc.unary_unary_rpc_method_handler(
-                    servicer.AddUsersToProject,
-                    request_deserializer=web__api__pb2.AddUsersToProjectRequest.FromString,
-                    response_serializer=web__api__pb2.AddUsersToProjectResponse.SerializeToString,
+            'AddUserToProjects': grpc.unary_unary_rpc_method_handler(
+                    servicer.AddUserToProjects,
+                    request_deserializer=web__api__pb2.AddUserToProjectsRequest.FromString,
+                    response_serializer=web__api__pb2.AddUserToProjectsResponse.SerializeToString,
+            ),
+            'DeleteUserFromProject': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteUserFromProject,
+                    request_deserializer=web__api__pb2.DeleteUserFromProjectRequest.FromString,
+                    response_serializer=web__api__pb2.DeleteUserFromProjectResponse.SerializeToString,
             ),
             'ArchiveProject': grpc.unary_unary_rpc_method_handler(
                     servicer.ArchiveProject,
@@ -1125,7 +1270,7 @@ class ProjectService(object):
             _registered_method=True)
 
     @staticmethod
-    def AddUsersToProject(request,
+    def AddUserToProjects(request,
             target,
             options=(),
             channel_credentials=None,
@@ -1138,9 +1283,36 @@ class ProjectService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/web_api.ProjectService/AddUsersToProject',
-            web__api__pb2.AddUsersToProjectRequest.SerializeToString,
-            web__api__pb2.AddUsersToProjectResponse.FromString,
+            '/web_api.ProjectService/AddUserToProjects',
+            web__api__pb2.AddUserToProjectsRequest.SerializeToString,
+            web__api__pb2.AddUserToProjectsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteUserFromProject(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/web_api.ProjectService/DeleteUserFromProject',
+            web__api__pb2.DeleteUserFromProjectRequest.SerializeToString,
+            web__api__pb2.DeleteUserFromProjectResponse.FromString,
             options,
             channel_credentials,
             insecure,

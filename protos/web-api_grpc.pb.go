@@ -613,10 +613,13 @@ var AuthenticationService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	OrganizationService_CreateOrganization_FullMethodName       = "/web_api.OrganizationService/CreateOrganization"
-	OrganizationService_GetOrganization_FullMethodName          = "/web_api.OrganizationService/GetOrganization"
-	OrganizationService_UpdateOrganization_FullMethodName       = "/web_api.OrganizationService/UpdateOrganization"
-	OrganizationService_UpdateBillingInformation_FullMethodName = "/web_api.OrganizationService/UpdateBillingInformation"
+	OrganizationService_CreateOrganization_FullMethodName         = "/web_api.OrganizationService/CreateOrganization"
+	OrganizationService_GetOrganization_FullMethodName            = "/web_api.OrganizationService/GetOrganization"
+	OrganizationService_UpdateOrganization_FullMethodName         = "/web_api.OrganizationService/UpdateOrganization"
+	OrganizationService_UpdateBillingInformation_FullMethodName   = "/web_api.OrganizationService/UpdateBillingInformation"
+	OrganizationService_InviteUserToOrganization_FullMethodName   = "/web_api.OrganizationService/InviteUserToOrganization"
+	OrganizationService_UpdateUserOrganizationRole_FullMethodName = "/web_api.OrganizationService/UpdateUserOrganizationRole"
+	OrganizationService_DeleteUserFromOrganization_FullMethodName = "/web_api.OrganizationService/DeleteUserFromOrganization"
 )
 
 // OrganizationServiceClient is the client API for OrganizationService service.
@@ -627,6 +630,9 @@ type OrganizationServiceClient interface {
 	GetOrganization(ctx context.Context, in *GetOrganizationRequest, opts ...grpc.CallOption) (*GetOrganizationResponse, error)
 	UpdateOrganization(ctx context.Context, in *UpdateOrganizationRequest, opts ...grpc.CallOption) (*UpdateOrganizationResponse, error)
 	UpdateBillingInformation(ctx context.Context, in *UpdateBillingInformationRequest, opts ...grpc.CallOption) (*BaseResponse, error)
+	InviteUserToOrganization(ctx context.Context, in *InviteUserToOrganizationRequest, opts ...grpc.CallOption) (*InviteUserToOrganizationResponse, error)
+	UpdateUserOrganizationRole(ctx context.Context, in *UpdateUserOrganizationRoleRequest, opts ...grpc.CallOption) (*UpdateUserOrganizationRoleResponse, error)
+	DeleteUserFromOrganization(ctx context.Context, in *DeleteUserFromOrganizationRequest, opts ...grpc.CallOption) (*DeleteUserFromOrganizationResponse, error)
 }
 
 type organizationServiceClient struct {
@@ -677,6 +683,36 @@ func (c *organizationServiceClient) UpdateBillingInformation(ctx context.Context
 	return out, nil
 }
 
+func (c *organizationServiceClient) InviteUserToOrganization(ctx context.Context, in *InviteUserToOrganizationRequest, opts ...grpc.CallOption) (*InviteUserToOrganizationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InviteUserToOrganizationResponse)
+	err := c.cc.Invoke(ctx, OrganizationService_InviteUserToOrganization_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *organizationServiceClient) UpdateUserOrganizationRole(ctx context.Context, in *UpdateUserOrganizationRoleRequest, opts ...grpc.CallOption) (*UpdateUserOrganizationRoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateUserOrganizationRoleResponse)
+	err := c.cc.Invoke(ctx, OrganizationService_UpdateUserOrganizationRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *organizationServiceClient) DeleteUserFromOrganization(ctx context.Context, in *DeleteUserFromOrganizationRequest, opts ...grpc.CallOption) (*DeleteUserFromOrganizationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteUserFromOrganizationResponse)
+	err := c.cc.Invoke(ctx, OrganizationService_DeleteUserFromOrganization_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrganizationServiceServer is the server API for OrganizationService service.
 // All implementations should embed UnimplementedOrganizationServiceServer
 // for forward compatibility.
@@ -685,6 +721,9 @@ type OrganizationServiceServer interface {
 	GetOrganization(context.Context, *GetOrganizationRequest) (*GetOrganizationResponse, error)
 	UpdateOrganization(context.Context, *UpdateOrganizationRequest) (*UpdateOrganizationResponse, error)
 	UpdateBillingInformation(context.Context, *UpdateBillingInformationRequest) (*BaseResponse, error)
+	InviteUserToOrganization(context.Context, *InviteUserToOrganizationRequest) (*InviteUserToOrganizationResponse, error)
+	UpdateUserOrganizationRole(context.Context, *UpdateUserOrganizationRoleRequest) (*UpdateUserOrganizationRoleResponse, error)
+	DeleteUserFromOrganization(context.Context, *DeleteUserFromOrganizationRequest) (*DeleteUserFromOrganizationResponse, error)
 }
 
 // UnimplementedOrganizationServiceServer should be embedded to have
@@ -705,6 +744,15 @@ func (UnimplementedOrganizationServiceServer) UpdateOrganization(context.Context
 }
 func (UnimplementedOrganizationServiceServer) UpdateBillingInformation(context.Context, *UpdateBillingInformationRequest) (*BaseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateBillingInformation not implemented")
+}
+func (UnimplementedOrganizationServiceServer) InviteUserToOrganization(context.Context, *InviteUserToOrganizationRequest) (*InviteUserToOrganizationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InviteUserToOrganization not implemented")
+}
+func (UnimplementedOrganizationServiceServer) UpdateUserOrganizationRole(context.Context, *UpdateUserOrganizationRoleRequest) (*UpdateUserOrganizationRoleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateUserOrganizationRole not implemented")
+}
+func (UnimplementedOrganizationServiceServer) DeleteUserFromOrganization(context.Context, *DeleteUserFromOrganizationRequest) (*DeleteUserFromOrganizationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteUserFromOrganization not implemented")
 }
 func (UnimplementedOrganizationServiceServer) testEmbeddedByValue() {}
 
@@ -798,6 +846,60 @@ func _OrganizationService_UpdateBillingInformation_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrganizationService_InviteUserToOrganization_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InviteUserToOrganizationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrganizationServiceServer).InviteUserToOrganization(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrganizationService_InviteUserToOrganization_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrganizationServiceServer).InviteUserToOrganization(ctx, req.(*InviteUserToOrganizationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrganizationService_UpdateUserOrganizationRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateUserOrganizationRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrganizationServiceServer).UpdateUserOrganizationRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrganizationService_UpdateUserOrganizationRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrganizationServiceServer).UpdateUserOrganizationRole(ctx, req.(*UpdateUserOrganizationRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrganizationService_DeleteUserFromOrganization_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteUserFromOrganizationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrganizationServiceServer).DeleteUserFromOrganization(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrganizationService_DeleteUserFromOrganization_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrganizationServiceServer).DeleteUserFromOrganization(ctx, req.(*DeleteUserFromOrganizationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrganizationService_ServiceDesc is the grpc.ServiceDesc for OrganizationService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -821,6 +923,18 @@ var OrganizationService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "UpdateBillingInformation",
 			Handler:    _OrganizationService_UpdateBillingInformation_Handler,
 		},
+		{
+			MethodName: "InviteUserToOrganization",
+			Handler:    _OrganizationService_InviteUserToOrganization_Handler,
+		},
+		{
+			MethodName: "UpdateUserOrganizationRole",
+			Handler:    _OrganizationService_UpdateUserOrganizationRole_Handler,
+		},
+		{
+			MethodName: "DeleteUserFromOrganization",
+			Handler:    _OrganizationService_DeleteUserFromOrganization_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "web-api.proto",
@@ -831,7 +945,8 @@ const (
 	ProjectService_UpdateProject_FullMethodName           = "/web_api.ProjectService/UpdateProject"
 	ProjectService_GetProject_FullMethodName              = "/web_api.ProjectService/GetProject"
 	ProjectService_GetAllProject_FullMethodName           = "/web_api.ProjectService/GetAllProject"
-	ProjectService_AddUsersToProject_FullMethodName       = "/web_api.ProjectService/AddUsersToProject"
+	ProjectService_AddUserToProjects_FullMethodName       = "/web_api.ProjectService/AddUserToProjects"
+	ProjectService_DeleteUserFromProject_FullMethodName   = "/web_api.ProjectService/DeleteUserFromProject"
 	ProjectService_ArchiveProject_FullMethodName          = "/web_api.ProjectService/ArchiveProject"
 	ProjectService_CreateProjectCredential_FullMethodName = "/web_api.ProjectService/CreateProjectCredential"
 	ProjectService_GetAllProjectCredential_FullMethodName = "/web_api.ProjectService/GetAllProjectCredential"
@@ -845,7 +960,8 @@ type ProjectServiceClient interface {
 	UpdateProject(ctx context.Context, in *UpdateProjectRequest, opts ...grpc.CallOption) (*UpdateProjectResponse, error)
 	GetProject(ctx context.Context, in *GetProjectRequest, opts ...grpc.CallOption) (*GetProjectResponse, error)
 	GetAllProject(ctx context.Context, in *GetAllProjectRequest, opts ...grpc.CallOption) (*GetAllProjectResponse, error)
-	AddUsersToProject(ctx context.Context, in *AddUsersToProjectRequest, opts ...grpc.CallOption) (*AddUsersToProjectResponse, error)
+	AddUserToProjects(ctx context.Context, in *AddUserToProjectsRequest, opts ...grpc.CallOption) (*AddUserToProjectsResponse, error)
+	DeleteUserFromProject(ctx context.Context, in *DeleteUserFromProjectRequest, opts ...grpc.CallOption) (*DeleteUserFromProjectResponse, error)
 	ArchiveProject(ctx context.Context, in *ArchiveProjectRequest, opts ...grpc.CallOption) (*ArchiveProjectResponse, error)
 	CreateProjectCredential(ctx context.Context, in *CreateProjectCredentialRequest, opts ...grpc.CallOption) (*CreateProjectCredentialResponse, error)
 	GetAllProjectCredential(ctx context.Context, in *GetAllProjectCredentialRequest, opts ...grpc.CallOption) (*GetAllProjectCredentialResponse, error)
@@ -899,10 +1015,20 @@ func (c *projectServiceClient) GetAllProject(ctx context.Context, in *GetAllProj
 	return out, nil
 }
 
-func (c *projectServiceClient) AddUsersToProject(ctx context.Context, in *AddUsersToProjectRequest, opts ...grpc.CallOption) (*AddUsersToProjectResponse, error) {
+func (c *projectServiceClient) AddUserToProjects(ctx context.Context, in *AddUserToProjectsRequest, opts ...grpc.CallOption) (*AddUserToProjectsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AddUsersToProjectResponse)
-	err := c.cc.Invoke(ctx, ProjectService_AddUsersToProject_FullMethodName, in, out, cOpts...)
+	out := new(AddUserToProjectsResponse)
+	err := c.cc.Invoke(ctx, ProjectService_AddUserToProjects_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *projectServiceClient) DeleteUserFromProject(ctx context.Context, in *DeleteUserFromProjectRequest, opts ...grpc.CallOption) (*DeleteUserFromProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteUserFromProjectResponse)
+	err := c.cc.Invoke(ctx, ProjectService_DeleteUserFromProject_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -947,7 +1073,8 @@ type ProjectServiceServer interface {
 	UpdateProject(context.Context, *UpdateProjectRequest) (*UpdateProjectResponse, error)
 	GetProject(context.Context, *GetProjectRequest) (*GetProjectResponse, error)
 	GetAllProject(context.Context, *GetAllProjectRequest) (*GetAllProjectResponse, error)
-	AddUsersToProject(context.Context, *AddUsersToProjectRequest) (*AddUsersToProjectResponse, error)
+	AddUserToProjects(context.Context, *AddUserToProjectsRequest) (*AddUserToProjectsResponse, error)
+	DeleteUserFromProject(context.Context, *DeleteUserFromProjectRequest) (*DeleteUserFromProjectResponse, error)
 	ArchiveProject(context.Context, *ArchiveProjectRequest) (*ArchiveProjectResponse, error)
 	CreateProjectCredential(context.Context, *CreateProjectCredentialRequest) (*CreateProjectCredentialResponse, error)
 	GetAllProjectCredential(context.Context, *GetAllProjectCredentialRequest) (*GetAllProjectCredentialResponse, error)
@@ -972,8 +1099,11 @@ func (UnimplementedProjectServiceServer) GetProject(context.Context, *GetProject
 func (UnimplementedProjectServiceServer) GetAllProject(context.Context, *GetAllProjectRequest) (*GetAllProjectResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAllProject not implemented")
 }
-func (UnimplementedProjectServiceServer) AddUsersToProject(context.Context, *AddUsersToProjectRequest) (*AddUsersToProjectResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AddUsersToProject not implemented")
+func (UnimplementedProjectServiceServer) AddUserToProjects(context.Context, *AddUserToProjectsRequest) (*AddUserToProjectsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddUserToProjects not implemented")
+}
+func (UnimplementedProjectServiceServer) DeleteUserFromProject(context.Context, *DeleteUserFromProjectRequest) (*DeleteUserFromProjectResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteUserFromProject not implemented")
 }
 func (UnimplementedProjectServiceServer) ArchiveProject(context.Context, *ArchiveProjectRequest) (*ArchiveProjectResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ArchiveProject not implemented")
@@ -1076,20 +1206,38 @@ func _ProjectService_GetAllProject_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ProjectService_AddUsersToProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AddUsersToProjectRequest)
+func _ProjectService_AddUserToProjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddUserToProjectsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ProjectServiceServer).AddUsersToProject(ctx, in)
+		return srv.(ProjectServiceServer).AddUserToProjects(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: ProjectService_AddUsersToProject_FullMethodName,
+		FullMethod: ProjectService_AddUserToProjects_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ProjectServiceServer).AddUsersToProject(ctx, req.(*AddUsersToProjectRequest))
+		return srv.(ProjectServiceServer).AddUserToProjects(ctx, req.(*AddUserToProjectsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ProjectService_DeleteUserFromProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteUserFromProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProjectServiceServer).DeleteUserFromProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProjectService_DeleteUserFromProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProjectServiceServer).DeleteUserFromProject(ctx, req.(*DeleteUserFromProjectRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1172,8 +1320,12 @@ var ProjectService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ProjectService_GetAllProject_Handler,
 		},
 		{
-			MethodName: "AddUsersToProject",
-			Handler:    _ProjectService_AddUsersToProject_Handler,
+			MethodName: "AddUserToProjects",
+			Handler:    _ProjectService_AddUserToProjects_Handler,
+		},
+		{
+			MethodName: "DeleteUserFromProject",
+			Handler:    _ProjectService_DeleteUserFromProject_Handler,
 		},
 		{
 			MethodName: "ArchiveProject",

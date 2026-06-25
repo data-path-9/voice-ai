@@ -5,7 +5,6 @@ package web_api
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	web_config "github.com/rapidaai/api/web-api/config"
@@ -17,6 +16,7 @@ import (
 	external_emailer_template "github.com/rapidaai/pkg/clients/external/emailer/template"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/connectors"
+	pkg_errors "github.com/rapidaai/pkg/errors"
 	gorm_models "github.com/rapidaai/pkg/models/gorm"
 	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
@@ -173,6 +173,21 @@ func newProjectAPITest(t *testing.T) (*webProjectGRPCApi, *gorm.DB, *testEmailer
 	}, db, emailer
 }
 
+func newOrganizationAPITest(t *testing.T) (*webOrganizationGRPCApi, *gorm.DB, *testEmailer) {
+	t.Helper()
+	projectApi, db, emailer := newProjectAPITest(t)
+	return &webOrganizationGRPCApi{
+		webOrganizationApi: webOrganizationApi{
+			cfg:            projectApi.cfg,
+			logger:         projectApi.logger,
+			postgres:       projectApi.postgres,
+			projectService: projectApi.projectService,
+			userService:    projectApi.userService,
+			emailerClient:  emailer,
+		},
+	}, db, emailer
+}
+
 func logger2Discard() logger.Interface {
 	return logger.Discard.LogMode(logger.Silent)
 }
@@ -193,162 +208,284 @@ func ownerContext(role string) context.Context {
 	})
 }
 
-func TestGetAllUserReturnsActiveAndInvitedOrganizationMembers(t *testing.T) {
-	projectApi, db, _ := newProjectAPITest(t)
-	api := &webAuthGRPCApi{
-		webAuthApi: webAuthApi{
-			logger:      projectApi.logger,
-			postgres:    projectApi.postgres,
-			userService: projectApi.userService,
+func TestAddUserToProjectsAssignsExistingOrganizationUserProjectRoles(t *testing.T) {
+	api, db, _ := newProjectAPITest(t)
+	require.NoError(t, db.Create(&internal_entity.UserAuth{
+		Audited: gorm_models.Audited{Id: 90},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
 		},
+		Name:     "Existing",
+		Email:    "existing-projects@example.com",
+		Password: "hash",
+		Source:   "direct",
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
+		Audited: gorm_models.Audited{Id: 91},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		UserAuthId:     90,
+		OrganizationId: 10,
+		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
+	}).Error)
+
+	res, err := api.AddUserToProjects(ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()), &protos.AddUserToProjectsRequest{
+		UserId: 90,
+		ProjectRoles: []*protos.ProjectRoleAssignment{
+			{ProjectId: 100, ProjectRole: type_enums.PROJECT_ROLE_ADMIN.String()},
+			{ProjectId: 101, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, res.GetSuccess())
+	require.Len(t, res.GetData(), 2)
+
+	var projectRoles []internal_entity.UserProjectRole
+	require.NoError(t, db.Find(&projectRoles, "user_auth_id = ?", 90).Error)
+	require.Len(t, projectRoles, 2)
+	roles := map[uint64]string{}
+	for _, projectRole := range projectRoles {
+		roles[projectRole.ProjectId] = projectRole.Role
+		require.Equal(t, type_enums.RECORD_ACTIVE, projectRole.Status)
 	}
+	require.Equal(t, map[uint64]string{
+		100: type_enums.PROJECT_ROLE_ADMIN.String(),
+		101: type_enums.PROJECT_ROLE_READER.String(),
+	}, roles)
+}
+
+func TestAddUserToProjectsRejectsExistingProjectMembership(t *testing.T) {
+	api, db, _ := newProjectAPITest(t)
 	require.NoError(t, db.Create(&internal_entity.UserAuth{
-		Audited: gorm_models.Audited{Id: 80},
+		Audited: gorm_models.Audited{Id: 88},
 		Mutable: gorm_models.Mutable{
 			Status:    type_enums.RECORD_ACTIVE,
 			CreatedBy: 1,
 		},
-		Name:     "Active",
-		Email:    "active@example.com",
-		Password: "hash",
-		Source:   "direct",
-	}).Error)
-	require.NoError(t, db.Create(&internal_entity.UserAuth{
-		Audited: gorm_models.Audited{Id: 81},
-		Mutable: gorm_models.Mutable{
-			Status:    type_enums.RECORD_INVITED,
-			CreatedBy: 1,
-		},
-		Name:     "Invited",
-		Email:    "invited@example.com",
-		Password: "hash",
-		Source:   "invited-by-other",
-	}).Error)
-	require.NoError(t, db.Create(&internal_entity.UserAuth{
-		Audited: gorm_models.Audited{Id: 82},
-		Mutable: gorm_models.Mutable{
-			Status:    type_enums.RECORD_ACTIVE,
-			CreatedBy: 1,
-		},
-		Name:     "Other",
-		Email:    "other@example.com",
+		Name:     "Existing Project Member",
+		Email:    "existing-project-member@example.com",
 		Password: "hash",
 		Source:   "direct",
 	}).Error)
 	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
-		Audited: gorm_models.Audited{Id: 83},
+		Audited: gorm_models.Audited{Id: 89},
 		Mutable: gorm_models.Mutable{
 			Status:    type_enums.RECORD_ACTIVE,
 			CreatedBy: 1,
 		},
-		UserAuthId:     80,
+		UserAuthId:     88,
 		OrganizationId: 10,
 		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
 	}).Error)
-	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
-		Audited: gorm_models.Audited{Id: 84},
-		Mutable: gorm_models.Mutable{
-			Status:    type_enums.RECORD_INVITED,
-			CreatedBy: 1,
-		},
-		UserAuthId:     81,
-		OrganizationId: 10,
-		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
-	}).Error)
-	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
-		Audited: gorm_models.Audited{Id: 85},
+	require.NoError(t, db.Create(&internal_entity.UserProjectRole{
+		Audited: gorm_models.Audited{Id: 87},
 		Mutable: gorm_models.Mutable{
 			Status:    type_enums.RECORD_ACTIVE,
 			CreatedBy: 1,
 		},
-		UserAuthId:     82,
+		UserAuthId: 88,
+		ProjectId:  100,
+		Role:       type_enums.PROJECT_ROLE_READER.String(),
+	}).Error)
+
+	res, err := api.AddUserToProjects(ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()), &protos.AddUserToProjectsRequest{
+		UserId: 88,
+		ProjectRoles: []*protos.ProjectRoleAssignment{
+			{ProjectId: 100, ProjectRole: type_enums.PROJECT_ROLE_ADMIN.String()},
+			{ProjectId: 101, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.GetSuccess())
+	require.Equal(t, pkg_errors.AddUserToProjectsUserAlreadyInProject.HTTPStatusCodeInt32(), res.GetCode())
+	require.EqualValues(t, pkg_errors.AddUserToProjectsUserAlreadyInProject.Code, res.GetError().GetErrorCode())
+	require.Equal(t, pkg_errors.AddUserToProjectsUserAlreadyInProject.Error, res.GetError().GetErrorMessage())
+	require.Equal(t, pkg_errors.AddUserToProjectsUserAlreadyInProject.ErrorMessage, res.GetError().GetHumanMessage())
+
+	var projectRole internal_entity.UserProjectRole
+	require.NoError(t, db.First(&projectRole, "user_auth_id = ? AND project_id = ?", 88, 100).Error)
+	require.Equal(t, type_enums.PROJECT_ROLE_READER.String(), projectRole.Role)
+}
+
+func TestAddUserToProjectsRejectsUserOutsideOrganization(t *testing.T) {
+	api, db, _ := newProjectAPITest(t)
+	require.NoError(t, db.Create(&internal_entity.UserAuth{
+		Audited: gorm_models.Audited{Id: 92},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		Name:     "Outside",
+		Email:    "outside@example.com",
+		Password: "hash",
+		Source:   "direct",
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
+		Audited: gorm_models.Audited{Id: 93},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		UserAuthId:     92,
 		OrganizationId: 20,
 		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
 	}).Error)
 
-	res, err := api.GetAllUser(ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()), &protos.GetAllUserRequest{
-		Paginate: &protos.Paginate{Page: 1, PageSize: 10},
+	res, err := api.AddUserToProjects(ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()), &protos.AddUserToProjectsRequest{
+		UserId: 92,
+		ProjectRoles: []*protos.ProjectRoleAssignment{
+			{ProjectId: 100, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
+		},
 	})
 	require.NoError(t, err)
-	require.True(t, res.GetSuccess())
-	require.EqualValues(t, 2, res.GetPaginated().GetTotalItem())
-
-	members := map[string]string{}
-	for _, member := range res.GetData() {
-		members[member.GetEmail()] = member.GetStatus()
-	}
-	require.Equal(t, map[string]string{
-		"active@example.com":  type_enums.RECORD_ACTIVE.String(),
-		"invited@example.com": type_enums.RECORD_INVITED.String(),
-	}, members)
+	require.False(t, res.GetSuccess())
+	require.Equal(t, pkg_errors.AddUserToProjectsUserNotInOrganization.HTTPStatusCodeInt32(), res.GetCode())
+	require.EqualValues(t, pkg_errors.AddUserToProjectsUserNotInOrganization.Code, res.GetError().GetErrorCode())
+	require.Equal(t, pkg_errors.AddUserToProjectsUserNotInOrganization.Error, res.GetError().GetErrorMessage())
+	require.Equal(t, pkg_errors.AddUserToProjectsUserNotInOrganization.ErrorMessage, res.GetError().GetHumanMessage())
 }
 
-func TestAddUsersToProjectRejectsAuthAndValidationFailures(t *testing.T) {
+func TestAddUserToProjectsRejectsArchivedOrganizationUser(t *testing.T) {
 	api, db, _ := newProjectAPITest(t)
+	require.NoError(t, db.Create(&internal_entity.UserAuth{
+		Audited: gorm_models.Audited{Id: 96},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ARCHIEVE,
+			CreatedBy: 1,
+		},
+		Name:     "Archived Org User",
+		Email:    "archived-org-user@example.com",
+		Password: "hash",
+		Source:   "direct",
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
+		Audited: gorm_models.Audited{Id: 97},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ARCHIEVE,
+			CreatedBy: 1,
+		},
+		UserAuthId:     96,
+		OrganizationId: 10,
+		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
+	}).Error)
 
-	_, err := api.AddUsersToProject(context.Background(), &protos.AddUsersToProjectRequest{
-		Email:      "new@example.com",
-		Role:       type_enums.PROJECT_ROLE_READER.String(),
-		ProjectIds: []uint64{100},
+	res, err := api.AddUserToProjects(ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()), &protos.AddUserToProjectsRequest{
+		UserId: 96,
+		ProjectRoles: []*protos.ProjectRoleAssignment{
+			{ProjectId: 100, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
+		},
 	})
-	require.Error(t, err)
+	require.NoError(t, err)
+	require.False(t, res.GetSuccess())
+	require.Equal(t, pkg_errors.AddUserToProjectsUserNotInOrganization.HTTPStatusCodeInt32(), res.GetCode())
+	require.EqualValues(t, pkg_errors.AddUserToProjectsUserNotInOrganization.Code, res.GetError().GetErrorCode())
+	require.Equal(t, pkg_errors.AddUserToProjectsUserNotInOrganization.Error, res.GetError().GetErrorMessage())
+	require.Equal(t, pkg_errors.AddUserToProjectsUserNotInOrganization.ErrorMessage, res.GetError().GetHumanMessage())
+
+	var projectRoleCount int64
+	require.NoError(t, db.Model(&internal_entity.UserProjectRole{}).Where("user_auth_id = ?", 96).Count(&projectRoleCount).Error)
+	require.Zero(t, projectRoleCount)
+}
+
+func TestAddUserToProjectsRejectsInvalidAssignmentsBeforeWrites(t *testing.T) {
+	api, db, _ := newProjectAPITest(t)
+	require.NoError(t, db.Create(&internal_entity.UserAuth{
+		Audited: gorm_models.Audited{Id: 94},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		Name:     "Invalid Assignments",
+		Email:    "invalid-assignments@example.com",
+		Password: "hash",
+		Source:   "direct",
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
+		Audited: gorm_models.Audited{Id: 95},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		UserAuthId:     94,
+		OrganizationId: 10,
+		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
+	}).Error)
 
 	tests := []struct {
-		name string
-		ctx  context.Context
-		req  *protos.AddUsersToProjectRequest
+		name          string
+		req           *protos.AddUserToProjectsRequest
+		platformError pkg_errors.PlatformError
 	}{
 		{
-			name: "non admin",
-			ctx:  ownerContext(type_enums.ORGANIZATION_ROLE_MEMBER.String()),
-			req: &protos.AddUsersToProjectRequest{
-				Email:      "new@example.com",
-				Role:       type_enums.PROJECT_ROLE_READER.String(),
-				ProjectIds: []uint64{100},
+			name:          "zero user id",
+			platformError: pkg_errors.AddUserToProjectsInvalidUser,
+			req: &protos.AddUserToProjectsRequest{
+				UserId: 0,
+				ProjectRoles: []*protos.ProjectRoleAssignment{
+					{ProjectId: 100, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
+				},
 			},
 		},
 		{
-			name: "invalid raw email",
-			ctx:  ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()),
-			req: &protos.AddUsersToProjectRequest{
-				Email:      " new@example.com",
-				Role:       type_enums.PROJECT_ROLE_READER.String(),
-				ProjectIds: []uint64{100},
+			name:          "missing project roles",
+			platformError: pkg_errors.AddUserToProjectsMissingProjectRoles,
+			req:           &protos.AddUserToProjectsRequest{UserId: 94},
+		},
+		{
+			name:          "empty project id",
+			platformError: pkg_errors.AddUserToProjectsInvalidProjects,
+			req: &protos.AddUserToProjectsRequest{
+				UserId: 94,
+				ProjectRoles: []*protos.ProjectRoleAssignment{
+					{ProjectId: 0, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
+				},
 			},
 		},
 		{
-			name: "invalid role",
-			ctx:  ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()),
-			req: &protos.AddUsersToProjectRequest{
-				Email:      "new@example.com",
-				Role:       "Reader",
-				ProjectIds: []uint64{100},
+			name:          "duplicate project",
+			platformError: pkg_errors.AddUserToProjectsDuplicateProject,
+			req: &protos.AddUserToProjectsRequest{
+				UserId: 94,
+				ProjectRoles: []*protos.ProjectRoleAssignment{
+					{ProjectId: 100, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
+					{ProjectId: 100, ProjectRole: type_enums.PROJECT_ROLE_WRITER.String()},
+				},
 			},
 		},
 		{
-			name: "empty project list",
-			ctx:  ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()),
-			req: &protos.AddUsersToProjectRequest{
-				Email:      "new@example.com",
-				Role:       type_enums.PROJECT_ROLE_READER.String(),
-				ProjectIds: nil,
+			name:          "invalid project role",
+			platformError: pkg_errors.AddUserToProjectsInvalidProjectRole,
+			req: &protos.AddUserToProjectsRequest{
+				UserId: 94,
+				ProjectRoles: []*protos.ProjectRoleAssignment{
+					{ProjectId: 100, ProjectRole: "Reader"},
+				},
 			},
 		},
 		{
-			name: "empty project id",
-			ctx:  ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()),
-			req: &protos.AddUsersToProjectRequest{
-				Email:      "new@example.com",
-				Role:       type_enums.PROJECT_ROLE_READER.String(),
-				ProjectIds: []uint64{0},
+			name:          "project outside organization",
+			platformError: pkg_errors.AddUserToProjectsInvalidProjects,
+			req: &protos.AddUserToProjectsRequest{
+				UserId: 94,
+				ProjectRoles: []*protos.ProjectRoleAssignment{
+					{ProjectId: 200, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
+				},
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := api.AddUsersToProject(tt.ctx, tt.req)
-			require.Error(t, err)
+			res, err := api.AddUserToProjects(ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()), tt.req)
+			require.NoError(t, err)
+			require.False(t, res.GetSuccess())
+			require.Equal(t, tt.platformError.HTTPStatusCodeInt32(), res.GetCode())
+			require.EqualValues(t, tt.platformError.Code, res.GetError().GetErrorCode())
+			require.Equal(t, tt.platformError.Error, res.GetError().GetErrorMessage())
+			require.Equal(t, tt.platformError.ErrorMessage, res.GetError().GetHumanMessage())
 			var count int64
 			require.NoError(t, db.Model(&internal_entity.UserProjectRole{}).Count(&count).Error)
 			require.Zero(t, count)
@@ -356,209 +493,195 @@ func TestAddUsersToProjectRejectsAuthAndValidationFailures(t *testing.T) {
 	}
 }
 
-func TestAddUsersToProjectRejectsInvalidProjectsBeforeWrites(t *testing.T) {
-	api, db, _ := newProjectAPITest(t)
-
-	for _, ids := range [][]uint64{{200}, {300}, {999}, {100, 200}} {
-		_, err := api.AddUsersToProject(ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()), &protos.AddUsersToProjectRequest{
-			Email:      "new@example.com",
-			Role:       type_enums.PROJECT_ROLE_WRITER.String(),
-			ProjectIds: ids,
-		})
-		require.Error(t, err)
-		var count int64
-		require.NoError(t, db.Model(&internal_entity.UserProjectRole{}).Count(&count).Error)
-		require.Zero(t, count)
-	}
-}
-
-func TestAddUsersToProjectInvitesNewUserAsMemberWithProjectRole(t *testing.T) {
-	api, db, emailer := newProjectAPITest(t)
-
-	res, err := api.AddUsersToProject(ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()), &protos.AddUsersToProjectRequest{
-		Email:      "new@example.com",
-		Role:       type_enums.PROJECT_ROLE_WRITER.String(),
-		ProjectIds: []uint64{100, 101},
-	})
-	require.NoError(t, err)
-	require.True(t, res.GetSuccess())
-	require.Len(t, res.GetData(), 2)
-	require.Equal(t, 1, emailer.calls)
-	require.Equal(t, "new@example.com", emailer.to.Email)
-	require.Equal(t, "Alpha,Beta", emailer.args["project_name"])
-
-	var user internal_entity.UserAuth
-	require.NoError(t, db.First(&user, "email = ?", "new@example.com").Error)
-	var orgRole internal_entity.UserOrganizationRole
-	require.NoError(t, db.First(&orgRole, "user_auth_id = ?", user.Id).Error)
-	require.Equal(t, type_enums.ORGANIZATION_ROLE_MEMBER.String(), orgRole.Role)
-	require.Equal(t, type_enums.RECORD_INVITED, orgRole.Status)
-	var projectRoles []internal_entity.UserProjectRole
-	require.NoError(t, db.Find(&projectRoles, "user_auth_id = ?", user.Id).Error)
-	require.Len(t, projectRoles, 2)
-	for _, projectRole := range projectRoles {
-		require.Equal(t, type_enums.PROJECT_ROLE_WRITER.String(), projectRole.Role)
-		require.Equal(t, type_enums.RECORD_INVITED, projectRole.Status)
-	}
-}
-
-func TestAddUsersToProjectUpdatesExistingSameOrgProjectRole(t *testing.T) {
+func TestAddUserToProjectsProjectRoleFailureReturnsPayloadError(t *testing.T) {
 	api, db, _ := newProjectAPITest(t)
 	require.NoError(t, db.Create(&internal_entity.UserAuth{
-		Audited: gorm_models.Audited{Id: 50},
+		Audited: gorm_models.Audited{Id: 96},
 		Mutable: gorm_models.Mutable{
 			Status:    type_enums.RECORD_ACTIVE,
 			CreatedBy: 1,
 		},
-		Name:     "Existing",
-		Email:    "existing@example.com",
+		Name:     "Failure",
+		Email:    "failure@example.com",
 		Password: "hash",
 		Source:   "direct",
 	}).Error)
 	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
-		Audited: gorm_models.Audited{Id: 51},
+		Audited: gorm_models.Audited{Id: 97},
 		Mutable: gorm_models.Mutable{
 			Status:    type_enums.RECORD_ACTIVE,
 			CreatedBy: 1,
 		},
-		UserAuthId:     50,
+		UserAuthId:     96,
+		OrganizationId: 10,
+		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
+	}).Error)
+	require.NoError(t, db.Exec(`DROP TABLE user_project_roles`).Error)
+
+	res, err := api.AddUserToProjects(ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()), &protos.AddUserToProjectsRequest{
+		UserId: 96,
+		ProjectRoles: []*protos.ProjectRoleAssignment{
+			{ProjectId: 100, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.GetSuccess())
+	require.Equal(t, pkg_errors.AddUserToProjectsCreateProjectRoles.HTTPStatusCodeInt32(), res.GetCode())
+	require.EqualValues(t, pkg_errors.AddUserToProjectsCreateProjectRoles.Code, res.GetError().GetErrorCode())
+	require.Equal(t, pkg_errors.AddUserToProjectsCreateProjectRoles.Error, res.GetError().GetErrorMessage())
+	require.Equal(t, pkg_errors.AddUserToProjectsCreateProjectRoles.ErrorMessage, res.GetError().GetHumanMessage())
+}
+
+func TestDeleteUserFromProjectArchivesOnlySelectedProjectRole(t *testing.T) {
+	api, db, _ := newProjectAPITest(t)
+	require.NoError(t, db.Create(&internal_entity.UserAuth{
+		Audited: gorm_models.Audited{Id: 130},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		Name:     "Delete Project",
+		Email:    "delete-project@example.com",
+		Password: "hash",
+		Source:   "direct",
+	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
+		Audited: gorm_models.Audited{Id: 131},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		UserAuthId:     130,
 		OrganizationId: 10,
 		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
 	}).Error)
 	require.NoError(t, db.Create(&internal_entity.UserProjectRole{
-		Audited: gorm_models.Audited{Id: 52},
+		Audited: gorm_models.Audited{Id: 132},
 		Mutable: gorm_models.Mutable{
 			Status:    type_enums.RECORD_ACTIVE,
 			CreatedBy: 1,
 		},
-		UserAuthId: 50,
+		UserAuthId: 130,
 		ProjectId:  100,
 		Role:       type_enums.PROJECT_ROLE_READER.String(),
 	}).Error)
+	require.NoError(t, db.Create(&internal_entity.UserProjectRole{
+		Audited: gorm_models.Audited{Id: 133},
+		Mutable: gorm_models.Mutable{
+			Status:    type_enums.RECORD_ACTIVE,
+			CreatedBy: 1,
+		},
+		UserAuthId: 130,
+		ProjectId:  101,
+		Role:       type_enums.PROJECT_ROLE_WRITER.String(),
+	}).Error)
 
-	res, err := api.AddUsersToProject(ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()), &protos.AddUsersToProjectRequest{
-		Email:      "existing@example.com",
-		Role:       type_enums.PROJECT_ROLE_ADMIN.String(),
-		ProjectIds: []uint64{100},
+	res, err := api.DeleteUserFromProject(ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()), &protos.DeleteUserFromProjectRequest{
+		UserId:    130,
+		ProjectId: 100,
 	})
 	require.NoError(t, err)
 	require.True(t, res.GetSuccess())
+	require.EqualValues(t, 130, res.GetId())
 
-	var projectRoles []internal_entity.UserProjectRole
-	require.NoError(t, db.Find(&projectRoles, "user_auth_id = ? AND project_id = ?", 50, 100).Error)
-	require.Len(t, projectRoles, 1)
-	require.Equal(t, type_enums.PROJECT_ROLE_ADMIN.String(), projectRoles[0].Role)
-	require.Equal(t, type_enums.RECORD_ACTIVE, projectRoles[0].Status)
+	var user internal_entity.UserAuth
+	require.NoError(t, db.First(&user, "id = ?", 130).Error)
+	require.Equal(t, type_enums.RECORD_ACTIVE, user.Status)
+
+	var orgRole internal_entity.UserOrganizationRole
+	require.NoError(t, db.First(&orgRole, "user_auth_id = ? AND organization_id = ?", 130, 10).Error)
+	require.Equal(t, type_enums.RECORD_ACTIVE, orgRole.Status)
+
+	var deletedProjectRole internal_entity.UserProjectRole
+	require.NoError(t, db.First(&deletedProjectRole, "user_auth_id = ? AND project_id = ?", 130, 100).Error)
+	require.Equal(t, type_enums.RECORD_ARCHIEVE, deletedProjectRole.Status)
+
+	var activeProjectRole internal_entity.UserProjectRole
+	require.NoError(t, db.First(&activeProjectRole, "user_auth_id = ? AND project_id = ?", 130, 101).Error)
+	require.Equal(t, type_enums.RECORD_ACTIVE, activeProjectRole.Status)
 }
 
-func TestAddUsersToProjectReusesExistingInvitedOrganizationRole(t *testing.T) {
+func TestDeleteUserFromProjectRejectsAuthAndValidationFailures(t *testing.T) {
 	api, db, _ := newProjectAPITest(t)
 	require.NoError(t, db.Create(&internal_entity.UserAuth{
-		Audited: gorm_models.Audited{Id: 60},
+		Audited: gorm_models.Audited{Id: 140},
 		Mutable: gorm_models.Mutable{
-			Status:    type_enums.RECORD_INVITED,
+			Status:    type_enums.RECORD_ACTIVE,
 			CreatedBy: 1,
 		},
-		Name:     "Invited",
-		Email:    "invited@example.com",
+		Name:     "Project Delete Validation",
+		Email:    "project-delete-validation@example.com",
 		Password: "hash",
-		Source:   "invited-by-other",
+		Source:   "direct",
 	}).Error)
 	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
-		Audited: gorm_models.Audited{Id: 61},
+		Audited: gorm_models.Audited{Id: 141},
 		Mutable: gorm_models.Mutable{
-			Status:    type_enums.RECORD_INVITED,
+			Status:    type_enums.RECORD_ACTIVE,
 			CreatedBy: 1,
 		},
-		UserAuthId:     60,
+		UserAuthId:     140,
 		OrganizationId: 10,
 		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
 	}).Error)
 
-	res, err := api.AddUsersToProject(ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()), &protos.AddUsersToProjectRequest{
-		Email:      "invited@example.com",
-		Role:       type_enums.PROJECT_ROLE_READER.String(),
-		ProjectIds: []uint64{100},
-	})
-	require.NoError(t, err)
-	require.True(t, res.GetSuccess())
-
-	var orgRoleCount int64
-	require.NoError(t, db.Model(&internal_entity.UserOrganizationRole{}).Where("user_auth_id = ?", 60).Count(&orgRoleCount).Error)
-	require.EqualValues(t, 1, orgRoleCount)
-	var projectRole internal_entity.UserProjectRole
-	require.NoError(t, db.First(&projectRole, "user_auth_id = ? AND project_id = ?", 60, 100).Error)
-	require.Equal(t, type_enums.PROJECT_ROLE_READER.String(), projectRole.Role)
-	require.Equal(t, type_enums.RECORD_INVITED, projectRole.Status)
-}
-
-func TestAddUsersToProjectRejectsExistingInvitedUserInAnotherOrganization(t *testing.T) {
-	api, db, emailer := newProjectAPITest(t)
-	require.NoError(t, db.Create(&internal_entity.UserAuth{
-		Audited: gorm_models.Audited{Id: 70},
-		Mutable: gorm_models.Mutable{
-			Status:    type_enums.RECORD_INVITED,
-			CreatedBy: 1,
-		},
-		Name:     "Invited",
-		Email:    "cross-invited@example.com",
-		Password: "hash",
-		Source:   "invited-by-other",
-	}).Error)
-	require.NoError(t, db.Create(&internal_entity.UserOrganizationRole{
-		Audited: gorm_models.Audited{Id: 71},
-		Mutable: gorm_models.Mutable{
-			Status:    type_enums.RECORD_INVITED,
-			CreatedBy: 1,
-		},
-		UserAuthId:     70,
-		OrganizationId: 20,
-		Role:           type_enums.ORGANIZATION_ROLE_MEMBER.String(),
-	}).Error)
-
-	_, err := api.AddUsersToProject(ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()), &protos.AddUsersToProjectRequest{
-		Email:      "cross-invited@example.com",
-		Role:       type_enums.PROJECT_ROLE_READER.String(),
-		ProjectIds: []uint64{100},
-	})
+	res, err := api.DeleteUserFromProject(context.Background(), &protos.DeleteUserFromProjectRequest{UserId: 140, ProjectId: 100})
 	require.Error(t, err)
-	require.Zero(t, emailer.calls)
+	require.False(t, res.GetSuccess())
+	require.Equal(t, pkg_errors.DeleteUserFromProjectUnauthenticated.HTTPStatusCodeInt32(), res.GetCode())
 
-	var projectRoleCount int64
-	require.NoError(t, db.Model(&internal_entity.UserProjectRole{}).Where("user_auth_id = ?", 70).Count(&projectRoleCount).Error)
-	require.Zero(t, projectRoleCount)
-}
+	tests := []struct {
+		name          string
+		ctx           context.Context
+		req           *protos.DeleteUserFromProjectRequest
+		platformError pkg_errors.PlatformError
+		expectError   bool
+	}{
+		{
+			name:          "non admin",
+			ctx:           ownerContext(type_enums.ORGANIZATION_ROLE_MEMBER.String()),
+			req:           &protos.DeleteUserFromProjectRequest{UserId: 140, ProjectId: 100},
+			platformError: pkg_errors.DeleteUserFromProjectUnauthorized,
+		},
+		{
+			name:          "zero user id",
+			ctx:           ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()),
+			req:           &protos.DeleteUserFromProjectRequest{ProjectId: 100},
+			platformError: pkg_errors.DeleteUserFromProjectInvalidUser,
+		},
+		{
+			name:          "zero project id",
+			ctx:           ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()),
+			req:           &protos.DeleteUserFromProjectRequest{UserId: 140},
+			platformError: pkg_errors.DeleteUserFromProjectInvalidProject,
+		},
+		{
+			name:          "project outside organization",
+			ctx:           ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()),
+			req:           &protos.DeleteUserFromProjectRequest{UserId: 140, ProjectId: 200},
+			platformError: pkg_errors.DeleteUserFromProjectInvalidProject,
+		},
+		{
+			name:          "user not in project",
+			ctx:           ownerContext(type_enums.ORGANIZATION_ROLE_ADMIN.String()),
+			req:           &protos.DeleteUserFromProjectRequest{UserId: 140, ProjectId: 100},
+			platformError: pkg_errors.DeleteUserFromProjectUserNotInProject,
+		},
+	}
 
-func TestAddUsersToProjectProjectRoleFailureReturnsError(t *testing.T) {
-	api, db, _ := newProjectAPITest(t)
-	require.NoError(t, db.Exec(`DROP TABLE user_project_roles`).Error)
-
-	_, err := api.AddUsersToProject(ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()), &protos.AddUsersToProjectRequest{
-		Email:      "new@example.com",
-		Role:       type_enums.PROJECT_ROLE_READER.String(),
-		ProjectIds: []uint64{100},
-	})
-	require.Error(t, err)
-
-	var count int64
-	require.NoError(t, db.Model(&internal_entity.UserAuth{}).Count(&count).Error)
-	require.EqualValues(t, 1, count)
-}
-
-func TestAddUsersToProjectEmailFailureDoesNotRollback(t *testing.T) {
-	api, db, emailer := newProjectAPITest(t)
-	emailer.err = errors.New("email failed")
-
-	res, err := api.AddUsersToProject(ownerContext(type_enums.ORGANIZATION_ROLE_OWNER.String()), &protos.AddUsersToProjectRequest{
-		Email:      "new@example.com",
-		Role:       type_enums.PROJECT_ROLE_READER.String(),
-		ProjectIds: []uint64{100},
-	})
-	require.NoError(t, err)
-	require.True(t, res.GetSuccess())
-	require.Equal(t, 1, emailer.calls)
-
-	var count int64
-	require.NoError(t, db.Model(&internal_entity.UserProjectRole{}).Count(&count).Error)
-	require.EqualValues(t, 1, count)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := api.DeleteUserFromProject(tt.ctx, tt.req)
+			if tt.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.False(t, res.GetSuccess())
+			require.Equal(t, tt.platformError.HTTPStatusCodeInt32(), res.GetCode())
+			require.EqualValues(t, tt.platformError.Code, res.GetError().GetErrorCode())
+			require.Equal(t, tt.platformError.Error, res.GetError().GetErrorMessage())
+			require.Equal(t, tt.platformError.ErrorMessage, res.GetError().GetHumanMessage())
+		})
+	}
 }
