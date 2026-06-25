@@ -693,6 +693,11 @@ class OrganizationServiceStub(object):
                 request_serializer=web__api__pb2.InviteUserToOrganizationRequest.SerializeToString,
                 response_deserializer=web__api__pb2.InviteUserToOrganizationResponse.FromString,
                 _registered_method=True)
+        self.UpdateUserOrganizationRole = channel.unary_unary(
+                '/web_api.OrganizationService/UpdateUserOrganizationRole',
+                request_serializer=web__api__pb2.UpdateUserOrganizationRoleRequest.SerializeToString,
+                response_deserializer=web__api__pb2.UpdateUserOrganizationRoleResponse.FromString,
+                _registered_method=True)
         self.DeleteUserFromOrganization = channel.unary_unary(
                 '/web_api.OrganizationService/DeleteUserFromOrganization',
                 request_serializer=web__api__pb2.DeleteUserFromOrganizationRequest.SerializeToString,
@@ -733,6 +738,12 @@ class OrganizationServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateUserOrganizationRole(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def DeleteUserFromOrganization(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -766,6 +777,11 @@ def add_OrganizationServiceServicer_to_server(servicer, server):
                     servicer.InviteUserToOrganization,
                     request_deserializer=web__api__pb2.InviteUserToOrganizationRequest.FromString,
                     response_serializer=web__api__pb2.InviteUserToOrganizationResponse.SerializeToString,
+            ),
+            'UpdateUserOrganizationRole': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateUserOrganizationRole,
+                    request_deserializer=web__api__pb2.UpdateUserOrganizationRoleRequest.FromString,
+                    response_serializer=web__api__pb2.UpdateUserOrganizationRoleResponse.SerializeToString,
             ),
             'DeleteUserFromOrganization': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteUserFromOrganization,
@@ -908,6 +924,33 @@ class OrganizationService(object):
             '/web_api.OrganizationService/InviteUserToOrganization',
             web__api__pb2.InviteUserToOrganizationRequest.SerializeToString,
             web__api__pb2.InviteUserToOrganizationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateUserOrganizationRole(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/web_api.OrganizationService/UpdateUserOrganizationRole',
+            web__api__pb2.UpdateUserOrganizationRoleRequest.SerializeToString,
+            web__api__pb2.UpdateUserOrganizationRoleResponse.FromString,
             options,
             channel_credentials,
             insecure,

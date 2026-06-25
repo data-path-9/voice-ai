@@ -260,7 +260,7 @@ func (wProjectApi *webProjectGRPCApi) AddUserToProjects(ctx context.Context, irR
 				ErrorMessage: pkg_errors.AddUserToProjectsMissingOrganization.Error,
 				HumanMessage: pkg_errors.AddUserToProjectsMissingOrganization.ErrorMessage,
 			},
-		}, errors.New(pkg_errors.AddUserToProjectsMissingOrganization.Error)
+		}, nil
 	}
 	if !validator.OneOf(currentOrgRole.Role, type_enums.ORGANIZATION_ROLE_OWNER.String(), type_enums.ORGANIZATION_ROLE_ADMIN.String()) {
 		return &protos.AddUserToProjectsResponse{
@@ -271,7 +271,7 @@ func (wProjectApi *webProjectGRPCApi) AddUserToProjects(ctx context.Context, irR
 				ErrorMessage: pkg_errors.AddUserToProjectsUnauthorized.Error,
 				HumanMessage: pkg_errors.AddUserToProjectsUnauthorized.ErrorMessage,
 			},
-		}, errors.New(pkg_errors.AddUserToProjectsUnauthorized.Error)
+		}, nil
 	}
 	if !validator.NonZero(irRequest.GetUserId()) {
 		return &protos.AddUserToProjectsResponse{
@@ -389,7 +389,7 @@ func (wProjectApi *webProjectGRPCApi) AddUserToProjects(ctx context.Context, irR
 				ErrorMessage: pkg_errors.AddUserToProjectsCreateProjectRoles.Error,
 				HumanMessage: pkg_errors.AddUserToProjectsCreateProjectRoles.ErrorMessage,
 			},
-		}, errors.New(pkg_errors.AddUserToProjectsCreateProjectRoles.Error)
+		}, nil
 	}
 	if len(existingProjectRoles) > 0 {
 		return &protos.AddUserToProjectsResponse{
@@ -415,7 +415,7 @@ func (wProjectApi *webProjectGRPCApi) AddUserToProjects(ctx context.Context, irR
 					ErrorMessage: pkg_errors.AddUserToProjectsCreateProjectRoles.Error,
 					HumanMessage: pkg_errors.AddUserToProjectsCreateProjectRoles.ErrorMessage,
 				},
-			}, errors.New(pkg_errors.AddUserToProjectsCreateProjectRoles.Error)
+			}, nil
 		}
 	}
 
@@ -459,7 +459,7 @@ func (wProjectApi *webProjectGRPCApi) DeleteUserFromProject(ctx context.Context,
 				ErrorMessage: pkg_errors.DeleteUserFromProjectMissingOrganization.Error,
 				HumanMessage: pkg_errors.DeleteUserFromProjectMissingOrganization.ErrorMessage,
 			},
-		}, errors.New(pkg_errors.DeleteUserFromProjectMissingOrganization.Error)
+		}, nil
 	}
 	if !validator.OneOf(currentOrgRole.Role, type_enums.ORGANIZATION_ROLE_OWNER.String(), type_enums.ORGANIZATION_ROLE_ADMIN.String()) {
 		return &protos.DeleteUserFromProjectResponse{
@@ -470,7 +470,7 @@ func (wProjectApi *webProjectGRPCApi) DeleteUserFromProject(ctx context.Context,
 				ErrorMessage: pkg_errors.DeleteUserFromProjectUnauthorized.Error,
 				HumanMessage: pkg_errors.DeleteUserFromProjectUnauthorized.ErrorMessage,
 			},
-		}, errors.New(pkg_errors.DeleteUserFromProjectUnauthorized.Error)
+		}, nil
 	}
 	if !validator.NonZero(irRequest.GetUserId()) {
 		return &protos.DeleteUserFromProjectResponse{
@@ -561,7 +561,7 @@ func (wProjectApi *webProjectGRPCApi) DeleteUserFromProject(ctx context.Context,
 				ErrorMessage: pkg_errors.DeleteUserFromProjectArchiveRole.Error,
 				HumanMessage: pkg_errors.DeleteUserFromProjectArchiveRole.ErrorMessage,
 			},
-		}, errors.New(pkg_errors.DeleteUserFromProjectArchiveRole.Error)
+		}, nil
 	}
 
 	return &protos.DeleteUserFromProjectResponse{

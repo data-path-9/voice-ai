@@ -508,6 +508,24 @@ class AddUserToProjectsRequest(_message.Message):
     projectRoles: _containers.RepeatedCompositeFieldContainer[ProjectRoleAssignment]
     def __init__(self, userId: _Optional[int] = ..., projectRoles: _Optional[_Iterable[_Union[ProjectRoleAssignment, _Mapping]]] = ...) -> None: ...
 
+class UpdateUserOrganizationRoleRequest(_message.Message):
+    __slots__ = ("userId", "organizationRole")
+    USERID_FIELD_NUMBER: _ClassVar[int]
+    ORGANIZATIONROLE_FIELD_NUMBER: _ClassVar[int]
+    userId: int
+    organizationRole: str
+    def __init__(self, userId: _Optional[int] = ..., organizationRole: _Optional[str] = ...) -> None: ...
+
+class UpdateUserOrganizationRoleResponse(_message.Message):
+    __slots__ = ("code", "success", "error")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    code: int
+    success: bool
+    error: _common_pb2.Error
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ...) -> None: ...
+
 class DeleteUserFromOrganizationRequest(_message.Message):
     __slots__ = ("userId",)
     USERID_FIELD_NUMBER: _ClassVar[int]

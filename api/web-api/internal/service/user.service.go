@@ -25,6 +25,7 @@ type UserService interface {
 	CreateOrganizationRole(ctx context.Context, auth types.Principle, role string, userId uint64, orgnizationId uint64, status type_enums.RecordState) (*internal_entity.UserOrganizationRole, error)
 	CreateProjectRole(ctx context.Context, auth types.Principle, userId uint64, role string, projectId uint64, status type_enums.RecordState) (*internal_entity.UserProjectRole, error)
 	CreateProjectRoles(ctx context.Context, auth types.Principle, userId uint64, role string, projectIds []uint64, status type_enums.RecordState) ([]*internal_entity.UserProjectRole, error)
+	UpdateOrganizationRole(ctx context.Context, auth types.Principle, userId uint64, organizationId uint64, role string) error
 	ArchiveUserFromOrganization(ctx context.Context, auth types.Principle, userId uint64, organizationId uint64) error
 	ArchiveUserFromProject(ctx context.Context, auth types.Principle, userId uint64, projectId uint64) error
 
@@ -36,6 +37,7 @@ type UserService interface {
 	GetActiveOrInvitedProjectRole(ctx context.Context, userId uint64, projectId uint64) (*internal_entity.UserProjectRole, error)
 	GetOrganizationRole(ctx context.Context, userId uint64) (*internal_entity.UserOrganizationRole, error)
 	GetActiveOrInvitedOrganizationRole(ctx context.Context, userId uint64) (*internal_entity.UserOrganizationRole, error)
+	GetActiveOrInvitedOrganizationRoleForOrganization(ctx context.Context, userId uint64, organizationId uint64) (*internal_entity.UserOrganizationRole, error)
 	GetAnyOrganizationRole(ctx context.Context, userId uint64) (*internal_entity.UserOrganizationRole, error)
 	Activate(ctx context.Context, Id uint64, name string, source *string) (types.Principle, error)
 

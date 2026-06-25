@@ -277,6 +277,21 @@ func (aS *userService) CreateOrganizationRole(ctx context.Context, auth types.Pr
 	return ct, nil
 }
 
+func (aS *userService) UpdateOrganizationRole(ctx context.Context, auth types.Principle, userId uint64, organizationId uint64, role string) error {
+	db := aS.postgres.DB(ctx)
+	tx := db.Model(&internal_entity.UserOrganizationRole{}).
+		Where("user_auth_id = ? AND organization_id = ? AND status IN ?", userId, organizationId, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()}).
+		Updates(map[string]interface{}{
+			"role":       strings.ToLower(role),
+			"updated_by": auth.GetUserInfo().Id,
+		})
+	if tx.Error != nil {
+		aS.logger.Errorf("exception in DB transaction %v", tx.Error)
+		return tx.Error
+	}
+	return nil
+}
+
 func (aS *userService) GetActiveOrInvitedProjectRole(ctx context.Context, userId uint64, projectId uint64) (*internal_entity.UserProjectRole, error) {
 	db := aS.postgres.DB(ctx)
 	var ct internal_entity.UserProjectRole
@@ -432,6 +447,19 @@ func (aS *userService) GetActiveOrInvitedOrganizationRole(ctx context.Context, u
 	db := aS.postgres.DB(ctx)
 	var ct internal_entity.UserOrganizationRole
 	tx := db.Last(&ct, "user_auth_id = ? AND status IN ?", userId, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()})
+	if tx.Error != nil {
+		if !errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			aS.logger.Errorf("exception in DB transaction %v", tx.Error)
+		}
+		return nil, tx.Error
+	}
+	return &ct, nil
+}
+
+func (aS *userService) GetActiveOrInvitedOrganizationRoleForOrganization(ctx context.Context, userId uint64, organizationId uint64) (*internal_entity.UserOrganizationRole, error) {
+	db := aS.postgres.DB(ctx)
+	var ct internal_entity.UserOrganizationRole
+	tx := db.Last(&ct, "user_auth_id = ? AND organization_id = ? AND status IN ?", userId, organizationId, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()})
 	if tx.Error != nil {
 		if !errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 			aS.logger.Errorf("exception in DB transaction %v", tx.Error)

@@ -5,6 +5,8 @@ import { InviteProjectUserDialog } from '@/app/components/base/modal/invite-proj
 import {
   DeleteUserFromOrganization,
   DeleteUserFromOrganizationRequest,
+  UpdateUserOrganizationRole,
+  UpdateUserOrganizationRoleRequest,
   User,
 } from '@rapidaai/react';
 import { useCurrentCredential } from '@/hooks/use-credential';
@@ -14,7 +16,7 @@ import { useUserPageStore } from '@/hooks';
 import { SingleUser } from '@/app/pages/workspace/user/single-user';
 import { PrimaryButton } from '@/app/components/carbon/button';
 import { Pagination } from '@/app/components/carbon/pagination';
-import { Add, Renew, TrashCan } from '@carbon/icons-react';
+import { Add, Renew, TrashCan, UserAdmin } from '@carbon/icons-react';
 import {
   Table,
   TableHead,
@@ -43,6 +45,9 @@ const headers = [
   { key: 'status', header: 'Status' },
 ];
 
+const fallbackErrorMessage =
+  'Unable to process your request. please try again later.';
+
 export function UserPage() {
   const { loading, showLoader, hideLoader } = useRapidaStore();
   const [inviteOrganizationModalOpen, setInviteOrganizationModalOpen] =
@@ -55,6 +60,13 @@ export function UserPage() {
   const selectedUser = userActions.users.find(
     user => user.getId() === selectedUserId,
   );
+  const selectedOrganizationRole = selectedUser?.getRole()?.toLowerCase();
+  const nextOrganizationRole =
+    selectedOrganizationRole === 'member'
+      ? 'admin'
+      : selectedOrganizationRole === 'admin'
+        ? 'member'
+        : null;
 
   const onError = useCallback((err: string) => {
     hideLoader();
@@ -87,9 +99,7 @@ export function UserPage() {
       hideLoader();
 
       const responseError = response.getError();
-      const message =
-        responseError?.getHumanmessage() ||
-        'Unable to process your request. please try again later.';
+      const message = responseError?.getHumanmessage() || fallbackErrorMessage;
 
       if (response.getSuccess()) {
         setUserPendingDelete(null);
@@ -102,10 +112,44 @@ export function UserPage() {
       toast.error(message);
     } catch (err: any) {
       hideLoader();
-      toast.error(
-        err?.message ||
-          'Unable to process your request. please try again later.',
-      );
+      toast.error(err?.message || fallbackErrorMessage);
+    }
+  };
+
+  const onUpdateOrganizationRole = async (
+    user: User,
+    organizationRole: string,
+  ) => {
+    showLoader('overlay');
+    const req = new UpdateUserOrganizationRoleRequest();
+    req.setUserid(user.getId());
+    req.setOrganizationrole(organizationRole);
+
+    try {
+      const response = await UpdateUserOrganizationRole(connectionConfig, req, {
+        authorization: token,
+        'x-auth-id': authId,
+      });
+      hideLoader();
+
+      const responseError = response.getError();
+      const message = responseError?.getHumanmessage() || fallbackErrorMessage;
+
+      if (response.getSuccess()) {
+        setSelectedUserId(null);
+        toast.success(
+          organizationRole === 'admin'
+            ? 'The user was promoted to admin.'
+            : 'The user was changed to member.',
+        );
+        getUsers(token, authId, projectId);
+        return;
+      }
+
+      toast.error(message);
+    } catch (err: any) {
+      hideLoader();
+      toast.error(err?.message || fallbackErrorMessage);
     }
   };
 
@@ -137,6 +181,18 @@ export function UserPage() {
           >
             Invite to project
           </TableBatchAction>
+          {nextOrganizationRole && (
+            <TableBatchAction
+              renderIcon={UserAdmin}
+              onClick={() => {
+                if (selectedUser) {
+                  onUpdateOrganizationRole(selectedUser, nextOrganizationRole);
+                }
+              }}
+            >
+              {nextOrganizationRole === 'admin' ? 'Make admin' : 'Make member'}
+            </TableBatchAction>
+          )}
           <TableBatchAction
             className="cds--btn--danger"
             renderIcon={TrashCan}

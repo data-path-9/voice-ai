@@ -493,7 +493,7 @@ func TestAddUserToProjectsRejectsInvalidAssignmentsBeforeWrites(t *testing.T) {
 	}
 }
 
-func TestAddUserToProjectsProjectRoleFailureReturnsError(t *testing.T) {
+func TestAddUserToProjectsProjectRoleFailureReturnsPayloadError(t *testing.T) {
 	api, db, _ := newProjectAPITest(t)
 	require.NoError(t, db.Create(&internal_entity.UserAuth{
 		Audited: gorm_models.Audited{Id: 96},
@@ -524,7 +524,7 @@ func TestAddUserToProjectsProjectRoleFailureReturnsError(t *testing.T) {
 			{ProjectId: 100, ProjectRole: type_enums.PROJECT_ROLE_READER.String()},
 		},
 	})
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.False(t, res.GetSuccess())
 	require.Equal(t, pkg_errors.AddUserToProjectsCreateProjectRoles.HTTPStatusCodeInt32(), res.GetCode())
 	require.EqualValues(t, pkg_errors.AddUserToProjectsCreateProjectRoles.Code, res.GetError().GetErrorCode())
@@ -642,7 +642,6 @@ func TestDeleteUserFromProjectRejectsAuthAndValidationFailures(t *testing.T) {
 			ctx:           ownerContext(type_enums.ORGANIZATION_ROLE_MEMBER.String()),
 			req:           &protos.DeleteUserFromProjectRequest{UserId: 140, ProjectId: 100},
 			platformError: pkg_errors.DeleteUserFromProjectUnauthorized,
-			expectError:   true,
 		},
 		{
 			name:          "zero user id",

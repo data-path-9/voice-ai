@@ -618,6 +618,7 @@ const (
 	OrganizationService_UpdateOrganization_FullMethodName         = "/web_api.OrganizationService/UpdateOrganization"
 	OrganizationService_UpdateBillingInformation_FullMethodName   = "/web_api.OrganizationService/UpdateBillingInformation"
 	OrganizationService_InviteUserToOrganization_FullMethodName   = "/web_api.OrganizationService/InviteUserToOrganization"
+	OrganizationService_UpdateUserOrganizationRole_FullMethodName = "/web_api.OrganizationService/UpdateUserOrganizationRole"
 	OrganizationService_DeleteUserFromOrganization_FullMethodName = "/web_api.OrganizationService/DeleteUserFromOrganization"
 )
 
@@ -630,6 +631,7 @@ type OrganizationServiceClient interface {
 	UpdateOrganization(ctx context.Context, in *UpdateOrganizationRequest, opts ...grpc.CallOption) (*UpdateOrganizationResponse, error)
 	UpdateBillingInformation(ctx context.Context, in *UpdateBillingInformationRequest, opts ...grpc.CallOption) (*BaseResponse, error)
 	InviteUserToOrganization(ctx context.Context, in *InviteUserToOrganizationRequest, opts ...grpc.CallOption) (*InviteUserToOrganizationResponse, error)
+	UpdateUserOrganizationRole(ctx context.Context, in *UpdateUserOrganizationRoleRequest, opts ...grpc.CallOption) (*UpdateUserOrganizationRoleResponse, error)
 	DeleteUserFromOrganization(ctx context.Context, in *DeleteUserFromOrganizationRequest, opts ...grpc.CallOption) (*DeleteUserFromOrganizationResponse, error)
 }
 
@@ -691,6 +693,16 @@ func (c *organizationServiceClient) InviteUserToOrganization(ctx context.Context
 	return out, nil
 }
 
+func (c *organizationServiceClient) UpdateUserOrganizationRole(ctx context.Context, in *UpdateUserOrganizationRoleRequest, opts ...grpc.CallOption) (*UpdateUserOrganizationRoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateUserOrganizationRoleResponse)
+	err := c.cc.Invoke(ctx, OrganizationService_UpdateUserOrganizationRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *organizationServiceClient) DeleteUserFromOrganization(ctx context.Context, in *DeleteUserFromOrganizationRequest, opts ...grpc.CallOption) (*DeleteUserFromOrganizationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteUserFromOrganizationResponse)
@@ -710,6 +722,7 @@ type OrganizationServiceServer interface {
 	UpdateOrganization(context.Context, *UpdateOrganizationRequest) (*UpdateOrganizationResponse, error)
 	UpdateBillingInformation(context.Context, *UpdateBillingInformationRequest) (*BaseResponse, error)
 	InviteUserToOrganization(context.Context, *InviteUserToOrganizationRequest) (*InviteUserToOrganizationResponse, error)
+	UpdateUserOrganizationRole(context.Context, *UpdateUserOrganizationRoleRequest) (*UpdateUserOrganizationRoleResponse, error)
 	DeleteUserFromOrganization(context.Context, *DeleteUserFromOrganizationRequest) (*DeleteUserFromOrganizationResponse, error)
 }
 
@@ -734,6 +747,9 @@ func (UnimplementedOrganizationServiceServer) UpdateBillingInformation(context.C
 }
 func (UnimplementedOrganizationServiceServer) InviteUserToOrganization(context.Context, *InviteUserToOrganizationRequest) (*InviteUserToOrganizationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InviteUserToOrganization not implemented")
+}
+func (UnimplementedOrganizationServiceServer) UpdateUserOrganizationRole(context.Context, *UpdateUserOrganizationRoleRequest) (*UpdateUserOrganizationRoleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateUserOrganizationRole not implemented")
 }
 func (UnimplementedOrganizationServiceServer) DeleteUserFromOrganization(context.Context, *DeleteUserFromOrganizationRequest) (*DeleteUserFromOrganizationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteUserFromOrganization not implemented")
@@ -848,6 +864,24 @@ func _OrganizationService_InviteUserToOrganization_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrganizationService_UpdateUserOrganizationRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateUserOrganizationRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrganizationServiceServer).UpdateUserOrganizationRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrganizationService_UpdateUserOrganizationRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrganizationServiceServer).UpdateUserOrganizationRole(ctx, req.(*UpdateUserOrganizationRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _OrganizationService_DeleteUserFromOrganization_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteUserFromOrganizationRequest)
 	if err := dec(in); err != nil {
@@ -892,6 +926,10 @@ var OrganizationService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "InviteUserToOrganization",
 			Handler:    _OrganizationService_InviteUserToOrganization_Handler,
+		},
+		{
+			MethodName: "UpdateUserOrganizationRole",
+			Handler:    _OrganizationService_UpdateUserOrganizationRole_Handler,
 		},
 		{
 			MethodName: "DeleteUserFromOrganization",
