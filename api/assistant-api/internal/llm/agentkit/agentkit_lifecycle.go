@@ -63,6 +63,21 @@ func (e *agentkitExecutor) initialize(ctx context.Context, comm internal_type.Co
 	if provider.MaxSendMessageBytes != nil {
 		maxSendMessageBytes = *provider.MaxSendMessageBytes
 	}
+	tlsServerName := ""
+	if provider.TLSServerName != nil {
+		tlsServerName = *provider.TLSServerName
+	}
+	agentkitOptions := map[string]interface{}{
+		"transportSecurity":          transportSecurity,
+		"tlsVerification":            tlsVerification,
+		"tlsServerName":              tlsServerName,
+		"caCertificatePemConfigured": provider.Certificate != "",
+		"connectTimeoutMs":           connectTimeoutMs,
+		"keepaliveTimeMs":            keepaliveTimeMs,
+		"keepaliveTimeoutMs":         keepaliveTimeoutMs,
+		"maxRecvMessageBytes":        maxRecvMessageBytes,
+		"maxSendMessageBytes":        maxSendMessageBytes,
+	}
 
 	connectTimeout := time.Duration(connectTimeoutMs) * time.Millisecond
 	opts := []grpc.DialOption{
@@ -83,8 +98,8 @@ func (e *agentkitExecutor) initialize(ctx context.Context, comm internal_type.Co
 		tlsConfig := &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		}
-		if provider.TLSServerName != nil && *provider.TLSServerName != "" {
-			tlsConfig.ServerName = *provider.TLSServerName
+		if tlsServerName != "" {
+			tlsConfig.ServerName = tlsServerName
 		}
 		if tlsVerification == TLSVerificationSkipVerify {
 			e.logger.Warnf("Using insecure TLS (skipping certificate verification)")
@@ -101,7 +116,7 @@ func (e *agentkitExecutor) initialize(ctx context.Context, comm internal_type.Co
 						Attributes: observability.Attributes{
 							"component": observability.ComponentLLM.String(),
 							"provider":  e.Name(),
-							"options":   observability.AttributeValue(cfg.GetOptions()),
+							"options":   observability.AttributeValue(agentkitOptions),
 							"url":       provider.Url,
 							"error":     "invalid certificate",
 						},
@@ -127,7 +142,7 @@ func (e *agentkitExecutor) initialize(ctx context.Context, comm internal_type.Co
 				Attributes: observability.Attributes{
 					"component":  observability.ComponentLLM.String(),
 					"provider":   e.Name(),
-					"options":    observability.AttributeValue(cfg.GetOptions()),
+					"options":    observability.AttributeValue(agentkitOptions),
 					"url":        provider.Url,
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
@@ -159,7 +174,7 @@ func (e *agentkitExecutor) initialize(ctx context.Context, comm internal_type.Co
 					Attributes: observability.Attributes{
 						"component":  observability.ComponentLLM.String(),
 						"provider":   e.Name(),
-						"options":    observability.AttributeValue(cfg.GetOptions()),
+						"options":    observability.AttributeValue(agentkitOptions),
 						"url":        provider.Url,
 						"error":      err.Error(),
 						"error_type": fmt.Sprintf("%T", err),
@@ -186,7 +201,7 @@ func (e *agentkitExecutor) initialize(ctx context.Context, comm internal_type.Co
 				Attributes: observability.Attributes{
 					"component":  observability.ComponentLLM.String(),
 					"provider":   e.Name(),
-					"options":    observability.AttributeValue(cfg.GetOptions()),
+					"options":    observability.AttributeValue(agentkitOptions),
 					"url":        provider.Url,
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
@@ -236,7 +251,7 @@ func (e *agentkitExecutor) initialize(ctx context.Context, comm internal_type.Co
 				Attributes: observability.Attributes{
 					"component":  observability.ComponentLLM.String(),
 					"provider":   e.Name(),
-					"options":    observability.AttributeValue(cfg.GetOptions()),
+					"options":    observability.AttributeValue(agentkitOptions),
 					"url":        provider.Url,
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
@@ -270,7 +285,7 @@ func (e *agentkitExecutor) initialize(ctx context.Context, comm internal_type.Co
 					"component": observability.ComponentLLM.String(),
 					"provider":  e.Name(),
 					"url":       provider.Url,
-					"options":   observability.AttributeValue(cfg.GetOptions()),
+					"options":   observability.AttributeValue(agentkitOptions),
 				},
 				OccurredAt: time.Now(),
 			},
