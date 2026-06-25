@@ -67,7 +67,7 @@ func TestRnnoiseDenoiser_ObservabilityInitRecords(t *testing.T) {
 	var packets []internal_type.Packet
 	opts := utils.Option{"microphone.denoising.provider": rnNoiseDenoiserName}
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {
@@ -84,7 +84,9 @@ func TestRnnoiseDenoiser_ObservabilityInitRecords(t *testing.T) {
 	for _, packet := range packets {
 		switch typed := packet.(type) {
 		case internal_type.ObservabilityEventRecordPacket:
-			assert.NotEqual(t, observability.DenoiseStarted, typed.Record.Event)
+			if typed.Record.Component == observability.ComponentDenoise {
+				assert.Failf(t, "unexpected denoise event during init", "event=%s", typed.Record.Event)
+			}
 		case internal_type.ObservabilityMetricRecordPacket:
 			if len(typed.Record.Metrics) > 0 && typed.Record.Metrics[0].Name == observability.MetricDenoiseInitLatencyMs {
 				initMetric = typed
@@ -112,7 +114,7 @@ func TestRnnoiseDenoiser_ObservabilityCloseRecords(t *testing.T) {
 	logger := testLogger(t)
 	var packets []internal_type.Packet
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {
@@ -230,7 +232,7 @@ func TestRnnoiseDenoiser_PreservesLengthOnFirstChunk(t *testing.T) {
 	logger := testLogger(t)
 	var packets []internal_type.Packet
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {
@@ -261,7 +263,7 @@ func TestRnnoiseDenoiser_EmitsNonSilentAudio(t *testing.T) {
 	logger := testLogger(t)
 	var packets []internal_type.Packet
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {
@@ -306,7 +308,7 @@ func TestRnnoiseDenoiser_PreservesLengthAcrossCalls(t *testing.T) {
 	logger := testLogger(t)
 	var packets []internal_type.Packet
 
-	denoiser, err := NewRnnoiseDenoiser(
+	denoiser, err := newRnnoiseDenoiserForTest(
 		t.Context(),
 		logger,
 		func(_ context.Context, pkt ...internal_type.Packet) error {

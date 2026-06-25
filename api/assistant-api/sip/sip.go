@@ -49,8 +49,11 @@ type SIPEngine struct {
 	storage    storages.Storage
 
 	assistantConversationService internal_services.AssistantConversationService
+	assistantToolService         internal_services.AssistantToolService
 	assistantService             internal_services.AssistantService
 	deploymentService            internal_services.AssistantDeploymentService
+	configurationService         internal_services.AssistantConfigurationService
+	httpLogService               internal_services.AssistantHTTPLogService
 	vaultClient                  web_client.VaultClient
 	callContextStore             callcontext.Store
 
@@ -70,16 +73,20 @@ func NewSIPEngine(config *config.AssistantConfig, logger commons.Logger,
 	redis connectors.RedisConnector,
 	opensearch connectors.OpenSearchConnector,
 	vectordb connectors.VectorConnector) *SIPEngine {
+	fileStorage := storage_files.NewStorage(config.AssetStoreConfig, logger)
 	return &SIPEngine{
 		cfg:                          config,
 		logger:                       logger,
 		postgres:                     postgres,
 		redis:                        redis,
 		opensearch:                   opensearch,
-		assistantConversationService: internal_assistant_service.NewAssistantConversationService(logger, postgres, storage_files.NewStorage(config.AssetStoreConfig, logger)),
+		assistantConversationService: internal_assistant_service.NewAssistantConversationService(logger, postgres, fileStorage),
+		assistantToolService:         internal_assistant_service.NewAssistantToolService(logger, postgres, fileStorage),
 		assistantService:             internal_assistant_service.NewAssistantService(config, logger, postgres, opensearch),
 		deploymentService:            internal_assistant_service.NewAssistantDeploymentService(config, logger, postgres),
-		storage:                      storage_files.NewStorage(config.AssetStoreConfig, logger),
+		configurationService:         internal_assistant_service.NewAssistantConfigurationService(logger, postgres),
+		httpLogService:               internal_assistant_service.NewAssistantHTTPLogService(logger, postgres, fileStorage),
+		storage:                      fileStorage,
 		vaultClient:                  web_client.NewVaultClientGRPC(&config.AppConfig, logger, redis),
 		callContextStore:             callcontext.NewStore(postgres, logger),
 	}
@@ -157,6 +164,9 @@ func (m *SIPEngine) Connect(ctx context.Context) error {
 		sip_pipeline.WithAssistantConfig(m.cfg),
 		sip_pipeline.WithAssistantService(m.assistantService),
 		sip_pipeline.WithAssistantConversationService(m.assistantConversationService),
+		sip_pipeline.WithAssistantToolService(m.assistantToolService),
+		sip_pipeline.WithAssistantConfigurationService(m.configurationService),
+		sip_pipeline.WithHTTPLogService(m.httpLogService),
 		sip_pipeline.WithCallContextStore(m.callContextStore),
 		sip_pipeline.WithPostgres(m.postgres),
 		sip_pipeline.WithOpenSearch(m.opensearch),

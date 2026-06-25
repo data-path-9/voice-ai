@@ -6,13 +6,34 @@
 package internal_telephony_base
 
 import (
+	"context"
 	"testing"
 
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/stretchr/testify/require"
 )
+
+type recordingObserver struct {
+	scope   observability.Scope
+	records []observability.Record
+}
+
+func (r *recordingObserver) Record(_ context.Context, scope observability.Scope, records ...observability.Record) error {
+	r.scope = scope
+	r.records = append(r.records, records...)
+	return nil
+}
+
+func (r *recordingObserver) AddCollectors(...observability.Collector) error {
+	return nil
+}
+
+func (r *recordingObserver) Close(context.Context) error {
+	return nil
+}
 
 func newTestLogger(t *testing.T) commons.Logger {
 	t.Helper()
@@ -87,4 +108,34 @@ func TestCreateConnectionRequest_OmitsEmptyOptionalFields(t *testing.T) {
 	require.Equal(t, "inbound", metadataString(t, md, "client.direction"))
 	require.Equal(t, "sip", metadataString(t, md, "client.channel"))
 	require.Equal(t, "ctx-1", metadataString(t, md, "client.context_id"))
+}
+
+func TestRecord_PassesRecordsThrough(t *testing.T) {
+	cc := &callcontext.CallContext{
+		AssistantID:    1,
+		ConversationID: 42,
+		Direction:      "outbound",
+		Provider:       "sip",
+		CallerNumber:   "15551234567",
+		FromNumber:     "15557654321",
+		ChannelUUID:    "provider-call-id",
+		ContextID:      "ctx-uuid-123",
+	}
+	observer := &recordingObserver{}
+	base := New(newTestLogger(t), cc, nil, observer)
+
+	err := base.Record(observability.RecordEvent{
+		Component: observability.ComponentCall,
+		Event:     observability.CallHangup,
+		Attributes: observability.Attributes{
+			"reason": "remote_hangup",
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, observer.records, 1)
+
+	eventRecord, ok := observer.records[0].(observability.RecordEvent)
+	require.True(t, ok)
+	require.Equal(t, observability.CallHangup, eventRecord.Event)
+	require.Equal(t, "remote_hangup", eventRecord.Attributes["reason"])
 }

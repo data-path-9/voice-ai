@@ -55,9 +55,6 @@ type testToolExecutor struct {
 	}
 }
 
-func (m *testToolExecutor) Initialize(context.Context, internal_type.Communication) error {
-	return nil
-}
 func (m *testToolExecutor) GetFunctionDefinitions() []*protos.FunctionDefinition { return nil }
 func (m *testToolExecutor) ExecuteAll(_ context.Context, contextID string, tools []*protos.ToolCall, _ internal_type.Communication) {
 	m.calls = append(m.calls, struct {

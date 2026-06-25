@@ -39,7 +39,8 @@ export const ConfigRenderer: React.FC<{
     | 'vad'
     | 'eos'
     | 'noise'
-    | 'telemetry';
+    | 'telemetry'
+    | 'storage';
   config: CategoryConfig;
   parameters: Metadata[] | null;
   onParameterChange: (parameters: Metadata[]) => void;

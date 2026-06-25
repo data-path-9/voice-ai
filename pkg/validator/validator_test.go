@@ -105,6 +105,15 @@ func TestAllNonZero(t *testing.T) {
 	}
 }
 
+func TestNonZero(t *testing.T) {
+	if !NonZero(uint64(1)) {
+		t.Fatal("expected non-zero uint64 to pass validation")
+	}
+	if NonZero(uint64(0)) {
+		t.Fatal("expected zero uint64 to fail validation")
+	}
+}
+
 func TestOfAssistantDefinition(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -113,7 +122,7 @@ func TestOfAssistantDefinition(t *testing.T) {
 	}{
 		{name: "nil assistant", assistant: nil, want: false},
 		{name: "zero assistant id", assistant: &protos.AssistantDefinition{}, want: false},
-		{name: "empty version", assistant: &protos.AssistantDefinition{AssistantId: 1}, want: false},
+		{name: "empty version", assistant: &protos.AssistantDefinition{AssistantId: 1}, want: true},
 		{name: "latest version", assistant: &protos.AssistantDefinition{AssistantId: 1, Version: "latest"}, want: true},
 		{name: "explicit version", assistant: &protos.AssistantDefinition{AssistantId: 1, Version: "vrsn_123"}, want: true},
 		{name: "numeric version without prefix", assistant: &protos.AssistantDefinition{AssistantId: 1, Version: "123"}, want: false},

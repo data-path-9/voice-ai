@@ -1,21 +1,24 @@
 import { create } from 'zustand';
 import { initialPaginated } from '@/types/types.paginated';
 import {
-  AssistantWebhook,
+  AssistantConfiguration,
   Criteria,
-  DeleteAssistantWebhookRequest,
-  GetAllAssistantWebhookRequest,
+  DeleteAssistantConfiguration,
+  DeleteAssistantConfigurationRequest,
+  GetAllAssistantConfiguration,
+  GetAllAssistantConfigurationRequest,
+  GetAssistantConfigurationResponse,
   Paginate,
+  UpdateAssistantConfiguration,
+  UpdateAssistantConfigurationRequest,
 } from '@rapidaai/react';
 import {
   AssistantWebhookProperty,
   AssistantWebhookType,
 } from './types/types.assistant-webhook';
-import {
-  DeleteAssistantWebhook,
-  GetAllAssistantWebhook,
-} from '@rapidaai/react';
 import { connectionConfig } from '@/configs';
+
+const webhookConfigurationType = 'webhook';
 
 const initialAssistantWebhook: AssistantWebhookProperty = {
   webhooks: [],
@@ -68,7 +71,7 @@ export const useAssistantWebhookPageStore = create<AssistantWebhookType>(
      *
      * @param ep
      */
-    onChangeAssistantWebhooks: (ep: AssistantWebhook[]) => {
+    onChangeAssistantWebhooks: (ep: AssistantConfiguration[]) => {
       set({
         webhooks: ep,
       });
@@ -117,10 +120,11 @@ export const useAssistantWebhookPageStore = create<AssistantWebhookType>(
       token: string,
       userId: string,
       onError: (err: string) => void,
-      onSuccess: (e: AssistantWebhook[]) => void,
+      onSuccess: (e: AssistantConfiguration[]) => void,
     ) => {
-      const req = new GetAllAssistantWebhookRequest();
+      const req = new GetAllAssistantConfigurationRequest();
       req.setAssistantid(assistantId);
+      req.setConfigurationtype(webhookConfigurationType);
 
       const paginate = new Paginate();
       paginate.setPage(get().page);
@@ -136,7 +140,7 @@ export const useAssistantWebhookPageStore = create<AssistantWebhookType>(
       });
 
       try {
-        const gur = await GetAllAssistantWebhook(connectionConfig, req, {
+        const gur = await GetAllAssistantConfiguration(connectionConfig, req, {
           authorization: token,
           'x-project-id': projectId,
           'x-auth-id': userId,
@@ -179,18 +183,19 @@ export const useAssistantWebhookPageStore = create<AssistantWebhookType>(
       token: string,
       userId: string,
       onError: (err: string) => void,
-      onSuccess: (e: AssistantWebhook) => void,
+      onSuccess: (e: AssistantConfiguration) => void,
     ) => {
-      const req = new DeleteAssistantWebhookRequest();
+      const req = new DeleteAssistantConfigurationRequest();
       req.setAssistantid(assistantId);
       req.setId(webhookId);
 
       try {
-        const gur = await DeleteAssistantWebhook(connectionConfig, req, {
-          authorization: token,
-          'x-project-id': projectId,
-          'x-auth-id': userId,
-        });
+        const gur: GetAssistantConfigurationResponse =
+          await DeleteAssistantConfiguration(connectionConfig, req, {
+            authorization: token,
+            'x-project-id': projectId,
+            'x-auth-id': userId,
+          });
 
         if (gur?.getSuccess() && gur.getData()) {
           onSuccess(gur.getData()!);
@@ -206,6 +211,48 @@ export const useAssistantWebhookPageStore = create<AssistantWebhookType>(
         }
       } catch {
         onError('Unable to delete assistant webhook, please try again later.');
+      }
+    },
+
+    updateAssistantWebhookEnabled: async (
+      assistantId: string,
+      webhook: AssistantConfiguration,
+      enabled: boolean,
+      projectId: string,
+      token: string,
+      userId: string,
+      onError: (err: string) => void,
+      onSuccess: (e: AssistantConfiguration) => void,
+    ) => {
+      const req = new UpdateAssistantConfigurationRequest();
+      req.setId(webhook.getId());
+      req.setAssistantid(assistantId);
+      req.setConfigurationtype(webhookConfigurationType);
+      req.setProvider(webhook.getProvider());
+      req.setEnabled(enabled);
+      req.setOptionsList(webhook.getOptionsList());
+
+      try {
+        const gur: GetAssistantConfigurationResponse =
+          await UpdateAssistantConfiguration(connectionConfig, req, {
+            authorization: token,
+            'x-project-id': projectId,
+            'x-auth-id': userId,
+          });
+
+        if (gur?.getSuccess() && gur.getData()) {
+          onSuccess(gur.getData()!);
+          return;
+        }
+
+        let errorMessage = gur?.getError();
+        if (errorMessage) {
+          onError(errorMessage.getHumanmessage());
+          return;
+        }
+        onError('Unable to update assistant webhook, please try again later.');
+      } catch {
+        onError('Unable to update assistant webhook, please try again later.');
       }
     },
     /**

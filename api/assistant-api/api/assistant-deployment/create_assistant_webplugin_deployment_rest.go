@@ -60,8 +60,8 @@ func (deploymentApi *AssistantDeploymentApi) CreateAssistantWebpluginDeploymentR
 		return
 	}
 
-	assistantId, err := strconv.ParseUint(string(request.AssistantId), 10, 64)
-	if err != nil || assistantId == 0 {
+	assistantId, err := utils.StringToUint64(string(request.AssistantId))
+	if err != nil || !validator.NonZero(assistantId) {
 		c.JSON(pkg_errors.CreateAssistantWebpluginDeploymentInvalidAssistantID.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(pkg_errors.CreateAssistantWebpluginDeploymentInvalidAssistantID.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),

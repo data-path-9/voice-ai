@@ -4,9 +4,9 @@ import '@testing-library/jest-dom';
 import { CreateAssistantWebhook } from '@/app/pages/assistant/actions/configure-assistant-webhook/create-assistant-webhook';
 import { UpdateAssistantWebhook } from '@/app/pages/assistant/actions/configure-assistant-webhook/update-assistant-webhook';
 import {
-  CreateWebhook,
-  GetAssistantWebhook,
-  UpdateWebhook,
+  CreateAssistantConfiguration,
+  GetAssistantConfiguration,
+  UpdateAssistantConfiguration,
 } from '@rapidaai/react';
 
 let mockParams: Record<string, string | undefined> = {
@@ -23,7 +23,6 @@ const mockNavigate = {
 
 jest.mock('@rapidaai/react', () => ({
   ConnectionConfig: class {
-    constructor(_: unknown) {}
     static WithDebugger(config: unknown) {
       return config;
     }
@@ -44,12 +43,11 @@ jest.mock('@rapidaai/react', () => ({
       return this.value;
     }
   },
-  CreateAssistantWebhookRequest: class {
+  CreateAssistantConfigurationRequest: class {
     assistantId = '';
     provider = '';
-    assistantEventsList: string[] = [];
-    description = '';
-    executionPriority = 0;
+    configurationType = '';
+    enabled = false;
     optionsList: any[] = [];
     setAssistantid(value: string) {
       this.assistantId = value;
@@ -57,29 +55,23 @@ jest.mock('@rapidaai/react', () => ({
     getAssistantid() {
       return this.assistantId;
     }
-    setAssistanteventsList(value: string[]) {
-      this.assistantEventsList = value;
-    }
     setProvider(value: string) {
       this.provider = value;
     }
     getProvider() {
       return this.provider;
     }
-    getAssistanteventsList() {
-      return this.assistantEventsList;
+    setConfigurationtype(value: string) {
+      this.configurationType = value;
     }
-    setDescription(value: string) {
-      this.description = value;
+    getConfigurationtype() {
+      return this.configurationType;
     }
-    getDescription() {
-      return this.description;
+    setEnabled(value: boolean) {
+      this.enabled = value;
     }
-    setExecutionpriority(value: number) {
-      this.executionPriority = value;
-    }
-    getExecutionpriority() {
-      return this.executionPriority;
+    getEnabled() {
+      return this.enabled;
     }
     setOptionsList(value: any[]) {
       this.optionsList = value;
@@ -88,13 +80,12 @@ jest.mock('@rapidaai/react', () => ({
       return this.optionsList;
     }
   },
-  UpdateAssistantWebhookRequest: class {
+  UpdateAssistantConfigurationRequest: class {
     id = '';
     assistantId = '';
     provider = '';
-    assistantEventsList: string[] = [];
-    description = '';
-    executionPriority = 0;
+    configurationType = '';
+    enabled = false;
     optionsList: any[] = [];
     setId(value: string) {
       this.id = value;
@@ -108,29 +99,23 @@ jest.mock('@rapidaai/react', () => ({
     getAssistantid() {
       return this.assistantId;
     }
-    setAssistanteventsList(value: string[]) {
-      this.assistantEventsList = value;
-    }
     setProvider(value: string) {
       this.provider = value;
     }
     getProvider() {
       return this.provider;
     }
-    getAssistanteventsList() {
-      return this.assistantEventsList;
+    setConfigurationtype(value: string) {
+      this.configurationType = value;
     }
-    setDescription(value: string) {
-      this.description = value;
+    getConfigurationtype() {
+      return this.configurationType;
     }
-    getDescription() {
-      return this.description;
+    setEnabled(value: boolean) {
+      this.enabled = value;
     }
-    setExecutionpriority(value: number) {
-      this.executionPriority = value;
-    }
-    getExecutionpriority() {
-      return this.executionPriority;
+    getEnabled() {
+      return this.enabled;
     }
     setOptionsList(value: any[]) {
       this.optionsList = value;
@@ -139,7 +124,7 @@ jest.mock('@rapidaai/react', () => ({
       return this.optionsList;
     }
   },
-  GetAssistantWebhookRequest: class {
+  GetAssistantConfigurationRequest: class {
     id = '';
     assistantId = '';
     setId(value: string) {
@@ -155,9 +140,9 @@ jest.mock('@rapidaai/react', () => ({
       return this.assistantId;
     }
   },
-  CreateWebhook: jest.fn(),
-  GetAssistantWebhook: jest.fn(),
-  UpdateWebhook: jest.fn(),
+  CreateAssistantConfiguration: jest.fn(),
+  GetAssistantConfiguration: jest.fn(),
+  UpdateAssistantConfiguration: jest.fn(),
 }));
 
 jest.mock('react-router-dom', () => ({
@@ -257,56 +242,6 @@ jest.mock('@/app/components/carbon/form', () => {
           placeholder,
           'data-testid': id,
         }),
-      ),
-  };
-});
-
-jest.mock('@/app/components/carbon/dropdown', () => {
-  const React = require('react');
-  return {
-    MultiSelect: ({
-      id,
-      items = [],
-      selectedItems = [],
-      itemToString,
-      onChange,
-      label,
-      titleText,
-      helperText,
-    }: any) =>
-      React.createElement(
-        'div',
-        null,
-        titleText ? React.createElement('div', null, titleText) : null,
-        label ? React.createElement('label', { htmlFor: id }, label) : null,
-        React.createElement(
-          'select',
-          {
-            id,
-            multiple: true,
-            'data-testid': id,
-            value: selectedItems.map((item: any) => item.id),
-            onChange: (e: any) => {
-              const values = Array.from(e.target.selectedOptions).map(
-                (option: any) => option.value,
-              );
-              const next = items.filter((item: any) =>
-                values.includes(item.id),
-              );
-              onChange?.({ selectedItems: next });
-            },
-          },
-          items.map((item: any) =>
-            React.createElement(
-              'option',
-              { key: item.id, value: item.id },
-              itemToString
-                ? itemToString(item)
-                : item.label || item.name || item.id,
-            ),
-          ),
-        ),
-        helperText ? React.createElement('div', null, helperText) : null,
       ),
   };
 });
@@ -415,6 +350,25 @@ jest.mock('@carbon/react', () => {
         }),
         labelText,
       ),
+    StructuredListWrapper: ({
+      children,
+      isCondensed: _isCondensed,
+      isFlush: _isFlush,
+      selection: _selection,
+      selectedInitialRow: _selectedInitialRow,
+      ...props
+    }: any) => React.createElement('div', props, children),
+    StructuredListHead: ({ children }: any) =>
+      React.createElement('div', null, children),
+    StructuredListBody: ({ children }: any) =>
+      React.createElement('div', null, children),
+    StructuredListRow: ({
+      children,
+      head: _head,
+      selection: _selection,
+    }: any) => React.createElement('div', null, children),
+    StructuredListCell: ({ children, head: _head, noWrap: _noWrap }: any) =>
+      React.createElement('div', null, children),
     Button: ({
       iconDescription,
       children,
@@ -440,15 +394,12 @@ describe('Assistant webhook flows', () => {
     jest.clearAllMocks();
     mockParams = { assistantId: 'assistant-1', webhookId: 'webhook-1' };
 
-    (CreateWebhook as jest.Mock).mockResolvedValue({
+    (CreateAssistantConfiguration as jest.Mock).mockResolvedValue({
       getSuccess: () => true,
     });
 
-    (GetAssistantWebhook as jest.Mock).mockResolvedValue({
+    (GetAssistantConfiguration as jest.Mock).mockResolvedValue({
       getData: () => ({
-        getDescription: () => 'existing webhook',
-        getExecutionpriority: () => 1,
-        getAssistanteventsList: () => ['conversation.begin'],
         getOptionsList: () => [
           {
             getKey: () => 'http_method',
@@ -472,8 +423,19 @@ describe('Assistant webhook flows', () => {
           },
           {
             getKey: () => 'http_headers',
-            getValue: () =>
-              '{"Authorization":"Bearer token"}',
+            getValue: () => '{"Authorization":"Bearer token"}',
+          },
+          {
+            getKey: () => 'assistant_events',
+            getValue: () => '["conversation.begin"]',
+          },
+          {
+            getKey: () => 'execution_priority',
+            getValue: () => '1',
+          },
+          {
+            getKey: () => 'description',
+            getValue: () => 'existing webhook',
           },
           {
             getKey: () => 'webhook.condition',
@@ -489,13 +451,57 @@ describe('Assistant webhook flows', () => {
       }),
     });
 
-    (UpdateWebhook as jest.Mock).mockResolvedValue({
+    (UpdateAssistantConfiguration as jest.Mock).mockResolvedValue({
       getSuccess: () => true,
     });
   });
 
-  it('create webhook supports header/parameter add-delete and payload duplicate-key validation', () => {
+  const selectFirstEventAndContinue = () => {
+    const eventCheckbox = document.getElementById(
+      'webhook-event-call.received',
+    ) as HTMLInputElement;
+    fireEvent.click(eventCheckbox);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  };
+
+  const selectWebRTCEventAndContinue = () => {
+    const eventCheckbox = document.getElementById(
+      'webhook-event-webrtc.connected',
+    ) as HTMLInputElement;
+    fireEvent.click(eventCheckbox);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  };
+
+  const continueWithLoadedEvent = async () => {
+    await waitFor(() => {
+      expect(
+        document.getElementById(
+          'webhook-event-conversation.begin',
+        ) as HTMLInputElement,
+      ).toBeChecked();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  };
+
+  const continueWithLoadedAndWebRTCEvent = async () => {
+    await waitFor(() => {
+      expect(
+        document.getElementById(
+          'webhook-event-conversation.begin',
+        ) as HTMLInputElement,
+      ).toBeChecked();
+    });
+    const eventCheckbox = document.getElementById(
+      'webhook-event-webrtc.reconnecting',
+    ) as HTMLInputElement;
+    fireEvent.click(eventCheckbox);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+  };
+
+  it('create webhook supports header add-delete and continues without payload mapping', () => {
     render(<CreateAssistantWebhook assistantId="assistant-1" />);
+
+    selectFirstEventAndContinue();
 
     fireEvent.change(screen.getByTestId('webhook-endpoint'), {
       target: { value: 'https://api.example.com/webhook' },
@@ -510,48 +516,13 @@ describe('Assistant webhook flows', () => {
     expect(headerRemoveButton).toBeTruthy();
     fireEvent.click(headerRemoveButton!);
     expect(screen.getByText('Headers (0)')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Add parameter' }));
-    fireEvent.change(screen.getByTestId('param-type-4'), {
-      target: { value: 'event' },
-    });
-    fireEvent.change(screen.getByTestId('param-key-4'), {
-      target: { value: 'type' },
-    });
-    fireEvent.change(screen.getByTestId('param-val-4'), {
-      target: { value: 'duplicate_key_payload' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-
-    expect(
-      screen.getByText('Duplicate parameter keys are not allowed.'),
-    ).toBeInTheDocument();
-  });
-
-  it('create webhook preselects assistant id for a new assistant payload parameter', () => {
-    render(<CreateAssistantWebhook assistantId="assistant-1" />);
-
-    fireEvent.change(screen.getByTestId('webhook-endpoint'), {
-      target: { value: 'https://api.example.com/webhook' },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Add parameter' }));
-    fireEvent.change(screen.getByTestId('param-key-4'), {
-      target: { value: 'name' },
-    });
-    fireEvent.change(screen.getByTestId('param-val-4'), {
-      target: { value: 'assistant_name' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-
-    expect(
-      screen.queryByText('Empty parameter keys or values are not allowed.'),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText('Events')).toBeInTheDocument();
+    expect(screen.getByText('Destination')).toBeInTheDocument();
   });
 
   it('create webhook validates headers when key is present without value', () => {
     render(<CreateAssistantWebhook assistantId="assistant-1" />);
+
+    selectFirstEventAndContinue();
 
     fireEvent.change(screen.getByTestId('webhook-endpoint'), {
       target: { value: 'https://api.example.com/webhook' },
@@ -561,7 +532,7 @@ describe('Assistant webhook flows', () => {
     fireEvent.change(screen.getByTestId('api-header-key-0'), {
       target: { value: 'Authorization' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Configure webhook' }));
 
     expect(
       screen.getByText('Headers with a key must also include a value.'),
@@ -571,16 +542,11 @@ describe('Assistant webhook flows', () => {
   it('create webhook submits with selected event and configuration', async () => {
     render(<CreateAssistantWebhook assistantId="assistant-1" />);
 
+    selectWebRTCEventAndContinue();
+
     fireEvent.change(screen.getByTestId('webhook-endpoint'), {
       target: { value: 'https://api.example.com/webhook' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-
-    const eventSelect = screen.getByTestId(
-      'webhook-events',
-    ) as HTMLSelectElement;
-    eventSelect.options[0].selected = true;
-    fireEvent.change(eventSelect);
     fireEvent.change(screen.getByTestId('webhook-max-retries'), {
       target: { value: '2' },
     });
@@ -592,12 +558,14 @@ describe('Assistant webhook flows', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Configure webhook' }));
 
-    await waitFor(() => expect(CreateWebhook).toHaveBeenCalledTimes(1));
-    const req = (CreateWebhook as jest.Mock).mock.calls[0][1];
+    await waitFor(() =>
+      expect(CreateAssistantConfiguration).toHaveBeenCalledTimes(1),
+    );
+    const req = (CreateAssistantConfiguration as jest.Mock).mock.calls[0][1];
     expect(req.getAssistantid()).toBe('assistant-1');
-    expect(req.getAssistanteventsList()).toEqual(['conversation.begin']);
-    expect(req.getExecutionpriority()).toBe(4);
-    expect(req.getDescription()).toBe('');
+    expect(req.getConfigurationtype()).toBe('webhook');
+    expect(req.getProvider()).toBe('http');
+    expect(req.getEnabled()).toBe(true);
 
     const optionMap = new Map(
       req
@@ -608,21 +576,17 @@ describe('Assistant webhook flows', () => {
     expect(optionMap.get('http_url')).toBe('https://api.example.com/webhook');
     expect(optionMap.get('max_retry_count')).toBe('2');
     expect(optionMap.get('timeout_seconds')).toBe('220');
-    const headers = JSON.parse(optionMap.get('http_headers'));
-    expect(headers['webhook.condition']).toBeUndefined();
-    expect(JSON.parse(optionMap.get('webhook.condition'))).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          key: 'source',
-          condition: '=',
-          value: 'all',
-        }),
-      ]),
-    );
+    expect(optionMap.get('assistant_events')).toBe('["webrtc.connected"]');
+    expect(optionMap.get('execution_priority')).toBe('4');
+    expect(optionMap.get('description')).toBe('');
+    expect(optionMap.has('http_body')).toBe(false);
+    expect(optionMap.has('webhook.condition')).toBe(false);
   });
 
   it('update webhook validates invalid destination url', async () => {
     render(<UpdateAssistantWebhook assistantId="assistant-1" />);
+
+    await continueWithLoadedEvent();
 
     await waitFor(() => {
       expect(screen.getByTestId('webhook-endpoint')).toHaveValue(
@@ -633,7 +597,7 @@ describe('Assistant webhook flows', () => {
     fireEvent.change(screen.getByTestId('webhook-endpoint'), {
       target: { value: 'bad-url' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update webhook' }));
 
     expect(
       screen.getByText('Please provide a valid server URL for the webhook.'),
@@ -642,6 +606,8 @@ describe('Assistant webhook flows', () => {
 
   it('update webhook validates headers when key is present without value', async () => {
     render(<UpdateAssistantWebhook assistantId="assistant-1" />);
+
+    await continueWithLoadedEvent();
 
     await waitFor(() => {
       expect(screen.getByTestId('webhook-endpoint')).toHaveValue(
@@ -652,7 +618,7 @@ describe('Assistant webhook flows', () => {
     fireEvent.change(screen.getByTestId('api-header-val-0'), {
       target: { value: '' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update webhook' }));
 
     expect(
       screen.getByText('Headers with a key must also include a value.'),
@@ -662,80 +628,36 @@ describe('Assistant webhook flows', () => {
   it('update webhook submits with loaded values', async () => {
     render(<UpdateAssistantWebhook assistantId="assistant-1" />);
 
+    await continueWithLoadedAndWebRTCEvent();
+
     await waitFor(() => {
       expect(screen.getByTestId('webhook-endpoint')).toHaveValue(
         'https://hooks.example.com/incoming',
       );
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     fireEvent.click(screen.getByRole('button', { name: 'Update webhook' }));
 
-    await waitFor(() => expect(UpdateWebhook).toHaveBeenCalledTimes(1));
-    const req = (UpdateWebhook as jest.Mock).mock.calls[0][1];
+    await waitFor(() =>
+      expect(UpdateAssistantConfiguration).toHaveBeenCalledTimes(1),
+    );
+    const req = (UpdateAssistantConfiguration as jest.Mock).mock.calls[0][1];
     expect(req.getAssistantid()).toBe('assistant-1');
     expect(req.getId()).toBe('webhook-1');
-    expect(req.getAssistanteventsList()).toEqual(['conversation.begin']);
-    expect(req.getExecutionpriority()).toBe(1);
-    expect(req.getDescription()).toBe('existing webhook');
+    expect(req.getConfigurationtype()).toBe('webhook');
+    expect(req.getProvider()).toBe('http');
+    expect(req.getEnabled()).toBe(true);
     const optionMap = new Map(
       req
         .getOptionsList()
         .map((option: any) => [option.getKey(), option.getValue()]),
     );
-    expect(JSON.parse(optionMap.get('webhook.condition'))).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          key: 'source',
-          condition: '=',
-          value: 'phone',
-        }),
-      ]),
+    expect(optionMap.get('assistant_events')).toBe(
+      '["conversation.begin","webrtc.reconnecting"]',
     );
-  });
-
-  it('update webhook supports add and edit for payload mappings', async () => {
-    render(<UpdateAssistantWebhook assistantId="assistant-1" />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('webhook-endpoint')).toHaveValue(
-        'https://hooks.example.com/incoming',
-      );
-    });
-
-    fireEvent.change(screen.getByTestId('param-key-0'), {
-      target: { value: 'data' },
-    });
-    fireEvent.change(screen.getByTestId('param-val-0'), {
-      target: { value: 'eventData' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Add parameter' }));
-    fireEvent.change(screen.getByTestId('param-type-2'), {
-      target: { value: 'conversation' },
-    });
-    fireEvent.change(screen.getByTestId('param-key-2'), {
-      target: { value: 'id' },
-    });
-    fireEvent.change(screen.getByTestId('param-val-2'), {
-      target: { value: 'conversationId' },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Update webhook' }));
-
-    await waitFor(() => expect(UpdateWebhook).toHaveBeenCalledTimes(1));
-    const req = (UpdateWebhook as jest.Mock).mock.calls[0][1];
-    const optionMap = new Map(
-      req
-        .getOptionsList()
-        .map((option: any) => [option.getKey(), option.getValue()]),
-    );
-    const payloadParams = JSON.parse(optionMap.get('http_body'));
-    expect(payloadParams).toEqual(
-      expect.objectContaining({
-        'event.data': 'eventData',
-        'conversation.id': 'conversationId',
-      }),
-    );
+    expect(optionMap.get('execution_priority')).toBe('1');
+    expect(optionMap.get('description')).toBe('existing webhook');
+    expect(optionMap.has('http_body')).toBe(false);
+    expect(optionMap.has('webhook.condition')).toBe(false);
   });
 });

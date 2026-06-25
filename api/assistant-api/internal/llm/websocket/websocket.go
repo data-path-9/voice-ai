@@ -8,6 +8,7 @@ package internal_llm_websocket
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -34,11 +35,68 @@ type websocketExecutor struct {
 	requestStartedAt time.Time
 }
 
-// NewWebsocketAssistantExecutor creates a new WebSocket-based assistant executor.
-func NewWebsocketAssistantExecutor(logger commons.Logger) *websocketExecutor {
-	return &websocketExecutor{
-		logger: logger,
+type options struct {
+	ctx           context.Context
+	logger        commons.Logger
+	communication internal_type.Communication
+	configuration *protos.ConversationInitialization
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
 	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithCommunication(communication internal_type.Communication) Option {
+	return func(options *options) {
+		options.communication = communication
+	}
+}
+
+func WithConfiguration(configuration *protos.ConversationInitialization) Option {
+	return func(options *options) {
+		options.configuration = configuration
+	}
+}
+
+// New creates and initializes a WebSocket-based assistant executor.
+func New(opts ...Option) (*websocketExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+	if options.communication == nil {
+		return nil, errors.New("websocket: communication is required")
+	}
+	if options.configuration == nil {
+		return nil, errors.New("websocket: configuration is required")
+	}
+	if options.communication.Assistant() == nil {
+		return nil, errors.New("websocket: assistant is required")
+	}
+	if options.communication.Assistant().AssistantProviderWebsocket == nil {
+		return nil, errors.New("websocket: provider configuration is required")
+	}
+	executor := &websocketExecutor{logger: options.logger}
+	if err := executor.initialize(options.ctx, options.communication, options.configuration); err != nil {
+		_ = executor.Close(options.ctx)
+		return nil, err
+	}
+	return executor, nil
 }
 
 // Name returns the executor name identifier.
@@ -46,8 +104,7 @@ func (e *websocketExecutor) Name() string {
 	return "websocket"
 }
 
-// Initialize establishes the WebSocket connection and starts the listener.
-func (e *websocketExecutor) Initialize(ctx context.Context, comm internal_type.Communication, cfg *protos.ConversationInitialization) error {
+func (e *websocketExecutor) initialize(ctx context.Context, comm internal_type.Communication, cfg *protos.ConversationInitialization) error {
 	start := time.Now()
 	provider := comm.Assistant().AssistantProviderWebsocket
 	if provider == nil {
@@ -440,11 +497,6 @@ func (e *websocketExecutor) handleResponse(ctx context.Context, resp *Response, 
 			}
 			onPacket(ctx, packets...)
 		}
-
-	// case TypeToolCall:
-	// 	var d ToolCallData
-	// 	json.Unmarshal(resp.Data, &d)
-	// 	onPacket(ctx, internal_type.LLMToolCallPacket{ContextID: d.ID, Name: d.Name, Action: e.mapToolAction(d.Name), Result: d.Params})
 
 	case TypeInterruption:
 		var d InterruptionData

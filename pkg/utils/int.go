@@ -33,3 +33,11 @@ func StringToUint32(value string) (uint32, error) {
 	}
 	return uint32(parsed), nil
 }
+
+func StringToUint64(value string) (uint64, error) {
+	parsed, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("cannot parse %q as uint64: %w", value, err)
+	}
+	return parsed, nil
+}

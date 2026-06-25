@@ -14,6 +14,7 @@ import (
 	"time"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/clients/rest"
 	"github.com/rapidaai/pkg/commons"
@@ -31,32 +32,108 @@ const (
 	ResponseArgumentsKeyV1 = "args"
 	ResponseMetadataKey    = "metadata"
 	ResponseOptionsKey     = "options"
-
-	FailBehaviorBlock = "block"
-	FailBehaviorAllow = "allow"
 )
-
-// Result carries the outcome of an authentication attempt.
-type Result struct {
-	Authenticated bool
-	Arguments     map[string]interface{}
-	Metadata      map[string]interface{}
-	Options       map[string]interface{}
-}
 
 type runtimeExecutor struct {
 	logger        commons.Logger
+	ctx           context.Context
+	contextID     string
 	callback      internal_type.Callback
-	authenticator *internal_assistant_entity.AssistantAuthentication
+	caller        internal_type.InternalCaller
+	authenticator *internal_assistant_entity.AssistantConfiguration
+	onPacket      func(context.Context, ...internal_type.Packet) error
 }
 
-// NewExecutor creates a fully wired HTTP authentication executor.
-func NewExecutor(logger commons.Logger, _ context.Context, authenticator *internal_assistant_entity.AssistantAuthentication, callback internal_type.Callback, _ internal_type.InternalCaller) (internal_type.AuthenticationExecutor, error) {
-	return &runtimeExecutor{
-		logger:        logger,
-		callback:      callback,
-		authenticator: authenticator,
-	}, nil
+type Option func(*runtimeExecutor)
+
+func WithLogger(logger commons.Logger) Option {
+	return func(executor *runtimeExecutor) {
+		executor.logger = logger
+	}
+}
+
+func WithContext(ctx context.Context) Option {
+	return func(executor *runtimeExecutor) {
+		executor.ctx = ctx
+	}
+}
+
+func WithConfiguration(authenticator *internal_assistant_entity.AssistantConfiguration) Option {
+	return func(executor *runtimeExecutor) {
+		executor.authenticator = authenticator
+	}
+}
+
+func WithCallback(callback internal_type.Callback) Option {
+	return func(executor *runtimeExecutor) {
+		executor.callback = callback
+	}
+}
+
+func WithCaller(caller internal_type.InternalCaller) Option {
+	return func(executor *runtimeExecutor) {
+		executor.caller = caller
+	}
+}
+
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
+	return func(executor *runtimeExecutor) {
+		executor.onPacket = onPacket
+	}
+}
+
+// New creates a fully wired HTTP authentication executor.
+func New(opts ...Option) (internal_type.AuthenticationExecutor, error) {
+	executor := &runtimeExecutor{ctx: context.Background()}
+	start := time.Now()
+	for _, opt := range opts {
+		if opt != nil {
+			opt(executor)
+		}
+	}
+	if executor.ctx == nil {
+		executor.ctx = context.Background()
+	}
+	if executor.callback != nil {
+		executor.onPacket = executor.callback.OnPacket
+	}
+	if executor.authenticator == nil {
+		return nil, fmt.Errorf("authentication http: configuration is required")
+	}
+	if executor.callback == nil {
+		return nil, fmt.Errorf("authentication http: callback is required")
+	}
+	if executor.onPacket != nil {
+		_ = executor.onPacket(executor.ctx,
+			internal_type.ObservabilityMetricRecordPacket{
+				ContextID: executor.contextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewMetricAuthenticationInitLatencyMs(time.Since(start), observability.Attributes{
+					"provider":         executor.authenticator.Provider,
+					"configuration_id": fmt.Sprintf("%d", executor.authenticator.Id),
+					"executor":         executor.Name(),
+				}),
+			},
+			internal_type.ObservabilityLogRecordPacket{
+				ContextID: executor.contextID,
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.RecordLog{
+					Level:   observability.LevelInfo,
+					Message: fmt.Sprintf("%s: initialization completed", executor.Name()),
+					Attributes: observability.Attributes{
+						"component":        observability.ComponentAuthentication.String(),
+						"operation":        "initialize_executor",
+						"provider":         executor.authenticator.Provider,
+						"configuration_id": fmt.Sprintf("%d", executor.authenticator.Id),
+						"context_id":       executor.contextID,
+						"options":          observability.AttributeValue(executor.Options()),
+					},
+					OccurredAt: time.Now(),
+				},
+			},
+		)
+	}
+	return executor, nil
 }
 
 func (e *runtimeExecutor) Name() string {
@@ -71,17 +148,12 @@ func (e *runtimeExecutor) Arguments() (map[string]string, error) {
 	return e.authenticator.GetOptions().GetStringMap(OptionHTTPBodyKey)
 }
 
-// Execute runs authentication against the configured endpoint and emits packetized outcome.
-func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.ExecuteSessionAuthenticationPacket) error {
+// Execute runs authentication against the configured endpoint.
+func (e *runtimeExecutor) Execute(ctx context.Context, input internal_type.AuthenticationInput) (*internal_type.AuthenticationOutput, error) {
 	auth := e.authenticator
 	url, err := auth.GetOptions().GetString(OptionHTTPURLKey)
 	if err != nil || url == "" {
-		e.callback.OnPacket(ctx, internal_type.SessionAuthenticationFailedPacket{
-			ContextID:      packet.ContextID,
-			Error:          fmt.Errorf("authentication: missing %s", OptionHTTPURLKey),
-			Initialization: packet.Initialization,
-		})
-		return nil
+		return nil, fmt.Errorf("authentication: missing %s", OptionHTTPURLKey)
 	}
 	method := "POST"
 	if m, err := auth.GetOptions().GetString(OptionHTTPMethodKey); err == nil && m != "" {
@@ -94,60 +166,26 @@ func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.Exec
 		headers = h
 	}
 
-	timeout := auth.TimeoutMs
-	if timeout == 0 {
-		timeout = 5000
+	timeout := uint32(5000)
+	if raw, err := auth.GetOptions().GetUint32("timeout_ms"); err == nil {
+		timeout = raw
 	}
 
 	client := rest.NewRestClientWithConfig(url, headers, uint32(timeout/1000))
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 	startTime := time.Now()
-	requestPayload := e.createRequestPayload(url, method, headers, uint32(timeout), packet.Arguments)
-	sourceRefID := auth.Id
-	response, err := e.send(callCtx, client, method, packet.Arguments, headers)
+	requestPayload := e.createRequestPayload(url, method, headers, uint32(timeout), input.Arguments)
+	response, err := e.send(callCtx, client, method, input.Arguments, headers)
 	if err != nil {
 		errMsg := err.Error()
-		e.onCreateLog(ctx, packet.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_FAILED, 0, &errMsg, requestPayload, nil)
-		if auth.FailBehavior == FailBehaviorAllow {
-			e.logger.Warnw("authentication failed, allowing due to fail_behavior=allow", "url", url, "error", err)
-			e.callback.OnPacket(ctx, internal_type.SessionAuthenticationSucceededPacket{
-				ContextID:      packet.ContextID,
-				Authenticated:  false,
-				Initialization: packet.Initialization,
-			})
-			return nil
-		}
-		e.callback.OnPacket(ctx, internal_type.SessionAuthenticationFailedPacket{
-			ContextID:      packet.ContextID,
-			Error:          fmt.Errorf("authentication: request failed: %w", err),
-			Initialization: packet.Initialization,
-		})
-		return nil
+		e.onCreateLog(ctx, input.ContextID, url, method, e.authenticator.Id, startTime, type_enums.RECORD_FAILED, 0, &errMsg, requestPayload, nil)
+		return nil, fmt.Errorf("authentication: request failed: %w", err)
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		errMsg := fmt.Sprintf("authentication: endpoint returned status %d", response.StatusCode)
-		e.onCreateLog(ctx, packet.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_FAILED, int64(response.StatusCode), &errMsg, requestPayload, response.Body)
 
-		if auth.FailBehavior == FailBehaviorAllow {
-			e.logger.Warnw("authentication returned non-2xx, allowing due to fail_behavior=allow",
-				"url", url, "status", response.StatusCode)
-			e.callback.OnPacket(ctx, internal_type.SessionAuthenticationSucceededPacket{
-				ContextID:      packet.ContextID,
-				Authenticated:  false,
-				Initialization: packet.Initialization,
-			})
-			return nil
-		}
-		e.callback.OnPacket(ctx, internal_type.SessionAuthenticationFailedPacket{
-			ContextID:      packet.ContextID,
-			Error:          fmt.Errorf("authentication: endpoint returned status %d", response.StatusCode),
-			Initialization: packet.Initialization,
-		})
-		return nil
+	result := &internal_type.AuthenticationOutput{
+		Authenticated: response.StatusCode >= 200 && response.StatusCode < 300,
 	}
-	e.onCreateLog(ctx, packet.ContextID, url, method, sourceRefID, startTime, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, response.Body)
-	result := &Result{Authenticated: true}
 	if parsed, err := response.ToMap(); err == nil {
 		if args, ok := parsed[ResponseArgumentsKeyV1].(map[string]interface{}); ok {
 			result.Arguments = args
@@ -163,15 +201,28 @@ func (e *runtimeExecutor) Execute(ctx context.Context, packet internal_type.Exec
 		}
 	}
 
-	e.callback.OnPacket(ctx, internal_type.SessionAuthenticationSucceededPacket{
-		ContextID:      packet.ContextID,
-		Authenticated:  result.Authenticated,
-		Arguments:      result.Arguments,
-		Metadata:       result.Metadata,
-		Options:        result.Options,
-		Initialization: packet.Initialization,
-	})
-	return nil
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		errMsg := fmt.Sprintf("authentication: endpoint returned status %d", response.StatusCode)
+		e.onCreateLog(ctx, input.ContextID, url, method, e.authenticator.Id, startTime, type_enums.RECORD_FAILED, int64(response.StatusCode), &errMsg, requestPayload, response.Body)
+		result.Authenticated = false
+	} else {
+		e.onCreateLog(ctx, input.ContextID, url, method, e.authenticator.Id, startTime, type_enums.RECORD_COMPLETE, int64(response.StatusCode), nil, requestPayload, response.Body)
+	}
+
+	if !result.Authenticated {
+		failBehavior := "block"
+		if raw, err := auth.GetOptions().GetString("fail_behavior"); err == nil {
+			failBehavior = strings.ToLower(strings.TrimSpace(raw))
+		}
+		switch failBehavior {
+		case "do_nothing", "do-nothing", "none", "allow":
+			return result, nil
+		default:
+			return nil, fmt.Errorf("authentication: unauthenticated")
+		}
+	}
+
+	return result, nil
 }
 
 func (e *runtimeExecutor) createRequestPayload(url, method string, headers map[string]string, timeoutMs uint32, body map[string]interface{}) []byte {

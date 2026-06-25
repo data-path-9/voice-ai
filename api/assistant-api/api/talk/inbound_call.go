@@ -8,7 +8,6 @@ package assistant_talk_api
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -36,7 +35,7 @@ func (cApi *ConversationApi) CallReciever(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assistant ID"})
 		return
 	}
-	assistantId, err := strconv.ParseUint(assistantID, 10, 64)
+	assistantId, err := utils.StringToUint64(assistantID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assistant ID"})
 		return

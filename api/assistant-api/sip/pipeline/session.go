@@ -13,7 +13,10 @@ import (
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
-	observability_collector_conversationdb "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationdb"
+	observability_collector_conversationmetadata "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationmetadata"
+	observability_collector_conversationmetric "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationmetric"
+	observability_collector_requestlog "github.com/rapidaai/api/assistant-api/internal/observability/collectors/requestlog"
+	observability_collector_toollog "github.com/rapidaai/api/assistant-api/internal/observability/collectors/toollog"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
 	"github.com/rapidaai/pkg/types"
@@ -147,15 +150,8 @@ func (d *Dispatcher) setupCall(ctx context.Context, stage sip_infra.SessionEstab
 }
 
 func (d *Dispatcher) createObserver(ctx context.Context, setup *CallSetupResult, auth types.SimplePrinciple) observability.Recorder {
-	otelCollectors := make([]observability.Collector, 0)
-	if d.assistantConversationService != nil {
-		otelCollectors = append(otelCollectors, observability_collector_conversationdb.New(observability_collector_conversationdb.Config{
-			Logger:              d.logger,
-			ConversationService: d.assistantConversationService,
-		}))
-	}
-	otelCollectors = append(otelCollectors, collectors.NewWithEnv(ctx, d.logger, d.assistantConfig)...)
-	return observability.New(
+
+	recorder := observability.New(
 		observability.WithLogger(d.logger),
 		observability.WithAuth(auth),
 		observability.WithGlobalScope(observability.GlobalScope{
@@ -164,8 +160,28 @@ func (d *Dispatcher) createObserver(ctx context.Context, setup *CallSetupResult,
 		}),
 		observability.WithContext(ctx),
 		observability.WithGracePeriod(),
-		observability.WithCollectors(otelCollectors...),
+		observability.WithCollectors(
+			observability_collector_conversationmetric.New(observability_collector_conversationmetric.Config{
+				Logger:              d.logger,
+				ConversationService: d.assistantConversationService,
+			}),
+			observability_collector_conversationmetadata.New(observability_collector_conversationmetadata.Config{
+				Logger:              d.logger,
+				ConversationService: d.assistantConversationService,
+			}),
+			observability_collector_requestlog.New(observability_collector_requestlog.Config{
+				Logger:         d.logger,
+				HTTPLogService: d.httpLogService,
+			}),
+			observability_collector_toollog.New(observability_collector_toollog.Config{
+				Logger:      d.logger,
+				ToolService: d.assistantToolService,
+			}),
+			collectors.NewWithWebhookConfiguration(ctx, d.logger, auth, setup.AssistantID, d.configurationService, d.httpLogService),
+			collectors.NewWithEnv(ctx, d.logger, d.assistantConfig),
+		),
 	)
+	return recorder
 }
 
 func reconstructCallContext(

@@ -28,11 +28,8 @@ type GetAssistantOption struct {
 	InjectConversations bool
 
 	InjectAnalysis       bool
-	InjectWebhook        bool
 	InjectAuthentication bool
-
-	//
-	InjectTelemetryProvider bool
+	InjectStorage        bool
 }
 
 func NewDefaultGetAssistantOption() *GetAssistantOption {
@@ -48,7 +45,7 @@ func NewDefaultGetAssistantOption() *GetAssistantOption {
 		InjectTool:                   true,
 		InjectConversations:          true,
 		InjectAuthentication:         true,
-		InjectTelemetryProvider:      true,
+		InjectStorage:                true,
 	}
 }
 

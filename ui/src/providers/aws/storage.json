@@ -1,0 +1,12 @@
+{
+  "parameters": [
+    {
+      "key": "s3_bucket_name",
+      "label": "S3 Bucket Name",
+      "type": "input",
+      "required": true,
+      "placeholder": "Enter your S3 bucket name",
+      "errorMessage": "Please provide a valid S3 bucket name."
+    }
+  ]
+}

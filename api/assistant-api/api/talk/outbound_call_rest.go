@@ -104,7 +104,7 @@ func (cApi *ConversationApi) CreatePhoneCallRest(c *gin.Context) {
 	version := ""
 	if validator.NonNil(ir.Assistant) {
 		if validator.NonNil(ir.Assistant.AssistantId) {
-			assistantID, _ = strconv.ParseUint(*ir.Assistant.AssistantId, 10, 64)
+			assistantID, _ = utils.StringToUint64(*ir.Assistant.AssistantId)
 		}
 		if validator.NonNil(ir.Assistant.Version) {
 			version = *ir.Assistant.Version

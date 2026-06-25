@@ -9,10 +9,13 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
+	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
+	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
@@ -23,8 +26,8 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing telephony provider"})
 		return
 	}
-	assistantID, err := strconv.ParseUint(c.Param("assistantId"), 10, 64)
-	if err != nil || !validator.AllNonZero(assistantID) {
+	assistantID, err := utils.StringToUint64(c.Param("assistantId"))
+	if err != nil || !validator.NonZero(assistantID) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assistantId"})
 		return
 	}
@@ -48,7 +51,17 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 	}
 
 	auth := cc.ToAuth()
-	observer := cApi.Observability(c, auth)
+	observer := cApi.Observability(c, auth, observability.WithGracePeriod())
+	if err := observer.AddCollectors(collectors.NewWithWebhookConfiguration(c, cApi.logger, auth, cc.AssistantID, cApi.configurationService, cApi.httpLogService)); err != nil {
+		cApi.logger.Warnw("observability collector registration failed",
+			"component", "callback",
+			"operation", "add_assistant_collectors",
+			"assistant_id", cc.AssistantID,
+			"context_id", cc.ContextID,
+			"error", err,
+		)
+	}
+
 	scope := observability.ConversationScope{
 		AssistantScope: observability.AssistantScope{AssistantID: cc.AssistantID},
 		ConversationID: cc.ConversationID,
@@ -75,6 +88,48 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 			"channel_uuid": statusInfo.ChannelUUID,
 		},
 	})
+	callbackStatusEvent := strings.ToLower(statusInfo.Event)
+	callbackWebhookEvent := observability.EventName("")
+	switch callbackStatusEvent {
+	case "ringing", "call.ringing":
+		callbackWebhookEvent = observability.CallRinging
+	case "answered", "in-progress", "in_progress", "call.answered":
+		callbackWebhookEvent = observability.CallProviderAnswered
+	case "cancelled", "canceled", "call.cancelled", "call.canceled":
+		callbackWebhookEvent = observability.CallCancelled
+	}
+	if statusInfo.Error != nil && callbackWebhookEvent == "" {
+		callbackWebhookEvent = observability.CallFailed
+	}
+	if callbackWebhookEvent != "" {
+		callbackWebhookData := map[string]interface{}{
+			"source":       "provider_callback",
+			"context_id":   cc.ContextID,
+			"provider":     cc.Provider,
+			"direction":    cc.Direction,
+			"caller":       cc.CallerNumber,
+			"from":         cc.FromNumber,
+			"channel_uuid": statusInfo.ChannelUUID,
+			"status_event": statusInfo.Event,
+			"raw_payload":  statusInfo.RawPayload,
+			"payload":      statusInfo.Payload,
+		}
+		if statusInfo.Error != nil {
+			callbackWebhookData["error"] = statusInfo.Error.Error
+			callbackWebhookData["reason"] = statusInfo.Error.Reason
+		}
+		if statusInfo.Duration != nil {
+			callbackWebhookData["duration_ns"] = statusInfo.Duration.Nanoseconds()
+		}
+		if validator.NotBlank(statusInfo.Price) {
+			callbackWebhookData["price"] = statusInfo.Price
+		}
+		_ = observer.Record(c, scope, observability.RecordWebhook{
+			Event:     callbackWebhookEvent,
+			ContextID: cc.ContextID,
+			Payload:   callbackWebhookData,
+		})
+	}
 	if statusInfo.Error != nil {
 		if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
 			CallStatus:       callcontext.CallStatusFailed,
@@ -147,7 +202,17 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 	}
 	if statusInfo != nil {
 		auth := cc.ToAuth()
-		observer := cApi.Observability(c, auth)
+		observer := cApi.Observability(c, auth, observability.WithGracePeriod())
+		if err := observer.AddCollectors(collectors.NewWithWebhookConfiguration(c, cApi.logger, auth, cc.AssistantID, cApi.configurationService, cApi.httpLogService)); err != nil {
+			cApi.logger.Warnw("observability collector registration failed",
+				"component", "callback",
+				"operation", "add_assistant_collectors",
+				"assistant_id", cc.AssistantID,
+				"context_id", cc.ContextID,
+				"error", err,
+			)
+		}
+
 		scope := observability.ConversationScope{
 			AssistantScope: observability.AssistantScope{AssistantID: cc.AssistantID},
 			ConversationID: cc.ConversationID,
@@ -174,6 +239,48 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 				"channel_uuid": statusInfo.ChannelUUID,
 			},
 		})
+		callbackStatusEvent := strings.ToLower(statusInfo.Event)
+		callbackWebhookEvent := observability.EventName("")
+		switch callbackStatusEvent {
+		case "ringing", "call.ringing":
+			callbackWebhookEvent = observability.CallRinging
+		case "answered", "in-progress", "in_progress", "call.answered":
+			callbackWebhookEvent = observability.CallProviderAnswered
+		case "cancelled", "canceled", "call.cancelled", "call.canceled":
+			callbackWebhookEvent = observability.CallCancelled
+		}
+		if statusInfo.Error != nil && callbackWebhookEvent == "" {
+			callbackWebhookEvent = observability.CallFailed
+		}
+		if callbackWebhookEvent != "" {
+			callbackWebhookData := map[string]interface{}{
+				"source":       "provider_callback",
+				"context_id":   cc.ContextID,
+				"provider":     cc.Provider,
+				"direction":    cc.Direction,
+				"caller":       cc.CallerNumber,
+				"from":         cc.FromNumber,
+				"channel_uuid": statusInfo.ChannelUUID,
+				"status_event": statusInfo.Event,
+				"raw_payload":  statusInfo.RawPayload,
+				"payload":      statusInfo.Payload,
+			}
+			if statusInfo.Error != nil {
+				callbackWebhookData["error"] = statusInfo.Error.Error
+				callbackWebhookData["reason"] = statusInfo.Error.Reason
+			}
+			if statusInfo.Duration != nil {
+				callbackWebhookData["duration_ns"] = statusInfo.Duration.Nanoseconds()
+			}
+			if validator.NotBlank(statusInfo.Price) {
+				callbackWebhookData["price"] = statusInfo.Price
+			}
+			_ = observer.Record(c, scope, observability.RecordWebhook{
+				Event:     callbackWebhookEvent,
+				ContextID: cc.ContextID,
+				Payload:   callbackWebhookData,
+			})
+		}
 		if statusInfo.Error != nil {
 			if err := cApi.callContextStore.UpdateCallStatus(c, cc.ContextID, callcontext.CallStatusUpdate{
 				CallStatus:       callcontext.CallStatusFailed,

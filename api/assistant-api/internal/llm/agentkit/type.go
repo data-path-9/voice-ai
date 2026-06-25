@@ -7,13 +7,8 @@
 package internal_llm_agentkit
 
 import (
-	"time"
-
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
-	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
-	"google.golang.org/grpc"
-	"sync"
 )
 
 type AgentPipeline interface {
@@ -38,21 +33,6 @@ type InterruptionPipeline struct {
 
 type ResponsePipeline struct {
 	Response *protos.TalkOutput
-}
-
-type agentkitExecutor struct {
-	logger           commons.Logger
-	transport        agentkitTransport
-	stateMu          sync.RWMutex
-	activeContextID  string
-	requestStartedAt time.Time
-	closing          bool
-}
-
-type agentkitTransport struct {
-	conn         *grpc.ClientConn
-	stream       grpc.BidiStreamingClient[protos.TalkInput, protos.TalkOutput]
-	listenerDone chan struct{}
 }
 
 func (UserTurnPipeline) agentPipeline()      {}

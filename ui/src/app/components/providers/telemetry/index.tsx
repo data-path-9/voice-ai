@@ -1,6 +1,9 @@
 import { CredentialDropdown } from '@/app/components/dropdown/credential-dropdown';
 import { ProviderComponentProps } from '@/app/components/providers';
-import { TelemetryConfigComponent } from '@/app/components/providers/telemetry/provider';
+import {
+  GetDefaultTelemetryIfInvalid,
+  TelemetryConfigComponent,
+} from '@/app/components/providers/telemetry/provider';
 import { TELEMETRY_PROVIDER } from '@/providers';
 import { Metadata, VaultCredential } from '@rapidaai/react';
 import { useCallback } from 'react';
@@ -30,20 +33,26 @@ export const TelemetryProvider: React.FC<ProviderComponentProps> = props => {
     onChangeParameter(updatedParams);
   };
 
-  const selectedProvider = TELEMETRY_PROVIDER.find(x => x.code === provider) || null;
+  const selectedProvider =
+    TELEMETRY_PROVIDER.find(x => x.code === provider) || null;
 
   return (
     <Stack gap={6}>
       <Dropdown
         id="telemetry-provider"
-        titleText="Provider"
+        titleText="Telemetry provider"
         label="Select telemetry provider"
         items={TELEMETRY_PROVIDER}
         selectedItem={selectedProvider}
         itemToString={(item: any) => item?.name || ''}
         onChange={({ selectedItem }: any) => {
-          if (selectedItem) onChangeProvider(selectedItem.code);
+          if (!selectedItem) return;
+          onChangeProvider(selectedItem.code);
+          onChangeParameter(
+            GetDefaultTelemetryIfInvalid(selectedItem.code, parameters || []),
+          );
         }}
+        helperText="Select a telemetry provider for assistant observability."
       />
       {provider && (
         <CredentialDropdown
@@ -55,7 +64,7 @@ export const TelemetryProvider: React.FC<ProviderComponentProps> = props => {
         />
       )}
       {provider && (
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-3 gap-x-6 gap-y-3">
           <TelemetryConfigComponent {...props} />
         </div>
       )}

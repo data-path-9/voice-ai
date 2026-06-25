@@ -26,18 +26,18 @@ func pipecatOptions() utils.Option {
 	return utils.Option{EndOfSpeechOptionsKeyProvider: PipecatSmartTurnEndOfSpeech}
 }
 
-func TestGetEndOfSpeech_ReturnsPipecat(t *testing.T) {
+func TestNewEndOfSpeech_ReturnsPipecat(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	endOfSpeech, err := GetEndOfSpeech(context.Background(), logger, mockCallback, pipecatOptions())
+	endOfSpeech, err := newEndOfSpeechForTest(context.Background(), logger, mockCallback, pipecatOptions())
 
 	require.NoError(t, err)
 	assert.NotNil(t, endOfSpeech)
 	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
 }
 
-func TestGetEndOfSpeech_ReturnsErrorForUnsupportedProvider(t *testing.T) {
-	endOfSpeech, err := GetEndOfSpeech(
+func TestNewEndOfSpeech_ReturnsErrorForUnsupportedProvider(t *testing.T) {
+	endOfSpeech, err := newEndOfSpeechForTest(
 		t.Context(),
 		nil,
 		mockCallback,
@@ -56,28 +56,31 @@ func TestEndOfSpeechIdentifier_Constants(t *testing.T) {
 	assert.NotEqual(t, SilenceBasedEndOfSpeech, LiveKitEndOfSpeech)
 }
 
-func TestGetEndOfSpeech_WithNilLogger(t *testing.T) {
-	endOfSpeech, err := GetEndOfSpeech(t.Context(), nil, mockCallback, pipecatOptions())
+func TestNewEndOfSpeech_WithNilLogger(t *testing.T) {
+	endOfSpeech, err := newEndOfSpeechForTest(t.Context(), nil, mockCallback, pipecatOptions())
 
 	require.NoError(t, err)
 	assert.NotNil(t, endOfSpeech)
 	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
 }
 
-func TestGetEndOfSpeech_WithNilCallback(t *testing.T) {
+func TestNewEndOfSpeech_WithNilCallback(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	endOfSpeech, err := GetEndOfSpeech(t.Context(), logger, nil, pipecatOptions())
+	endOfSpeech, err := New(
+		WithContext(t.Context()),
+		WithLogger(logger),
+		WithOptions(pipecatOptions()),
+	)
 
-	require.NoError(t, err)
-	assert.NotNil(t, endOfSpeech)
-	assert.Equal(t, "pipecatSmartTurnEndOfSpeech", endOfSpeech.Name())
+	require.Error(t, err)
+	assert.Nil(t, endOfSpeech)
 }
 
-func TestGetEndOfSpeech_WithNilOptionsReturnsError(t *testing.T) {
+func TestNewEndOfSpeech_WithNilOptionsReturnsError(t *testing.T) {
 	logger, _ := commons.NewApplicationLogger()
 
-	endOfSpeech, err := GetEndOfSpeech(t.Context(), logger, mockCallback, nil)
+	endOfSpeech, err := newEndOfSpeechForTest(t.Context(), logger, mockCallback, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, endOfSpeech)

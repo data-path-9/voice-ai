@@ -12,88 +12,231 @@ import (
 
 	assistant_config "github.com/rapidaai/api/assistant-api/config"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
-	internal_telemetry_entity "github.com/rapidaai/api/assistant-api/internal/entity/telemetry"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/configs"
+	gorm_model "github.com/rapidaai/pkg/models/gorm"
+	"github.com/rapidaai/pkg/types"
+	type_enums "github.com/rapidaai/pkg/types/enums"
+	"github.com/rapidaai/protos"
 )
 
 func TestNew_AppendsTelemetryWhenDefaultTelemetryEnabled(t *testing.T) {
-	collectors := NewWithEnv(context.Background(), testLogger(t), &assistant_config.AssistantConfig{
+	collector := NewWithEnv(context.Background(), testLogger(t), &assistant_config.AssistantConfig{
 		TelemetryConfig: &configs.TelemetryConfig{
 			TelemetryType: string(configs.LOGGING),
 			Logging:       &configs.TelemetryLoggingConfig{},
 		},
 	})
-	if len(collectors) != 1 {
-		t.Fatalf("expected telemetry collector only, got %d", len(collectors))
+	if collector == nil {
+		t.Fatal("expected telemetry collector")
 	}
 }
 
 func TestTimelineConfig_IgnoresTelemetryOpenSearch(t *testing.T) {
-	collectors := NewWithEnv(context.Background(), testLogger(t), &assistant_config.AssistantConfig{
+	collector := NewWithEnv(context.Background(), testLogger(t), &assistant_config.AssistantConfig{
 		TelemetryConfig: &configs.TelemetryConfig{
 			TelemetryType: string(configs.LOGGING),
 			OpenSearch:    &configs.OpenSearchConfig{Schema: "http", Host: "localhost"},
 			Logging:       &configs.TelemetryLoggingConfig{},
 		},
 	})
-	if len(collectors) != 1 {
-		t.Fatalf("expected telemetry collector only, got %d", len(collectors))
+	if collector == nil {
+		t.Fatal("expected telemetry collector")
 	}
 }
 
 func TestNew_SkipsInactiveConfig(t *testing.T) {
-	collectors := NewWithEnv(context.Background(), testLogger(t), &assistant_config.AssistantConfig{
+	collector := NewWithEnv(context.Background(), testLogger(t), &assistant_config.AssistantConfig{
 		TelemetryConfig: &configs.TelemetryConfig{},
 	})
-	if len(collectors) != 0 {
-		t.Fatalf("expected no collectors, got %d", len(collectors))
+	if collector != nil {
+		t.Fatalf("expected no collector, got %T", collector)
 	}
 }
 
 func TestNew_SkipsUnknownDefaultTelemetryType(t *testing.T) {
-	collectors := NewWithEnv(context.Background(), testLogger(t), &assistant_config.AssistantConfig{
+	collector := NewWithEnv(context.Background(), testLogger(t), &assistant_config.AssistantConfig{
 		TelemetryConfig: &configs.TelemetryConfig{TelemetryType: "unknown"},
 	})
-	if len(collectors) != 0 {
-		t.Fatalf("expected no collectors, got %d", len(collectors))
+	if collector != nil {
+		t.Fatalf("expected no collector, got %T", collector)
 	}
 }
 
 func TestNew_LogsAndSkipsTelemetryWhenCollectorFails(t *testing.T) {
-	collectors := NewWithAssistantTelemetry(context.Background(), nil, []*internal_telemetry_entity.AssistantTelemetryProvider{
-		{ProviderType: "unknown", Enabled: true},
-	})
-	if len(collectors) != 0 {
-		t.Fatalf("expected failed telemetry collector to be skipped, got %d", len(collectors))
+	organizationID := uint64(10)
+	projectID := uint64(20)
+	auth := &types.ServiceScope{
+		OrganizationId: &organizationID,
+		ProjectId:      &projectID,
+	}
+	configurationService := &recordingAssistantConfigurationService{
+		configurations: []*internal_assistant_entity.AssistantConfiguration{
+			{
+				ConfigurationType: internal_assistant_entity.AssistantConfigurationTypeTelemetry,
+				Provider:          "unknown",
+				Enabled:           true,
+			},
+		},
+	}
+	collector := NewWithAssistantTelemetry(context.Background(), nil, auth, 30, configurationService)
+	if collector == nil {
+		t.Fatal("expected assistant telemetry collector")
+	}
+	if configurationService.getAllCalls != 0 {
+		t.Fatalf("NewWithAssistantTelemetry should not load providers, got %d calls", configurationService.getAllCalls)
+	}
+	if err := collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 30}, observability.Context{}, observability.RecordLog{
+		Level:   observability.LevelInfo,
+		Message: "test",
+	}); err != nil {
+		t.Fatalf("expected unknown telemetry provider to be skipped without error, got %v", err)
+	}
+	if configurationService.getAllCalls != 1 {
+		t.Fatalf("expected one telemetry provider load, got %d", configurationService.getAllCalls)
 	}
 }
 
-func TestNew_AppendsNoopForEmptyAssistantProvider(t *testing.T) {
-	collectors := NewWithAssistantTelemetry(context.Background(), testLogger(t), []*internal_telemetry_entity.AssistantTelemetryProvider{
-		{ProviderType: "", Enabled: true},
-	})
-	if len(collectors) != 1 {
-		t.Fatalf("expected empty assistant provider to append noop collector, got %d", len(collectors))
+func TestNew_SkipsAssistantTelemetryWithoutRequiredConfig(t *testing.T) {
+	organizationID := uint64(10)
+	projectID := uint64(20)
+	auth := &types.ServiceScope{
+		OrganizationId: &organizationID,
+		ProjectId:      &projectID,
+	}
+	if collector := NewWithAssistantTelemetry(context.Background(), testLogger(t), nil, 30, &recordingAssistantConfigurationService{}); collector != nil {
+		t.Fatalf("expected no collector without auth, got %T", collector)
+	}
+	if collector := NewWithAssistantTelemetry(context.Background(), testLogger(t), auth, 0, &recordingAssistantConfigurationService{}); collector != nil {
+		t.Fatalf("expected no collector without assistant ID, got %T", collector)
+	}
+	if collector := NewWithAssistantTelemetry(context.Background(), testLogger(t), auth, 30, nil); collector != nil {
+		t.Fatalf("expected no collector without service, got %T", collector)
 	}
 }
 
-func TestNew_LogsAndSkipsUnknownAssistantProvider(t *testing.T) {
-	collectors := NewWithAssistantTelemetry(context.Background(), testLogger(t), []*internal_telemetry_entity.AssistantTelemetryProvider{
-		{ProviderType: "unknown", Enabled: true},
-	})
-	if len(collectors) != 0 {
-		t.Fatalf("expected unknown assistant provider to be skipped, got %d", len(collectors))
+func TestNew_AssistantTelemetryLoadsByAssistantID(t *testing.T) {
+	organizationID := uint64(10)
+	projectID := uint64(20)
+	auth := &types.ServiceScope{
+		OrganizationId: &organizationID,
+		ProjectId:      &projectID,
+	}
+	configurationService := &recordingAssistantConfigurationService{
+		configurations: []*internal_assistant_entity.AssistantConfiguration{
+			{
+				Audited:           gorm_model.Audited{Id: 101},
+				ConfigurationType: internal_assistant_entity.AssistantConfigurationTypeTelemetry,
+				Provider:          "logging",
+				Enabled:           true,
+			},
+			{
+				Audited:           gorm_model.Audited{Id: 202},
+				ConfigurationType: internal_assistant_entity.AssistantConfigurationTypeTelemetry,
+				Provider:          "logging",
+				Enabled:           false,
+			},
+		},
+	}
+	collector := NewWithAssistantTelemetry(context.Background(), testLogger(t), auth, 30, configurationService)
+	if collector == nil {
+		t.Fatal("expected assistant telemetry collector")
+	}
+	if collector.Key() != "telemetry:assistant:30" {
+		t.Fatalf("expected assistant telemetry key, got %q", collector.Key())
+	}
+	if configurationService.getAllCalls != 0 {
+		t.Fatalf("NewWithAssistantTelemetry should not load providers, got %d calls", configurationService.getAllCalls)
+	}
+	if err := collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 30}, observability.Context{}, observability.RecordLog{
+		Level:   observability.LevelInfo,
+		Message: "test",
+	}); err != nil {
+		t.Fatalf("expected assistant telemetry collect to succeed, got %v", err)
+	}
+	if configurationService.getAllCalls != 1 {
+		t.Fatalf("expected telemetry provider load, got %d", configurationService.getAllCalls)
+	}
+	if configurationService.assistantID != 30 {
+		t.Fatalf("expected assistant ID 30, got %d", configurationService.assistantID)
 	}
 }
 
 func TestNew_AppendsWebhookCollector(t *testing.T) {
-	collectors := NewWithAssistantWebhook(testLogger(t), []*internal_assistant_entity.AssistantWebhook{
-		{Provider: internal_assistant_entity.AssistantWebhookProviderHTTP},
-	})
-	if len(collectors) != 1 {
-		t.Fatalf("expected webhook collector only, got %d", len(collectors))
+	organizationID := uint64(10)
+	projectID := uint64(20)
+	auth := &types.ServiceScope{
+		OrganizationId: &organizationID,
+		ProjectId:      &projectID,
 	}
+	configurationService := &recordingAssistantConfigurationService{
+		configurations: []*internal_assistant_entity.AssistantConfiguration{
+			{
+				ConfigurationType: internal_assistant_entity.AssistantConfigurationTypeWebhook,
+				Provider:          "http",
+				Enabled:           true,
+			},
+		},
+	}
+
+	collector := NewWithWebhookConfiguration(context.Background(), testLogger(t), auth, 30, configurationService, &recordingHTTPLogService{})
+	if collector == nil {
+		t.Fatal("expected webhook collector")
+	}
+	if configurationService.getAllCalls != 0 {
+		t.Fatalf("NewWithWebhookConfiguration should not load webhooks, got %d calls", configurationService.getAllCalls)
+	}
+}
+
+type recordingAssistantConfigurationService struct {
+	configurations []*internal_assistant_entity.AssistantConfiguration
+	getAllCalls    int
+	assistantID    uint64
+}
+
+func (s *recordingAssistantConfigurationService) Get(context.Context, types.SimplePrinciple, uint64, uint64) (*internal_assistant_entity.AssistantConfiguration, error) {
+	return nil, nil
+}
+
+func (s *recordingAssistantConfigurationService) GetAll(_ context.Context, _ types.SimplePrinciple, assistantID uint64, _ string, _ string, _ []*protos.Criteria, _ *protos.Paginate) (int64, []*internal_assistant_entity.AssistantConfiguration, error) {
+	s.getAllCalls++
+	s.assistantID = assistantID
+	return int64(len(s.configurations)), s.configurations, nil
+}
+
+func (s *recordingAssistantConfigurationService) Create(context.Context, types.SimplePrinciple, uint64, string, string, bool, []*protos.Metadata) (*internal_assistant_entity.AssistantConfiguration, error) {
+	return nil, nil
+}
+
+func (s *recordingAssistantConfigurationService) Update(context.Context, types.SimplePrinciple, uint64, uint64, string, string, bool, []*protos.Metadata) (*internal_assistant_entity.AssistantConfiguration, error) {
+	return nil, nil
+}
+
+func (s *recordingAssistantConfigurationService) Delete(context.Context, types.SimplePrinciple, uint64, uint64) (*internal_assistant_entity.AssistantConfiguration, error) {
+	return nil, nil
+}
+
+type recordingHTTPLogService struct{}
+
+func (s *recordingHTTPLogService) CreateLog(context.Context, types.SimplePrinciple, string, uint64, string, string, uint64, *uint64, string, string, int64, int64, uint32, type_enums.RecordState, *string, []byte, []byte) (*internal_assistant_entity.AssistantHTTPLog, error) {
+	return nil, nil
+}
+
+func (s *recordingHTTPLogService) GetLog(context.Context, types.SimplePrinciple, uint64, uint64) (*internal_assistant_entity.AssistantHTTPLog, error) {
+	return nil, nil
+}
+
+func (s *recordingHTTPLogService) GetAllLog(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate, *protos.Ordering) (int64, []*internal_assistant_entity.AssistantHTTPLog, error) {
+	return 0, nil, nil
+}
+
+func (s *recordingHTTPLogService) GetLogObject(context.Context, uint64, uint64, uint64) ([]byte, []byte, error) {
+	return nil, nil, nil
+}
+
+func (s *recordingHTTPLogService) RetryLog(context.Context, types.SimplePrinciple, uint64, uint64) (*internal_assistant_entity.AssistantHTTPLog, error) {
+	return nil, nil
 }
 
 func testLogger(t *testing.T) commons.Logger {

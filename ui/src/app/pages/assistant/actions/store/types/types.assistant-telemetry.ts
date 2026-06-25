@@ -1,19 +1,19 @@
-import { AssistantTelemetryProvider } from '@rapidaai/react';
+import { AssistantConfiguration } from '@rapidaai/react';
 import { ColumnarType, PaginatedType } from '@/types';
 
 export type AssistantTelemetryProperty = {
-  telemetries: AssistantTelemetryProvider[];
+  telemetries: AssistantConfiguration[];
 };
 
 export type AssistantTelemetryType = {
-  onChangeAssistantTelemetries: (ep: AssistantTelemetryProvider[]) => void;
+  onChangeAssistantTelemetries: (telemetries: AssistantConfiguration[]) => void;
   getAssistantTelemetry: (
     assistantId: string,
     projectId: string,
     token: string,
     userId: string,
     onError: (err: string) => void,
-    onSuccess: (e: AssistantTelemetryProvider[]) => void,
+    onSuccess: (telemetries: AssistantConfiguration[]) => void,
   ) => void;
   deleteAssistantTelemetry: (
     assistantId: string,
@@ -22,7 +22,17 @@ export type AssistantTelemetryType = {
     token: string,
     userId: string,
     onError: (err: string) => void,
-    onSuccess: (e: AssistantTelemetryProvider) => void,
+    onSuccess: (telemetry: AssistantConfiguration) => void,
+  ) => void;
+  updateAssistantTelemetryEnabled: (
+    assistantId: string,
+    telemetry: AssistantConfiguration,
+    enabled: boolean,
+    projectId: string,
+    token: string,
+    userId: string,
+    onError: (err: string) => void,
+    onSuccess: (telemetry: AssistantConfiguration) => void,
   ) => void;
   clear: () => void;
 } & AssistantTelemetryProperty &

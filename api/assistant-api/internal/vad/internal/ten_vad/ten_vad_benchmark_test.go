@@ -23,7 +23,7 @@ func newBenchmarkTenVAD(b *testing.B, threshold float64) *TenVAD {
 	callback := func(context.Context, ...internal_type.Packet) error { return nil }
 	opts := newTestOptions(b, threshold)
 
-	vad, err := NewTenVAD(b.Context(), logger, callback, opts)
+	vad, err := newTenVADForTest(b.Context(), logger, callback, opts)
 	if err != nil {
 		b.Skipf("ten_vad library not available: %v", err)
 	}
@@ -224,7 +224,7 @@ func BenchmarkTenVAD_Process_Parallel_2Streams(b *testing.B) {
 	vads := make([]*TenVAD, 2)
 	for i := 0; i < 2; i++ {
 		callback := func(context.Context, ...internal_type.Packet) error { return nil }
-		vad, err := NewTenVAD(b.Context(), logger, callback, opts)
+		vad, err := newTenVADForTest(b.Context(), logger, callback, opts)
 		if err != nil {
 			b.Skipf("ten_vad library not available: %v", err)
 		}
@@ -256,7 +256,7 @@ func BenchmarkTenVAD_Process_Parallel_8Streams(b *testing.B) {
 	vads := make([]*TenVAD, 8)
 	for i := 0; i < 8; i++ {
 		callback := func(context.Context, ...internal_type.Packet) error { return nil }
-		vad, err := NewTenVAD(b.Context(), logger, callback, opts)
+		vad, err := newTenVADForTest(b.Context(), logger, callback, opts)
 		if err != nil {
 			b.Skipf("ten_vad library not available: %v", err)
 		}
@@ -365,7 +365,7 @@ func BenchmarkTenVAD_Initialization(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		vad, err := NewTenVAD(b.Context(), logger, callback, opts)
+		vad, err := newTenVADForTest(b.Context(), logger, callback, opts)
 		if err != nil {
 			b.Skipf("ten_vad library not available: %v", err)
 		}
@@ -385,7 +385,7 @@ func BenchmarkTenVAD_Process_WithCallback(b *testing.B) {
 	}
 	opts := newTestOptions(b, 0.3)
 
-	vad, err := NewTenVAD(b.Context(), logger, callback, opts)
+	vad, err := newTenVADForTest(b.Context(), logger, callback, opts)
 	if err != nil {
 		b.Skipf("ten_vad library not available: %v", err)
 	}

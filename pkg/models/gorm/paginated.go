@@ -6,17 +6,19 @@
 package gorm_models
 
 import (
+	"math"
+
 	"gorm.io/gorm"
 )
 
 type Paginated struct {
 	DB       *gorm.DB
-	Page     int
-	PageSize int
+	Page     uint32
+	PageSize uint32
 	Count    *int64
 }
 
-func NewPaginated(page int, pageSize int, count *int64, db *gorm.DB) *Paginated {
+func NewPaginated(page uint32, pageSize uint32, count *int64, db *gorm.DB) *Paginated {
 	return &Paginated{
 		Page: page, PageSize: pageSize, Count: count, DB: db,
 	}
@@ -31,19 +33,27 @@ func Paginate(r *Paginated) func(db *gorm.DB) *gorm.DB {
 			return db
 		}
 
-		page := r.Page
-		if page <= 0 {
-			page = 1
+		page := 1
+		if r.Page > 0 {
+			if uint64(r.Page) > uint64(math.MaxInt) {
+				page = math.MaxInt
+			} else {
+				page = int(r.Page)
+			}
 		}
 
-		pageSize := r.PageSize
-		switch {
-		case pageSize > 100:
-			pageSize = 100
-		case pageSize < 0:
-			pageSize = 10
+		pageSize := 100
+		if r.PageSize <= 100 {
+			pageSize = int(r.PageSize)
 		}
-		offset := (page - 1) * pageSize
+		offset := 0
+		if page > 1 {
+			if page-1 > math.MaxInt/pageSize {
+				offset = math.MaxInt
+			} else {
+				offset = (page - 1) * pageSize
+			}
+		}
 		result := db.Offset(offset).Limit(pageSize)
 		return result
 	}

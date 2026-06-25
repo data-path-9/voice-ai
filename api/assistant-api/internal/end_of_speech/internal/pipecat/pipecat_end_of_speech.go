@@ -94,22 +94,63 @@ type pipecatEndOfSpeech struct {
 	eosStartedAt time.Time
 }
 
-func NewPipecatEndOfSpeech(
-	logger commons.Logger,
-	onPacket func(context.Context, ...internal_type.Packet) error,
-	opts utils.Option,
-) (internal_type.EndOfSpeechExecutor, error) {
+type options struct {
+	ctx      context.Context
+	logger   commons.Logger
+	onPacket func(context.Context, ...internal_type.Packet) error
+	options  utils.Option
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
+	return func(options *options) {
+		options.onPacket = onPacket
+	}
+}
+
+func WithOptions(opts utils.Option) Option {
+	return func(options *options) {
+		options.options = opts
+	}
+}
+
+func New(opts ...Option) (internal_type.EndOfSpeechExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+	if options.onPacket == nil {
+		return nil, fmt.Errorf("%s: onPacket is required", pipecatEndOfSpeechName)
+	}
 	start := time.Now()
 
 	detectorConfig := PipecatDetectorConfig{}
-	if modelPath, err := opts.GetString("microphone.eos.pipecat.model_path"); err == nil {
+	if modelPath, err := options.options.GetString("microphone.eos.pipecat.model_path"); err == nil {
 		detectorConfig.ModelPath = modelPath
 	}
 
 	detector, err := NewPipecatDetector(detectorConfig)
 	if err != nil {
-		if onPacket != nil {
-			_ = onPacket(context.Background(), internal_type.ObservabilityLogRecordPacket{
+		if options.onPacket != nil {
+			_ = options.onPacket(options.ctx, internal_type.ObservabilityLogRecordPacket{
 				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
 					Level:   observability.LevelError,
@@ -117,7 +158,7 @@ func NewPipecatEndOfSpeech(
 					Attributes: observability.Attributes{
 						"component": observability.ComponentEOS.String(),
 						"provider":  pipecatEndOfSpeechName,
-						"options":   observability.AttributeValue(opts),
+						"options":   observability.AttributeValue(options.options),
 					},
 					OccurredAt: time.Now(),
 				},
@@ -127,9 +168,9 @@ func NewPipecatEndOfSpeech(
 	}
 
 	endOfSpeech := &pipecatEndOfSpeech{
-		logger:          logger,
-		onPacket:        onPacket,
-		opts:            opts,
+		logger:          options.logger,
+		onPacket:        options.onPacket,
+		opts:            options.options,
 		predictor:       detector,
 		threshold:       defaultPctThreshold,
 		quickTimeout:    time.Duration(defaultPctQuickTimeout) * time.Millisecond,
@@ -142,45 +183,43 @@ func NewPipecatEndOfSpeech(
 		eosStartedAt:    time.Now(),
 	}
 
-	if threshold, err := opts.GetFloat64(optPctThreshold); err == nil {
+	if threshold, err := options.options.GetFloat64(optPctThreshold); err == nil {
 		endOfSpeech.threshold = threshold
 	}
-	if extendedTimeout, err := opts.GetFloat64(optPctExtendedTimeout); err == nil {
+	if extendedTimeout, err := options.options.GetFloat64(optPctExtendedTimeout); err == nil {
 		endOfSpeech.extendedTimeout = time.Duration(extendedTimeout) * time.Millisecond
-	} else if extendedTimeout, err := opts.GetFloat64(optPctLegacySilenceTimeout); err == nil {
+	} else if extendedTimeout, err := options.options.GetFloat64(optPctLegacySilenceTimeout); err == nil {
 		endOfSpeech.extendedTimeout = time.Duration(extendedTimeout) * time.Millisecond
 	}
-	if quickTimeout, err := opts.GetFloat64(optPctQuickTimeout); err == nil {
+	if quickTimeout, err := options.options.GetFloat64(optPctQuickTimeout); err == nil {
 		endOfSpeech.quickTimeout = time.Duration(quickTimeout) * time.Millisecond
 	}
-	if fallbackTimeout, err := opts.GetFloat64(optPctFallbackTimeout); err == nil {
+	if fallbackTimeout, err := options.options.GetFloat64(optPctFallbackTimeout); err == nil {
 		endOfSpeech.fallbackTimeout = time.Duration(fallbackTimeout) * time.Millisecond
-	} else if fallbackTimeout, err := opts.GetFloat64(optPctLegacyTimeout); err == nil {
+	} else if fallbackTimeout, err := options.options.GetFloat64(optPctLegacyTimeout); err == nil {
 		endOfSpeech.fallbackTimeout = time.Duration(fallbackTimeout) * time.Millisecond
 	}
 
 	go endOfSpeech.worker()
-	if endOfSpeech.onPacket != nil {
-		_ = endOfSpeech.onPacket(context.Background(),
-			internal_type.ObservabilityMetricRecordPacket{
-				Scope:  internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.NewMetricEOSInitLatencyMs(time.Since(start), observability.Attributes{"provider": endOfSpeech.Name()}),
-			},
-			internal_type.ObservabilityLogRecordPacket{
-				Scope: internal_type.ObservabilityRecordScopeConversation,
-				Record: observability.RecordLog{
-					Level:   observability.LevelInfo,
-					Message: fmt.Sprintf("%s: initialization completed", endOfSpeech.Name()),
-					Attributes: observability.Attributes{
-						"component": observability.ComponentEOS.String(),
-						"provider":  endOfSpeech.Name(),
-						"options":   observability.AttributeValue(endOfSpeech.Options()),
-					},
-					OccurredAt: time.Now(),
+	_ = endOfSpeech.onPacket(options.ctx,
+		internal_type.ObservabilityMetricRecordPacket{
+			Scope:  internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewMetricEOSInitLatencyMs(time.Since(start), observability.Attributes{"provider": endOfSpeech.Name()}),
+		},
+		internal_type.ObservabilityLogRecordPacket{
+			Scope: internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.RecordLog{
+				Level:   observability.LevelInfo,
+				Message: fmt.Sprintf("%s: initialization completed", endOfSpeech.Name()),
+				Attributes: observability.Attributes{
+					"component": observability.ComponentEOS.String(),
+					"provider":  endOfSpeech.Name(),
+					"options":   observability.AttributeValue(endOfSpeech.Options()),
 				},
+				OccurredAt: time.Now(),
 			},
-		)
-	}
+		},
+	)
 
 	return endOfSpeech, nil
 }

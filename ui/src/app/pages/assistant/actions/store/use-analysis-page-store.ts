@@ -1,21 +1,24 @@
 import { create } from 'zustand';
 import { initialPaginated } from '@/types/types.paginated';
 import {
-  AssistantAnalysis,
+  AssistantConfiguration,
   Criteria,
-  DeleteAssistantAnalysisRequest,
-  GetAllAssistantAnalysisRequest,
+  DeleteAssistantConfiguration,
+  DeleteAssistantConfigurationRequest,
+  GetAllAssistantConfiguration,
+  GetAllAssistantConfigurationRequest,
+  GetAssistantConfigurationResponse,
   Paginate,
+  UpdateAssistantConfiguration,
+  UpdateAssistantConfigurationRequest,
 } from '@rapidaai/react';
 import {
   AssistantAnalysisProperty,
   AssistantAnalysisType,
 } from './types/types.assistant-analysis';
-import {
-  DeleteAssistantAnalysis,
-  GetAllAssistantAnalysis,
-} from '@rapidaai/react';
 import { connectionConfig } from '@/configs';
+
+const analysisConfigurationType = 'analysis';
 
 const initialAssistantAnalysis: AssistantAnalysisProperty = {
   analysises: [],
@@ -68,7 +71,7 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
      *
      * @param ep
      */
-    onChangeAssistantAnalysises: (ep: AssistantAnalysis[]) => {
+    onChangeAssistantAnalysises: (ep: AssistantConfiguration[]) => {
       set({
         analysises: ep,
       });
@@ -117,10 +120,11 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
       token: string,
       userId: string,
       onError: (err: string) => void,
-      onSuccess: (e: AssistantAnalysis[]) => void,
+      onSuccess: (e: AssistantConfiguration[]) => void,
     ) => {
-      const req = new GetAllAssistantAnalysisRequest();
+      const req = new GetAllAssistantConfigurationRequest();
       req.setAssistantid(assistantId);
+      req.setConfigurationtype(analysisConfigurationType);
 
       const paginate = new Paginate();
       paginate.setPage(get().page);
@@ -136,7 +140,7 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
       });
 
       try {
-        const gur = await GetAllAssistantAnalysis(connectionConfig, req, {
+        const gur = await GetAllAssistantConfiguration(connectionConfig, req, {
           authorization: token,
           'x-project-id': projectId,
           'x-auth-id': userId,
@@ -179,18 +183,19 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
       token: string,
       userId: string,
       onError: (err: string) => void,
-      onSuccess: (e: AssistantAnalysis) => void,
+      onSuccess: (e: AssistantConfiguration) => void,
     ) => {
-      const req = new DeleteAssistantAnalysisRequest();
+      const req = new DeleteAssistantConfigurationRequest();
       req.setAssistantid(assistantId);
       req.setId(analysisId);
 
       try {
-        const gur = await DeleteAssistantAnalysis(connectionConfig, req, {
-          authorization: token,
-          'x-project-id': projectId,
-          'x-auth-id': userId,
-        });
+        const gur: GetAssistantConfigurationResponse =
+          await DeleteAssistantConfiguration(connectionConfig, req, {
+            authorization: token,
+            'x-project-id': projectId,
+            'x-auth-id': userId,
+          });
 
         if (gur?.getSuccess() && gur.getData()) {
           onSuccess(gur.getData()!);
@@ -206,6 +211,48 @@ export const useAssistantAnalysisPageStore = create<AssistantAnalysisType>(
         }
       } catch {
         onError('Unable to delete assistant analysis, please try again later.');
+      }
+    },
+
+    updateAssistantAnalysisEnabled: async (
+      assistantId: string,
+      analysis: AssistantConfiguration,
+      enabled: boolean,
+      projectId: string,
+      token: string,
+      userId: string,
+      onError: (err: string) => void,
+      onSuccess: (e: AssistantConfiguration) => void,
+    ) => {
+      const req = new UpdateAssistantConfigurationRequest();
+      req.setId(analysis.getId());
+      req.setAssistantid(assistantId);
+      req.setConfigurationtype(analysisConfigurationType);
+      req.setProvider(analysis.getProvider());
+      req.setEnabled(enabled);
+      req.setOptionsList(analysis.getOptionsList());
+
+      try {
+        const gur: GetAssistantConfigurationResponse =
+          await UpdateAssistantConfiguration(connectionConfig, req, {
+            authorization: token,
+            'x-project-id': projectId,
+            'x-auth-id': userId,
+          });
+
+        if (gur?.getSuccess() && gur.getData()) {
+          onSuccess(gur.getData()!);
+          return;
+        }
+
+        let errorMessage = gur?.getError();
+        if (errorMessage) {
+          onError(errorMessage.getHumanmessage());
+          return;
+        }
+        onError('Unable to update assistant analysis, please try again later.');
+      } catch {
+        onError('Unable to update assistant analysis, please try again later.');
       }
     },
 

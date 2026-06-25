@@ -53,14 +53,31 @@ type conversationRecordingExecutor struct {
 	trackWriteCursorBytes [recordingTrackCount]int
 }
 
-func NewConversationRecordingExecutor(
-	contextID string,
-	onPacket func(context.Context, ...internal_type.Packet) error,
-) (internal_type.ConversationRecordingExecutor, error) {
-	return &conversationRecordingExecutor{
-		contextID: contextID,
-		onPacket:  onPacket,
-	}, nil
+type Option func(*conversationRecordingExecutor)
+
+func WithContextID(contextID string) Option {
+	return func(executor *conversationRecordingExecutor) {
+		executor.contextID = contextID
+	}
+}
+
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
+	return func(executor *conversationRecordingExecutor) {
+		executor.onPacket = onPacket
+	}
+}
+
+func New(opts ...Option) (internal_type.ConversationRecordingExecutor, error) {
+	executor := &conversationRecordingExecutor{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(executor)
+		}
+	}
+	if executor.onPacket == nil {
+		return nil, fmt.Errorf("conversation_recording: onPacket is required")
+	}
+	return executor, nil
 }
 
 func (r *conversationRecordingExecutor) Name() string { return "conversation_recording" }

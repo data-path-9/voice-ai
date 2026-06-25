@@ -26,20 +26,73 @@ const (
 	EndOfSpeechOptionsKeyProvider                       = "microphone.eos.provider"
 )
 
-func GetEndOfSpeech(
-	_ context.Context,
-	logger commons.Logger,
-	onCallback func(context.Context, ...internal_type.Packet) error,
-	opts utils.Option,
-) (internal_type.EndOfSpeechExecutor, error) {
-	provider, _ := opts.GetString(EndOfSpeechOptionsKeyProvider)
+type options struct {
+	ctx      context.Context
+	logger   commons.Logger
+	onPacket func(context.Context, ...internal_type.Packet) error
+	options  utils.Option
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
+	return func(options *options) {
+		options.onPacket = onPacket
+	}
+}
+
+func WithOptions(opts utils.Option) Option {
+	return func(options *options) {
+		options.options = opts
+	}
+}
+
+func New(opts ...Option) (internal_type.EndOfSpeechExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+
+	provider, _ := options.options.GetString(EndOfSpeechOptionsKeyProvider)
 	switch EndOfSpeechIdentifier(provider) {
 	case SilenceBasedEndOfSpeech:
-		return internal_silence_based.NewSilenceBasedEndOfSpeech(logger, onCallback, opts)
+		return internal_silence_based.New(
+			internal_silence_based.WithContext(options.ctx),
+			internal_silence_based.WithLogger(options.logger),
+			internal_silence_based.WithOnPacket(options.onPacket),
+			internal_silence_based.WithOptions(options.options),
+		)
 	case LiveKitEndOfSpeech:
-		return internal_livekit.NewLivekitEndOfSpeech(logger, onCallback, opts)
+		return internal_livekit.New(
+			internal_livekit.WithContext(options.ctx),
+			internal_livekit.WithLogger(options.logger),
+			internal_livekit.WithOnPacket(options.onPacket),
+			internal_livekit.WithOptions(options.options),
+		)
 	case PipecatSmartTurnEndOfSpeech:
-		return internal_pipecat.NewPipecatEndOfSpeech(logger, onCallback, opts)
+		return internal_pipecat.New(
+			internal_pipecat.WithContext(options.ctx),
+			internal_pipecat.WithLogger(options.logger),
+			internal_pipecat.WithOnPacket(options.onPacket),
+			internal_pipecat.WithOptions(options.options),
+		)
 	default:
 		return nil, fmt.Errorf("end_of_speech: unsupported provider %q", provider)
 	}

@@ -8,8 +8,8 @@ import { useCurrentCredential } from '@/hooks/use-credential';
 import { randomMeaningfullName } from '@/utils';
 import { EndpointDropdown } from '@/app/components/dropdown/endpoint-dropdown';
 import {
-  CreateAnalysis,
-  CreateAssistantAnalysisRequest,
+  CreateAssistantConfiguration,
+  CreateAssistantConfigurationRequest,
   Endpoint,
   Metadata,
 } from '@rapidaai/react';
@@ -55,6 +55,7 @@ const PARAM_TYPE_OPTIONS = [
   { value: 'analysis', name: 'Analysis' },
 ];
 const ANALYSIS_CONDITION_OPTION_KEY = 'analysis.condition';
+const analysisConfigurationType = 'analysis';
 const RESERVED_OPTION_KEYS = new Set([
   'option.endpoint_id',
   'option.endpoint_version',
@@ -138,15 +139,17 @@ export const CreateAssistantAnalysis: FC<{ assistantId: string }> = ({
       parameters.map(p => [`${p.type}.${p.key}`, p.value]),
     );
 
-    const request = new CreateAssistantAnalysisRequest();
+    const request = new CreateAssistantConfigurationRequest();
     request.setAssistantid(assistantId);
+    request.setConfigurationtype(analysisConfigurationType);
     request.setProvider('endpoint');
-    request.setName(name);
-    request.setDescription(description);
-    request.setExecutionpriority(priority);
+    request.setEnabled(true);
 
     const options: Metadata[] = [];
     [
+      { key: 'name', value: name },
+      { key: 'description', value: description },
+      { key: 'execution_priority', value: String(priority || 0) },
       { key: 'endpoint_id', value: endpointId },
       { key: 'endpoint_version', value: 'latest' },
       {
@@ -166,11 +169,15 @@ export const CreateAssistantAnalysis: FC<{ assistantId: string }> = ({
     request.setOptionsList(options);
 
     try {
-      const response = await CreateAnalysis(connectionConfig, request, {
-        'x-auth-id': authId,
-        authorization: token,
-        'x-project-id': projectId,
-      });
+      const response = await CreateAssistantConfiguration(
+        connectionConfig,
+        request,
+        {
+          'x-auth-id': authId,
+          authorization: token,
+          'x-project-id': projectId,
+        },
+      );
 
       if (response?.getSuccess()) {
         toast.success('Analysis added to assistant successfully');

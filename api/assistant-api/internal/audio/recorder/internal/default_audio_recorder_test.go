@@ -16,7 +16,12 @@ import (
 
 func newTestRecorder(t *testing.T) *conversationRecordingExecutor {
 	t.Helper()
-	rec, err := NewConversationRecordingExecutor("ctx-recording", nil)
+	rec, err := New(
+		WithContextID("ctx-recording"),
+		WithOnPacket(func(context.Context, ...internal_type.Packet) error {
+			return nil
+		}),
+	)
 	if err != nil {
 		t.Fatalf("failed to create recorder: %v", err)
 	}

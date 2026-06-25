@@ -749,5 +749,5 @@ func parsePositiveUint32(value string) (uint32, error) {
 	if err != nil || parsed == 0 {
 		return 0, fmt.Errorf("invalid positive uint32: %q", value)
 	}
-	return uint32(parsed), nil
+	return parsed, nil
 }

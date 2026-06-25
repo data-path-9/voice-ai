@@ -31,8 +31,8 @@ func TestDenoiserIdentifierString(t *testing.T) {
 	}
 }
 
-// TestGetDenoiserWithValidTypes tests factory with valid denoiser types
-func TestGetDenoiserWithValidTypes(t *testing.T) {
+// TestNewDenoiserWithValidTypes tests factory with valid denoiser types
+func TestNewDenoiserWithValidTypes(t *testing.T) {
 	mockLogger, _ := commons.NewApplicationLogger()
 
 	tests := []struct {
@@ -48,15 +48,15 @@ func TestGetDenoiserWithValidTypes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := utils.Option{DenoiserOptionsKeyProvider: tt.identifier}
 
-			denoiser, err := GetDenoiser(t.Context(), mockLogger, nil, opts)
+			denoiser, err := newDenoiserForTest(t.Context(), mockLogger, nil, opts)
 			assert.NoError(t, err)
 			assert.NotNil(t, denoiser)
 		})
 	}
 }
 
-// TestGetDenoiserWithInvalidIdentifiers tests factory with invalid identifiers
-func TestGetDenoiserWithInvalidIdentifiers(t *testing.T) {
+// TestNewDenoiserWithInvalidIdentifiers tests factory with invalid identifiers
+func TestNewDenoiserWithInvalidIdentifiers(t *testing.T) {
 	mockLogger, _ := commons.NewApplicationLogger()
 	tests := []struct {
 		name       string
@@ -73,15 +73,15 @@ func TestGetDenoiserWithInvalidIdentifiers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := utils.Option{DenoiserOptionsKeyProvider: tt.identifier}
 
-			denoiser, err := GetDenoiser(t.Context(), mockLogger, nil, opts)
+			denoiser, err := newDenoiserForTest(t.Context(), mockLogger, nil, opts)
 			assert.NoError(t, err)
 			assert.NotNil(t, denoiser)
 		})
 	}
 }
 
-// TestGetDenoiserWithNilLogger tests with nil logger
-func TestGetDenoiserWithNilLogger(t *testing.T) {
+// TestNewDenoiserWithNilLogger tests with nil logger
+func TestNewDenoiserWithNilLogger(t *testing.T) {
 	tests := []struct {
 		name       string
 		identifier DenoiserIdentifier
@@ -95,32 +95,23 @@ func TestGetDenoiserWithNilLogger(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := utils.Option{DenoiserOptionsKeyProvider: tt.identifier}
 
-			denoiser, _ := GetDenoiser(t.Context(), nil, nil, opts)
+			denoiser, _ := newDenoiserForTest(t.Context(), nil, nil, opts)
 			assert.NotNil(t, denoiser)
 		})
 	}
 }
 
-// TestGetDenoiserWithNilOnPacket tests factory behavior when no callback is provided.
-func TestGetDenoiserWithNilOnPacket(t *testing.T) {
+// TestNewDenoiserWithNilOnPacket tests factory behavior when no callback is provided.
+func TestNewDenoiserWithNilOnPacket(t *testing.T) {
 	mockLogger, _ := commons.NewApplicationLogger()
 
-	tests := []struct {
-		name       string
-		identifier DenoiserIdentifier
-	}{
-		{name: "KRISP with nil onPacket", identifier: KRISP},
-		{name: "RN_NOISE with nil onPacket", identifier: RN_NOISE},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			opts := utils.Option{DenoiserOptionsKeyProvider: tt.identifier}
-
-			denoiser, _ := GetDenoiser(t.Context(), mockLogger, nil, opts)
-			assert.NotNil(t, denoiser)
-		})
-	}
+	denoiser, err := New(
+		WithContext(t.Context()),
+		WithLogger(mockLogger),
+		WithOptions(utils.Option{DenoiserOptionsKeyProvider: RN_NOISE}),
+	)
+	assert.Error(t, err)
+	assert.Nil(t, denoiser)
 }
 
 // TestAllDenoiserTypesCallFactory tests all types work
@@ -138,7 +129,7 @@ func TestAllDenoiserTypesCallFactory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := utils.Option{DenoiserOptionsKeyProvider: tt.identifier}
-			denoiser, err := GetDenoiser(t.Context(), mockLogger, nil, opts)
+			denoiser, err := newDenoiserForTest(t.Context(), mockLogger, nil, opts)
 			assert.NoError(t, err)
 			assert.NotNil(t, denoiser)
 		})
@@ -204,7 +195,7 @@ func TestDenoiserFactoryDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := utils.Option{DenoiserOptionsKeyProvider: tt.identifier}
-			denoiser, err := GetDenoiser(t.Context(), mockLogger, nil, opts)
+			denoiser, err := newDenoiserForTest(t.Context(), mockLogger, nil, opts)
 			assert.NoError(t, err)
 			assert.NotNil(t, denoiser)
 		})
@@ -237,7 +228,7 @@ func TestDenoiserFactoryProvidesExecutorMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := utils.Option{DenoiserOptionsKeyProvider: tt.identifier}
 
-			denoiser, err := GetDenoiser(t.Context(), mockLogger, nil, opts)
+			denoiser, err := newDenoiserForTest(t.Context(), mockLogger, nil, opts)
 			assert.NoError(t, err)
 			assert.NotNil(t, denoiser)
 			assert.NotEmpty(t, denoiser.Name())
@@ -247,33 +238,33 @@ func TestDenoiserFactoryProvidesExecutorMetadata(t *testing.T) {
 	}
 }
 
-// BenchmarkGetDenoiserKRISP benchmarks KRISP factory
-func BenchmarkGetDenoiserKRISP(b *testing.B) {
+// BenchmarkNewDenoiserKRISP benchmarks KRISP factory
+func BenchmarkNewDenoiserKRISP(b *testing.B) {
 	opts := utils.Option{DenoiserOptionsKeyProvider: KRISP}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		GetDenoiser(b.Context(), nil, nil, opts)
+		newDenoiserForTest(b.Context(), nil, nil, opts)
 	}
 }
 
-// BenchmarkGetDenoiserRNNoise benchmarks RN_NOISE factory
-func BenchmarkGetDenoiserRNNoise(b *testing.B) {
+// BenchmarkNewDenoiserRNNoise benchmarks RN_NOISE factory
+func BenchmarkNewDenoiserRNNoise(b *testing.B) {
 	opts := utils.Option{DenoiserOptionsKeyProvider: RN_NOISE}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		GetDenoiser(b.Context(), nil, nil, opts)
+		newDenoiserForTest(b.Context(), nil, nil, opts)
 	}
 }
 
-// BenchmarkGetDenoiserDefault benchmarks default behavior
-func BenchmarkGetDenoiserDefault(b *testing.B) {
+// BenchmarkNewDenoiserDefault benchmarks default behavior
+func BenchmarkNewDenoiserDefault(b *testing.B) {
 	opts := utils.Option{DenoiserOptionsKeyProvider: DenoiserIdentifier("")}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		GetDenoiser(b.Context(), nil, nil, opts)
+		newDenoiserForTest(b.Context(), nil, nil, opts)
 	}
 }
 

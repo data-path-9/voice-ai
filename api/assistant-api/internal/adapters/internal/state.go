@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
-	internal_telemetry_entity "github.com/rapidaai/api/assistant-api/internal/entity/telemetry"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -63,16 +62,6 @@ func (gr *genericRequestor) GetSpeechToTextTransformer() (
 	return nil, errors.New("audio is not enabled for the source")
 }
 
-func (gr *genericRequestor) GetTelemetryProvider(ctx context.Context) ([]*internal_telemetry_entity.AssistantTelemetryProvider, error) {
-	if gr.assistant == nil {
-		return nil, errors.New("assistant is not initialized")
-	}
-	if gr.assistant.AssistantTelemetryProviders == nil {
-		return []*internal_telemetry_entity.AssistantTelemetryProvider{}, nil
-	}
-	return gr.assistant.AssistantTelemetryProviders, nil
-}
-
 func (gr *genericRequestor) GetTextToSpeechTransformer() (*internal_assistant_entity.AssistantDeploymentAudio, error) {
 	switch gr.source {
 	case utils.PhoneCall:
@@ -109,9 +98,8 @@ func (gr *genericRequestor) GetAssistant(
 		InjectKnowledgeConfiguration: true,
 		InjectTool:                   true,
 		InjectAnalysis:               true,
-		InjectWebhook:                true,
-		InjectTelemetryProvider:      true,
 		InjectAuthentication:         true,
+		InjectStorage:                true,
 		InjectConversations:          false,
 		InjectTag:                    false,
 	}

@@ -106,8 +106,8 @@ func (pS *projectService) GetAll(ctx context.Context, auth types.SimplePrinciple
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{
@@ -222,8 +222,8 @@ func (pS *projectService) GetAllCredential(ctx context.Context, auth types.Princ
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{

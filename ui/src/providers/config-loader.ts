@@ -21,7 +21,8 @@ export type ProviderConfigCategory =
   | 'vad'
   | 'eos'
   | 'noise'
-  | 'telemetry';
+  | 'telemetry'
+  | 'storage';
 
 export interface ParameterConfig {
   key: string;
@@ -78,6 +79,7 @@ export interface ProviderConfig {
   eos?: CategoryConfig;
   noise?: CategoryConfig;
   telemetry?: CategoryConfig;
+  storage?: CategoryConfig;
 }
 
 export interface MetadataLike {
@@ -108,6 +110,8 @@ const categoryParameterCache: Record<string, ParameterConfig[]> = {};
 const PROVIDER_PATH_ALIASES: Record<string, string> = {
   sarvamai: 'sarvam',
   'google-speech-service': 'google',
+  'aws-cloud': 'aws',
+  'azure-cloud': 'azure',
 };
 const MODEL_SELECTOR_CATEGORIES: ReadonlySet<ProviderConfigCategory> = new Set([
   'stt',
@@ -227,6 +231,7 @@ export function loadProviderConfig(provider: string): ProviderConfig | null {
     'eos',
     'noise',
     'telemetry',
+    'storage',
   ];
 
   for (const category of categories) {

@@ -18,7 +18,8 @@ import (
 	internal_webrtc "github.com/rapidaai/api/assistant-api/internal/channel/webrtc"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
-	observability_collector_conversationdb "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationdb"
+	observability_collector_conversationmetadata "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationmetadata"
+	observability_collector_conversationmetric "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationmetric"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
@@ -46,6 +47,9 @@ type ConversationApi struct {
 	channelPipeline              *channel_pipeline.Dispatcher
 	assistantConversationService internal_services.AssistantConversationService
 	assistantService             internal_services.AssistantService
+	configurationService         internal_services.AssistantConfigurationService
+	httpLogService               internal_services.AssistantHTTPLogService
+	assistantToolService         internal_services.AssistantToolService
 	vaultClient                  web_client.VaultClient
 	authClient                   web_client.AuthClient
 }
@@ -55,17 +59,21 @@ type ConversationGrpcApi struct {
 }
 
 func (cApi *ConversationApi) Observability(ctx context.Context, auth types.SimplePrinciple, options ...observability.Option) observability.Recorder {
-	otelCollectors := make([]observability.Collector, 0)
-	otelCollectors = append(otelCollectors, observability_collector_conversationdb.New(observability_collector_conversationdb.Config{
-		Logger:              cApi.logger,
-		ConversationService: cApi.assistantConversationService,
-	}))
-	otelCollectors = append(otelCollectors, collectors.NewWithEnv(ctx, cApi.logger, cApi.cfg)...)
 	recorderOptions := []observability.Option{
 		observability.WithLogger(cApi.logger),
 		observability.WithAuth(auth),
 		observability.WithContext(ctx),
-		observability.WithCollectors(otelCollectors...),
+		observability.WithCollectors(
+			observability_collector_conversationmetric.New(observability_collector_conversationmetric.Config{
+				Logger:              cApi.logger,
+				ConversationService: cApi.assistantConversationService,
+			}),
+			observability_collector_conversationmetadata.New(observability_collector_conversationmetadata.Config{
+				Logger:              cApi.logger,
+				ConversationService: cApi.assistantConversationService,
+			}),
+			collectors.NewWithEnv(ctx, cApi.logger, cApi.cfg),
+		),
 	}
 	recorderOptions = append(recorderOptions, options...)
 	return observability.New(recorderOptions...)
@@ -84,6 +92,9 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 	assistantService := internal_assistant_service.NewAssistantService(cfg, logger, postgres, opensearch)
 	fileStorage := storage_files.NewStorage(cfg.AssetStoreConfig, logger)
 	conversationService := internal_assistant_service.NewAssistantConversationService(logger, postgres, fileStorage)
+	configurationService := internal_assistant_service.NewAssistantConfigurationService(logger, postgres)
+	httpLogService := internal_assistant_service.NewAssistantHTTPLogService(logger, postgres, fileStorage)
+	assistantToolService := internal_assistant_service.NewAssistantToolService(logger, postgres, fileStorage)
 	inbound := channel_telephony.NewInboundDispatcher(
 		channel_telephony.WithConfig(cfg),
 		channel_telephony.WithLogger(logger),
@@ -100,6 +111,8 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 		channel_telephony.WithOutboundVaultClient(vaultClient),
 		channel_telephony.WithOutboundAssistantService(assistantService),
 		channel_telephony.WithOutboundConversationService(conversationService),
+		channel_telephony.WithOutboundAssistantConfigurationService(configurationService),
+		channel_telephony.WithOutboundHTTPLogService(httpLogService),
 		channel_telephony.WithOutboundTelephonyOption(channel_telephony.TelephonyOption{SIPServer: sipServer}),
 	)
 	cApi := &ConversationApi{
@@ -113,6 +126,9 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 		inboundDispatcher:            inbound,
 		assistantConversationService: conversationService,
 		assistantService:             assistantService,
+		configurationService:         configurationService,
+		httpLogService:               httpLogService,
+		assistantToolService:         assistantToolService,
 		storage:                      fileStorage,
 		vaultClient:                  vaultClient,
 		authClient:                   web_client.NewAuthenticator(&cfg.AppConfig, logger, redis),
@@ -122,6 +138,9 @@ func newConversationApiCore(cfg *config.AssistantConfig, logger commons.Logger,
 			channel_pipeline.WithOutboundDispatcher(outbound),
 			channel_pipeline.WithConversationService(conversationService),
 			channel_pipeline.WithAssistantService(assistantService),
+			channel_pipeline.WithAssistantConfigurationService(configurationService),
+			channel_pipeline.WithHTTPLogService(httpLogService),
+			channel_pipeline.WithAssistantToolService(assistantToolService),
 		),
 	}
 	return cApi
@@ -194,6 +213,10 @@ func (cApi *ConversationGrpcApi) AssistantTalk(stream assistant_api.TalkService_
 		internal_grpc.WithLogger(cApi.logger),
 		internal_grpc.WithServer(stream),
 		internal_grpc.WithObserver(observabilityRecorder),
+		internal_grpc.WithAuth(auth),
+		internal_grpc.WithAssistantConfigurationService(cApi.configurationService),
+		internal_grpc.WithHTTPLogService(cApi.httpLogService),
+		internal_grpc.WithAssistantToolService(cApi.assistantToolService),
 	)
 	if err != nil {
 		cApi.logger.Errorf("failed to create grpc streamer: %v", err)
@@ -244,6 +267,10 @@ func (cApi *ConversationGrpcApi) WebTalk(stream assistant_api.WebRTC_WebTalkServ
 		internal_webrtc.WithServer(stream),
 		internal_webrtc.WithServerConfig(cApi.cfg.WebRTCConfig),
 		internal_webrtc.WithObserver(observabilityRecorder),
+		internal_webrtc.WithAuth(auth),
+		internal_webrtc.WithAssistantConfigurationService(cApi.configurationService),
+		internal_webrtc.WithHTTPLogService(cApi.httpLogService),
+		internal_webrtc.WithAssistantToolService(cApi.assistantToolService),
 	)
 	if err != nil {
 		cApi.logger.Errorf("failed to create grpc streamer: %v", err)

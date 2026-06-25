@@ -36,13 +36,53 @@ type toolRegistration struct {
 	def    *protos.FunctionDefinition
 }
 
-func NewToolExecutor(logger commons.Logger) ToolExecutor {
-	return &toolExecutor{
-		logger:                 logger,
+type options struct {
+	ctx           context.Context
+	logger        commons.Logger
+	communication internal_type.Communication
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithCommunication(communication internal_type.Communication) Option {
+	return func(options *options) {
+		options.communication = communication
+	}
+}
+
+func New(opts ...Option) (ToolExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+	if options.communication == nil {
+		return nil, errors.New("tool: communication is required")
+	}
+	executor := &toolExecutor{
+		logger:                 options.logger,
 		mcpClients:             make([]*internal_tool_mcp.Client, 0),
 		tools:                  make(map[string]internal_tool.ToolCaller),
 		availableToolFunctions: make([]*protos.FunctionDefinition, 0),
 	}
+	executor.initializeToolPipeline(options.ctx, options.communication)
+	return executor, nil
 }
 
 // registerTool safely registers a tool caller and its definition
@@ -208,12 +248,6 @@ func (executor *toolExecutor) initializeToolPipeline(
 	if err := executor.Run(ctx, DiscoverToolsPipeline{Communication: communication}); err != nil {
 		executor.logger.Errorf("tool initialize pipeline failed: %v", err)
 	}
-}
-
-// Initialize sets up all tools (local + MCP) for the assistant
-func (executor *toolExecutor) Initialize(ctx context.Context, communication internal_type.Communication) error {
-	executor.initializeToolPipeline(ctx, communication)
-	return nil
 }
 
 func (executor *toolExecutor) GetFunctionDefinitions() []*protos.FunctionDefinition {

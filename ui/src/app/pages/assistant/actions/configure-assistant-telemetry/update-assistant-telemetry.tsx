@@ -1,30 +1,30 @@
 import React, { FC, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  GetAssistantTelemetryProvider,
+  GetAssistantConfiguration,
+  GetAssistantConfigurationRequest,
   Metadata,
-  UpdateAssistantTelemetryProvider,
+  UpdateAssistantConfiguration,
+  UpdateAssistantConfigurationRequest,
 } from '@rapidaai/react';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
 import { useCurrentCredential } from '@/hooks/use-credential';
 import { useRapidaStore } from '@/hooks';
 import { connectionConfig } from '@/configs';
 import toast from 'react-hot-toast/headless';
-import {
-  PrimaryButton,
-  SecondaryButton,
-} from '@/app/components/carbon/button';
+import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import { ButtonSet } from '@carbon/react';
-import { FieldSet } from '@/app/components/form/fieldset';
-import { InputCheckbox } from '@/app/components/carbon/form/input-checkbox';
-import { InputHelper } from '@/app/components/input-helper';
+import { Stack } from '@/app/components/carbon/form';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
 import { TelemetryProvider } from '@/app/components/providers/telemetry';
-import { PageActionButtonBlock } from '@/app/components/blocks/page-action-button-block';
 import {
   GetDefaultTelemetryIfInvalid,
   ValidateTelemetry,
 } from '@/app/components/providers/telemetry/provider';
+import { InputGroup } from '@/app/components/input-group';
+import { Notification } from '@/app/components/carbon/notification';
+
+const telemetryConfigurationType = 'telemetry';
 
 export const UpdateAssistantTelemetry: FC<{ assistantId: string }> = ({
   assistantId,
@@ -37,20 +37,24 @@ export const UpdateAssistantTelemetry: FC<{ assistantId: string }> = ({
 
   const [provider, setProvider] = useState('');
   const [parameters, setParameters] = useState<Metadata[]>([]);
-  const [enabled, setEnabled] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     if (!telemetryId) return;
 
+    const request = new GetAssistantConfigurationRequest();
+    request.setAssistantid(assistantId);
+    request.setId(telemetryId);
+
     showLoader();
-    GetAssistantTelemetryProvider(
-      connectionConfig,
-      assistantId,
-      telemetryId,
-      (err, response) => {
+    GetAssistantConfiguration(connectionConfig, request, {
+      'x-auth-id': authId,
+      authorization: token,
+      'x-project-id': projectId,
+    })
+      .then(response => {
         hideLoader();
-        if (err || !response?.getSuccess()) {
+        if (!response?.getSuccess()) {
           toast.error('Unable to load telemetry provider');
           return;
         }
@@ -58,9 +62,8 @@ export const UpdateAssistantTelemetry: FC<{ assistantId: string }> = ({
         const telemetry = response.getData();
         if (!telemetry) return;
 
-        const loadedProvider = telemetry.getProvidertype();
+        const loadedProvider = telemetry.getProvider();
         setProvider(loadedProvider);
-        setEnabled(telemetry.getEnabled());
 
         const loadedParams = telemetry.getOptionsList().map(opt => {
           const m = new Metadata();
@@ -71,13 +74,11 @@ export const UpdateAssistantTelemetry: FC<{ assistantId: string }> = ({
         setParameters(
           GetDefaultTelemetryIfInvalid(loadedProvider, loadedParams),
         );
-      },
-      {
-        'x-auth-id': authId,
-        authorization: token,
-        'x-project-id': projectId,
-      },
-    );
+      })
+      .catch(() => {
+        hideLoader();
+        toast.error('Unable to load telemetry provider');
+      });
   }, [assistantId, telemetryId, authId, token, projectId]);
 
   const onChangeProvider = (providerCode: string) => {
@@ -102,23 +103,22 @@ export const UpdateAssistantTelemetry: FC<{ assistantId: string }> = ({
       return;
     }
 
-    showLoader();
-    UpdateAssistantTelemetryProvider(
-      connectionConfig,
-      assistantId,
-      telemetryId,
-      provider,
-      enabled,
-      parameters,
-      (err, response) => {
-        hideLoader();
-        if (err) {
-          setErrorMessage(
-            'Unable to update assistant telemetry provider, please try again.',
-          );
-          return;
-        }
+    const request = new UpdateAssistantConfigurationRequest();
+    request.setId(telemetryId);
+    request.setAssistantid(assistantId);
+    request.setConfigurationtype(telemetryConfigurationType);
+    request.setProvider(provider);
+    request.setEnabled(true);
+    request.setOptionsList(parameters);
 
+    showLoader();
+    UpdateAssistantConfiguration(connectionConfig, request, {
+      'x-auth-id': authId,
+      authorization: token,
+      'x-project-id': projectId,
+    })
+      .then(response => {
+        hideLoader();
         if (response?.getSuccess()) {
           toast.success('Assistant telemetry provider updated successfully');
           navigator.goToAssistantTelemetry(assistantId);
@@ -130,70 +130,68 @@ export const UpdateAssistantTelemetry: FC<{ assistantId: string }> = ({
           message ||
             'Unable to update assistant telemetry provider, please try again.',
         );
-      },
-      {
-        'x-auth-id': authId,
-        authorization: token,
-        'x-project-id': projectId,
-      },
-    );
+      })
+      .catch(() => {
+        hideLoader();
+        setErrorMessage(
+          'Unable to update assistant telemetry provider, please try again.',
+        );
+      });
   };
 
   return (
     <>
       <ConfirmDialogComponent />
-      <div className="flex flex-col flex-1 min-h-0 bg-white dark:bg-gray-900">
-        <header className="px-8 pt-8 pb-6 border-b border-gray-200 dark:border-gray-800 shrink-0">
-          <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400 mb-1.5">
-            Telemetry
-          </p>
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 leading-tight">
-            Update Telemetry Provider
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-500 mt-1.5 leading-relaxed">
-            Edit telemetry destination for this assistant.
-          </p>
-        </header>
+      <section className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col bg-white dark:bg-gray-900">
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+            <div className="flex flex-col flex-1">
+              <header className="px-4 pt-8 pb-6 border-b border-gray-200 dark:border-gray-800">
+                <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 leading-tight">
+                  Telemetry
+                </h1>
+                <p className="text-sm text-gray-500 dark:text-gray-500 mt-1.5 leading-relaxed">
+                  Configure the provider and destination.
+                </p>
+              </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="px-8 pt-6 pb-8 max-w-4xl flex flex-col gap-8">
-            <TelemetryProvider
-              provider={provider}
-              onChangeProvider={onChangeProvider}
-              parameters={parameters}
-              onChangeParameter={onChangeParameter}
-            />
+              <div className="pb-8 flex flex-col">
+                <InputGroup title="Destination">
+                  <Stack gap={6}>
+                    <TelemetryProvider
+                      provider={provider}
+                      onChangeProvider={onChangeProvider}
+                      parameters={parameters}
+                      onChangeParameter={onChangeParameter}
+                    />
+                  </Stack>
+                </InputGroup>
+              </div>
+            </div>
+          </div>
 
-            <FieldSet>
-              <InputCheckbox
-                checked={enabled}
-                onChange={e => setEnabled(e.target.checked)}
+          <div className="shrink-0">
+            {errorMessage && (
+              <Notification
+                kind="error"
+                title="Error"
+                subtitle={errorMessage}
+              />
+            )}
+            <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
+              <SecondaryButton
+                size="lg"
+                onClick={() => showDialog(navigator.goBack)}
               >
-                Enable this telemetry provider
-              </InputCheckbox>
-              <InputHelper>
-                Disabled providers are saved but not used by the assistant.
-              </InputHelper>
-            </FieldSet>
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton size="lg" isLoading={loading} onClick={onSubmit}>
+                Update telemetry
+              </PrimaryButton>
+            </ButtonSet>
           </div>
         </div>
-
-        <PageActionButtonBlock errorMessage={errorMessage}>
-          <ButtonSet className="!w-full [&>button]:!flex-1 [&>button]:!max-w-none">
-            <SecondaryButton size="lg"
-              onClick={() => showDialog(navigator.goBack)}
-            >
-              Cancel
-            </SecondaryButton>
-            <PrimaryButton size="lg"
-              isLoading={loading}
-              onClick={onSubmit}
-            >
-              Save telemetry
-            </PrimaryButton>
-          </ButtonSet>
-        </PageActionButtonBlock>
-      </div>
+      </section>
     </>
   );
 };

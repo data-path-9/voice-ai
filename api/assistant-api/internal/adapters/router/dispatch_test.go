@@ -85,9 +85,15 @@ func (s *dispatchHandlerStub) HandleInitializeConversation(context.Context, inte
 }
 func (s *dispatchHandlerStub) HandleInitializeSessionRuntime(context.Context, internal_type.InitializeSessionRuntimePacket) {
 }
+func (s *dispatchHandlerStub) HandleInitializeConversationRecordingExecutor(context.Context, internal_type.InitializeConversationRecordingExecutorPacket) {
+}
+func (s *dispatchHandlerStub) HandleInitializeArtifactPushExecutor(context.Context, internal_type.InitializeArtifactPushExecutorPacket) {
+}
+func (s *dispatchHandlerStub) HandleInitializeAnalysisExecutor(context.Context, internal_type.InitializeAnalysisExecutorPacket) {
+}
 func (s *dispatchHandlerStub) HandleInitializeAuthentication(context.Context, internal_type.InitializeAuthenticationPacket) {
 }
-func (s *dispatchHandlerStub) HandleExecuteSessionAuthentication(context.Context, internal_type.ExecuteSessionAuthenticationPacket) {
+func (s *dispatchHandlerStub) HandleExecuteAuthentication(context.Context, internal_type.ExecuteAuthenticationPacket) {
 }
 func (s *dispatchHandlerStub) HandleSessionAuthenticationSucceeded(context.Context, internal_type.SessionAuthenticationSucceededPacket) {
 }
@@ -108,8 +114,6 @@ func (s *dispatchHandlerStub) HandleInitializeAssistantExecutorPacket(context.Co
 func (s *dispatchHandlerStub) HandleInitializeBehavior(context.Context, internal_type.InitializeBehaviorPacket) {
 }
 func (s *dispatchHandlerStub) HandleInitializationCompleted(context.Context, internal_type.InitializationCompletedPacket) {
-}
-func (s *dispatchHandlerStub) HandleInitializeTelemetry(context.Context, internal_type.InitializeTelemetryPacket) {
 }
 func (s *dispatchHandlerStub) HandleInitializeInboundDispatcher(context.Context, internal_type.InitializeInboundDispatcherPacket) {
 }
@@ -149,17 +153,21 @@ func (s *dispatchHandlerStub) HandleFinalizeSpeechToText(context.Context, intern
 }
 func (s *dispatchHandlerStub) HandleFinalizeAuthentication(context.Context, internal_type.FinalizeAuthenticationPacket) {
 }
+func (s *dispatchHandlerStub) HandleFinalizeConversationRecordingExecutor(context.Context, internal_type.FinalizeConversationRecordingExecutorPacket) {
+}
 func (s *dispatchHandlerStub) HandleFinalizeSessionRuntime(context.Context, internal_type.FinalizeSessionRuntimePacket) {
 }
+func (s *dispatchHandlerStub) HandleFinalizeArtifactPushExecutor(context.Context, internal_type.FinalizeArtifactPushExecutorPacket) {
+}
+func (s *dispatchHandlerStub) HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket) {
+}
 func (s *dispatchHandlerStub) HandleFinalizeConversation(context.Context, internal_type.FinalizeConversationPacket) {
+}
+func (s *dispatchHandlerStub) HandleFinalizeAnalysisExecutor(context.Context, internal_type.FinalizeAnalysisExecutorPacket) {
 }
 func (s *dispatchHandlerStub) HandleFinalizeAssistant(context.Context, internal_type.FinalizeAssistantPacket) {
 }
 func (s *dispatchHandlerStub) HandleFinalizationCompleted(context.Context, internal_type.FinalizationCompletedPacket) {
-}
-func (s *dispatchHandlerStub) HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket) {
-}
-func (s *dispatchHandlerStub) HandleExecuteWebhook(context.Context, internal_type.ExecuteWebhookPacket) {
 }
 func (s *dispatchHandlerStub) HandleSpeechToTextAudio(context.Context, internal_type.SpeechToTextAudioPacket) {
 }

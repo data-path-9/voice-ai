@@ -146,6 +146,17 @@ export const useGlobalNavigation = () => {
       `/deployment/assistant/${assistantId}/configure-telemetry/${telemetryId}`,
     );
 
+  const goToAssistantStorage = (assistantId: string) =>
+    navigate(`/deployment/assistant/${assistantId}/configure-storage`);
+
+  const goToCreateAssistantStorage = (assistantId: string) =>
+    navigate(`/deployment/assistant/${assistantId}/configure-storage/create`);
+
+  const goToEditAssistantStorage = (assistantId: string, storageId: string) =>
+    navigate(
+      `/deployment/assistant/${assistantId}/configure-storage/${storageId}`,
+    );
+
   const goToAssistantSession = (assistantId: string, sessionId: string) =>
     navigate(`/deployment/assistant/${assistantId}/sessions/${sessionId}`);
 
@@ -243,6 +254,9 @@ export const useGlobalNavigation = () => {
     goToAssistantTelemetry,
     goToCreateAssistantTelemetry,
     goToEditAssistantTelemetry,
+    goToAssistantStorage,
+    goToCreateAssistantStorage,
+    goToEditAssistantStorage,
 
     //
     goToAssistantSession,

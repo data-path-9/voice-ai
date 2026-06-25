@@ -1,13 +1,21 @@
 import { FC, useEffect, useMemo, useState } from 'react';
 import {
-  AssistantAuthentication,
-  DisableAssistantAuthentication,
-  DisableAssistantAuthenticationRequest,
-  GetAssistantAuthentication,
-  GetAssistantAuthenticationRequest,
+  AssistantConfiguration,
+  DeleteAssistantConfiguration,
+  DeleteAssistantConfigurationRequest,
+  GetAllAssistantConfiguration,
+  GetAllAssistantConfigurationRequest,
+  Paginate,
+  UpdateAssistantConfiguration,
+  UpdateAssistantConfigurationRequest,
 } from '@rapidaai/react';
 import {
   Breadcrumb,
+  Button as CarbonButton,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ComposedModal,
   BreadcrumbItem,
   Table,
   TableBody,
@@ -17,13 +25,14 @@ import {
   TableRow,
   TableToolbar,
   TableToolbarContent,
+  OverflowMenu,
+  OverflowMenuItem,
 } from '@carbon/react';
-import { Renew, Add, Edit, DisableStep } from '@carbon/icons-react';
+import { Renew, Add } from '@carbon/icons-react';
 import toast from 'react-hot-toast/headless';
 
 import { useCurrentCredential } from '@/hooks/use-credential';
 import { useGlobalNavigation } from '@/hooks/use-global-navigator';
-import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
 import { connectionConfig } from '@/configs';
 import { PrimaryButton, IconOnlyButton } from '@/app/components/carbon/button';
 import { UrlTableCell } from '@/app/components/carbon/url-table-cell';
@@ -34,11 +43,14 @@ import { CarbonShapeIndicator } from '@/app/components/carbon/shape-indicator';
 import { toHumanReadableDateTime } from '@/utils/date';
 
 import {
-  getAuthenticationStatus,
   toOptionMap,
   AUTH_OPTION_ENDPOINT,
   AUTH_OPTION_METHOD,
 } from './shared';
+
+const authenticationConfigurationType = 'authentication';
+
+type AuthenticationAction = 'enable' | 'disable' | 'delete';
 
 interface ConfigureAuthenticationListProps {
   assistantId: string;
@@ -49,14 +61,13 @@ export const ConfigureAuthenticationList: FC<
 > = ({ assistantId }) => {
   const navigator = useGlobalNavigation();
   const { authId, token, projectId } = useCurrentCredential();
-  const { showDialog, ConfirmDialogComponent } = useConfirmDialog({
-    title: 'Disable authentication?',
-    content: 'Authentication will be inactive for this assistant.',
-  });
 
   const [loading, setLoading] = useState(true);
   const [authentication, setAuthentication] =
-    useState<AssistantAuthentication | null>(null);
+    useState<AssistantConfiguration | null>(null);
+  const [pendingAction, setPendingAction] =
+    useState<AuthenticationAction | null>(null);
+  const [submittingAction, setSubmittingAction] = useState(false);
 
   const configureRoute = `/deployment/assistant/${assistantId}/configure-authentication/${
     authentication ? 'edit' : 'create'
@@ -64,10 +75,16 @@ export const ConfigureAuthenticationList: FC<
 
   const load = () => {
     setLoading(true);
-    const request = new GetAssistantAuthenticationRequest();
+    const request = new GetAllAssistantConfigurationRequest();
     request.setAssistantid(assistantId);
+    request.setConfigurationtype(authenticationConfigurationType);
 
-    GetAssistantAuthentication(connectionConfig, request, {
+    const paginate = new Paginate();
+    paginate.setPage(1);
+    paginate.setPagesize(1);
+    request.setPaginate(paginate);
+
+    GetAllAssistantConfiguration(connectionConfig, request, {
       'x-auth-id': authId,
       authorization: token,
       'x-project-id': projectId,
@@ -79,7 +96,7 @@ export const ConfigureAuthenticationList: FC<
           return;
         }
 
-        setAuthentication(response.getData() || null);
+        setAuthentication(response.getDataList()?.[0] || null);
         setLoading(false);
       })
       .catch(() => {
@@ -96,33 +113,119 @@ export const ConfigureAuthenticationList: FC<
     () => toOptionMap(authentication?.getOptionsList?.() || []),
     [authentication],
   );
+  const authenticationEnabled = authentication?.getEnabled?.() ?? true;
 
-  const onDisable = () => {
+  const closeActionModal = () => {
+    if (submittingAction) return;
+    setPendingAction(null);
+  };
+
+  const onDelete = () => {
     if (!authentication) return;
-    const request = new DisableAssistantAuthenticationRequest();
+    const request = new DeleteAssistantConfigurationRequest();
     request.setAssistantid(assistantId);
-    DisableAssistantAuthentication(connectionConfig, request, {
+    request.setId(authentication.getId());
+
+    setSubmittingAction(true);
+    DeleteAssistantConfiguration(connectionConfig, request, {
       'x-auth-id': authId,
       authorization: token,
       'x-project-id': projectId,
     })
       .then(response => {
         if (response?.getSuccess()) {
-          toast.success('Assistant authentication disabled successfully.');
+          toast.success('Assistant authentication deleted successfully.');
+          setPendingAction(null);
           load();
           return;
         }
         toast.error(
           response?.getError?.()?.getHumanmessage?.() ||
-            'Unable to disable assistant authentication.',
+            'Unable to delete assistant authentication.',
         );
       })
       .catch(err => {
         toast.error(
-          err?.message || 'Unable to disable assistant authentication.',
+          err?.message || 'Unable to delete assistant authentication.',
         );
-      });
+      })
+      .finally(() => setSubmittingAction(false));
   };
+
+  const setAuthenticationEnabled = (enabled: boolean) => {
+    if (!authentication) return;
+
+    const request = new UpdateAssistantConfigurationRequest();
+    request.setId(authentication.getId());
+    request.setAssistantid(assistantId);
+    request.setConfigurationtype(authenticationConfigurationType);
+    request.setProvider(authentication.getProvider() || 'http');
+    request.setEnabled(enabled);
+    request.setOptionsList(authentication.getOptionsList?.() || []);
+
+    setSubmittingAction(true);
+    UpdateAssistantConfiguration(connectionConfig, request, {
+      'x-auth-id': authId,
+      authorization: token,
+      'x-project-id': projectId,
+    })
+      .then(response => {
+        if (response?.getSuccess()) {
+          toast.success(
+            `Assistant authentication ${enabled ? 'enabled' : 'disabled'} successfully.`,
+          );
+          setPendingAction(null);
+          load();
+          return;
+        }
+        toast.error(
+          response?.getError?.()?.getHumanmessage?.() ||
+            `Unable to ${enabled ? 'enable' : 'disable'} assistant authentication.`,
+        );
+      })
+      .catch(err => {
+        toast.error(
+          err?.message ||
+            `Unable to ${enabled ? 'enable' : 'disable'} assistant authentication.`,
+        );
+      })
+      .finally(() => setSubmittingAction(false));
+  };
+
+  const confirmAction = () => {
+    switch (pendingAction) {
+      case 'enable':
+        setAuthenticationEnabled(true);
+        break;
+      case 'disable':
+        setAuthenticationEnabled(false);
+        break;
+      case 'delete':
+        onDelete();
+        break;
+      default:
+        break;
+    }
+  };
+
+  const modalTitle =
+    pendingAction === 'enable'
+      ? 'Enable authentication?'
+      : pendingAction === 'disable'
+        ? 'Disable authentication?'
+        : 'Delete authentication?';
+  const modalContent =
+    pendingAction === 'enable'
+      ? 'Sessions will be verified before initialization.'
+      : pendingAction === 'disable'
+        ? 'Sessions will continue without authentication verification.'
+        : 'Authentication configuration will be removed from this assistant.';
+  const modalPrimaryLabel =
+    pendingAction === 'enable'
+      ? 'Enable'
+      : pendingAction === 'disable'
+        ? 'Disable'
+        : 'Delete';
 
   if (loading) {
     return (
@@ -134,7 +237,35 @@ export const ConfigureAuthenticationList: FC<
 
   return (
     <div className="h-full flex flex-col flex-1">
-      <ConfirmDialogComponent />
+      <ComposedModal
+        open={Boolean(pendingAction)}
+        onClose={closeActionModal}
+        size="sm"
+        danger={pendingAction !== 'enable'}
+      >
+        <ModalHeader title={modalTitle} />
+        <ModalBody>
+          <p>{modalContent}</p>
+        </ModalBody>
+        <ModalFooter danger={pendingAction !== 'enable'}>
+          <CarbonButton
+            kind="secondary"
+            size="md"
+            disabled={submittingAction}
+            onClick={closeActionModal}
+          >
+            Cancel
+          </CarbonButton>
+          <CarbonButton
+            kind={pendingAction === 'enable' ? 'primary' : 'danger'}
+            size="md"
+            disabled={submittingAction}
+            onClick={confirmAction}
+          >
+            {modalPrimaryLabel}
+          </CarbonButton>
+        </ModalFooter>
+      </ComposedModal>
       <div className="px-4 pt-4 pb-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
         <div>
           <Breadcrumb noTrailingSlash className="mb-2">
@@ -183,7 +314,7 @@ export const ConfigureAuthenticationList: FC<
             <TableBody>
               <TableRow>
                 <TableCell className="text-sm whitespace-nowrap">
-                  HTTP
+                  {authentication.getProvider() || 'http'}
                 </TableCell>
                 <TableCell className="text-sm whitespace-nowrap">
                   {optionMap[AUTH_OPTION_METHOD] || '-'}
@@ -191,7 +322,8 @@ export const ConfigureAuthenticationList: FC<
                 <UrlTableCell url={optionMap[AUTH_OPTION_ENDPOINT]} />
                 <TableCell className="text-sm whitespace-nowrap">
                   <CarbonShapeIndicator
-                    state={authentication.getStatus()}
+                    kind={authenticationEnabled ? 'stable' : 'draft'}
+                    label={authenticationEnabled ? 'Enabled' : 'Disabled'}
                     textSize={14}
                   />
                 </TableCell>
@@ -203,25 +335,29 @@ export const ConfigureAuthenticationList: FC<
                   className="text-sm whitespace-nowrap"
                   onClick={e => e.stopPropagation()}
                 >
-                  <div className="flex items-center gap-0">
-                    <IconOnlyButton
-                      kind="ghost"
-                      size="md"
-                      renderIcon={Edit}
-                      iconDescription="Configure authentication"
+                  <OverflowMenu
+                    size="sm"
+                    flipped
+                    aria-label="Authentication actions"
+                  >
+                    <OverflowMenuItem
+                      itemText="Edit"
                       onClick={() => navigator.goTo(configureRoute)}
                     />
-                    <IconOnlyButton
-                      size="md"
-                      kind="ghost"
-                      renderIcon={DisableStep}
-                      iconDescription="Disable authentication"
-                      disabled={
-                        getAuthenticationStatus(authentication) !== 'active'
+                    <OverflowMenuItem
+                      itemText={authenticationEnabled ? 'Disable' : 'Enable'}
+                      onClick={() =>
+                        setPendingAction(
+                          authenticationEnabled ? 'disable' : 'enable',
+                        )
                       }
-                      onClick={() => showDialog(onDisable)}
                     />
-                  </div>
+                    <OverflowMenuItem
+                      itemText="Delete"
+                      isDelete
+                      onClick={() => setPendingAction('delete')}
+                    />
+                  </OverflowMenu>
                 </TableCell>
               </TableRow>
             </TableBody>

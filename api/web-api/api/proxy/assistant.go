@@ -284,54 +284,6 @@ func (assistantGRPCApi *webAssistantGRPCApi) UpdateAssistantDetail(ctx context.C
 	return assistantGRPCApi.assistantClient.UpdateAssistantDetail(ctx, iAuth, iRequest)
 }
 
-// CreateAssistantWebhook implements protos.AssistantServiceServer.
-func (assistantGRPCApi *webAssistantGRPCApi) CreateAssistantWebhook(ctx context.Context, iRequest *protos.CreateAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to create assistant tag")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.CreateAssistantWebhook(ctx, iAuth, iRequest)
-}
-
-func (assistantGRPCApi *webAssistantGRPCApi) UpdateAssistantWebhook(ctx context.Context, iRequest *protos.UpdateAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to Update assistant tag")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.UpdateAssistantWebhook(ctx, iAuth, iRequest)
-}
-
-func (assistantGRPCApi *webAssistantGRPCApi) DeleteAssistantWebhook(ctx context.Context, iRequest *protos.DeleteAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to Delete assistant tag")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.DeleteAssistantWebhook(ctx, iAuth, iRequest)
-}
-
-// GetAllAssistantWebhook implements protos.AssistantServiceServer.
-func (assistantGRPCApi *webAssistantGRPCApi) GetAllAssistantWebhook(ctx context.Context, iRequest *protos.GetAllAssistantWebhookRequest) (*protos.GetAllAssistantWebhookResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to create assistant tag")
-		return nil, errors.New("unauthenticated request")
-	}
-
-	page, tls, err := assistantGRPCApi.assistantClient.GetAllAssistantWebhook(ctx, iAuth, iRequest.GetAssistantId(), iRequest.GetCriterias(), iRequest.GetPaginate())
-	if err != nil {
-		return utils.Error[protos.GetAllAssistantWebhookResponse](
-			err,
-			"Unable to get all the webhooks, please try again later.",
-		)
-	}
-	return utils.PaginatedSuccess[protos.GetAllAssistantWebhookResponse, []*protos.AssistantWebhook](
-		page.GetTotalItem(), page.GetCurrentPage(),
-		tls)
-}
-
 // GetAllAssistantHTTPLog implements protos.AssistantServiceServer.
 func (assistantGRPCApi *webAssistantGRPCApi) GetAllAssistantHTTPLog(ctx context.Context, iRequest *protos.GetAllAssistantHTTPLogRequest) (*protos.GetAllAssistantHTTPLogResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
@@ -384,18 +336,7 @@ func (assistantGRPCApi *webAssistantGRPCApi) RetryAssistantHTTPLog(ctx context.C
 	return assistantGRPCApi.assistantClient.RetryAssistantHTTPLog(ctx, iAuth, iRequest)
 }
 
-// GetAssistantWebhook implements protos.AssistantServiceServer.
-func (assistantGRPCApi *webAssistantGRPCApi) GetAssistantWebhook(ctx context.Context, iRequest *protos.GetAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to create assistant tag")
-		return nil, errors.New("unauthenticated request")
-	}
-
-	return assistantGRPCApi.assistantClient.GetAssistantWebhook(ctx, iAuth, iRequest)
-}
-
-// GetAssistantWebhook implements protos.AssistantServiceServer.
+// GetAssistantConversation implements protos.AssistantServiceServer.
 func (assistantGRPCApi *webAssistantGRPCApi) GetAssistantConversation(ctx context.Context, iRequest *protos.GetAssistantConversationRequest) (*protos.GetAssistantConversationResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
@@ -414,7 +355,7 @@ func (assistantGRPCApi *webAssistantGRPCApi) DeleteAssistant(ctx context.Context
 	return assistantGRPCApi.assistantClient.DeleteAssistant(ctx, iAuth, iRequest)
 }
 
-// CreateAssistantWebhook implements protos.AssistantServiceServer.
+// CreateAssistantKnowledge implements protos.AssistantServiceServer.
 func (assistantGRPCApi *webAssistantGRPCApi) CreateAssistantKnowledge(ctx context.Context, iRequest *protos.CreateAssistantKnowledgeRequest) (*protos.GetAssistantKnowledgeResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
@@ -529,62 +470,6 @@ func (assistantGRPCApi *webAssistantGRPCApi) GetAssistantTool(ctx context.Contex
 	return assistantGRPCApi.assistantClient.GetAssistantTool(ctx, iAuth, iRequest)
 }
 
-func (assistantGRPCApi *webAssistantGRPCApi) CreateAssistantAnalysis(ctx context.Context, iRequest *protos.CreateAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to create assistant tag")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.CreateAssistantAnalysis(ctx, iAuth, iRequest)
-}
-
-func (assistantGRPCApi *webAssistantGRPCApi) UpdateAssistantAnalysis(ctx context.Context, iRequest *protos.UpdateAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to Update assistant tag")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.UpdateAssistantAnalysis(ctx, iAuth, iRequest)
-}
-
-func (assistantGRPCApi *webAssistantGRPCApi) DeleteAssistantAnalysis(ctx context.Context, iRequest *protos.DeleteAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to Delete assistant tag")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.DeleteAssistantAnalysis(ctx, iAuth, iRequest)
-}
-
-func (assistantGRPCApi *webAssistantGRPCApi) GetAllAssistantAnalysis(ctx context.Context, iRequest *protos.GetAllAssistantAnalysisRequest) (*protos.GetAllAssistantAnalysisResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to GetAllAssistantAnalysis")
-		return nil, errors.New("unauthenticated request")
-	}
-
-	page, tls, err := assistantGRPCApi.assistantClient.GetAllAssistantAnalysis(ctx, iAuth, iRequest.GetAssistantId(), iRequest.GetCriterias(), iRequest.GetPaginate())
-	if err != nil {
-		return utils.Error[protos.GetAllAssistantAnalysisResponse](
-			err,
-			"Unable to get all the webhook analysis, please try again later.",
-		)
-	}
-
-	return utils.PaginatedSuccess[protos.GetAllAssistantAnalysisResponse, []*protos.AssistantAnalysis](
-		page.GetTotalItem(), page.GetCurrentPage(),
-		tls)
-}
-
-func (assistantGRPCApi *webAssistantGRPCApi) GetAssistantAnalysis(ctx context.Context, iRequest *protos.GetAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to GetAssistantAnalysis")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.GetAssistantAnalysis(ctx, iAuth, iRequest)
-}
-
 func (assistantGRPCApi *webAssistantGRPCApi) GetAssistantToolLog(ctx context.Context, iRequest *protos.GetAssistantToolLogRequest) (*protos.GetAssistantToolLogResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
@@ -603,79 +488,47 @@ func (assistantGRPCApi *webAssistantGRPCApi) GetAllAssistantToolLog(ctx context.
 	return assistantGRPCApi.assistantClient.GetAllAssistantToolLog(ctx, iAuth, iRequest)
 }
 
-// CreateAssistantTelemetryProvider implements [protos.AssistantServiceServer].
-func (assistantGRPCApi *webAssistantGRPCApi) CreateAssistantTelemetryProvider(ctx context.Context, iRequest *protos.CreateAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error) {
+func (assistantGRPCApi *webAssistantGRPCApi) CreateAssistantConfiguration(ctx context.Context, iRequest *protos.CreateAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to CreateAssistantTelemetryProvider")
+		assistantGRPCApi.logger.Errorf("unauthenticated request to CreateAssistantConfiguration")
 		return nil, errors.New("unauthenticated request")
 	}
-	return assistantGRPCApi.assistantClient.CreateAssistantTelemetryProvider(ctx, iAuth, iRequest)
+	return assistantGRPCApi.assistantClient.CreateAssistantConfiguration(ctx, iAuth, iRequest)
 }
 
-// DeleteAssistantTelemetryProvider implements [protos.AssistantServiceServer].
-func (assistantGRPCApi *webAssistantGRPCApi) DeleteAssistantTelemetryProvider(ctx context.Context, iRequest *protos.DeleteAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error) {
+func (assistantGRPCApi *webAssistantGRPCApi) UpdateAssistantConfiguration(ctx context.Context, iRequest *protos.UpdateAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to DeleteAssistantTelemetryProvider")
+		assistantGRPCApi.logger.Errorf("unauthenticated request to UpdateAssistantConfiguration")
 		return nil, errors.New("unauthenticated request")
 	}
-	return assistantGRPCApi.assistantClient.DeleteAssistantTelemetryProvider(ctx, iAuth, iRequest)
+	return assistantGRPCApi.assistantClient.UpdateAssistantConfiguration(ctx, iAuth, iRequest)
 }
 
-// GetAllAssistantTelemetryProvider implements [protos.AssistantServiceServer].
-func (assistantGRPCApi *webAssistantGRPCApi) GetAllAssistantTelemetryProvider(ctx context.Context, iRequest *protos.GetAllAssistantTelemetryProviderRequest) (*protos.GetAllAssistantTelemetryProviderResponse, error) {
+func (assistantGRPCApi *webAssistantGRPCApi) DeleteAssistantConfiguration(ctx context.Context, iRequest *protos.DeleteAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to GetAllAssistantTelemetryProvider")
+		assistantGRPCApi.logger.Errorf("unauthenticated request to DeleteAssistantConfiguration")
 		return nil, errors.New("unauthenticated request")
 	}
-	return assistantGRPCApi.assistantClient.GetAllAssistantTelemetryProvider(ctx, iAuth, iRequest)
+	return assistantGRPCApi.assistantClient.DeleteAssistantConfiguration(ctx, iAuth, iRequest)
 }
 
-// GetAssistantTelemetryProvider implements [protos.AssistantServiceServer].
-func (assistantGRPCApi *webAssistantGRPCApi) GetAssistantTelemetryProvider(ctx context.Context, iRequest *protos.GetAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error) {
+func (assistantGRPCApi *webAssistantGRPCApi) GetAllAssistantConfiguration(ctx context.Context, iRequest *protos.GetAllAssistantConfigurationRequest) (*protos.GetAllAssistantConfigurationResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to GetAssistantTelemetryProvider")
+		assistantGRPCApi.logger.Errorf("unauthenticated request to GetAllAssistantConfiguration")
 		return nil, errors.New("unauthenticated request")
 	}
-	return assistantGRPCApi.assistantClient.GetAssistantTelemetryProvider(ctx, iAuth, iRequest)
+	return assistantGRPCApi.assistantClient.GetAllAssistantConfiguration(ctx, iAuth, iRequest)
 }
 
-// UpdateAssistantTelemetryProvider implements [protos.AssistantServiceServer].
-func (assistantGRPCApi *webAssistantGRPCApi) UpdateAssistantTelemetryProvider(ctx context.Context, iRequest *protos.UpdateAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error) {
+func (assistantGRPCApi *webAssistantGRPCApi) GetAssistantConfiguration(ctx context.Context, iRequest *protos.GetAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error) {
 	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to UpdateAssistantTelemetryProvider")
+		assistantGRPCApi.logger.Errorf("unauthenticated request to GetAssistantConfiguration")
 		return nil, errors.New("unauthenticated request")
 	}
-	return assistantGRPCApi.assistantClient.UpdateAssistantTelemetryProvider(ctx, iAuth, iRequest)
-}
-
-func (assistantGRPCApi *webAssistantGRPCApi) CreateAssistantAuthentication(ctx context.Context, iRequest *protos.CreateAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to CreateAssistantAuthentication")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.CreateAssistantAuthentication(ctx, iAuth, iRequest)
-}
-
-func (assistantGRPCApi *webAssistantGRPCApi) GetAssistantAuthentication(ctx context.Context, iRequest *protos.GetAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error) {
-	iAuth, isAuthenticated := types.GetSimplePrincipleGRPC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to GetAssistantAuthentication")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.GetAssistantAuthentication(ctx, iAuth, iRequest)
-}
-
-func (assistantGRPCApi *webAssistantGRPCApi) DisableAssistantAuthentication(ctx context.Context, iRequest *protos.DisableAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error) {
-	iAuth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
-	if !isAuthenticated {
-		assistantGRPCApi.logger.Errorf("unauthenticated request to DisableAssistantAuthentication")
-		return nil, errors.New("unauthenticated request")
-	}
-	return assistantGRPCApi.assistantClient.DisableAssistantAuthentication(ctx, iAuth, iRequest)
+	return assistantGRPCApi.assistantClient.GetAssistantConfiguration(ctx, iAuth, iRequest)
 }

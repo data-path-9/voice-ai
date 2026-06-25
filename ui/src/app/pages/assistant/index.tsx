@@ -137,6 +137,30 @@ export const DeploymentUpdateAssistantTelemetryPage = lazyLoad(
   },
 );
 
+export const DeploymentConfigureAssistantStoragePage = lazyLoad(
+  () => import('./actions/configure-assistant-storage'),
+  module => module.ConfigureAssistantStoragePage,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
+export const DeploymentCreateAssistantStoragePage = lazyLoad(
+  () => import('./actions/configure-assistant-storage'),
+  module => module.CreateAssistantStoragePage,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
+export const DeploymentUpdateAssistantStoragePage = lazyLoad(
+  () => import('./actions/configure-assistant-storage'),
+  module => module.UpdateAssistantStoragePage,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
 export const DeploymentConfigureAssistantWebDeploymentPage = lazyLoad(
   () => import('./actions/create-deployment/web-plugin'),
   module => module.ConfigureAssistantWebDeploymentPage,

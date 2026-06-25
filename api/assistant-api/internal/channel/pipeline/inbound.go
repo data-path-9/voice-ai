@@ -12,6 +12,8 @@ import (
 
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
+	observability_collector_requestlog "github.com/rapidaai/api/assistant-api/internal/observability/collectors/requestlog"
+	observability_collector_toollog "github.com/rapidaai/api/assistant-api/internal/observability/collectors/toollog"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/pkg/utils"
@@ -19,6 +21,25 @@ import (
 )
 
 func (d *Dispatcher) runInboundCall(ctx context.Context, v CallReceivedPipeline) *PipelineResult {
+	if err := v.Observer.AddCollectors(
+		observability_collector_requestlog.New(observability_collector_requestlog.Config{
+			Logger:         d.logger,
+			HTTPLogService: d.httpLogService,
+		}),
+		observability_collector_toollog.New(observability_collector_toollog.Config{
+			Logger:      d.logger,
+			ToolService: d.assistantToolService,
+		}),
+		collectors.NewWithWebhookConfiguration(ctx, d.logger, v.Auth, v.AssistantID, d.configurationService, d.httpLogService)); err != nil {
+		d.logger.Warnw("observability collector registration failed",
+			"component", "call",
+			"operation", "add_assistant_collectors",
+			"assistant_id", v.AssistantID,
+			"provider", v.Provider,
+			"error", err,
+		)
+	}
+
 	callInfo, err := d.inboundDispatcher.ReceiveCall(v.GinContext, v.Provider)
 	if err != nil {
 		_ = v.Observer.Record(ctx, observability.AssistantScope{AssistantID: v.AssistantID}, observability.RecordLog{
@@ -48,9 +69,17 @@ func (d *Dispatcher) runInboundCall(ctx context.Context, v CallReceivedPipeline)
 			"provider": v.Provider,
 			"caller":   callInfo.CallerNumber,
 		},
+	}, observability.RecordWebhook{
+		Event: observability.CallReceived,
+		Payload: map[string]interface{}{
+			"provider":  v.Provider,
+			"caller":    callInfo.CallerNumber,
+			"from":      callInfo.FromNumber,
+			"direction": "inbound",
+		},
 	})
 
-	assistant, err := d.assistantService.Get(ctx, v.Auth, v.AssistantID, utils.GetVersionDefinition("latest"), &internal_services.GetAssistantOption{InjectPhoneDeployment: true, InjectWebhook: true})
+	assistant, err := d.assistantService.Get(ctx, v.Auth, v.AssistantID, utils.GetVersionDefinition("latest"), &internal_services.GetAssistantOption{InjectPhoneDeployment: true})
 	if err != nil {
 		_ = v.Observer.Record(ctx, observability.AssistantScope{AssistantID: v.AssistantID}, observability.RecordLog{
 			Level:   observability.LevelError,
@@ -61,12 +90,20 @@ func (d *Dispatcher) runInboundCall(ctx context.Context, v CallReceivedPipeline)
 				"caller":       callInfo.CallerNumber,
 				"error":        err.Error(),
 			},
+		}, observability.RecordWebhook{
+			Event: observability.CallFailed,
+			Payload: map[string]interface{}{
+				"stage":     "assistant_load",
+				"provider":  v.Provider,
+				"caller":    callInfo.CallerNumber,
+				"from":      callInfo.FromNumber,
+				"direction": "inbound",
+				"error":     err.Error(),
+			},
 		})
 		return &PipelineResult{Error: err}
 	}
 
-	// added collector may be duplicate but handled at collector level
-	v.Observer.AddCollectors(collectors.NewWithAssistantWebhook(d.logger, assistant.AssistantWebhooks)...)
 	_ = v.Observer.Record(ctx, observability.AssistantScope{AssistantID: assistant.Id}, observability.RecordEvent{
 		Event: observability.CallAssistantLoaded,
 		Attributes: observability.Attributes{
@@ -84,6 +121,16 @@ func (d *Dispatcher) runInboundCall(ctx context.Context, v CallReceivedPipeline)
 				"provider": v.Provider,
 				"caller":   callInfo.CallerNumber,
 				"error":    err.Error(),
+			},
+		}, observability.RecordWebhook{
+			Event: observability.CallFailed,
+			Payload: map[string]interface{}{
+				"stage":     "conversation_create",
+				"provider":  v.Provider,
+				"caller":    callInfo.CallerNumber,
+				"from":      callInfo.FromNumber,
+				"direction": "inbound",
+				"error":     err.Error(),
 			},
 		})
 		return &PipelineResult{Error: err}
@@ -112,6 +159,17 @@ func (d *Dispatcher) runInboundCall(ctx context.Context, v CallReceivedPipeline)
 				"provider": v.Provider,
 				"caller":   callInfo.CallerNumber,
 				"error":    err.Error(),
+			},
+		}, observability.RecordWebhook{
+			Event:     observability.CallFailed,
+			ContextID: contextID,
+			Payload: map[string]interface{}{
+				"stage":     "call_context_save",
+				"provider":  v.Provider,
+				"caller":    callInfo.CallerNumber,
+				"from":      callInfo.FromNumber,
+				"direction": "inbound",
+				"error":     err.Error(),
 			},
 		})
 		return &PipelineResult{Error: err}
@@ -157,21 +215,31 @@ func (d *Dispatcher) runInboundCall(ctx context.Context, v CallReceivedPipeline)
 
 	v.GinContext.Set("contextId", contextID)
 	if err := d.inboundDispatcher.AnswerProvider(v.GinContext, v.Auth, v.Provider, v.AssistantID, callInfo.CallerNumber, conversation.Id); err != nil {
-		_ = v.Observer.Record(ctx,
-			observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{AssistantID: v.AssistantID},
-				ConversationID: conversation.Id,
+		_ = v.Observer.Record(ctx, observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: v.AssistantID},
+			ConversationID: conversation.Id,
+		}, observability.RecordLog{
+			Level:   observability.LevelError,
+			Message: "inbound provider answer failed",
+			Attributes: observability.Attributes{
+				"provider":   v.Provider,
+				"caller":     callInfo.CallerNumber,
+				"context_id": contextID,
+				"error":      err.Error(),
 			},
-			observability.RecordLog{
-				Level:   observability.LevelError,
-				Message: "inbound provider answer failed",
-				Attributes: observability.Attributes{
-					"provider":   v.Provider,
-					"caller":     callInfo.CallerNumber,
-					"context_id": contextID,
-					"error":      err.Error(),
-				},
-			})
+		}, observability.RecordWebhook{
+			Event:     observability.CallFailed,
+			ContextID: contextID,
+			Payload: map[string]interface{}{
+				"stage":      "provider_answer",
+				"provider":   v.Provider,
+				"caller":     callInfo.CallerNumber,
+				"from":       callInfo.FromNumber,
+				"context_id": contextID,
+				"direction":  "inbound",
+				"error":      err.Error(),
+			},
+		})
 		return &PipelineResult{Error: err}
 	}
 	_ = v.Observer.Record(ctx,
@@ -185,6 +253,17 @@ func (d *Dispatcher) runInboundCall(ctx context.Context, v CallReceivedPipeline)
 				"provider":   v.Provider,
 				"caller":     callInfo.CallerNumber,
 				"context_id": contextID,
+			},
+		},
+		observability.RecordWebhook{
+			Event:     observability.CallProviderAnswered,
+			ContextID: contextID,
+			Payload: map[string]interface{}{
+				"provider":   v.Provider,
+				"caller":     callInfo.CallerNumber,
+				"from":       callInfo.FromNumber,
+				"context_id": contextID,
+				"direction":  "inbound",
 			},
 		})
 

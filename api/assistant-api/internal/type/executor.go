@@ -8,13 +8,13 @@ package internal_type
 import (
 	"context"
 
+	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/protos"
 )
 
-// Executor is the generic contract for session-scoped executors.
-// P is the specific packet type the executor handles in Execute.
-// Construction (with full dependency wiring) happens in each implementation's
-// New<X>Executor function — there is no separate Initialize phase.
+// Executor is the generic contract for session-scoped packet handlers.
+// Construction is fully wired by each implementation's New<X>Executor.
 type Executor[P Packet] interface {
 	Name() string
 	Options() utils.Option
@@ -23,22 +23,83 @@ type Executor[P Packet] interface {
 	Close(ctx context.Context) error
 }
 
-// Typed interfaces for each concrete executor. Each embeds the generic Executor
-// so it can extend the contract with executor-specific methods later.
+// SyncExecutor is for session-scoped executors that must return data to the
+// caller before the next packet in the flow can run.
+type SyncExecutor[I any, O any] interface {
+	Name() string
+	Options() utils.Option
+	Arguments() (map[string]string, error)
+	Execute(ctx context.Context, input I) (O, error)
+	Close(ctx context.Context) error
+}
+
+type AnalysisInput struct {
+	ContextID string
+	Arguments map[string]interface{}
+	Auth      types.SimplePrinciple
+}
+
+type AnalysisOutput struct {
+	Metadata *protos.Metadata
+}
+
+type AuthenticationInput struct {
+	ContextID      string
+	Arguments      map[string]interface{}
+	Initialization *protos.ConversationInitialization
+}
+
+type AuthenticationOutput struct {
+	Authenticated bool
+	Arguments     map[string]interface{}
+	Metadata      map[string]interface{}
+	Options       map[string]interface{}
+}
+
+type ArtifactPushArtifact struct {
+	Name        string
+	Type        string
+	ContentType string
+	Content     []byte
+}
+
+type ArtifactPushInput struct {
+	ContextID string
+	Artifacts []ArtifactPushArtifact
+}
+
+type ArtifactPushResult struct {
+	Name           string
+	Type           string
+	ContentType    string
+	DestinationKey string
+	CompletePath   string
+	StorageType    string
+}
+
+type ArtifactPushOutput struct {
+	Provider        string
+	ConfigurationID uint64
+	Results         []ArtifactPushResult
+}
+
+// Typed interfaces for each concrete executor.
 type LLMExecutor interface {
-	Executor[Packet]
+	Name() string
+	Execute(ctx context.Context, communication Communication, packet Packet) error
+	Close(ctx context.Context) error
 }
 
 type AnalysisExecutor interface {
-	Executor[ExecuteAnalysisPacket]
-}
-
-type WebhookExecutor interface {
-	Executor[ExecuteWebhookPacket]
+	SyncExecutor[AnalysisInput, *AnalysisOutput]
 }
 
 type AuthenticationExecutor interface {
-	Executor[ExecuteSessionAuthenticationPacket]
+	SyncExecutor[AuthenticationInput, *AuthenticationOutput]
+}
+
+type ArtifactPushExecutor interface {
+	SyncExecutor[ArtifactPushInput, *ArtifactPushOutput]
 }
 
 type EndOfSpeechExecutor interface {
@@ -51,4 +112,14 @@ type VoiceActivityDetectorExecutor interface {
 
 type VoiceDenoiserExecutor interface {
 	Executor[DenoiseAudioPacket]
+}
+
+type ConversationRecordingAudio struct {
+	UserAudio      []byte
+	AssistantAudio []byte
+	MixedAudio     []byte
+}
+
+type ConversationRecordingExecutor interface {
+	Executor[Packet]
 }

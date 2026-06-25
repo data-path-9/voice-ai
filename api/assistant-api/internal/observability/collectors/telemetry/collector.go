@@ -14,11 +14,15 @@ import (
 	"sync"
 	"time"
 
+	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
+	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	"github.com/rapidaai/pkg/commons"
 	telemetry "github.com/rapidaai/pkg/telemetry"
 	"github.com/rapidaai/pkg/telemetry/providers"
+	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/validator"
+	"github.com/rapidaai/protos"
 )
 
 type Provider struct {
@@ -27,24 +31,50 @@ type Provider struct {
 }
 
 type Config struct {
-	Logger    commons.Logger
-	Providers Provider
-	Exporters telemetry.Exporter
+	Logger                        commons.Logger
+	Providers                     Provider
+	Exporters                     telemetry.Exporter
+	Key                           string
+	Auth                          types.SimplePrinciple
+	AssistantID                   uint64
+	AssistantConfigurationService internal_services.AssistantConfigurationService
 }
 
 type Collector struct {
-	logger      commons.Logger
-	provider    Provider
-	exporter    telemetry.Exporter
-	initialized bool
-	mu          sync.Mutex
-	key         string
+	logger                        commons.Logger
+	provider                      Provider
+	exporter                      telemetry.Exporter
+	initialized                   bool
+	mu                            sync.Mutex
+	key                           string
+	auth                          types.SimplePrinciple
+	assistantID                   uint64
+	assistantConfigurationService internal_services.AssistantConfigurationService
+	assistantCollectors           *observability.Collectors
+	assistantCollectorsLoaded     bool
 }
 
 func New(ctx context.Context, cfg Config) (observability.Collector, error) {
+	if validator.NonNil(cfg.AssistantConfigurationService) || cfg.AssistantID != 0 || validator.NonNil(cfg.Auth) {
+		if !validator.NonNil(cfg.Auth) || cfg.AssistantID == 0 || !validator.NonNil(cfg.AssistantConfigurationService) {
+			return observability.NoopCollector{}, nil
+		}
+		return &Collector{
+			logger:                        cfg.Logger,
+			auth:                          cfg.Auth,
+			assistantID:                   cfg.AssistantID,
+			assistantConfigurationService: cfg.AssistantConfigurationService,
+			key:                           "telemetry:assistant:" + strconv.FormatUint(cfg.AssistantID, 10),
+			initialized:                   true,
+		}, nil
+	}
+
 	key := "telemetry"
 	if providerName := strings.TrimSpace(cfg.Providers.Name); validator.NotBlank(providerName) {
 		key = "telemetry:" + providerName
+	}
+	if validator.NotBlank(cfg.Key) {
+		key = cfg.Key
 	}
 	if validator.NonNil(cfg.Exporters) {
 		return &Collector{exporter: cfg.Exporters, initialized: true, key: key}, nil
@@ -78,6 +108,60 @@ func (c *Collector) Key() string {
 }
 
 func (c *Collector) Collect(ctx context.Context, scope observability.Scope, observationContext observability.Context, record observability.Record) error {
+	if validator.NonNil(c.assistantConfigurationService) {
+		c.mu.Lock()
+		if !c.assistantCollectorsLoaded {
+			_, telemetryConfigurations, err := c.assistantConfigurationService.GetAll(
+				ctx,
+				c.auth,
+				c.assistantID,
+				string(internal_assistant_entity.AssistantConfigurationTypeTelemetry),
+				"",
+				nil,
+				&protos.Paginate{},
+			)
+			if err != nil {
+				c.mu.Unlock()
+				return err
+			}
+
+			configuredCollectors := make([]observability.Collector, 0, len(telemetryConfigurations))
+			for _, telemetryConfiguration := range telemetryConfigurations {
+				if telemetryConfiguration == nil || !telemetryConfiguration.Enabled {
+					continue
+				}
+				collectorKey := ""
+				if telemetryConfiguration.Id != 0 {
+					collectorKey = "telemetry:assistant:" + strconv.FormatUint(telemetryConfiguration.Id, 10)
+				}
+				options := make(map[string]interface{}, len(telemetryConfiguration.GetOptions()))
+				for key, value := range telemetryConfiguration.GetOptions() {
+					options[key] = value
+				}
+				collector, err := New(ctx, Config{
+					Logger: c.logger,
+					Providers: Provider{
+						Name:    telemetryConfiguration.Provider,
+						Options: options,
+					},
+					Key: collectorKey,
+				})
+				if err != nil {
+					continue
+				}
+				configuredCollectors = append(configuredCollectors, collector)
+			}
+			c.assistantCollectors = observability.NewCollectors(configuredCollectors...)
+			c.assistantCollectorsLoaded = true
+		}
+		collectors := c.assistantCollectors
+		c.mu.Unlock()
+		if collectors == nil {
+			return nil
+		}
+		return collectors.Collect(ctx, scope, observationContext, record)
+	}
+
 	c.mu.Lock()
 	if !c.initialized {
 		exporter, err := newExporter(ctx, c.logger, c.provider)
@@ -188,6 +272,16 @@ func (c *Collector) toTelemetryScope(scope observability.Scope) telemetry.Scope 
 }
 
 func (c *Collector) Close(ctx context.Context) error {
+	if validator.NonNil(c.assistantConfigurationService) {
+		c.mu.Lock()
+		collectors := c.assistantCollectors
+		c.mu.Unlock()
+		if collectors == nil {
+			return nil
+		}
+		return collectors.Close(ctx)
+	}
+
 	var errs []error
 	c.mu.Lock()
 	if !c.initialized {

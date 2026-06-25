@@ -23,7 +23,6 @@ import (
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_knowledge_gorm "github.com/rapidaai/api/assistant-api/internal/entity/knowledges"
-	internal_llm "github.com/rapidaai/api/assistant-api/internal/llm"
 	internal_input_normalizer "github.com/rapidaai/api/assistant-api/internal/normalizer/input"
 	internal_output_normalizer "github.com/rapidaai/api/assistant-api/internal/normalizer/output"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
@@ -102,16 +101,16 @@ type genericRequestor struct {
 	inputNormalizer  internal_type.PacketNormalizer
 	outputNormalizer internal_type.PacketNormalizer
 
-	conversationRecordingExecutor internal_type.ConversationRecordingExecutor
-
 	// executor
-	assistantAnalyseExecutors []internal_type.AnalysisExecutor
-	assistantWebhookExecutors []internal_type.WebhookExecutor
-	authenticationExecutor    internal_type.AuthenticationExecutor
-	assistantExecutor         internal_llm.AssistantExecutor
-	endOfSpeechExecutor       internal_type.EndOfSpeechExecutor
-	denoiserExecutor          internal_type.VoiceDenoiserExecutor
-	vadExecutor               internal_type.VoiceActivityDetectorExecutor
+	assistantAnalyseExecutors     []internal_type.AnalysisExecutor
+	artifactPushExecutors         []internal_type.ArtifactPushExecutor
+	conversationRecordingExecutor internal_type.ConversationRecordingExecutor
+	authenticationExecutor        internal_type.AuthenticationExecutor
+	assistantExecutor             internal_type.LLMExecutor
+	endOfSpeechExecutor           internal_type.EndOfSpeechExecutor
+	denoiserExecutor              internal_type.VoiceDenoiserExecutor
+	vadExecutor                   internal_type.VoiceActivityDetectorExecutor
+
 	// states
 	assistant             *internal_assistant_entity.Assistant
 	assistantConversation *internal_conversation_entity.AssistantConversation
@@ -119,6 +118,7 @@ type genericRequestor struct {
 
 	args     map[string]interface{}
 	metadata map[string]interface{}
+	metrics  map[string]*protos.Metric
 	options  map[string]interface{}
 
 	// experience
@@ -181,10 +181,11 @@ func NewGenericRequestor(
 		//
 		histories:                 make([]internal_type.MessagePacket, 0),
 		metadata:                  make(map[string]interface{}),
+		metrics:                   make(map[string]*protos.Metric),
 		args:                      make(map[string]interface{}),
 		options:                   make(map[string]interface{}),
 		assistantAnalyseExecutors: make([]internal_type.AnalysisExecutor, 0),
-		assistantWebhookExecutors: make([]internal_type.WebhookExecutor, 0),
+		artifactPushExecutors:     make([]internal_type.ArtifactPushExecutor, 0),
 		sessionCtx:                sessionCtx,
 		cancelSession:             cancelSession,
 		channels:                  channels,
@@ -252,6 +253,17 @@ func (talking *genericRequestor) ResumeConversation(ctx context.Context, assista
 	talking.args = conversation.GetArguments()
 	talking.options = conversation.GetOptions()
 	talking.metadata = conversation.GetMetadatas()
+	talking.metrics = make(map[string]*protos.Metric)
+	for _, metric := range conversation.Metrics {
+		if metric == nil {
+			continue
+		}
+		talking.metrics[metric.Name] = &protos.Metric{
+			Name:        metric.Name,
+			Value:       metric.Value,
+			Description: metric.Description,
+		}
+	}
 	if extra, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil {
 		talking.applyMetadata(extra)
 	}
@@ -328,10 +340,6 @@ func (r *genericRequestor) Transition(newState adapter_lifecycle.MessageState) e
 		})
 	}
 	return nil
-}
-
-func (r *genericRequestor) getSessionState() adapter_lifecycle.SessionState {
-	return r.sessionLifecycle.Current()
 }
 
 func (r *genericRequestor) canSwitchSession() bool {

@@ -9,11 +9,11 @@ import { randomMeaningfullName } from '@/utils';
 import { EndpointDropdown } from '@/app/components/dropdown/endpoint-dropdown';
 import {
   Endpoint,
-  GetAssistantAnalysis,
-  GetAssistantAnalysisRequest,
+  GetAssistantConfiguration,
+  GetAssistantConfigurationRequest,
   Metadata,
-  UpdateAssistantAnalysisRequest,
-  UpdateAnalysis,
+  UpdateAssistantConfiguration,
+  UpdateAssistantConfigurationRequest,
 } from '@rapidaai/react';
 import { useParams } from 'react-router-dom';
 import toast from 'react-hot-toast/headless';
@@ -58,6 +58,7 @@ const PARAM_TYPE_OPTIONS = [
   { value: 'analysis', name: 'Analysis' },
 ];
 const ANALYSIS_CONDITION_OPTION_KEY = 'analysis.condition';
+const analysisConfigurationType = 'analysis';
 
 const RESERVED_OPTION_KEYS = new Set([
   'option.endpoint_id',
@@ -130,22 +131,18 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
 
   useEffect(() => {
     const load = async () => {
-      const request = new GetAssistantAnalysisRequest();
+      const request = new GetAssistantConfigurationRequest();
       request.setAssistantid(assistantId);
       request.setId(analysisId!);
 
       try {
-        const res = await GetAssistantAnalysis(connectionConfig, request, {
+        const res = await GetAssistantConfiguration(connectionConfig, request, {
           'x-auth-id': authId,
           authorization: token,
           'x-project-id': projectId,
         });
         const analysis = res?.getData();
         if (!analysis) return;
-
-        setName(analysis.getName());
-        setDescription(analysis.getDescription());
-        setPriority(analysis.getExecutionpriority());
 
         const options = new Map<string, string>();
         const optionsList = (analysis as any).getOptionsList?.();
@@ -159,6 +156,10 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
           });
         }
 
+        setName(options.get('name') || '');
+        setDescription(options.get('description') || '');
+        const nextPriority = Number(options.get('execution_priority') || '0');
+        setPriority(Number.isFinite(nextPriority) ? nextPriority : 0);
         setEndpointId(options.get('endpoint_id') || '');
 
         const parsedConditions =
@@ -197,7 +198,9 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
     const keys = parameters.map(p => `${p.type}.${p.key}`);
     const reservedKey = keys.find(key => RESERVED_OPTION_KEYS.has(key));
     if (reservedKey) {
-      setErrorMessage(`${reservedKey} is reserved and managed by analysis options.`);
+      setErrorMessage(
+        `${reservedKey} is reserved and managed by analysis options.`,
+      );
       return false;
     }
     if (new Set(keys).size !== keys.length) {
@@ -226,7 +229,9 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
     const keys = parameters.map(p => `${p.type}.${p.key}`);
     const reservedKey = keys.find(key => RESERVED_OPTION_KEYS.has(key));
     if (reservedKey) {
-      setErrorMessage(`${reservedKey} is reserved and managed by analysis options.`);
+      setErrorMessage(
+        `${reservedKey} is reserved and managed by analysis options.`,
+      );
       return;
     }
 
@@ -234,16 +239,18 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
       parameters.map(p => [`${p.type}.${p.key}`, p.value]),
     );
 
-    const request = new UpdateAssistantAnalysisRequest();
+    const request = new UpdateAssistantConfigurationRequest();
     request.setAssistantid(assistantId);
     request.setId(analysisId!);
+    request.setConfigurationtype(analysisConfigurationType);
     request.setProvider('endpoint');
-    request.setName(name);
-    request.setDescription(description);
-    request.setExecutionpriority(priority);
+    request.setEnabled(true);
 
     const options: Metadata[] = [];
     [
+      { key: 'name', value: name },
+      { key: 'description', value: description },
+      { key: 'execution_priority', value: String(priority || 0) },
       { key: 'endpoint_id', value: endpointId },
       { key: 'endpoint_version', value: 'latest' },
       {
@@ -263,11 +270,15 @@ export const UpdateAssistantAnalysis: FC<{ assistantId: string }> = ({
     request.setOptionsList(options);
 
     try {
-      const response = await UpdateAnalysis(connectionConfig, request, {
-        'x-auth-id': authId,
-        authorization: token,
-        'x-project-id': projectId,
-      });
+      const response = await UpdateAssistantConfiguration(
+        connectionConfig,
+        request,
+        {
+          'x-auth-id': authId,
+          authorization: token,
+          'x-project-id': projectId,
+        },
+      );
 
       if (response?.getSuccess()) {
         toast.success(`Assistant's analysis updated successfully`);

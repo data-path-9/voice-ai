@@ -57,8 +57,11 @@ type DispatchHandler interface {
 	HandleInitializeAssistant(context.Context, internal_type.InitializeAssistantPacket)
 	HandleInitializeConversation(context.Context, internal_type.InitializeConversationPacket)
 	HandleInitializeSessionRuntime(context.Context, internal_type.InitializeSessionRuntimePacket)
+	HandleInitializeConversationRecordingExecutor(context.Context, internal_type.InitializeConversationRecordingExecutorPacket)
+	HandleInitializeArtifactPushExecutor(context.Context, internal_type.InitializeArtifactPushExecutorPacket)
+	HandleInitializeAnalysisExecutor(context.Context, internal_type.InitializeAnalysisExecutorPacket)
 	HandleInitializeAuthentication(context.Context, internal_type.InitializeAuthenticationPacket)
-	HandleExecuteSessionAuthentication(context.Context, internal_type.ExecuteSessionAuthenticationPacket)
+	HandleExecuteAuthentication(context.Context, internal_type.ExecuteAuthenticationPacket)
 	HandleSessionAuthenticationSucceeded(context.Context, internal_type.SessionAuthenticationSucceededPacket)
 	HandleInitializeSpeechToText(context.Context, internal_type.InitializeSpeechToTextPacket)
 	HandleInitializeTextToSpeech(context.Context, internal_type.InitializeTextToSpeechPacket)
@@ -68,7 +71,6 @@ type DispatchHandler interface {
 	HandleInitializeAssistantExecutorPacket(context.Context, internal_type.InitializeAssistantExecutorPacket)
 	HandleInitializeBehavior(context.Context, internal_type.InitializeBehaviorPacket)
 	HandleInitializationCompleted(context.Context, internal_type.InitializationCompletedPacket)
-	HandleInitializeTelemetry(context.Context, internal_type.InitializeTelemetryPacket)
 	HandleInitializeInboundDispatcher(context.Context, internal_type.InitializeInboundDispatcherPacket)
 	HandleModeSwitchRequested(context.Context, internal_type.ModeSwitchRequestedPacket)
 	HandleModeSwitchCompleted(context.Context, internal_type.ModeSwitchCompletedPacket)
@@ -88,12 +90,14 @@ type DispatchHandler interface {
 	HandleFinalizeTextToSpeech(context.Context, internal_type.FinalizeTextToSpeechPacket)
 	HandleFinalizeSpeechToText(context.Context, internal_type.FinalizeSpeechToTextPacket)
 	HandleFinalizeAuthentication(context.Context, internal_type.FinalizeAuthenticationPacket)
+	HandleFinalizeConversationRecordingExecutor(context.Context, internal_type.FinalizeConversationRecordingExecutorPacket)
 	HandleFinalizeSessionRuntime(context.Context, internal_type.FinalizeSessionRuntimePacket)
+	HandleFinalizeArtifactPushExecutor(context.Context, internal_type.FinalizeArtifactPushExecutorPacket)
+	HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket)
 	HandleFinalizeConversation(context.Context, internal_type.FinalizeConversationPacket)
+	HandleFinalizeAnalysisExecutor(context.Context, internal_type.FinalizeAnalysisExecutorPacket)
 	HandleFinalizeAssistant(context.Context, internal_type.FinalizeAssistantPacket)
 	HandleFinalizationCompleted(context.Context, internal_type.FinalizationCompletedPacket)
-	HandleExecuteAnalysis(context.Context, internal_type.ExecuteAnalysisPacket)
-	HandleExecuteWebhook(context.Context, internal_type.ExecuteWebhookPacket)
 	HandleObservabilityRecordPacket(context.Context, internal_type.ObservabilityRecordPacket)
 }
 
@@ -186,12 +190,18 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleInitializeConversation(ctx, vl)
 	case internal_type.InitializeSessionRuntimePacket:
 		handler.HandleInitializeSessionRuntime(ctx, vl)
+	case internal_type.InitializeConversationRecordingExecutorPacket:
+		handler.HandleInitializeConversationRecordingExecutor(ctx, vl)
+	case internal_type.InitializeArtifactPushExecutorPacket:
+		handler.HandleInitializeArtifactPushExecutor(ctx, vl)
+	case internal_type.InitializeAnalysisExecutorPacket:
+		handler.HandleInitializeAnalysisExecutor(ctx, vl)
 	case internal_type.InitializeAuthenticationPacket:
 		handler.HandleInitializeAuthentication(ctx, vl)
+	case internal_type.ExecuteAuthenticationPacket:
+		handler.HandleExecuteAuthentication(ctx, vl)
 	case internal_type.InitializeAssistantExecutorPacket:
 		handler.HandleInitializeAssistantExecutorPacket(ctx, vl)
-	case internal_type.ExecuteSessionAuthenticationPacket:
-		handler.HandleExecuteSessionAuthentication(ctx, vl)
 	case internal_type.SessionAuthenticationSucceededPacket:
 		handler.HandleSessionAuthenticationSucceeded(ctx, vl)
 	case internal_type.InitializeSpeechToTextPacket:
@@ -206,8 +216,6 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleInitializeBehavior(ctx, vl)
 	case internal_type.InitializationCompletedPacket:
 		handler.HandleInitializationCompleted(ctx, vl)
-	case internal_type.InitializeTelemetryPacket:
-		handler.HandleInitializeTelemetry(ctx, vl)
 	case internal_type.InitializeInboundDispatcherPacket:
 		handler.HandleInitializeInboundDispatcher(ctx, vl)
 	case internal_type.ModeSwitchRequestedPacket:
@@ -246,18 +254,22 @@ func DispatchPacket(ctx context.Context, p internal_type.Packet, handler Dispatc
 		handler.HandleFinalizeSpeechToText(ctx, vl)
 	case internal_type.FinalizeAuthenticationPacket:
 		handler.HandleFinalizeAuthentication(ctx, vl)
+	case internal_type.FinalizeConversationRecordingExecutorPacket:
+		handler.HandleFinalizeConversationRecordingExecutor(ctx, vl)
 	case internal_type.FinalizeSessionRuntimePacket:
 		handler.HandleFinalizeSessionRuntime(ctx, vl)
+	case internal_type.FinalizeArtifactPushExecutorPacket:
+		handler.HandleFinalizeArtifactPushExecutor(ctx, vl)
+	case internal_type.ExecuteAnalysisPacket:
+		handler.HandleExecuteAnalysis(ctx, vl)
 	case internal_type.FinalizeConversationPacket:
 		handler.HandleFinalizeConversation(ctx, vl)
+	case internal_type.FinalizeAnalysisExecutorPacket:
+		handler.HandleFinalizeAnalysisExecutor(ctx, vl)
 	case internal_type.FinalizeAssistantPacket:
 		handler.HandleFinalizeAssistant(ctx, vl)
 	case internal_type.FinalizationCompletedPacket:
 		handler.HandleFinalizationCompleted(ctx, vl)
-	case internal_type.ExecuteAnalysisPacket:
-		handler.HandleExecuteAnalysis(ctx, vl)
-	case internal_type.ExecuteWebhookPacket:
-		handler.HandleExecuteWebhook(ctx, vl)
 	case internal_type.ObservabilityRecordPacket:
 		handler.HandleObservabilityRecordPacket(ctx, vl)
 	case internal_type.EndOfSpeechInterruptionPacket:

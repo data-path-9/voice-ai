@@ -46,8 +46,8 @@ func (deploymentApi *AssistantDeploymentApi) GetAllAssistantWebpluginDeploymentR
 		return
 	}
 
-	assistantId, err := strconv.ParseUint(c.Param("assistantId"), 10, 64)
-	if err != nil || assistantId == 0 {
+	assistantId, err := utils.StringToUint64(c.Param("assistantId"))
+	if err != nil || !validator.NonZero(assistantId) {
 		c.JSON(pkg_errors.GetAllAssistantWebpluginDeploymentInvalidAssistantID.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(pkg_errors.GetAllAssistantWebpluginDeploymentInvalidAssistantID.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
@@ -62,8 +62,8 @@ func (deploymentApi *AssistantDeploymentApi) GetAllAssistantWebpluginDeploymentR
 
 	paginate := &assistant_api.Paginate{Page: 1, PageSize: 20}
 	if c.Query("page") != "" {
-		page, err := strconv.ParseUint(c.Query("page"), 10, 32)
-		if err != nil || page == 0 {
+		page, err := utils.StringToUint32(c.Query("page"))
+		if err != nil || !validator.NonZero(page) {
 			c.JSON(pkg_errors.GetAllAssistantWebpluginDeploymentInvalidRequest.HTTPStatusCode, openapi.ErrorResponse{
 				Code:    utils.Ptr(pkg_errors.GetAllAssistantWebpluginDeploymentInvalidRequest.HTTPStatusCodeInt32()),
 				Success: utils.Ptr(false),
@@ -75,11 +75,11 @@ func (deploymentApi *AssistantDeploymentApi) GetAllAssistantWebpluginDeploymentR
 			})
 			return
 		}
-		paginate.Page = uint32(page)
+		paginate.Page = page
 	}
 	if c.Query("pageSize") != "" {
-		pageSize, err := strconv.ParseUint(c.Query("pageSize"), 10, 32)
-		if err != nil || pageSize == 0 {
+		pageSize, err := utils.StringToUint32(c.Query("pageSize"))
+		if err != nil || !validator.NonZero(pageSize) {
 			c.JSON(pkg_errors.GetAllAssistantWebpluginDeploymentInvalidRequest.HTTPStatusCode, openapi.ErrorResponse{
 				Code:    utils.Ptr(pkg_errors.GetAllAssistantWebpluginDeploymentInvalidRequest.HTTPStatusCodeInt32()),
 				Success: utils.Ptr(false),
@@ -91,7 +91,7 @@ func (deploymentApi *AssistantDeploymentApi) GetAllAssistantWebpluginDeploymentR
 			})
 			return
 		}
-		paginate.PageSize = uint32(pageSize)
+		paginate.PageSize = pageSize
 	}
 
 	criterias := []*assistant_api.Criteria{}

@@ -23,13 +23,15 @@ import (
 const defaultOutboundConnectTimeout = 2 * time.Minute
 
 type OutboundDispatcherOptions struct {
-	Config              *config.AssistantConfig
-	Logger              commons.Logger
-	Store               callcontext.Store
-	VaultClient         web_client.VaultClient
-	AssistantService    internal_services.AssistantService
-	ConversationService internal_services.AssistantConversationService
-	TelephonyOption     TelephonyOption
+	Config               *config.AssistantConfig
+	Logger               commons.Logger
+	Store                callcontext.Store
+	VaultClient          web_client.VaultClient
+	AssistantService     internal_services.AssistantService
+	ConversationService  internal_services.AssistantConversationService
+	ConfigurationService internal_services.AssistantConfigurationService
+	HTTPLogService       internal_services.AssistantHTTPLogService
+	TelephonyOption      TelephonyOption
 }
 
 type OutboundDispatcherFuncOption func(*OutboundDispatcherOptions)
@@ -70,6 +72,18 @@ func WithOutboundConversationService(conversationService internal_services.Assis
 	}
 }
 
+func WithOutboundAssistantConfigurationService(configurationService internal_services.AssistantConfigurationService) OutboundDispatcherFuncOption {
+	return func(options *OutboundDispatcherOptions) {
+		options.ConfigurationService = configurationService
+	}
+}
+
+func WithOutboundHTTPLogService(httpLogService internal_services.AssistantHTTPLogService) OutboundDispatcherFuncOption {
+	return func(options *OutboundDispatcherOptions) {
+		options.HTTPLogService = httpLogService
+	}
+}
+
 func WithOutboundTelephonyOption(telephonyOpt TelephonyOption) OutboundDispatcherFuncOption {
 	return func(options *OutboundDispatcherOptions) {
 		options.TelephonyOption = telephonyOpt
@@ -83,6 +97,8 @@ type OutboundDispatcher struct {
 	vaultClient            web_client.VaultClient
 	assistantService       internal_services.AssistantService
 	conversationService    internal_services.AssistantConversationService
+	configurationService   internal_services.AssistantConfigurationService
+	httpLogService         internal_services.AssistantHTTPLogService
 	telephonyOpt           TelephonyOption
 	outboundConnectTimeout time.Duration
 }
@@ -99,6 +115,8 @@ func NewOutboundDispatcher(opts ...OutboundDispatcherFuncOption) *OutboundDispat
 		vaultClient:            options.VaultClient,
 		assistantService:       options.AssistantService,
 		conversationService:    options.ConversationService,
+		configurationService:   options.ConfigurationService,
+		httpLogService:         options.HTTPLogService,
 		telephonyOpt:           options.TelephonyOption,
 		outboundConnectTimeout: defaultOutboundConnectTimeout,
 	}

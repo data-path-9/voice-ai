@@ -72,23 +72,63 @@ type TenVAD struct {
 	speechPadMs          int
 }
 
-// NewTenVAD creates a new TenVAD instance.
+type options struct {
+	ctx      context.Context
+	logger   commons.Logger
+	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error
+	options  utils.Option
+}
+
+type Option func(*options)
+
+func WithContext(ctx context.Context) Option {
+	return func(options *options) {
+		options.ctx = ctx
+	}
+}
+
+func WithLogger(logger commons.Logger) Option {
+	return func(options *options) {
+		options.logger = logger
+	}
+}
+
+func WithOnPacket(onPacket func(ctx context.Context, pkt ...internal_type.Packet) error) Option {
+	return func(options *options) {
+		options.onPacket = onPacket
+	}
+}
+
+func WithOptions(opts utils.Option) Option {
+	return func(options *options) {
+		options.options = opts
+	}
+}
+
+// New creates a new TenVAD instance.
 // Input audio must be 16 kHz LINEAR16 mono.
-func NewTenVAD(
-	ctx context.Context,
-	logger commons.Logger,
-	onPacket func(ctx context.Context, pkt ...internal_type.Packet) error,
-	options utils.Option,
-) (internal_type.VoiceActivityDetectorExecutor, error) {
+func New(opts ...Option) (internal_type.VoiceActivityDetectorExecutor, error) {
+	options := &options{ctx: context.Background()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(options)
+		}
+	}
+	if options.ctx == nil {
+		options.ctx = context.Background()
+	}
+	if options.onPacket == nil {
+		return nil, fmt.Errorf("%s: onPacket is required", vadName)
+	}
 	start := time.Now()
 
 	hopSize := defaultHopSize
-	threshold := resolveThreshold(options)
+	threshold := resolveThreshold(options.options)
 
 	detector, err := NewDetector(hopSize, float32(threshold))
 	if err != nil {
-		if onPacket != nil {
-			_ = onPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+		if options.onPacket != nil {
+			_ = options.onPacket(options.ctx, internal_type.ObservabilityLogRecordPacket{
 				Scope: internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.RecordLog{
 					Level:   observability.LevelError,
@@ -96,7 +136,7 @@ func NewTenVAD(
 					Attributes: observability.Attributes{
 						"component": observability.ComponentVAD.String(),
 						"provider":  vadName,
-						"options":   observability.AttributeValue(options),
+						"options":   observability.AttributeValue(options.options),
 					},
 					OccurredAt: time.Now(),
 				},
@@ -106,26 +146,26 @@ func NewTenVAD(
 	}
 
 	tv := &TenVAD{
-		logger:               logger,
-		onPacket:             onPacket,
-		opts:                 options,
+		logger:               options.logger,
+		onPacket:             options.onPacket,
+		opts:                 options.options,
 		detector:             detector,
 		hopSize:              hopSize,
 		threshold:            float32(threshold),
-		minSilenceDurationMs: resolveMinSilenceDurationMs(options),
-		speechPadMs:          resolveSpeechPadMs(options),
+		minSilenceDurationMs: resolveMinSilenceDurationMs(options.options),
+		speechPadMs:          resolveSpeechPadMs(options.options),
 		isTerminated:         false,
 		vadStartedAt:         time.Now(),
 	}
 
 	// Auto-close on context cancellation
 	go func() {
-		<-ctx.Done()
+		<-options.ctx.Done()
 		_ = tv.Close(context.Background())
 	}()
 
-	if onPacket != nil {
-		_ = onPacket(ctx,
+	if options.onPacket != nil {
+		_ = options.onPacket(options.ctx,
 			internal_type.ObservabilityMetricRecordPacket{
 				Scope:  internal_type.ObservabilityRecordScopeConversation,
 				Record: observability.NewMetricVADInitLatencyMs(time.Since(start), observability.Attributes{"provider": tv.Name()}),

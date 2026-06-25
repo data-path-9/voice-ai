@@ -7,13 +7,12 @@ package internal_vonage_telephony
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -23,6 +22,7 @@ import (
 	callcontext "github.com/rapidaai/api/assistant-api/internal/callcontext"
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_vonage "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage/internal"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
@@ -30,6 +30,23 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+type recordingObserver struct {
+	records []observability.Record
+}
+
+func (r *recordingObserver) Record(_ context.Context, _ observability.Scope, records ...observability.Record) error {
+	r.records = append(r.records, records...)
+	return nil
+}
+
+func (r *recordingObserver) AddCollectors(...observability.Collector) error {
+	return nil
+}
+
+func (r *recordingObserver) Close(context.Context) error {
+	return nil
+}
 
 func testVaultCredential(t *testing.T, values map[string]interface{}) *protos.VaultCredential {
 	t.Helper()
@@ -525,14 +542,11 @@ func TestSend_Disconnection_LogsVonageAuthError(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close()
 
-	logDirectory := t.TempDir()
 	logger, err := commons.NewApplicationLogger(
-		commons.EnableConsole(false),
-		commons.EnableFile(true),
-		commons.Path(logDirectory),
-		commons.Name("vonage-disconnection"),
+		commons.EnableFile(false),
 	)
 	require.NoError(t, err)
+	observer := &recordingObserver{}
 
 	vng := &vonageWebsocketStreamer{
 		BaseTelephonyStreamer: internal_telephony_base.New(
@@ -543,7 +557,7 @@ func TestSend_Disconnection_LogsVonageAuthError(t *testing.T) {
 				ChannelUUID:    "vonage-call-id",
 			},
 			nil,
-			nil,
+			observer,
 		),
 		connection: conn,
 	}
@@ -552,14 +566,19 @@ func TestSend_Disconnection_LogsVonageAuthError(t *testing.T) {
 		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_USER,
 	})
 	require.NoError(t, err)
-	require.NoError(t, logger.Sync())
 
-	logBytes, err := os.ReadFile(filepath.Join(logDirectory, "vonage-disconnection.log"))
-	require.NoError(t, err)
-	logContent := string(logBytes)
-	assert.Contains(t, logContent, "Failed to create Vonage client for server-side disconnect")
-	assert.Contains(t, logContent, "vonage-call-id")
-	assert.Contains(t, logContent, protos.ConversationDisconnection_DISCONNECTION_TYPE_USER.String())
+	require.Len(t, observer.records, 2)
+	logRecord, ok := observer.records[0].(observability.RecordLog)
+	require.True(t, ok)
+	assert.Equal(t, "Failed to create Vonage client for server-side disconnect", logRecord.Message)
+	assert.Equal(t, "vonage-call-id", logRecord.Attributes["conversation_uuid"])
+	assert.Equal(t, protos.ConversationDisconnection_DISCONNECTION_TYPE_USER.String(), logRecord.Attributes["disconnection_type"])
+
+	metricRecord, ok := observer.records[1].(observability.RecordMetric)
+	require.True(t, ok)
+	require.Len(t, metricRecord.Metrics, 1)
+	assert.Equal(t, observability.MetricCallStatus, metricRecord.Metrics[0].Name)
+	assert.Equal(t, "FAILED", metricRecord.Metrics[0].Value)
 }
 
 // TestSend_TransferConversation_PushesFailedResult verifies that the

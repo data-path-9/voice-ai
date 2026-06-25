@@ -24,7 +24,8 @@ import (
 	channel_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/api/assistant-api/internal/observability/collectors"
-	observability_collector_conversationdb "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationdb"
+	observability_collector_conversationmetadata "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationmetadata"
+	observability_collector_conversationmetric "github.com/rapidaai/api/assistant-api/internal/observability/collectors/conversationmetric"
 	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_assistant_service "github.com/rapidaai/api/assistant-api/internal/services/assistant"
 	web_client "github.com/rapidaai/pkg/clients/web"
@@ -50,6 +51,9 @@ type audioSocketEngine struct {
 	vaultClient                  web_client.VaultClient
 	callcontext                  internal_callcontext.Store
 	assistantConversationService internal_services.AssistantConversationService
+	configurationService         internal_services.AssistantConfigurationService
+	httpLogService               internal_services.AssistantHTTPLogService
+	assistantToolService         internal_services.AssistantToolService
 }
 
 func NewAudioSocketEngine(cfg *config.AssistantConfig, logger commons.Logger,
@@ -68,6 +72,9 @@ func NewAudioSocketEngine(cfg *config.AssistantConfig, logger commons.Logger,
 		callcontext:                  internal_callcontext.NewStore(postgres, logger),
 		vaultClient:                  web_client.NewVaultClientGRPC(&cfg.AppConfig, logger, redis),
 		assistantConversationService: internal_assistant_service.NewAssistantConversationService(logger, postgres, fileStorage),
+		configurationService:         internal_assistant_service.NewAssistantConfigurationService(logger, postgres),
+		httpLogService:               internal_assistant_service.NewAssistantHTTPLogService(logger, postgres, fileStorage),
+		assistantToolService:         internal_assistant_service.NewAssistantToolService(logger, postgres, fileStorage),
 	}
 }
 
@@ -86,6 +93,9 @@ func (m *audioSocketEngine) Connect(ctx context.Context) error {
 		channel_pipeline.WithLogger(m.logger),
 		channel_pipeline.WithConversationService(m.assistantConversationService),
 		channel_pipeline.WithAssistantService(internal_assistant_service.NewAssistantService(m.cfg, m.logger, m.postgres, m.opensearch)),
+		channel_pipeline.WithAssistantConfigurationService(m.configurationService),
+		channel_pipeline.WithHTTPLogService(m.httpLogService),
+		channel_pipeline.WithAssistantToolService(m.assistantToolService),
 	)
 
 	addr := fmt.Sprintf("%s:%d", m.cfg.AudioSocketConfig.Host, m.cfg.AudioSocketConfig.Port)
@@ -146,17 +156,21 @@ func (m *audioSocketEngine) handleConnection(ctx context.Context, conn net.Conn)
 		m.logger.Warnw("AudioSocket failed to resolve call context", "contextId", contextID, "error", err)
 		return
 	}
-	otelCollectors := make([]observability.Collector, 0)
-	otelCollectors = append(otelCollectors, observability_collector_conversationdb.New(observability_collector_conversationdb.Config{
-		Logger:              m.logger,
-		ConversationService: m.assistantConversationService,
-	}))
-	otelCollectors = append(otelCollectors, collectors.NewWithEnv(ctx, m.logger, m.cfg)...)
+
 	observer := observability.New(
 		observability.WithLogger(m.logger),
 		observability.WithAuth(callContext.ToAuth()),
 		observability.WithContext(ctx),
-		observability.WithCollectors(otelCollectors...),
+		observability.WithCollectors(
+			observability_collector_conversationmetric.New(observability_collector_conversationmetric.Config{
+				Logger:              m.logger,
+				ConversationService: m.assistantConversationService,
+			}),
+			observability_collector_conversationmetadata.New(observability_collector_conversationmetadata.Config{
+				Logger:              m.logger,
+				ConversationService: m.assistantConversationService,
+			}),
+			collectors.NewWithEnv(ctx, m.logger, m.cfg)),
 		observability.WithGracePeriod(),
 	)
 	defer observer.Close(context.Background())

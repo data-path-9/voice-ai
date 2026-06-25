@@ -1,0 +1,12 @@
+{
+  "parameters": [
+    {
+      "key": "container",
+      "label": "Container",
+      "type": "input",
+      "required": true,
+      "placeholder": "Enter your Azure container",
+      "errorMessage": "Please provide a valid Azure container."
+    }
+  ]
+}

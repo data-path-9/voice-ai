@@ -48,6 +48,9 @@ type Dispatcher struct {
 	assistantConfig              *config.AssistantConfig
 	assistantService             internal_services.AssistantService
 	assistantConversationService internal_services.AssistantConversationService
+	assistantToolService         internal_services.AssistantToolService
+	configurationService         internal_services.AssistantConfigurationService
+	httpLogService               internal_services.AssistantHTTPLogService
 	callContextStore             callcontext.Store
 	postgres                     connectors.PostgresConnector
 	opensearch                   connectors.OpenSearchConnector
@@ -80,6 +83,9 @@ type DispatcherOptions struct {
 	AssistantConfig              *config.AssistantConfig
 	AssistantService             internal_services.AssistantService
 	AssistantConversationService internal_services.AssistantConversationService
+	AssistantToolService         internal_services.AssistantToolService
+	ConfigurationService         internal_services.AssistantConfigurationService
+	HTTPLogService               internal_services.AssistantHTTPLogService
 	CallContextStore             callcontext.Store
 	Postgres                     connectors.PostgresConnector
 	OpenSearch                   connectors.OpenSearchConnector
@@ -122,6 +128,24 @@ func WithAssistantService(assistantService internal_services.AssistantService) D
 func WithAssistantConversationService(assistantConversationService internal_services.AssistantConversationService) DispatcherOption {
 	return func(options *DispatcherOptions) {
 		options.AssistantConversationService = assistantConversationService
+	}
+}
+
+func WithAssistantToolService(assistantToolService internal_services.AssistantToolService) DispatcherOption {
+	return func(options *DispatcherOptions) {
+		options.AssistantToolService = assistantToolService
+	}
+}
+
+func WithAssistantConfigurationService(configurationService internal_services.AssistantConfigurationService) DispatcherOption {
+	return func(options *DispatcherOptions) {
+		options.ConfigurationService = configurationService
+	}
+}
+
+func WithHTTPLogService(httpLogService internal_services.AssistantHTTPLogService) DispatcherOption {
+	return func(options *DispatcherOptions) {
+		options.HTTPLogService = httpLogService
 	}
 }
 
@@ -179,6 +203,9 @@ func New(opts ...DispatcherOption) *Dispatcher {
 		assistantConfig:              options.AssistantConfig,
 		assistantService:             options.AssistantService,
 		assistantConversationService: options.AssistantConversationService,
+		assistantToolService:         options.AssistantToolService,
+		configurationService:         options.ConfigurationService,
+		httpLogService:               options.HTTPLogService,
 		callContextStore:             options.CallContextStore,
 		postgres:                     options.Postgres,
 		opensearch:                   options.OpenSearch,

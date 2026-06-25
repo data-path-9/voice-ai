@@ -64,34 +64,38 @@ const (
 
 	MetricVADInitLatencyMs = "vad_init_ms"
 
-	MetricEOSInitLatencyMs     = "eos_init_ms"
-	MetricEOSLatencyMs         = "eos_latency_ms"
-	MetricEOSTextToTriggerMs   = "eos_text_to_trigger_ms"
-	MetricEOSWordCount         = "eos_word_count"
-	MetricEOSCharCount         = "eos_char_count"
-	MetricEOSConfidence        = "eos_confidence"
-	MetricDenoiseInitLatencyMs = "denoise_init_ms"
-	MetricLLMInitLatencyMs     = "llm_init_ms"
-	MetricKnowledgeLatencyMs   = "knowledge_latency_ms"
-	MetricLLMError             = "llm_error"
-	MetricSTTError             = "stt_error"
-	MetricTTSError             = "tts_error"
-	MetricDiscardedTTSChunk    = "discarded_tts_chunk"
-	MetricDiscardedTTS         = "discarded_tts"
-	MetricTimeTaken            = "time_taken"
-	MetricStatus               = "status"
-	MetricInputToken           = "input_token"
-	MetricOutputToken          = "output_token"
-	MetricTotalToken           = "total_token"
-	MetricCachedContentToken   = "cached_content_token"
-	MetricCost                 = "cost"
-	MetricInputCost            = "input_cost"
-	MetricOutputCost           = "output_cost"
-	MetricLLMRequestID         = "llm_request_id"
-	MetricTokenPerSecond       = "token_pre_second"
-	MetricTimeToFirstToken     = "time_to_first_token"
-	MetricProviderTotalTime    = "provider_total_time"
-	MetricProviderGenerateTime = "provider_generate_time"
+	MetricEOSInitLatencyMs            = "eos_init_ms"
+	MetricEOSLatencyMs                = "eos_latency_ms"
+	MetricEOSTextToTriggerMs          = "eos_text_to_trigger_ms"
+	MetricEOSWordCount                = "eos_word_count"
+	MetricEOSCharCount                = "eos_char_count"
+	MetricEOSConfidence               = "eos_confidence"
+	MetricDenoiseInitLatencyMs        = "denoise_init_ms"
+	MetricLLMInitLatencyMs            = "llm_init_ms"
+	MetricStorageInitLatencyMs        = "storage_init_ms"
+	MetricAnalysisInitLatencyMs       = "analysis_init_ms"
+	MetricAuthenticationInitLatencyMs = "authentication_init_ms"
+	MetricRecordingInitLatencyMs      = "recording_init_ms"
+	MetricKnowledgeLatencyMs          = "knowledge_latency_ms"
+	MetricLLMError                    = "llm_error"
+	MetricSTTError                    = "stt_error"
+	MetricTTSError                    = "tts_error"
+	MetricDiscardedTTSChunk           = "discarded_tts_chunk"
+	MetricDiscardedTTS                = "discarded_tts"
+	MetricTimeTaken                   = "time_taken"
+	MetricStatus                      = "status"
+	MetricInputToken                  = "input_token"
+	MetricOutputToken                 = "output_token"
+	MetricTotalToken                  = "total_token"
+	MetricCachedContentToken          = "cached_content_token"
+	MetricCost                        = "cost"
+	MetricInputCost                   = "input_cost"
+	MetricOutputCost                  = "output_cost"
+	MetricLLMRequestID                = "llm_request_id"
+	MetricTokenPerSecond              = "token_pre_second"
+	MetricTimeToFirstToken            = "time_to_first_token"
+	MetricProviderTotalTime           = "provider_total_time"
+	MetricProviderGenerateTime        = "provider_generate_time"
 )
 
 func NewMetricSTTInitLatencyMs(duration time.Duration, attr Attributes) RecordMetric {
@@ -169,6 +173,46 @@ func NewMetricLLMInitLatencyMs(duration time.Duration, attr Attributes) RecordMe
 		Name:        MetricLLMInitLatencyMs,
 		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
 		Description: "LLM initialization latency in milliseconds",
+	}})
+	record.Attributes = attr
+	return record
+}
+
+func NewMetricStorageInitLatencyMs(duration time.Duration, attr Attributes) RecordMetric {
+	record := NewConversationMetricRecord([]*protos.Metric{{
+		Name:        MetricStorageInitLatencyMs,
+		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
+		Description: "Storage initialization latency in milliseconds",
+	}})
+	record.Attributes = attr
+	return record
+}
+
+func NewMetricAnalysisInitLatencyMs(duration time.Duration, attr Attributes) RecordMetric {
+	record := NewConversationMetricRecord([]*protos.Metric{{
+		Name:        MetricAnalysisInitLatencyMs,
+		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
+		Description: "Analysis initialization latency in milliseconds",
+	}})
+	record.Attributes = attr
+	return record
+}
+
+func NewMetricAuthenticationInitLatencyMs(duration time.Duration, attr Attributes) RecordMetric {
+	record := NewConversationMetricRecord([]*protos.Metric{{
+		Name:        MetricAuthenticationInitLatencyMs,
+		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
+		Description: "Authentication initialization latency in milliseconds",
+	}})
+	record.Attributes = attr
+	return record
+}
+
+func NewMetricRecordingInitLatencyMs(duration time.Duration, attr Attributes) RecordMetric {
+	record := NewConversationMetricRecord([]*protos.Metric{{
+		Name:        MetricRecordingInitLatencyMs,
+		Value:       strconv.FormatInt(duration.Milliseconds(), 10),
+		Description: "Recording initialization latency in milliseconds",
 	}})
 	record.Attributes = attr
 	return record

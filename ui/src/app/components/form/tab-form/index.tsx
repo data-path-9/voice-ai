@@ -152,7 +152,7 @@ export const TabForm: FC<TabFormProps> = ({
                   className="flex flex-col flex-1"
                 >
                   {/* IBM Carbon step content header */}
-                  <header className="px-8 pt-8 pb-6 border-b border-gray-200 dark:border-gray-800">
+                  <header className="px-4 pt-8 pb-6 border-b border-gray-200 dark:border-gray-800">
                     <p className="text-[10px] font-semibold tracking-[0.12em] uppercase text-gray-500 dark:text-gray-400 mb-1.5">
                       Step {activeIndex + 1} of {form.length}
                     </p>

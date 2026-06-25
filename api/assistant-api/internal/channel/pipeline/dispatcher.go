@@ -31,19 +31,25 @@ type PipelineResult struct {
 type Dispatcher struct {
 	logger commons.Logger
 
-	inboundDispatcher   *channel_telephony.InboundDispatcher
-	outboundDispatcher  *channel_telephony.OutboundDispatcher
-	conversationService internal_services.AssistantConversationService
-	assistantService    internal_services.AssistantService
+	inboundDispatcher    *channel_telephony.InboundDispatcher
+	outboundDispatcher   *channel_telephony.OutboundDispatcher
+	conversationService  internal_services.AssistantConversationService
+	assistantService     internal_services.AssistantService
+	configurationService internal_services.AssistantConfigurationService
+	httpLogService       internal_services.AssistantHTTPLogService
+	assistantToolService internal_services.AssistantToolService
 }
 
 // DispatcherOptions holds dependencies for creating a channel dispatcher.
 type DispatcherOptions struct {
-	logger              commons.Logger
-	inboundDispatcher   *channel_telephony.InboundDispatcher
-	outboundDispatcher  *channel_telephony.OutboundDispatcher
-	conversationService internal_services.AssistantConversationService
-	assistantService    internal_services.AssistantService
+	logger               commons.Logger
+	inboundDispatcher    *channel_telephony.InboundDispatcher
+	outboundDispatcher   *channel_telephony.OutboundDispatcher
+	conversationService  internal_services.AssistantConversationService
+	assistantService     internal_services.AssistantService
+	configurationService internal_services.AssistantConfigurationService
+	httpLogService       internal_services.AssistantHTTPLogService
+	assistantToolService internal_services.AssistantToolService
 }
 
 type FuncOption func(*DispatcherOptions)
@@ -78,17 +84,38 @@ func WithAssistantService(assistantService internal_services.AssistantService) F
 	}
 }
 
+func WithAssistantConfigurationService(configurationService internal_services.AssistantConfigurationService) FuncOption {
+	return func(options *DispatcherOptions) {
+		options.configurationService = configurationService
+	}
+}
+
+func WithHTTPLogService(httpLogService internal_services.AssistantHTTPLogService) FuncOption {
+	return func(options *DispatcherOptions) {
+		options.httpLogService = httpLogService
+	}
+}
+
+func WithAssistantToolService(assistantToolService internal_services.AssistantToolService) FuncOption {
+	return func(options *DispatcherOptions) {
+		options.assistantToolService = assistantToolService
+	}
+}
+
 func NewDispatcher(opts ...FuncOption) *Dispatcher {
 	var cfg DispatcherOptions
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 	return &Dispatcher{
-		logger:              cfg.logger,
-		inboundDispatcher:   cfg.inboundDispatcher,
-		outboundDispatcher:  cfg.outboundDispatcher,
-		conversationService: cfg.conversationService,
-		assistantService:    cfg.assistantService,
+		logger:               cfg.logger,
+		inboundDispatcher:    cfg.inboundDispatcher,
+		outboundDispatcher:   cfg.outboundDispatcher,
+		conversationService:  cfg.conversationService,
+		assistantService:     cfg.assistantService,
+		configurationService: cfg.configurationService,
+		httpLogService:       cfg.httpLogService,
+		assistantToolService: cfg.assistantToolService,
 	}
 }
 

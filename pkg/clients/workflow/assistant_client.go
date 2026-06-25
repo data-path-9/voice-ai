@@ -30,9 +30,6 @@ type AssistantServiceClient interface {
 	GetAllAssistantProvider(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.GetAllAssistantProviderResponse_AssistantProvider, error)
 	UpdateAssistantVersion(c context.Context, auth types.SimplePrinciple, iRequest *protos.UpdateAssistantVersionRequest) (*protos.GetAssistantResponse, error)
 	CreateAssistantProvider(c context.Context, auth types.SimplePrinciple, assistantRequest *protos.CreateAssistantProviderRequest) (*protos.GetAssistantProviderResponse, error)
-	CreateAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.CreateAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error)
-	GetAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.GetAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error)
-	DisableAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.DisableAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error)
 
 	//
 	GetAllMessage(c context.Context, auth types.SimplePrinciple,
@@ -80,20 +77,6 @@ type AssistantServiceClient interface {
 	RetryAssistantHTTPLog(ctx context.Context, auth types.SimplePrinciple, req *protos.RetryAssistantHTTPLogRequest) (*protos.GetAssistantHTTPLogResponse, error)
 
 	//
-	GetAllAssistantWebhook(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantWebhook, error)
-	GetAssistantWebhook(c context.Context, auth types.SimplePrinciple, iRequest *protos.GetAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error)
-	CreateAssistantWebhook(c context.Context, auth types.SimplePrinciple, iRequest *protos.CreateAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error)
-	UpdateAssistantWebhook(c context.Context, auth types.SimplePrinciple, iRequest *protos.UpdateAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error)
-	DeleteAssistantWebhook(c context.Context, auth types.SimplePrinciple, iRequest *protos.DeleteAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error)
-
-	//
-	GetAllAssistantAnalysis(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantAnalysis, error)
-	GetAssistantAnalysis(c context.Context, auth types.SimplePrinciple, iRequest *protos.GetAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error)
-	CreateAssistantAnalysis(c context.Context, auth types.SimplePrinciple, iRequest *protos.CreateAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error)
-	UpdateAssistantAnalysis(c context.Context, auth types.SimplePrinciple, iRequest *protos.UpdateAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error)
-	DeleteAssistantAnalysis(c context.Context, auth types.SimplePrinciple, iRequest *protos.DeleteAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error)
-
-	//
 	GetAllAssistantTool(c context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantTool, error)
 	GetAssistantTool(c context.Context, auth types.SimplePrinciple, iRequest *protos.GetAssistantToolRequest) (*protos.GetAssistantToolResponse, error)
 	CreateAssistantTool(c context.Context, auth types.SimplePrinciple, iRequest *protos.CreateAssistantToolRequest) (*protos.GetAssistantToolResponse, error)
@@ -110,12 +93,12 @@ type AssistantServiceClient interface {
 	GetAssistantToolLog(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAssistantToolLogRequest) (*protos.GetAssistantToolLogResponse, error)
 	GetAllAssistantToolLog(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAllAssistantToolLogRequest) (*protos.GetAllAssistantToolLogResponse, error)
 
-	// telemetry providers
-	GetAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error)
-	GetAllAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAllAssistantTelemetryProviderRequest) (*protos.GetAllAssistantTelemetryProviderResponse, error)
-	CreateAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.CreateAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error)
-	UpdateAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.UpdateAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error)
-	DeleteAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.DeleteAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error)
+	// assistant configurations
+	GetAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error)
+	GetAllAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAllAssistantConfigurationRequest) (*protos.GetAllAssistantConfigurationResponse, error)
+	CreateAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.CreateAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error)
+	UpdateAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.UpdateAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error)
+	DeleteAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.DeleteAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error)
 }
 
 type assistantServiceClient struct {
@@ -240,42 +223,6 @@ func (client *assistantServiceClient) CreateAssistantProvider(c context.Context,
 		client.logger.Errorf("error while calling to CreateAssistantProvider %v", err)
 		return nil, err
 	}
-	return res, nil
-}
-
-func (client *assistantServiceClient) CreateAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.CreateAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.CreateAssistantAuthentication(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantAuthentication", time.Since(start))
-		client.logger.Errorf("error while calling CreateAssistantAuthentication %v", err)
-		return nil, err
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantAuthentication", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) GetAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.GetAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.GetAssistantAuthentication(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantAuthentication", time.Since(start))
-		client.logger.Errorf("error while calling GetAssistantAuthentication %v", err)
-		return nil, err
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantAuthentication", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) DisableAssistantAuthentication(c context.Context, auth types.SimplePrinciple, iRequest *protos.DisableAssistantAuthenticationRequest) (*protos.GetAssistantAuthenticationResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.DisableAssistantAuthentication(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.DisableAssistantAuthentication", time.Since(start))
-		client.logger.Errorf("error while calling DisableAssistantAuthentication %v", err)
-		return nil, err
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.DisableAssistantAuthentication", time.Since(start))
 	return res, nil
 }
 
@@ -648,26 +595,6 @@ func (client *assistantServiceClient) DisableAssistantDebuggerDeployment(c conte
 	return res, nil
 }
 
-func (client *assistantServiceClient) GetAllAssistantWebhook(ctx context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantWebhook, error) {
-	start := time.Now()
-	res, err := client.assistantClient.GetAllAssistantWebhook(client.WithAuth(ctx, auth), &protos.GetAllAssistantWebhookRequest{
-		AssistantId: assistantId,
-		Paginate:    paginate,
-		Criterias:   criteria,
-	})
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantWebhook", time.Since(start))
-		client.logger.Errorf("error while calling to get all assistant %v", err)
-		return nil, nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get all assistant %v", err)
-	}
-
-	client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantWebhook", time.Since(start))
-	return res.GetPaginated(), res.GetData(), nil
-}
-
 func (client *assistantServiceClient) GetAllAssistantHTTPLog(ctx context.Context, auth types.SimplePrinciple,
 	projectId uint64,
 	criteria []*protos.Criteria, paginate *protos.Paginate, ordering *protos.Ordering) (*protos.Paginated, []*protos.AssistantHTTPLog, error) {
@@ -722,67 +649,6 @@ func (client *assistantServiceClient) RetryAssistantHTTPLog(c context.Context,
 	return res, nil
 }
 
-func (client *assistantServiceClient) GetAssistantWebhook(c context.Context,
-	auth types.SimplePrinciple, iRequest *protos.GetAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.GetAssistantWebhook(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantWebhook", time.Since(start))
-		client.logger.Errorf("error while calling GetAssistantWebhook %v", err)
-		return nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get GetAssistantWebhook %v", err)
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantWebhook", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) CreateAssistantWebhook(c context.Context, auth types.SimplePrinciple, iRequest *protos.CreateAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.CreateAssistantWebhook(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantWebhook", time.Since(start))
-		client.logger.Errorf("error while calling CreateAssistantWebhook %v", err)
-		return nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get tool %v", err)
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantWebhook", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) DeleteAssistantWebhook(c context.Context, auth types.SimplePrinciple, iRequest *protos.DeleteAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.DeleteAssistantWebhook(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.DeleteAssistantWebhook", time.Since(start))
-		client.logger.Errorf("error while calling DeleteAssistantWebhook %v", err)
-		return nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get tool %v", err)
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.DeleteAssistantWebhook", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) UpdateAssistantWebhook(c context.Context, auth types.SimplePrinciple, iRequest *protos.UpdateAssistantWebhookRequest) (*protos.GetAssistantWebhookResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.UpdateAssistantWebhook(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.UpdateAssistantWebhook", time.Since(start))
-		client.logger.Errorf("error while calling UpdateAssistantWebhook %v", err)
-		return nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get tool %v", err)
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.UpdateAssistantWebhook", time.Since(start))
-	return res, nil
-}
-
 func (client *assistantServiceClient) GetAssistantConversation(
 	c context.Context,
 	auth types.SimplePrinciple,
@@ -798,87 +664,6 @@ func (client *assistantServiceClient) GetAssistantConversation(
 		client.logger.Errorf("error while calling to get tool %v", err)
 	}
 	client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantConversation", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) GetAllAssistantAnalysis(ctx context.Context, auth types.SimplePrinciple, assistantId uint64, criteria []*protos.Criteria, paginate *protos.Paginate) (*protos.Paginated, []*protos.AssistantAnalysis, error) {
-	start := time.Now()
-	res, err := client.assistantClient.GetAllAssistantAnalysis(client.WithAuth(ctx, auth), &protos.GetAllAssistantAnalysisRequest{
-		Paginate:    paginate,
-		AssistantId: assistantId,
-		Criterias:   criteria,
-	})
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantAnalysis", time.Since(start))
-		client.logger.Errorf("error while calling to get all assistant %v", err)
-		return nil, nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get all assistant %v", err)
-	}
-
-	client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantAnalysis", time.Since(start))
-	return res.GetPaginated(), res.GetData(), nil
-}
-
-func (client *assistantServiceClient) GetAssistantAnalysis(c context.Context,
-	auth types.SimplePrinciple, iRequest *protos.GetAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.GetAssistantAnalysis(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantAnalysis", time.Since(start))
-		client.logger.Errorf("error while calling GetAssistantAnalysis %v", err)
-		return nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get GetAssistantAnalysis %v", err)
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantAnalysis", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) CreateAssistantAnalysis(c context.Context, auth types.SimplePrinciple, iRequest *protos.CreateAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.CreateAssistantAnalysis(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantAnalysis", time.Since(start))
-		client.logger.Errorf("error while calling CreateAssistantAnalysis %v", err)
-		return nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get tool %v", err)
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantAnalysis", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) DeleteAssistantAnalysis(c context.Context, auth types.SimplePrinciple, iRequest *protos.DeleteAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.DeleteAssistantAnalysis(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.DeleteAssistantAnalysis", time.Since(start))
-		client.logger.Errorf("error while calling DeleteAssistantAnalysis %v", err)
-		return nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get tool %v", err)
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.DeleteAssistantAnalysis", time.Since(start))
-	return res, nil
-}
-
-func (client *assistantServiceClient) UpdateAssistantAnalysis(c context.Context, auth types.SimplePrinciple, iRequest *protos.UpdateAssistantAnalysisRequest) (*protos.GetAssistantAnalysisResponse, error) {
-	start := time.Now()
-	res, err := client.assistantClient.UpdateAssistantAnalysis(client.WithAuth(c, auth), iRequest)
-	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.UpdateAssistantAnalysis", time.Since(start))
-		client.logger.Errorf("error while calling UpdateAssistantAnalysis %v", err)
-		return nil, err
-	}
-	if !res.GetSuccess() {
-		client.logger.Errorf("error while calling to get tool %v", err)
-	}
-	client.logger.Benchmark("Benchmarking: assistantClient.UpdateAssistantAnalysis", time.Since(start))
 	return res, nil
 }
 
@@ -1076,62 +861,62 @@ func (client *assistantServiceClient) GetAllAssistantToolLog(ctx context.Context
 	return res, nil
 }
 
-func (client *assistantServiceClient) GetAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error) {
+func (client *assistantServiceClient) GetAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error) {
 	start := time.Now()
-	res, err := client.assistantClient.GetAssistantTelemetryProvider(client.WithAuth(ctx, auth), in)
+	res, err := client.assistantClient.GetAssistantConfiguration(client.WithAuth(ctx, auth), in)
 	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantTelemetryProvider", time.Since(start))
-		client.logger.Errorf("error while calling GetAssistantTelemetryProvider %v", err)
+		client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantConfiguration", time.Since(start))
+		client.logger.Errorf("error while calling GetAssistantConfiguration %v", err)
 		return nil, err
 	}
-	client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantTelemetryProvider", time.Since(start))
+	client.logger.Benchmark("Benchmarking: assistantClient.GetAssistantConfiguration", time.Since(start))
 	return res, nil
 }
 
-func (client *assistantServiceClient) GetAllAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAllAssistantTelemetryProviderRequest) (*protos.GetAllAssistantTelemetryProviderResponse, error) {
+func (client *assistantServiceClient) GetAllAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.GetAllAssistantConfigurationRequest) (*protos.GetAllAssistantConfigurationResponse, error) {
 	start := time.Now()
-	res, err := client.assistantClient.GetAllAssistantTelemetryProvider(client.WithAuth(ctx, auth), in)
+	res, err := client.assistantClient.GetAllAssistantConfiguration(client.WithAuth(ctx, auth), in)
 	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantTelemetryProvider", time.Since(start))
-		client.logger.Errorf("error while calling GetAllAssistantTelemetryProvider %v", err)
+		client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantConfiguration", time.Since(start))
+		client.logger.Errorf("error while calling GetAllAssistantConfiguration %v", err)
 		return nil, err
 	}
-	client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantTelemetryProvider", time.Since(start))
+	client.logger.Benchmark("Benchmarking: assistantClient.GetAllAssistantConfiguration", time.Since(start))
 	return res, nil
 }
 
-func (client *assistantServiceClient) CreateAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.CreateAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error) {
+func (client *assistantServiceClient) CreateAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.CreateAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error) {
 	start := time.Now()
-	res, err := client.assistantClient.CreateAssistantTelemetryProvider(client.WithAuth(ctx, auth), in)
+	res, err := client.assistantClient.CreateAssistantConfiguration(client.WithAuth(ctx, auth), in)
 	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantTelemetryProvider", time.Since(start))
-		client.logger.Errorf("error while calling CreateAssistantTelemetryProvider %v", err)
+		client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantConfiguration", time.Since(start))
+		client.logger.Errorf("error while calling CreateAssistantConfiguration %v", err)
 		return nil, err
 	}
-	client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantTelemetryProvider", time.Since(start))
+	client.logger.Benchmark("Benchmarking: assistantClient.CreateAssistantConfiguration", time.Since(start))
 	return res, nil
 }
 
-func (client *assistantServiceClient) UpdateAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.UpdateAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error) {
+func (client *assistantServiceClient) UpdateAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.UpdateAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error) {
 	start := time.Now()
-	res, err := client.assistantClient.UpdateAssistantTelemetryProvider(client.WithAuth(ctx, auth), in)
+	res, err := client.assistantClient.UpdateAssistantConfiguration(client.WithAuth(ctx, auth), in)
 	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.UpdateAssistantTelemetryProvider", time.Since(start))
-		client.logger.Errorf("error while calling UpdateAssistantTelemetryProvider %v", err)
+		client.logger.Benchmark("Benchmarking: assistantClient.UpdateAssistantConfiguration", time.Since(start))
+		client.logger.Errorf("error while calling UpdateAssistantConfiguration %v", err)
 		return nil, err
 	}
-	client.logger.Benchmark("Benchmarking: assistantClient.UpdateAssistantTelemetryProvider", time.Since(start))
+	client.logger.Benchmark("Benchmarking: assistantClient.UpdateAssistantConfiguration", time.Since(start))
 	return res, nil
 }
 
-func (client *assistantServiceClient) DeleteAssistantTelemetryProvider(ctx context.Context, auth types.SimplePrinciple, in *protos.DeleteAssistantTelemetryProviderRequest) (*protos.GetAssistantTelemetryProviderResponse, error) {
+func (client *assistantServiceClient) DeleteAssistantConfiguration(ctx context.Context, auth types.SimplePrinciple, in *protos.DeleteAssistantConfigurationRequest) (*protos.GetAssistantConfigurationResponse, error) {
 	start := time.Now()
-	res, err := client.assistantClient.DeleteAssistantTelemetryProvider(client.WithAuth(ctx, auth), in)
+	res, err := client.assistantClient.DeleteAssistantConfiguration(client.WithAuth(ctx, auth), in)
 	if err != nil {
-		client.logger.Benchmark("Benchmarking: assistantClient.DeleteAssistantTelemetryProvider", time.Since(start))
-		client.logger.Errorf("error while calling DeleteAssistantTelemetryProvider %v", err)
+		client.logger.Benchmark("Benchmarking: assistantClient.DeleteAssistantConfiguration", time.Since(start))
+		client.logger.Errorf("error while calling DeleteAssistantConfiguration %v", err)
 		return nil, err
 	}
-	client.logger.Benchmark("Benchmarking: assistantClient.DeleteAssistantTelemetryProvider", time.Since(start))
+	client.logger.Benchmark("Benchmarking: assistantClient.DeleteAssistantConfiguration", time.Since(start))
 	return res, nil
 }

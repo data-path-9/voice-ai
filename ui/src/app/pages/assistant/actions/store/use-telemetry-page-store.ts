@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import { initialPaginated } from '@/types/types.paginated';
 import {
-  AssistantTelemetryProvider,
-  DeleteAssistantTelemetryProvider,
-  GetAllAssistantTelemetryProvider,
-  GetAllAssistantTelemetryProviderResponse,
-  GetAssistantTelemetryProviderResponse,
-  ServiceError,
+  AssistantConfiguration,
+  DeleteAssistantConfiguration,
+  DeleteAssistantConfigurationRequest,
+  GetAllAssistantConfiguration,
+  GetAllAssistantConfigurationRequest,
+  GetAssistantConfigurationResponse,
+  Paginate,
+  UpdateAssistantConfiguration,
+  UpdateAssistantConfigurationRequest,
 } from '@rapidaai/react';
 import {
   AssistantTelemetryProperty,
@@ -14,9 +17,14 @@ import {
 } from './types/types.assistant-telemetry';
 import { connectionConfig } from '@/configs';
 
+const telemetryConfigurationType = 'telemetry';
+
 const initialAssistantTelemetry: AssistantTelemetryProperty = {
   telemetries: [],
 };
+
+const errorText = (err: unknown, fallback: string) =>
+  err instanceof Error ? err.message || fallback : fallback;
 
 export const useAssistantTelemetryPageStore = create<AssistantTelemetryType>(
   (set, get) => ({
@@ -35,8 +43,8 @@ export const useAssistantTelemetryPageStore = create<AssistantTelemetryType>(
       set({ totalCount: tc });
     },
 
-    onChangeAssistantTelemetries: (ep: AssistantTelemetryProvider[]) => {
-      set({ telemetries: ep });
+    onChangeAssistantTelemetries: (telemetries: AssistantConfiguration[]) => {
+      set({ telemetries });
     },
 
     addCriteria: (k: string, v: string, logic: string) => {
@@ -63,49 +71,43 @@ export const useAssistantTelemetryPageStore = create<AssistantTelemetryType>(
       token: string,
       userId: string,
       onError: (err: string) => void,
-      onSuccess: (e: AssistantTelemetryProvider[]) => void,
+      onSuccess: (telemetries: AssistantConfiguration[]) => void,
     ) => {
-      const afterGetAllAssistantTelemetry = (
-        err: ServiceError | null,
-        gur: GetAllAssistantTelemetryProviderResponse | null,
-      ) => {
-        if (err) {
-          onError(err.message || 'Unable to fetch assistant telemetry providers.');
-          return;
-        }
+      const request = new GetAllAssistantConfigurationRequest();
+      request.setAssistantid(assistantId);
+      request.setConfigurationtype(telemetryConfigurationType);
 
-        if (gur?.getSuccess()) {
-          get().onChangeAssistantTelemetries(gur.getDataList());
-          const paginated = gur.getPaginated();
-          if (paginated) {
-            get().setTotalCount(paginated.getTotalitem());
+      const paginate = new Paginate();
+      paginate.setPage(get().page);
+      paginate.setPagesize(get().pageSize);
+      request.setPaginate(paginate);
+
+      GetAllAssistantConfiguration(connectionConfig, request, {
+        authorization: token,
+        'x-project-id': projectId,
+        'x-auth-id': userId,
+      })
+        .then(response => {
+          if (response?.getSuccess()) {
+            const data = response.getDataList();
+            get().onChangeAssistantTelemetries(data);
+            const paginated = response.getPaginated();
+            if (paginated) {
+              get().setTotalCount(paginated.getTotalitem());
+            }
+            onSuccess(data);
+            return;
           }
-          onSuccess(gur.getDataList());
-          return;
-        }
 
-        const errorMessage = gur?.getError();
-        if (errorMessage) {
-          onError(errorMessage.getHumanmessage());
-          return;
-        }
-
-        onError('Unable to get assistant telemetry providers, please try again later.');
-      };
-
-      GetAllAssistantTelemetryProvider(
-        connectionConfig,
-        assistantId,
-        get().page,
-        get().pageSize,
-        get().criteria,
-        afterGetAllAssistantTelemetry,
-        {
-          authorization: token,
-          'x-project-id': projectId,
-          'x-auth-id': userId,
-        },
-      );
+          const message = response?.getError()?.getHumanmessage();
+          onError(
+            message ||
+              'Unable to get assistant telemetry, please try again later.',
+          );
+        })
+        .catch(err => {
+          onError(errorText(err, 'Unable to fetch assistant telemetry.'));
+        });
     },
 
     deleteAssistantTelemetry: (
@@ -115,49 +117,78 @@ export const useAssistantTelemetryPageStore = create<AssistantTelemetryType>(
       token: string,
       userId: string,
       onError: (err: string) => void,
-      onSuccess: (e: AssistantTelemetryProvider) => void,
+      onSuccess: (telemetry: AssistantConfiguration) => void,
     ) => {
-      const afterDeleteAssistantTelemetry = (
-        err: ServiceError | null,
-        gur: GetAssistantTelemetryProviderResponse | null,
-      ) => {
-        if (err) {
-          onError(err.message || 'Unable to delete assistant telemetry provider.');
-          return;
-        }
+      const request = new DeleteAssistantConfigurationRequest();
+      request.setAssistantid(assistantId);
+      request.setId(telemetryId);
 
-        if (gur?.getSuccess() && gur.getData()) {
-          onSuccess(gur.getData()!);
-          return;
-        }
+      DeleteAssistantConfiguration(connectionConfig, request, {
+        authorization: token,
+        'x-project-id': projectId,
+        'x-auth-id': userId,
+      })
+        .then((response: GetAssistantConfigurationResponse) => {
+          if (response?.getSuccess() && response.getData()) {
+            onSuccess(response.getData()!);
+            return;
+          }
 
-        const errorMessage = gur?.getError();
-        if (errorMessage) {
-          onError(errorMessage.getHumanmessage());
-          return;
-        }
+          const message = response?.getError()?.getHumanmessage();
+          onError(
+            message ||
+              'Unable to delete assistant telemetry, please try again later.',
+          );
+        })
+        .catch(err => {
+          onError(errorText(err, 'Unable to delete assistant telemetry.'));
+        });
+    },
 
-        onError('Unable to delete assistant telemetry provider, please try again later.');
-      };
+    updateAssistantTelemetryEnabled: (
+      assistantId: string,
+      telemetry: AssistantConfiguration,
+      enabled: boolean,
+      projectId: string,
+      token: string,
+      userId: string,
+      onError: (err: string) => void,
+      onSuccess: (telemetry: AssistantConfiguration) => void,
+    ) => {
+      const request = new UpdateAssistantConfigurationRequest();
+      request.setId(telemetry.getId());
+      request.setAssistantid(assistantId);
+      request.setConfigurationtype(telemetryConfigurationType);
+      request.setProvider(telemetry.getProvider());
+      request.setEnabled(enabled);
+      request.setOptionsList(telemetry.getOptionsList());
 
-      DeleteAssistantTelemetryProvider(
-        connectionConfig,
-        assistantId,
-        telemetryId,
-        afterDeleteAssistantTelemetry,
-        {
-          authorization: token,
-          'x-project-id': projectId,
-          'x-auth-id': userId,
-        },
-      );
+      UpdateAssistantConfiguration(connectionConfig, request, {
+        authorization: token,
+        'x-project-id': projectId,
+        'x-auth-id': userId,
+      })
+        .then((response: GetAssistantConfigurationResponse) => {
+          if (response?.getSuccess() && response.getData()) {
+            onSuccess(response.getData()!);
+            return;
+          }
+
+          const message = response?.getError()?.getHumanmessage();
+          onError(
+            message ||
+              'Unable to update assistant telemetry, please try again later.',
+          );
+        })
+        .catch(err => {
+          onError(errorText(err, 'Unable to update assistant telemetry.'));
+        });
     },
 
     columns: [
       { name: 'ID', key: 'id', visible: false },
-      { name: 'Provider', key: 'providerType', visible: true },
-      { name: 'Enabled', key: 'enabled', visible: true },
-      { name: 'Options', key: 'options', visible: true },
+      { name: 'Provider', key: 'provider', visible: true },
+      { name: 'Target', key: 'target', visible: true },
       { name: 'Created Date', key: 'createdDate', visible: true },
     ],
 

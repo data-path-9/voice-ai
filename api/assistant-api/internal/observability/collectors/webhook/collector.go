@@ -8,19 +8,26 @@ package webhook
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
+	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	"github.com/rapidaai/pkg/clients/rest"
 	"github.com/rapidaai/pkg/commons"
+	"github.com/rapidaai/pkg/types"
+	type_enums "github.com/rapidaai/pkg/types/enums"
+	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/pkg/validator"
+	"github.com/rapidaai/protos"
 )
 
 const (
@@ -33,41 +40,42 @@ const (
 )
 
 type Config struct {
-	Logger   commons.Logger
-	Webhooks []*internal_assistant_entity.AssistantWebhook
+	Logger                        commons.Logger
+	Auth                          types.SimplePrinciple
+	AssistantID                   uint64
+	AssistantConfigurationService internal_services.AssistantConfigurationService
+	HTTPLogService                internal_services.AssistantHTTPLogService
 }
 
 type Collector struct {
-	logger   commons.Logger
-	webhooks []*internal_assistant_entity.AssistantWebhook
+	logger                        commons.Logger
+	auth                          types.SimplePrinciple
+	assistantID                   uint64
+	assistantConfigurationService internal_services.AssistantConfigurationService
+	httpLogService                internal_services.AssistantHTTPLogService
+	webhooks                      []*internal_assistant_entity.AssistantConfiguration
+	webhooksLoaded                bool
+	mu                            sync.Mutex
 }
 
-func New(cfg Config) observability.Collector {
-	if !validator.NotEmpty(cfg.Webhooks) {
+func New(_ context.Context, config Config) observability.Collector {
+	if config.Auth == nil || config.AssistantConfigurationService == nil || config.HTTPLogService == nil {
 		return observability.NoopCollector{}
 	}
 	return &Collector{
-		logger:   cfg.Logger,
-		webhooks: append([]*internal_assistant_entity.AssistantWebhook(nil), cfg.Webhooks...),
+		logger:                        config.Logger,
+		auth:                          config.Auth,
+		assistantID:                   config.AssistantID,
+		assistantConfigurationService: config.AssistantConfigurationService,
+		httpLogService:                config.HTTPLogService,
 	}
 }
 
 func (c *Collector) Key() string {
-	if !validator.NonNil(c) || !validator.NotEmpty(c.webhooks) {
+	if !validator.NonNil(c) {
 		return "webhook"
 	}
-	ids := make([]string, 0, len(c.webhooks))
-	for _, assistantWebhook := range c.webhooks {
-		if !validator.NonNil(assistantWebhook) {
-			continue
-		}
-		ids = append(ids, strconv.FormatUint(assistantWebhook.Id, 10))
-	}
-	slices.Sort(ids)
-	if len(ids) == 0 {
-		return "webhook"
-	}
-	return "webhook:" + strings.Join(ids, ",")
+	return "webhook:" + strconv.FormatUint(c.assistantID, 10)
 }
 
 func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ observability.Context, record observability.Record) error {
@@ -75,160 +83,234 @@ func (c *Collector) Collect(ctx context.Context, scope observability.Scope, _ ob
 	if !ok {
 		return nil
 	}
-	if !validator.NonNil(c) || !validator.NotEmpty(c.webhooks) {
+	if !validator.NonNil(c) {
 		return nil
 	}
-	payload := webhookPayload(scope, webhookRecord)
+	webhookConfigurations, err := c.webhookConfigurations(ctx)
+	if err != nil {
+		return err
+	}
+	if !validator.NotEmpty(webhookConfigurations) {
+		return nil
+	}
+	webhookEventPayload := map[string]interface{}{}
+	if len(webhookRecord.Payload) > 0 {
+		webhookEventPayload = make(map[string]interface{}, len(webhookRecord.Payload))
+		for key, value := range webhookRecord.Payload {
+			webhookEventPayload[key] = value
+		}
+	}
 
-	var errs []error
-	for _, assistantWebhook := range c.webhooks {
-		if !c.shouldSend(assistantWebhook, webhookRecord.Event.String()) {
+	var webhookErrors []error
+	for _, webhookConfiguration := range webhookConfigurations {
+		if !c.shouldSend(webhookConfiguration, webhookRecord.Event.String()) {
 			continue
 		}
-		if err := c.send(ctx, assistantWebhook, payload); err != nil {
-			errs = append(errs, err)
+		if err := c.send(ctx, scope, webhookConfiguration, webhookRecord.Event.String(), webhookRecord.ContextID, webhookEventPayload); err != nil {
+			webhookErrors = append(webhookErrors, err)
 			if validator.NonNil(c.logger) {
-				c.logger.Warnw("observability webhook failed", "webhookID", assistantWebhook.Id, "event", webhookRecord.Event.String(), "error", err)
+				c.logger.Warnw("observability webhook failed", "webhookID", webhookConfiguration.Id, "event", webhookRecord.Event.String(), "error", err)
 			}
 		}
 	}
-	return errors.Join(errs...)
+	return errors.Join(webhookErrors...)
 }
 
 func (c *Collector) Close(context.Context) error {
 	return nil
 }
 
-func (c *Collector) shouldSend(assistantWebhook *internal_assistant_entity.AssistantWebhook, eventName string) bool {
-	if !validator.NonNil(assistantWebhook) || !validator.NotBlank(eventName) {
-		return false
+func (c *Collector) webhookConfigurations(ctx context.Context) ([]*internal_assistant_entity.AssistantConfiguration, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.webhooksLoaded {
+		return c.webhooks, nil
 	}
-	if internal_assistant_entity.NormalizeAssistantWebhookProvider(assistantWebhook.Provider) != internal_assistant_entity.AssistantWebhookProviderHTTP {
-		return false
+
+	_, webhookConfigurations, err := c.assistantConfigurationService.GetAll(
+		ctx,
+		c.auth,
+		c.assistantID,
+		string(internal_assistant_entity.AssistantConfigurationTypeWebhook),
+		"",
+		nil,
+		&protos.Paginate{},
+	)
+	if err != nil {
+		if validator.NonNil(c.logger) {
+			c.logger.Warnw("observability webhook load failed", "assistantID", c.assistantID, "error", err)
+		}
+		return nil, err
 	}
-	return slices.Contains(assistantWebhook.GetAssistantEvents(), eventName)
+	c.webhooks = append([]*internal_assistant_entity.AssistantConfiguration(nil), webhookConfigurations...)
+	c.webhooksLoaded = true
+	return c.webhooks, nil
 }
 
-func (c *Collector) send(ctx context.Context, assistantWebhook *internal_assistant_entity.AssistantWebhook, payload map[string]interface{}) error {
-	cfg := httpConfigFromWebhook(assistantWebhook)
-	if !validator.NotBlank(cfg.URL) {
-		return fmt.Errorf("observability webhook: http_url is required for webhook %d", assistantWebhook.Id)
+func (c *Collector) shouldSend(webhookConfiguration *internal_assistant_entity.AssistantConfiguration, eventName string) bool {
+	if !validator.NonNil(webhookConfiguration) || !validator.NotBlank(eventName) {
+		return false
+	}
+	if !webhookConfiguration.Enabled {
+		return false
+	}
+	if webhookConfiguration.Provider != "http" {
+		return false
+	}
+	return slices.Contains(webhookConfiguration.GetOptions().GetStringSlice("assistant_events"), eventName)
+}
+
+func (c *Collector) send(ctx context.Context, scope observability.Scope, webhookConfiguration *internal_assistant_entity.AssistantConfiguration, webhookEventName string, webhookContextID string, webhookPayload map[string]interface{}) error {
+	webhookOptions := webhookConfiguration.GetOptions()
+	webhookHTTPMethod, err := webhookOptions.GetString(WebhookOptionHTTPMethodKey)
+	if err != nil || !validator.NotBlank(webhookHTTPMethod) {
+		webhookHTTPMethod = http.MethodPost
+	}
+	webhookHTTPMethod = strings.ToUpper(strings.TrimSpace(webhookHTTPMethod))
+
+	webhookHTTPURL, _ := webhookOptions.GetString(WebhookOptionHTTPURLKey)
+	if !validator.NotBlank(webhookHTTPURL) {
+		return fmt.Errorf("observability webhook: http_url is required for webhook %d", webhookConfiguration.Id)
 	}
 
-	client := rest.NewRestClientWithConfig(cfg.URL, cfg.Headers, cfg.TimeoutSeconds)
-	for retryCount := uint32(0); retryCount <= cfg.MaxRetryCount; retryCount++ {
-		response, err := sendHTTPRequest(ctx, client, cfg.Method, payload, cfg.Headers)
-		if err != nil {
-			if retryCount < cfg.MaxRetryCount {
-				time.Sleep(2 * time.Second)
-				continue
+	webhookHTTPHeaders, err := webhookOptions.GetStringMap(WebhookOptionHTTPHeadersKey)
+	if err != nil {
+		webhookHTTPHeaders = map[string]string{}
+	}
+
+	webhookMaxRetryCount, err := webhookOptions.GetUint32(WebhookOptionMaxRetryCountKey)
+	if err != nil {
+		webhookMaxRetryCount = 0
+	}
+
+	webhookTimeoutSeconds, err := webhookOptions.GetUint32(WebhookOptionTimeoutSecondsKey)
+	if err != nil {
+		webhookTimeoutSeconds = 0
+	}
+	webhookRetryStatusCodes := webhookOptions.GetStringSlice(WebhookOptionRetryStatusCodesKey)
+
+	webhookHTTPClient := rest.NewRestClientWithConfig(webhookHTTPURL, webhookHTTPHeaders, webhookTimeoutSeconds)
+	webhookAssistantID := uint64(0)
+	var webhookConversationID *uint64
+	switch typedScope := scope.(type) {
+	case observability.MessageScope:
+		webhookAssistantID = typedScope.AssistantScopeID()
+		scopeConversationID := typedScope.ConversationScopeID()
+		webhookConversationID = &scopeConversationID
+		if !validator.NotBlank(webhookContextID) {
+			webhookContextID = typedScope.ContextID()
+		}
+	case observability.ConversationScope:
+		webhookAssistantID = typedScope.AssistantScopeID()
+		scopeConversationID := typedScope.ConversationScopeID()
+		webhookConversationID = &scopeConversationID
+		if !validator.NotBlank(webhookContextID) {
+			webhookContextID = typedScope.ContextID()
+		}
+	case observability.AssistantScope:
+		webhookAssistantID = typedScope.AssistantScopeID()
+		if !validator.NotBlank(webhookContextID) {
+			webhookContextID = typedScope.ContextID()
+		}
+	}
+	if webhookAssistantID == 0 {
+		webhookAssistantID = c.assistantID
+	}
+	webhookRequestBody := map[string]interface{}{
+		"assistant": map[string]interface{}{
+			"id": webhookAssistantID,
+		},
+		"data":  webhookPayload,
+		"event": webhookEventName,
+	}
+	if webhookConversationID != nil && *webhookConversationID != 0 {
+		webhookRequestBody["conversation"] = map[string]interface{}{
+			"id": *webhookConversationID,
+		}
+	}
+
+	for webhookRetryCount := uint32(0); webhookRetryCount <= webhookMaxRetryCount; webhookRetryCount++ {
+		webhookAttemptStartTime := time.Now()
+		webhookRequestPayload, webhookRequestPayloadMarshalError := json.Marshal(map[string]interface{}{
+			"url":        webhookHTTPURL,
+			"method":     webhookHTTPMethod,
+			"headers":    webhookHTTPHeaders,
+			"timeout_ms": webhookTimeoutSeconds * 1000,
+			"body":       webhookRequestBody,
+		})
+		if webhookRequestPayloadMarshalError != nil {
+			webhookRequestPayload = nil
+		}
+
+		webhookHTTPLogStatus := type_enums.RECORD_COMPLETE
+		webhookResponseStatus := int64(0)
+		var webhookErrorMessage *string
+		var webhookResponsePayload []byte
+		var webhookReturnError error
+		shouldRetryWebhook := false
+
+		var webhookResponse *rest.APIResponse
+		var webhookSendError error
+		switch webhookHTTPMethod {
+		case http.MethodPut:
+			webhookResponse, webhookSendError = webhookHTTPClient.Put(ctx, "", webhookRequestBody, webhookHTTPHeaders)
+		case http.MethodPatch:
+			webhookResponse, webhookSendError = webhookHTTPClient.Patch(ctx, "", webhookRequestBody, webhookHTTPHeaders)
+		case http.MethodGet:
+			webhookResponse, webhookSendError = webhookHTTPClient.Get(ctx, "", webhookRequestBody, webhookHTTPHeaders)
+		default:
+			webhookResponse, webhookSendError = webhookHTTPClient.Post(ctx, "", webhookRequestBody, webhookHTTPHeaders)
+		}
+		if webhookSendError != nil {
+			webhookErrorMessageValue := webhookSendError.Error()
+			webhookHTTPLogStatus = type_enums.RECORD_FAILED
+			webhookErrorMessage = &webhookErrorMessageValue
+			webhookReturnError = webhookSendError
+			shouldRetryWebhook = webhookRetryCount < webhookMaxRetryCount
+		} else {
+			webhookResponseStatus = int64(webhookResponse.StatusCode)
+			webhookResponsePayload = webhookResponse.Body
+			if utils.MatchAnyString(webhookRetryStatusCodes, strconv.Itoa(webhookResponse.StatusCode)) {
+				webhookErrorMessageValue := fmt.Sprintf("observability webhook: retryable status %d", webhookResponse.StatusCode)
+				webhookHTTPLogStatus = type_enums.RECORD_FAILED
+				webhookErrorMessage = &webhookErrorMessageValue
+				webhookReturnError = fmt.Errorf("observability webhook: retryable status %d", webhookResponse.StatusCode)
+				shouldRetryWebhook = webhookRetryCount < webhookMaxRetryCount
+			} else if webhookResponse.StatusCode < 200 || webhookResponse.StatusCode >= 300 {
+				webhookErrorMessageValue := fmt.Sprintf("observability webhook: endpoint returned status %d", webhookResponse.StatusCode)
+				webhookHTTPLogStatus = type_enums.RECORD_FAILED
+				webhookErrorMessage = &webhookErrorMessageValue
+				webhookReturnError = fmt.Errorf("observability webhook: endpoint returned status %d", webhookResponse.StatusCode)
 			}
-			return err
 		}
-		if isRetryableStatus(response.StatusCode, cfg.RetryStatusCodes) {
-			if retryCount < cfg.MaxRetryCount {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			return fmt.Errorf("observability webhook: retryable status %d", response.StatusCode)
+
+		if _, recordWebhookRequestLogError := c.httpLogService.CreateLog(
+			ctx,
+			c.auth,
+			"webhook",
+			webhookConfiguration.Id,
+			webhookEventName,
+			webhookContextID,
+			webhookAssistantID,
+			webhookConversationID,
+			webhookHTTPURL,
+			webhookHTTPMethod,
+			webhookResponseStatus,
+			int64(time.Since(webhookAttemptStartTime)),
+			webhookRetryCount,
+			webhookHTTPLogStatus,
+			webhookErrorMessage,
+			webhookRequestPayload,
+			webhookResponsePayload,
+		); recordWebhookRequestLogError != nil && validator.NonNil(c.logger) {
+			c.logger.Warnw("observability webhook request log record failed", "webhookID", webhookConfiguration.Id, "event", webhookEventName, "error", recordWebhookRequestLogError)
 		}
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return fmt.Errorf("observability webhook: endpoint returned status %d", response.StatusCode)
+
+		if shouldRetryWebhook {
+			time.Sleep(2 * time.Second)
+			continue
 		}
-		return nil
+		return webhookReturnError
 	}
 	return nil
-}
-
-type httpConfig struct {
-	URL              string
-	Method           string
-	Headers          map[string]string
-	RetryStatusCodes []string
-	MaxRetryCount    uint32
-	TimeoutSeconds   uint32
-}
-
-func httpConfigFromWebhook(assistantWebhook *internal_assistant_entity.AssistantWebhook) httpConfig {
-	opts := assistantWebhook.GetOptions()
-	method, err := opts.GetString(WebhookOptionHTTPMethodKey)
-	if err != nil || !validator.NotBlank(method) {
-		method = http.MethodPost
-	}
-	url, _ := opts.GetString(WebhookOptionHTTPURLKey)
-	headers, err := opts.GetStringMap(WebhookOptionHTTPHeadersKey)
-	if err != nil {
-		headers = map[string]string{}
-	}
-	maxRetryCount, err := opts.GetUint32(WebhookOptionMaxRetryCountKey)
-	if err != nil {
-		maxRetryCount = 0
-	}
-	timeoutSeconds, err := opts.GetUint32(WebhookOptionTimeoutSecondsKey)
-	if err != nil {
-		timeoutSeconds = 0
-	}
-	return httpConfig{
-		URL:              url,
-		Method:           strings.ToUpper(strings.TrimSpace(method)),
-		Headers:          headers,
-		RetryStatusCodes: opts.GetStringSlice(WebhookOptionRetryStatusCodesKey),
-		MaxRetryCount:    maxRetryCount,
-		TimeoutSeconds:   timeoutSeconds,
-	}
-}
-
-func sendHTTPRequest(ctx context.Context, client *rest.RestClient, method string, payload map[string]interface{}, headers map[string]string) (*rest.APIResponse, error) {
-	switch method {
-	case http.MethodPut:
-		return client.Put(ctx, "", payload, headers)
-	case http.MethodPatch:
-		return client.Patch(ctx, "", payload, headers)
-	case http.MethodGet:
-		return client.Get(ctx, "", payload, headers)
-	default:
-		return client.Post(ctx, "", payload, headers)
-	}
-}
-
-func isRetryableStatus(statusCode int, retryStatusCodes []string) bool {
-	return slices.Contains(retryStatusCodes, strconv.Itoa(statusCode))
-}
-
-func webhookPayload(scope observability.Scope, record observability.RecordWebhook) map[string]interface{} {
-	if len(record.Payload) == 0 {
-		payload := map[string]interface{}{}
-		if scope != nil {
-			payload["scope"] = scope.ScopeType()
-			switch typed := scope.(type) {
-			case observability.ProjectScope:
-				payload["context_id"] = typed.ContextID()
-			case observability.AssistantScope:
-				payload["context_id"] = typed.ContextID()
-			case observability.ConversationScope:
-				payload["context_id"] = typed.ContextID()
-			case observability.MessageScope:
-				payload["context_id"] = typed.ContextID()
-			}
-		}
-		return payload
-	}
-	payload := make(map[string]interface{}, len(record.Payload))
-	for key, value := range record.Payload {
-		payload[key] = value
-	}
-	if scope != nil {
-		payload["scope"] = scope.ScopeType()
-		switch typed := scope.(type) {
-		case observability.ProjectScope:
-			payload["context_id"] = typed.ContextID()
-		case observability.AssistantScope:
-			payload["context_id"] = typed.ContextID()
-		case observability.ConversationScope:
-			payload["context_id"] = typed.ContextID()
-		case observability.MessageScope:
-			payload["context_id"] = typed.ContextID()
-		}
-	}
-	return payload
 }

@@ -223,7 +223,7 @@ telemetry:
 	}
 }
 
-func TestGetApplicationConfig_DropsIncompleteNestedOpenSearchConfigs(t *testing.T) {
+func TestGetApplicationConfig_RejectsIncompleteNestedOpenSearchConfigs(t *testing.T) {
 	v := viper.New()
 	v.SetConfigType("yaml")
 	configYAML := baseAssistantYAML + `
@@ -236,12 +236,7 @@ telemetry:
 		t.Fatalf("ReadConfig returned an error: %v", err)
 	}
 
-	appConfig, err := GetApplicationConfig(v)
-	if err != nil {
-		t.Fatalf("GetApplicationConfig returned an error: %v", err)
+	if _, err := GetApplicationConfig(v); err == nil {
+		t.Fatalf("expected incomplete telemetry opensearch config to fail validation")
 	}
-	if appConfig.TelemetryConfig == nil || appConfig.TelemetryConfig.OpenSearch != nil {
-		t.Fatalf("expected incomplete telemetry opensearch config to be nil")
-	}
-
 }

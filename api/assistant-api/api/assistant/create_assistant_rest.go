@@ -174,7 +174,7 @@ func (assistantApi *assistantApi) CreateAssistantRest(c *gin.Context) {
 	}
 	var sourceIdentifier *uint64
 	if validator.NonNil(createAssistantRequest.SourceIdentifier) {
-		parsedSourceIdentifier, err := strconv.ParseUint(*createAssistantRequest.SourceIdentifier, 10, 64)
+		parsedSourceIdentifier, err := utils.StringToUint64(*createAssistantRequest.SourceIdentifier)
 		if err != nil {
 
 			c.JSON(pkg_errors.CreateAssistantInvalidSourceIdentifier.HTTPStatusCode, openapi.ErrorResponse{
@@ -393,7 +393,7 @@ func (assistantApi *assistantApi) CreateAssistantRest(c *gin.Context) {
 		for _, assistantKnowledgeRequest := range *createAssistantRequest.AssistantKnowledges {
 			knowledgeID := uint64(0)
 			if validator.NonNil(assistantKnowledgeRequest.KnowledgeId) && validator.NotBlank(*assistantKnowledgeRequest.KnowledgeId) {
-				parsedKnowledgeID, err := strconv.ParseUint(*assistantKnowledgeRequest.KnowledgeId, 10, 64)
+				parsedKnowledgeID, err := utils.StringToUint64(*assistantKnowledgeRequest.KnowledgeId)
 				if err != nil {
 
 					c.JSON(pkg_errors.CreateAssistantInvalidKnowledgeID.HTTPStatusCode, openapi.ErrorResponse{
@@ -411,7 +411,7 @@ func (assistantApi *assistantApi) CreateAssistantRest(c *gin.Context) {
 			}
 			rerankerModelProviderID := uint64(0)
 			if validator.NonNil(assistantKnowledgeRequest.RerankerModelProviderId) && validator.NotBlank(*assistantKnowledgeRequest.RerankerModelProviderId) {
-				parsedRerankerModelProviderID, err := strconv.ParseUint(*assistantKnowledgeRequest.RerankerModelProviderId, 10, 64)
+				parsedRerankerModelProviderID, err := utils.StringToUint64(*assistantKnowledgeRequest.RerankerModelProviderId)
 				if err != nil {
 
 					c.JSON(pkg_errors.CreateAssistantInvalidRerankerModelProviderID.HTTPStatusCode, openapi.ErrorResponse{

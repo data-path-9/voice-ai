@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { CreateAssistantTelemetry } from '@/app/pages/assistant/actions/configure-assistant-telemetry/create-assistant-telemetry';
-import { CreateAssistantTelemetryProvider, Metadata } from '@rapidaai/react';
+import { CreateAssistantConfiguration, Metadata } from '@rapidaai/react';
 import {
   GetDefaultTelemetryIfInvalid,
   ValidateTelemetry,
@@ -24,7 +24,6 @@ const meta = (key: string, value: string): Metadata => {
 
 jest.mock('@rapidaai/react', () => {
   class ConnectionConfig {
-    constructor(_: unknown) {}
     static WithDebugger(config: unknown) {
       return config;
     }
@@ -45,10 +44,33 @@ jest.mock('@rapidaai/react', () => {
       return this.value;
     }
   }
+  class CreateAssistantConfigurationRequest {
+    assistantid = '';
+    configurationtype = '';
+    provider = '';
+    enabled = false;
+    optionsList: Metadata[] = [];
+    setAssistantid(v: string) {
+      this.assistantid = v;
+    }
+    setConfigurationtype(v: string) {
+      this.configurationtype = v;
+    }
+    setProvider(v: string) {
+      this.provider = v;
+    }
+    setEnabled(v: boolean) {
+      this.enabled = v;
+    }
+    setOptionsList(v: Metadata[]) {
+      this.optionsList = v;
+    }
+  }
   return {
     ConnectionConfig,
     Metadata,
-    CreateAssistantTelemetryProvider: jest.fn(),
+    CreateAssistantConfigurationRequest,
+    CreateAssistantConfiguration: jest.fn(),
   };
 });
 
@@ -96,8 +118,12 @@ jest.mock('@/app/components/providers/telemetry', () => ({
 }));
 
 jest.mock('@/app/components/carbon/button', () => ({
-  PrimaryButton: ({ children, isLoading: _, ...props }: any) => <button {...props}>{children}</button>,
-  SecondaryButton: ({ children, isLoading: _, ...props }: any) => <button {...props}>{children}</button>,
+  PrimaryButton: ({ children, isLoading: _, ...props }: any) => (
+    <button {...props}>{children}</button>
+  ),
+  SecondaryButton: ({ children, isLoading: _, ...props }: any) => (
+    <button {...props}>{children}</button>
+  ),
 }));
 
 jest.mock('@/app/components/carbon/form', () => ({
@@ -108,19 +134,12 @@ jest.mock('@/app/components/carbon/notification', () => ({
   Notification: ({ subtitle }: any) => <div>{subtitle}</div>,
 }));
 
-jest.mock('@/app/components/carbon/form/input-checkbox', () => ({
-  InputCheckbox: ({ checked, onChange, children }: any) => (
-    <label>
-      <input type="checkbox" checked={checked} onChange={onChange} />
-      {children}
-    </label>
-  ),
+jest.mock('@/app/components/input-group', () => ({
+  InputGroup: ({ children }: any) => <div>{children}</div>,
 }));
 
 jest.mock('@carbon/react', () => ({
   ButtonSet: ({ children }: any) => <div>{children}</div>,
-  Breadcrumb: ({ children }: any) => <div>{children}</div>,
-  BreadcrumbItem: ({ children }: any) => <div>{children}</div>,
 }));
 
 jest.mock('react-hot-toast/headless', () => ({
@@ -138,16 +157,9 @@ describe('Create assistant telemetry flow', () => {
       ],
     );
     (ValidateTelemetry as jest.Mock).mockReturnValue(undefined);
-    (CreateAssistantTelemetryProvider as jest.Mock).mockImplementation(
-      (
-        _cfg,
-        _assistantId,
-        _provider,
-        _enabled,
-        _params,
-        cb,
-      ) => cb(null, { getSuccess: () => true }),
-    );
+    (CreateAssistantConfiguration as jest.Mock).mockResolvedValue({
+      getSuccess: () => true,
+    });
   });
 
   it('shows validation error when telemetry config is invalid', () => {
@@ -156,12 +168,14 @@ describe('Create assistant telemetry flow', () => {
     );
     render(<CreateAssistantTelemetry assistantId="assistant-1" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save telemetry' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure telemetry' }),
+    );
 
     expect(
       screen.getByText('Please provide a valid telemetry endpoint.'),
     ).toBeInTheDocument();
-    expect(CreateAssistantTelemetryProvider).not.toHaveBeenCalled();
+    expect(CreateAssistantConfiguration).not.toHaveBeenCalled();
   });
 
   it('switching provider rehydrates defaults from credential-only parameters', () => {
@@ -180,7 +194,8 @@ describe('Create assistant telemetry flow', () => {
       'otlp_grpc',
       [expect.objectContaining({})],
     );
-    const params = (GetDefaultTelemetryIfInvalid as jest.Mock).mock.calls[1][1] as Metadata[];
+    const params = (GetDefaultTelemetryIfInvalid as jest.Mock).mock
+      .calls[1][1] as Metadata[];
     expect(params).toHaveLength(1);
     expect(params[0].getKey()).toBe('rapida.credential_id');
     expect(params[0].getValue()).toBe('cred-1');
@@ -189,19 +204,23 @@ describe('Create assistant telemetry flow', () => {
   it('creates telemetry provider successfully and navigates back to telemetry listing', async () => {
     render(<CreateAssistantTelemetry assistantId="assistant-1" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save telemetry' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure telemetry' }),
+    );
 
     await waitFor(() => {
-      expect(CreateAssistantTelemetryProvider).toHaveBeenCalledTimes(1);
+      expect(CreateAssistantConfiguration).toHaveBeenCalledTimes(1);
     });
 
-    expect(CreateAssistantTelemetryProvider).toHaveBeenCalledWith(
+    expect(CreateAssistantConfiguration).toHaveBeenCalledWith(
       expect.anything(),
-      'assistant-1',
-      'otlp_http',
-      true,
-      expect.any(Array),
-      expect.any(Function),
+      expect.objectContaining({
+        assistantid: 'assistant-1',
+        configurationtype: 'telemetry',
+        provider: 'otlp_http',
+        enabled: true,
+        optionsList: expect.any(Array),
+      }),
       expect.objectContaining({
         'x-auth-id': 'u1',
         authorization: 't1',
@@ -220,7 +239,7 @@ describe('Create assistant telemetry flow', () => {
       <CreateAssistantTelemetry assistantId="assistant-1" />,
     );
 
-    const pageRoot = container.firstElementChild as HTMLElement;
+    const pageRoot = container.querySelector('section > div') as HTMLElement;
     expect(pageRoot).toBeInTheDocument();
     expect(pageRoot).toHaveClass('bg-white');
     expect(pageRoot).toHaveClass('dark:bg-gray-900');
