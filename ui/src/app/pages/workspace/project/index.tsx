@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import { Helmet } from '@/app/components/helmet';
 import {
   ArchiveProjectResponse,
@@ -13,8 +13,7 @@ import { useRapidaStore } from '@/hooks';
 import { ServiceError } from '@rapidaai/react';
 import { PrimaryButton } from '@/app/components/carbon/button';
 import { Pagination } from '@/app/components/carbon/pagination';
-import { Add, Renew } from '@carbon/icons-react';
-import IconIndicator from '@carbon/react/es/components/IconIndicator';
+import { Add, Edit, Renew, TrashCan } from '@carbon/icons-react';
 import {
   Table,
   TableHead,
@@ -23,41 +22,24 @@ import {
   TableBody,
   TableCell,
   TableToolbar,
+  TableBatchAction,
+  TableBatchActions,
   TableToolbarContent,
   TableToolbarSearch,
   Button,
+  RadioButton,
 } from '@carbon/react';
 import { ProjectUserGroupAvatar } from '@/app/components/avatar/project-user-group-avatar';
 import { toHumanReadableDate } from '@/utils/date';
 import { RoleIndicator } from '@/app/components/indicators/role';
-import { ProjectOption } from '@/app/pages/workspace/project/project-options';
 import { PageHeaderBlock } from '@/app/components/blocks/page-header-block';
 import { PageTitleWithCount } from '@/app/components/blocks/page-title-with-count';
 import { TableSection } from '@/app/components/sections/table-section';
 import { connectionConfig } from '@/configs';
-
-const statusMap: Record<string, { kind: string; label: string }> = {
-  ACTIVE: { kind: 'succeeded', label: 'Active' },
-  active: { kind: 'succeeded', label: 'Active' },
-  DISABLED: { kind: 'failed', label: 'Disabled' },
-  disabled: { kind: 'failed', label: 'Disabled' },
-  INACTIVE: { kind: 'incomplete', label: 'Inactive' },
-  inactive: { kind: 'incomplete', label: 'Inactive' },
-  PENDING: { kind: 'pending', label: 'Pending' },
-  pending: { kind: 'pending', label: 'Pending' },
-  ARCHIVED: { kind: 'undefined', label: 'Archived' },
-  archived: { kind: 'undefined', label: 'Archived' },
-};
-
-const defaultStatus = { kind: 'normal', label: 'Active' };
-
-function getStatusKind(status?: string) {
-  return (statusMap[status || ''] || defaultStatus).kind as any;
-}
-
-function getStatusLabel(status?: string) {
-  return (statusMap[status || ''] || defaultStatus).label;
-}
+import { ConfirmDeleteDialog } from '@/app/components/base/modal/confirm-delete';
+import { AuthContext } from '@/context/auth-context';
+import { UpdateProjectDialog } from '@/app/components/base/modal/update-project-modal';
+import { CarbonIconIndicator } from '@/app/components/carbon/icon-indicator';
 
 const headers = [
   { key: 'name', header: 'Name' },
@@ -65,7 +47,6 @@ const headers = [
   { key: 'role', header: 'Your Role' },
   { key: 'collaborators', header: 'Collaborators' },
   { key: 'status', header: 'Status' },
-  { key: 'actions', header: '' },
 ];
 
 export function ProjectPage() {
@@ -77,6 +58,16 @@ export function ProjectPage() {
   const [pageSize, setPageSize] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
   const [criteria] = useState<{ key: string; value: string }[]>([]);
+  const [projectPendingDelete, setProjectPendingDelete] =
+    useState<Project | null>(null);
+  const [projectPendingUpdate, setProjectPendingUpdate] =
+    useState<Project | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    null,
+  );
+  const { projectRoles } = useContext(AuthContext);
+  const selectedProject =
+    projects.find(project => project.getId() === selectedProjectId) || null;
 
   const afterGettingProject = useCallback(
     (err: ServiceError | null, alpr: GetAllProjectResponse | null) => {
@@ -125,11 +116,14 @@ export function ProjectPage() {
       projectId,
       (err: ServiceError | null, apr: ArchiveProjectResponse | null) => {
         if (err) {
+          setProjectPendingDelete(null);
           return;
         }
         if (apr?.getSuccess()) {
           const newList = projects?.filter(p => p.getId() !== apr.getId());
           setProjects(newList);
+          setProjectPendingDelete(null);
+          setSelectedProjectId(null);
         }
       },
       {
@@ -148,6 +142,34 @@ export function ProjectPage() {
         </PageTitleWithCount>
       </PageHeaderBlock>
       <TableToolbar>
+        <TableBatchActions
+          shouldShowBatchActions={Boolean(selectedProject)}
+          totalSelected={selectedProject ? 1 : 0}
+          onCancel={() => setSelectedProjectId(null)}
+          totalCount={projects.length}
+        >
+          <TableBatchAction
+            renderIcon={Edit}
+            onClick={() => {
+              if (selectedProject) {
+                setProjectPendingUpdate(selectedProject);
+              }
+            }}
+          >
+            Update project details
+          </TableBatchAction>
+          <TableBatchAction
+            className="cds--btn--danger"
+            renderIcon={TrashCan}
+            onClick={() => {
+              if (selectedProject) {
+                setProjectPendingDelete(selectedProject);
+              }
+            }}
+          >
+            Delete project
+          </TableBatchAction>
+        </TableBatchActions>
         <TableToolbarContent>
           <TableToolbarSearch placeholder="Search projects..." />
           <Button
@@ -172,6 +194,7 @@ export function ProjectPage() {
         <Table>
           <TableHead>
             <TableRow>
+              <TableHeader className="!w-12" />
               {headers.map(h => (
                 <TableHeader key={h.key}>{h.header}</TableHeader>
               ))}
@@ -179,14 +202,49 @@ export function ProjectPage() {
           </TableHead>
           <TableBody>
             {projects.map(project => (
-              <TableRow key={project.getId()}>
+              <TableRow
+                key={project.getId()}
+                isSelected={selectedProjectId === project.getId()}
+                onClick={() =>
+                  setSelectedProjectId(
+                    selectedProjectId === project.getId()
+                      ? null
+                      : project.getId(),
+                  )
+                }
+                className="cursor-pointer"
+              >
+                <TableCell
+                  className="!w-12 !pr-0"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <RadioButton
+                    id={`project-select-${project.getId()}`}
+                    name="project-select"
+                    labelText=""
+                    hideLabel
+                    checked={selectedProjectId === project.getId()}
+                    onChange={() =>
+                      setSelectedProjectId(
+                        selectedProjectId === project.getId()
+                          ? null
+                          : project.getId(),
+                      )
+                    }
+                  />
+                </TableCell>
                 <TableCell>{project.getName()}</TableCell>
                 <TableCell>
                   {project.getCreateddate() &&
                     toHumanReadableDate(project.getCreateddate()!)}
                 </TableCell>
                 <TableCell>
-                  <RoleIndicator role={'SUPER_ADMIN'} />
+                  <RoleIndicator
+                    role={
+                      projectRoles?.find(p => p.projectid === project.getId())
+                        ?.role
+                    }
+                  />
                 </TableCell>
                 <TableCell>
                   <ProjectUserGroupAvatar
@@ -194,24 +252,10 @@ export function ProjectPage() {
                       .getMembersList()
                       .map(m => ({ name: m.getName() }))}
                     size={7}
-                    projectId={project.getId()}
                   />
                 </TableCell>
                 <TableCell>
-                  <IconIndicator
-                    kind={getStatusKind(project.getStatus?.())}
-                    label={getStatusLabel(project.getStatus?.())}
-                    size={16}
-                  />
-                </TableCell>
-                <TableCell>
-                  <ProjectOption
-                    project={project.toObject()}
-                    afterUpdateProject={() => {
-                      getAllProject(page, pageSize, criteria);
-                    }}
-                    onDelete={() => onDeleteProject(project.getId())}
-                  />
+                  <CarbonIconIndicator state={project.getStatus?.()} />
                 </TableCell>
               </TableRow>
             ))}
@@ -233,6 +277,46 @@ export function ProjectPage() {
         setModalOpen={setCreateProjectModalOpen}
         afterCreateProject={() => {
           getAllProject(page, pageSize, criteria);
+        }}
+      />
+      {projectPendingUpdate && (
+        <UpdateProjectDialog
+          existingProject={projectPendingUpdate.toObject()}
+          modalOpen={Boolean(projectPendingUpdate)}
+          setModalOpen={open => {
+            if (!open) {
+              setProjectPendingUpdate(null);
+            }
+          }}
+          afterUpdateProject={() => {
+            setSelectedProjectId(null);
+            setProjectPendingUpdate(null);
+            getAllProject(page, pageSize, criteria);
+          }}
+        />
+      )}
+      <ConfirmDeleteDialog
+        showing={Boolean(projectPendingDelete)}
+        title="Delete project"
+        content={
+          projectPendingDelete
+            ? `This will delete "${projectPendingDelete.getName()}". Type the project name to confirm.`
+            : ''
+        }
+        objectName={projectPendingDelete?.getName() || ''}
+        confirmText="Delete project"
+        onConfirm={() => {
+          if (projectPendingDelete) {
+            onDeleteProject(projectPendingDelete.getId());
+          }
+        }}
+        onCancel={() => {
+          setProjectPendingDelete(null);
+          setSelectedProjectId(null);
+        }}
+        onClose={() => {
+          setProjectPendingDelete(null);
+          setSelectedProjectId(null);
         }}
       />
     </>

@@ -3,13 +3,12 @@ package web_api
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strings"
+	"time"
 
 	"github.com/rapidaai/api/web-api/config"
-	"github.com/rapidaai/pkg/ciphers"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/connectors"
+	pkg_errors "github.com/rapidaai/pkg/errors"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/pkg/validator"
@@ -22,8 +21,8 @@ import (
 	internal_user_service "github.com/rapidaai/api/web-api/internal/service/user"
 	external_clients "github.com/rapidaai/pkg/clients/external"
 	external_emailer "github.com/rapidaai/pkg/clients/external/emailer"
-	external_emailer_template "github.com/rapidaai/pkg/clients/external/emailer/template"
 	type_enums "github.com/rapidaai/pkg/types/enums"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type webProjectApi struct {
@@ -238,164 +237,338 @@ func (wProjectApi *webProjectGRPCApi) GetProject(ctx context.Context, irRequest 
 	return utils.Success[protos.GetProjectResponse, *protos.Project](ot)
 }
 
-func (wProjectApi *webProjectGRPCApi) AddUsersToProject(ctx context.Context, irRequest *protos.AddUsersToProjectRequest) (*protos.AddUsersToProjectResponse, error) {
+func (wProjectApi *webProjectGRPCApi) AddUserToProjects(ctx context.Context, irRequest *protos.AddUserToProjectsRequest) (*protos.AddUserToProjectsResponse, error) {
 	auth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
 	if !isAuthenticated {
-		return nil, errors.New("unauthenticated request")
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsUnauthenticated.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsUnauthenticated.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsUnauthenticated.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsUnauthenticated.ErrorMessage,
+			},
+		}, errors.New(pkg_errors.AddUserToProjectsUnauthenticated.Error)
 	}
 	currentOrgRole := auth.GetOrganizationRole()
 	if currentOrgRole == nil {
-		return utils.Error[protos.AddUsersToProjectResponse](
-			errors.New("you are not part of any active organization"),
-			"Please create organization and try again.",
-		)
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsMissingOrganization.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsMissingOrganization.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsMissingOrganization.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsMissingOrganization.ErrorMessage,
+			},
+		}, errors.New(pkg_errors.AddUserToProjectsMissingOrganization.Error)
 	}
 	if !validator.OneOf(currentOrgRole.Role, type_enums.ORGANIZATION_ROLE_OWNER.String(), type_enums.ORGANIZATION_ROLE_ADMIN.String()) {
-		return utils.Error[protos.AddUsersToProjectResponse](
-			errors.New("user is not authorized to invite users to projects"),
-			"You do not have permission to invite users to projects.",
-		)
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsUnauthorized.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsUnauthorized.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsUnauthorized.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsUnauthorized.ErrorMessage,
+			},
+		}, errors.New(pkg_errors.AddUserToProjectsUnauthorized.Error)
+	}
+	if !validator.NonZero(irRequest.GetUserId()) {
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsInvalidUser.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsInvalidUser.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsInvalidUser.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsInvalidUser.ErrorMessage,
+			},
+		}, nil
+	}
+	if !validator.NotEmpty(irRequest.GetProjectRoles()) {
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsMissingProjectRoles.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsMissingProjectRoles.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsMissingProjectRoles.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsMissingProjectRoles.ErrorMessage,
+			},
+		}, nil
 	}
 
-	if !validator.Email(irRequest.GetEmail()) {
-		return utils.Error[protos.AddUsersToProjectResponse](
-			errors.New("invalid email address"),
-			"The provided email is not valid, please check the email and retry.",
-		)
+	eUser, err := wProjectApi.userService.GetUser(ctx, irRequest.GetUserId())
+	if err != nil {
+		wProjectApi.logger.Errorf("unable to get user for project assignment err %v", err)
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsInvalidUser.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsInvalidUser.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsInvalidUser.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsInvalidUser.ErrorMessage,
+			},
+		}, nil
 	}
-	if !validator.NotEmpty(irRequest.GetProjectIds()) {
-		return utils.Error[protos.AddUsersToProjectResponse](
-			errors.New("project ids are required"),
-			"Please select at least one project and retry.",
-		)
-	}
-	if !validator.AllNonZero(irRequest.GetProjectIds()...) {
-		return utils.Error[protos.AddUsersToProjectResponse](
-			errors.New("project ids must be non-empty"),
-			"Please select valid projects and retry.",
-		)
-	}
-	if !validator.OneOf(irRequest.GetRole(), type_enums.PROJECT_ROLE_SUPER_ADMIN.String(), type_enums.PROJECT_ROLE_ADMIN.String(), type_enums.PROJECT_ROLE_WRITER.String(), type_enums.PROJECT_ROLE_READER.String()) {
-		return utils.Error[protos.AddUsersToProjectResponse](
-			errors.New("invalid project role"),
-			"Please select a valid project role and retry.",
-		)
+	org, err := wProjectApi.userService.GetActiveOrInvitedOrganizationRole(ctx, eUser.GetId())
+	if err != nil || org.GetOrganizationId() != currentOrgRole.OrganizationId {
+		if err != nil {
+			wProjectApi.logger.Errorf("unable to get organization role for project assignment err %v", err)
+		}
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsUserNotInOrganization.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsUserNotInOrganization.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsUserNotInOrganization.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsUserNotInOrganization.ErrorMessage,
+			},
+		}, nil
 	}
 
-	projects, err := wProjectApi.projectService.GetAllByOrganization(ctx, auth, currentOrgRole.OrganizationId, utils.Unique(irRequest.GetProjectIds()))
+	projectIds := make([]uint64, 0, len(irRequest.GetProjectRoles()))
+	projectRoles := map[uint64]string{}
+	for _, projectRole := range irRequest.GetProjectRoles() {
+		if !validator.NonZero(projectRole.GetProjectId()) {
+			return &protos.AddUserToProjectsResponse{
+				Code:    pkg_errors.AddUserToProjectsInvalidProjects.HTTPStatusCodeInt32(),
+				Success: false,
+				Error: &protos.Error{
+					ErrorCode:    uint64(pkg_errors.AddUserToProjectsInvalidProjects.Code),
+					ErrorMessage: pkg_errors.AddUserToProjectsInvalidProjects.Error,
+					HumanMessage: pkg_errors.AddUserToProjectsInvalidProjects.ErrorMessage,
+				},
+			}, nil
+		}
+		if _, ok := projectRoles[projectRole.GetProjectId()]; ok {
+			return &protos.AddUserToProjectsResponse{
+				Code:    pkg_errors.AddUserToProjectsDuplicateProject.HTTPStatusCodeInt32(),
+				Success: false,
+				Error: &protos.Error{
+					ErrorCode:    uint64(pkg_errors.AddUserToProjectsDuplicateProject.Code),
+					ErrorMessage: pkg_errors.AddUserToProjectsDuplicateProject.Error,
+					HumanMessage: pkg_errors.AddUserToProjectsDuplicateProject.ErrorMessage,
+				},
+			}, nil
+		}
+		if !validator.OneOf(projectRole.GetProjectRole(), type_enums.PROJECT_ROLE_SUPER_ADMIN.String(), type_enums.PROJECT_ROLE_ADMIN.String(), type_enums.PROJECT_ROLE_WRITER.String(), type_enums.PROJECT_ROLE_READER.String()) {
+			return &protos.AddUserToProjectsResponse{
+				Code:    pkg_errors.AddUserToProjectsInvalidProjectRole.HTTPStatusCodeInt32(),
+				Success: false,
+				Error: &protos.Error{
+					ErrorCode:    uint64(pkg_errors.AddUserToProjectsInvalidProjectRole.Code),
+					ErrorMessage: pkg_errors.AddUserToProjectsInvalidProjectRole.Error,
+					HumanMessage: pkg_errors.AddUserToProjectsInvalidProjectRole.ErrorMessage,
+				},
+			}, nil
+		}
+		projectIds = append(projectIds, projectRole.GetProjectId())
+		projectRoles[projectRole.GetProjectId()] = projectRole.GetProjectRole()
+	}
+
+	projects, err := wProjectApi.projectService.GetAllByOrganization(ctx, auth, currentOrgRole.OrganizationId, projectIds)
 	if err != nil {
 		wProjectApi.logger.Errorf("projectService.GetAllByOrganization from grpc with err %v", err)
-		return utils.Error[protos.AddUsersToProjectResponse](
-			err,
-			"Please select valid projects and retry.",
-		)
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsInvalidProjects.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsInvalidProjects.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsInvalidProjects.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsInvalidProjects.ErrorMessage,
+			},
+		}, nil
 	}
-	projectIds := make([]uint64, 0, len(projects))
-	projectNames := make([]string, 0, len(projects))
+	existingProjectRoles, err := wProjectApi.userService.GetProjectRolesForUsers(ctx, projectIds, []uint64{eUser.Id})
+	if err != nil {
+		wProjectApi.logger.Errorf("unable to get existing project roles for assignment err %v", err)
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsCreateProjectRoles.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsCreateProjectRoles.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsCreateProjectRoles.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsCreateProjectRoles.ErrorMessage,
+			},
+		}, errors.New(pkg_errors.AddUserToProjectsCreateProjectRoles.Error)
+	}
+	if len(existingProjectRoles) > 0 {
+		return &protos.AddUserToProjectsResponse{
+			Code:    pkg_errors.AddUserToProjectsUserAlreadyInProject.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.AddUserToProjectsUserAlreadyInProject.Code),
+				ErrorMessage: pkg_errors.AddUserToProjectsUserAlreadyInProject.Error,
+				HumanMessage: pkg_errors.AddUserToProjectsUserAlreadyInProject.ErrorMessage,
+			},
+		}, nil
+	}
+
+	for _, projectRole := range irRequest.GetProjectRoles() {
+		_, err = wProjectApi.userService.CreateProjectRole(ctx, auth, eUser.Id, projectRole.GetProjectRole(), projectRole.GetProjectId(), org.Status)
+		if err != nil {
+			wProjectApi.logger.Errorf("unable to create project role err %v", err)
+			return &protos.AddUserToProjectsResponse{
+				Code:    pkg_errors.AddUserToProjectsCreateProjectRoles.HTTPStatusCodeInt32(),
+				Success: false,
+				Error: &protos.Error{
+					ErrorCode:    uint64(pkg_errors.AddUserToProjectsCreateProjectRoles.Code),
+					ErrorMessage: pkg_errors.AddUserToProjectsCreateProjectRoles.Error,
+					HumanMessage: pkg_errors.AddUserToProjectsCreateProjectRoles.ErrorMessage,
+				},
+			}, errors.New(pkg_errors.AddUserToProjectsCreateProjectRoles.Error)
+		}
+	}
+
+	out := make([]*protos.Project, 0, len(projects))
 	for _, project := range projects {
-		projectIds = append(projectIds, project.Id)
-		projectNames = append(projectNames, project.Name)
+		out = append(out, &protos.Project{
+			Id:          project.Id,
+			Name:        project.Name,
+			Description: project.Description,
+			Status:      project.Status.String(),
+			CreatedDate: timestamppb.New(time.Time(project.CreatedDate)),
+		})
+	}
+	return &protos.AddUserToProjectsResponse{
+		Code:    200,
+		Success: true,
+		Data:    out,
+	}, nil
+}
+
+func (wProjectApi *webProjectGRPCApi) DeleteUserFromProject(ctx context.Context, irRequest *protos.DeleteUserFromProjectRequest) (*protos.DeleteUserFromProjectResponse, error) {
+	auth, isAuthenticated := types.GetAuthPrincipleGPRC(ctx)
+	if !isAuthenticated {
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectUnauthenticated.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectUnauthenticated.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectUnauthenticated.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectUnauthenticated.ErrorMessage,
+			},
+		}, errors.New(pkg_errors.DeleteUserFromProjectUnauthenticated.Error)
+	}
+	currentOrgRole := auth.GetOrganizationRole()
+	if currentOrgRole == nil {
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectMissingOrganization.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectMissingOrganization.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectMissingOrganization.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectMissingOrganization.ErrorMessage,
+			},
+		}, errors.New(pkg_errors.DeleteUserFromProjectMissingOrganization.Error)
+	}
+	if !validator.OneOf(currentOrgRole.Role, type_enums.ORGANIZATION_ROLE_OWNER.String(), type_enums.ORGANIZATION_ROLE_ADMIN.String()) {
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectUnauthorized.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectUnauthorized.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectUnauthorized.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectUnauthorized.ErrorMessage,
+			},
+		}, errors.New(pkg_errors.DeleteUserFromProjectUnauthorized.Error)
+	}
+	if !validator.NonZero(irRequest.GetUserId()) {
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectInvalidUser.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectInvalidUser.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectInvalidUser.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectInvalidUser.ErrorMessage,
+			},
+		}, nil
+	}
+	if !validator.NonZero(irRequest.GetProjectId()) {
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectInvalidProject.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectInvalidProject.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectInvalidProject.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectInvalidProject.ErrorMessage,
+			},
+		}, nil
 	}
 
-	eUser, err := wProjectApi.userService.Get(ctx, irRequest.GetEmail())
+	eUser, err := wProjectApi.userService.GetUser(ctx, irRequest.GetUserId())
 	if err != nil {
-		source := "invited-by-other"
-		parts := strings.Split(irRequest.GetEmail(), "@")
-		// user creation for invite, we will create a random password and send email to reset password flow
-		ePrinciple, err := wProjectApi.userService.Create(ctx, parts[0], irRequest.GetEmail(), ciphers.RandomHash("rpd_"), type_enums.RECORD_INVITED, &source)
-		if err != nil {
-			wProjectApi.logger.Errorf("unable to create user for invite err %v", err)
-			return utils.Error[protos.AddUsersToProjectResponse](
-				err,
-				"Unable to add user to project, please try again in sometime.",
-			)
-		}
-
-		// user is newly created for invite, so we will create organization role for the user
-		_, err = wProjectApi.userService.CreateOrganizationRole(ctx, auth, type_enums.ORGANIZATION_ROLE_MEMBER.String(), *ePrinciple.GetUserId(), currentOrgRole.OrganizationId, type_enums.RECORD_INVITED)
-		if err != nil {
-			wProjectApi.logger.Errorf("unable to create organization role err %v", err)
-			return utils.Error[protos.AddUsersToProjectResponse](
-				err,
-				"Unable to add user to project, please try again in sometime.",
-			)
-		}
-		_, err = wProjectApi.userService.CreateProjectRoles(ctx, auth, *ePrinciple.GetUserId(), irRequest.GetRole(), projectIds, type_enums.RECORD_INVITED)
-		if err != nil {
-			wProjectApi.logger.Errorf("unable to create project role for invite err %v", err)
-			return utils.Error[protos.AddUsersToProjectResponse](
-				err,
-				"Unable to add user to project, please try again in sometime.",
-			)
-		}
-		if err = wProjectApi.emailerClient.EmailRichText(
-			ctx,
-			external_clients.Contact{
-				Name:  "",
-				Email: irRequest.GetEmail(),
+		wProjectApi.logger.Errorf("unable to get user for project delete err %v", err)
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectInvalidUser.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectInvalidUser.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectInvalidUser.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectInvalidUser.ErrorMessage,
 			},
-			fmt.Sprintf("[RapidaAI] %s has invited you to join the %s organization", auth.GetUserInfo().Name, currentOrgRole.OrganizationName),
-			external_emailer_template.INVITE_MEMBER_TEMPLATE,
-			map[string]string{
-				"inviter_name": auth.GetUserInfo().Name,
-				"project_name": strings.Join(projectNames, ","),
-				"invite_url":   fmt.Sprintf("%s/auth/signup?utm_source=invite&utm_param=%d", wProjectApi.cfg.BaseUrl(), currentOrgRole.OrganizationId),
-			},
-		); err != nil {
-			wProjectApi.logger.Errorf("error while sending invite email %v", err)
-		}
-
-	} else {
-		org, err := wProjectApi.userService.GetAnyOrganizationRole(ctx, eUser.GetId())
-		if err != nil {
-			_, err = wProjectApi.userService.CreateOrganizationRole(ctx, auth, type_enums.ORGANIZATION_ROLE_MEMBER.String(), eUser.GetId(), currentOrgRole.OrganizationId, eUser.Status)
-			if err != nil {
-				wProjectApi.logger.Errorf("unable to create organization role err %v", err)
-				return utils.Error[protos.AddUsersToProjectResponse](
-					err,
-					"Unable to add user to project, please try again in sometime.",
-				)
-			}
-		} else if org.GetOrganizationId() != currentOrgRole.OrganizationId {
-			return utils.Error[protos.AddUsersToProjectResponse](
-				errors.New("user is already part of another organization"),
-				"User is part of another organization, please ask the user to switch to this organization before adding to project.",
-			)
-		}
-
-		_, err = wProjectApi.userService.CreateProjectRoles(ctx, auth, eUser.Id, irRequest.GetRole(), projectIds, eUser.Status)
-		if err != nil {
-			wProjectApi.logger.Errorf("unable to create project role for invite err %v", err)
-			return utils.Error[protos.AddUsersToProjectResponse](
-				err,
-				"Unable to add user to project, please try again in sometime.",
-			)
-		}
-		if err = wProjectApi.emailerClient.EmailRichText(
-			ctx,
-			external_clients.Contact{
-				Name:  "",
-				Email: irRequest.GetEmail(),
-			},
-			fmt.Sprintf("[RapidaAI] %s has invited you to join the %s organization", auth.GetUserInfo().Name, currentOrgRole.OrganizationName),
-			external_emailer_template.INVITE_MEMBER_TEMPLATE,
-			map[string]string{
-				"inviter_name": auth.GetUserInfo().Name,
-				"project_name": strings.Join(projectNames, ","),
-				"invite_url":   fmt.Sprintf("%s/auth/signup?utm_source=invite&utm_param=%d", wProjectApi.cfg.BaseUrl(), currentOrgRole.OrganizationId),
-			},
-		); err != nil {
-			wProjectApi.logger.Errorf("error while sending invite email %v", err)
-		}
-
+		}, nil
 	}
-	out := []*protos.Project{}
-	err = utils.Cast(projects, &out)
-	if err != nil {
-		wProjectApi.logger.Errorf("unable to cast project credential to proto object %v", err)
+	org, err := wProjectApi.userService.GetAnyOrganizationRole(ctx, eUser.GetId())
+	if err != nil || org.GetOrganizationId() != currentOrgRole.OrganizationId || !validator.OneOf(org.Status.String(), type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()) {
+		if err != nil {
+			wProjectApi.logger.Errorf("unable to get organization role for project delete err %v", err)
+		}
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectUserNotInOrg.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectUserNotInOrg.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectUserNotInOrg.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectUserNotInOrg.ErrorMessage,
+			},
+		}, nil
 	}
-	return utils.Success[protos.AddUsersToProjectResponse, []*protos.Project](out)
+	if _, err = wProjectApi.projectService.GetAllByOrganization(ctx, auth, currentOrgRole.OrganizationId, []uint64{irRequest.GetProjectId()}); err != nil {
+		wProjectApi.logger.Errorf("projectService.GetAllByOrganization from grpc with err %v", err)
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectInvalidProject.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectInvalidProject.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectInvalidProject.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectInvalidProject.ErrorMessage,
+			},
+		}, nil
+	}
+	projectRole, err := wProjectApi.userService.GetActiveOrInvitedProjectRole(ctx, eUser.GetId(), irRequest.GetProjectId())
+	if err != nil || !validator.OneOf(projectRole.Status.String(), type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()) {
+		if err != nil {
+			wProjectApi.logger.Errorf("unable to get project role for project delete err %v", err)
+		}
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectUserNotInProject.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectUserNotInProject.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectUserNotInProject.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectUserNotInProject.ErrorMessage,
+			},
+		}, nil
+	}
 
+	if err = wProjectApi.userService.ArchiveUserFromProject(ctx, auth, eUser.GetId(), irRequest.GetProjectId()); err != nil {
+		wProjectApi.logger.Errorf("unable to archive user from project err %v", err)
+		return &protos.DeleteUserFromProjectResponse{
+			Code:    pkg_errors.DeleteUserFromProjectArchiveRole.HTTPStatusCodeInt32(),
+			Success: false,
+			Error: &protos.Error{
+				ErrorCode:    uint64(pkg_errors.DeleteUserFromProjectArchiveRole.Code),
+				ErrorMessage: pkg_errors.DeleteUserFromProjectArchiveRole.Error,
+				HumanMessage: pkg_errors.DeleteUserFromProjectArchiveRole.ErrorMessage,
+			},
+		}, errors.New(pkg_errors.DeleteUserFromProjectArchiveRole.Error)
+	}
+
+	return &protos.DeleteUserFromProjectResponse{
+		Code:    200,
+		Success: true,
+		Id:      eUser.GetId(),
+	}, nil
 }
 
 /*

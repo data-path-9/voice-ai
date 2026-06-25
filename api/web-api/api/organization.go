@@ -13,6 +13,8 @@ import (
 	internal_organization_service "github.com/rapidaai/api/web-api/internal/service/organization"
 	internal_user_service "github.com/rapidaai/api/web-api/internal/service/user"
 	internal_vault_service "github.com/rapidaai/api/web-api/internal/service/vault"
+	external_clients "github.com/rapidaai/pkg/clients/external"
+	external_emailer "github.com/rapidaai/pkg/clients/external/emailer"
 	commons "github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/connectors"
 	"github.com/rapidaai/pkg/types"
@@ -30,6 +32,7 @@ type webOrganizationApi struct {
 	userService         internal_service.UserService
 	vaultService        internal_service.VaultService
 	projectService      internal_service.ProjectService
+	emailerClient       external_clients.Emailer
 }
 
 type webOrganizationRPCApi struct {
@@ -52,6 +55,7 @@ func NewOrganizationRPC(config *config.WebAppConfig, logger commons.Logger,
 			redis:               redis,
 			organizationService: internal_organization_service.NewOrganizationService(logger, postgres),
 			userService:         internal_user_service.NewUserService(logger, postgres),
+			emailerClient:       external_emailer.NewEmailer(config.EmailerConfig, logger),
 		},
 	}
 }
@@ -69,6 +73,7 @@ func NewOrganizationGRPC(config *config.WebAppConfig, logger commons.Logger,
 			userService:         internal_user_service.NewUserService(logger, postgres),
 			projectService:      internal_project_service.NewProjectService(logger, postgres),
 			vaultService:        internal_vault_service.NewVaultService(logger, postgres),
+			emailerClient:       external_emailer.NewEmailer(config.EmailerConfig, logger),
 		},
 	}
 }

@@ -470,15 +470,81 @@ class GetAllProjectResponse(_message.Message):
     paginated: _common_pb2.Paginated
     def __init__(self, code: _Optional[int] = ..., success: bool = ..., data: _Optional[_Iterable[_Union[Project, _Mapping]]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ..., paginated: _Optional[_Union[_common_pb2.Paginated, _Mapping]] = ...) -> None: ...
 
-class AddUsersToProjectRequest(_message.Message):
-    __slots__ = ("email", "role", "projectIds")
+class ProjectRoleAssignment(_message.Message):
+    __slots__ = ("projectId", "projectRole")
+    PROJECTID_FIELD_NUMBER: _ClassVar[int]
+    PROJECTROLE_FIELD_NUMBER: _ClassVar[int]
+    projectId: int
+    projectRole: str
+    def __init__(self, projectId: _Optional[int] = ..., projectRole: _Optional[str] = ...) -> None: ...
+
+class InviteUserToOrganizationRequest(_message.Message):
+    __slots__ = ("email", "organizationRole", "projectRoles")
     EMAIL_FIELD_NUMBER: _ClassVar[int]
-    ROLE_FIELD_NUMBER: _ClassVar[int]
-    PROJECTIDS_FIELD_NUMBER: _ClassVar[int]
+    ORGANIZATIONROLE_FIELD_NUMBER: _ClassVar[int]
+    PROJECTROLES_FIELD_NUMBER: _ClassVar[int]
     email: str
-    role: str
-    projectIds: _containers.RepeatedScalarFieldContainer[int]
-    def __init__(self, email: _Optional[str] = ..., role: _Optional[str] = ..., projectIds: _Optional[_Iterable[int]] = ...) -> None: ...
+    organizationRole: str
+    projectRoles: _containers.RepeatedCompositeFieldContainer[ProjectRoleAssignment]
+    def __init__(self, email: _Optional[str] = ..., organizationRole: _Optional[str] = ..., projectRoles: _Optional[_Iterable[_Union[ProjectRoleAssignment, _Mapping]]] = ...) -> None: ...
+
+class InviteUserToOrganizationResponse(_message.Message):
+    __slots__ = ("code", "success", "data", "error")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    code: int
+    success: bool
+    data: _common_pb2.User
+    error: _common_pb2.Error
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., data: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ...) -> None: ...
+
+class AddUserToProjectsRequest(_message.Message):
+    __slots__ = ("userId", "projectRoles")
+    USERID_FIELD_NUMBER: _ClassVar[int]
+    PROJECTROLES_FIELD_NUMBER: _ClassVar[int]
+    userId: int
+    projectRoles: _containers.RepeatedCompositeFieldContainer[ProjectRoleAssignment]
+    def __init__(self, userId: _Optional[int] = ..., projectRoles: _Optional[_Iterable[_Union[ProjectRoleAssignment, _Mapping]]] = ...) -> None: ...
+
+class DeleteUserFromOrganizationRequest(_message.Message):
+    __slots__ = ("userId",)
+    USERID_FIELD_NUMBER: _ClassVar[int]
+    userId: int
+    def __init__(self, userId: _Optional[int] = ...) -> None: ...
+
+class DeleteUserFromOrganizationResponse(_message.Message):
+    __slots__ = ("code", "success", "id", "error")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    code: int
+    success: bool
+    id: int
+    error: _common_pb2.Error
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., id: _Optional[int] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ...) -> None: ...
+
+class DeleteUserFromProjectRequest(_message.Message):
+    __slots__ = ("userId", "projectId")
+    USERID_FIELD_NUMBER: _ClassVar[int]
+    PROJECTID_FIELD_NUMBER: _ClassVar[int]
+    userId: int
+    projectId: int
+    def __init__(self, userId: _Optional[int] = ..., projectId: _Optional[int] = ...) -> None: ...
+
+class DeleteUserFromProjectResponse(_message.Message):
+    __slots__ = ("code", "success", "id", "error")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    code: int
+    success: bool
+    id: int
+    error: _common_pb2.Error
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., id: _Optional[int] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ...) -> None: ...
 
 class ArchiveProjectRequest(_message.Message):
     __slots__ = ("id",)
@@ -498,7 +564,7 @@ class ArchiveProjectResponse(_message.Message):
     error: _common_pb2.Error
     def __init__(self, code: _Optional[int] = ..., success: bool = ..., id: _Optional[int] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ...) -> None: ...
 
-class AddUsersToProjectResponse(_message.Message):
+class AddUserToProjectsResponse(_message.Message):
     __slots__ = ("code", "success", "data", "error")
     CODE_FIELD_NUMBER: _ClassVar[int]
     SUCCESS_FIELD_NUMBER: _ClassVar[int]

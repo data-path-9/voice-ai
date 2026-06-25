@@ -1,22 +1,17 @@
 import React from 'react';
 import { Tag } from '@carbon/react';
-import { Edit, UserAdmin, UserRole, View } from '@carbon/icons-react';
+import { UserAdmin, UserMultiple, UserRole } from '@carbon/icons-react';
 
-export const RoleIndicator = ({ role, size = 'medium' }) => {
+export const OrganizationRoleIndicator = ({ role, size = 'medium' }) => {
   const roleConfig = {
-    'super admin': {
-      type: 'purple',
-      display: 'Super Admin',
+    owner: {
+      type: 'red',
+      display: 'Owner',
       Icon: UserAdmin,
     },
-    SUPER_ADMIN: {
-      type: 'purple',
-      display: 'Super Admin',
-      Icon: UserAdmin,
-    },
-    'SUPER ADMIN': {
-      type: 'purple',
-      display: 'Super Admin',
+    OWNER: {
+      type: 'red',
+      display: 'Owner',
       Icon: UserAdmin,
     },
     admin: {
@@ -29,30 +24,20 @@ export const RoleIndicator = ({ role, size = 'medium' }) => {
       display: 'Admin',
       Icon: UserRole,
     },
-    writer: {
+    member: {
       type: 'green',
-      display: 'Writer',
-      Icon: Edit,
+      display: 'Member',
+      Icon: UserMultiple,
     },
-    WRITER: {
+    MEMBER: {
       type: 'green',
-      display: 'Writer',
-      Icon: Edit,
-    },
-    reader: {
-      type: 'cyan',
-      display: 'Reader',
-      Icon: View,
-    },
-    READER: {
-      type: 'cyan',
-      display: 'Reader',
-      Icon: View,
+      display: 'Member',
+      Icon: UserMultiple,
     },
     DEFAULT: {
       type: 'gray',
-      display: 'User',
-      Icon: UserRole,
+      display: 'Member',
+      Icon: UserMultiple,
     },
   };
   const config = role

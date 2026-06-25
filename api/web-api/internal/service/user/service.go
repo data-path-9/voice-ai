@@ -2,11 +2,13 @@ package internal_user_service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	internal_entity "github.com/rapidaai/api/web-api/internal/entity"
@@ -275,10 +277,10 @@ func (aS *userService) CreateOrganizationRole(ctx context.Context, auth types.Pr
 	return ct, nil
 }
 
-func (aS *userService) GetProjectRole(ctx context.Context, userId uint64, projectId uint64) (*internal_entity.UserProjectRole, error) {
+func (aS *userService) GetActiveOrInvitedProjectRole(ctx context.Context, userId uint64, projectId uint64) (*internal_entity.UserProjectRole, error) {
 	db := aS.postgres.DB(ctx)
 	var ct internal_entity.UserProjectRole
-	tx := db.First(&ct, "user_auth_id = ? AND project_id = ?", userId, projectId)
+	tx := db.First(&ct, "user_auth_id = ? AND project_id = ? AND status IN ?", userId, projectId, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()})
 	if tx.Error != nil {
 		aS.logger.Errorf("exception in DB transaction %v", tx.Error)
 		return nil, tx.Error
@@ -347,12 +349,93 @@ func (aS *userService) CreateProjectRoles(ctx context.Context, auth types.Princi
 	return projectRoles, nil
 }
 
+func (aS *userService) ArchiveUserFromOrganization(ctx context.Context, auth types.Principle, userId uint64, organizationId uint64) error {
+	db := aS.postgres.DB(ctx)
+	tx := db.Begin()
+	if tx.Error != nil {
+		aS.logger.Errorf("exception in DB transaction %v", tx.Error)
+		return tx.Error
+	}
+
+	if err := tx.Model(&internal_entity.UserAuth{}).
+		Where("id = ?", userId).
+		Updates(&internal_entity.UserAuth{
+			Mutable: gorm_models.Mutable{
+				Status:    type_enums.RECORD_ARCHIEVE,
+				UpdatedBy: auth.GetUserInfo().Id,
+			},
+		}).Error; err != nil {
+		tx.Rollback()
+		aS.logger.Errorf("exception in DB transaction %v", err)
+		return err
+	}
+	if err := tx.Model(&internal_entity.UserOrganizationRole{}).
+		Where("user_auth_id = ? AND organization_id = ? AND status IN ?", userId, organizationId, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()}).
+		Updates(&internal_entity.UserOrganizationRole{
+			Mutable: gorm_models.Mutable{
+				Status:    type_enums.RECORD_ARCHIEVE,
+				UpdatedBy: auth.GetUserInfo().Id,
+			},
+		}).Error; err != nil {
+		tx.Rollback()
+		aS.logger.Errorf("exception in DB transaction %v", err)
+		return err
+	}
+	if err := tx.Model(&internal_entity.UserProjectRole{}).
+		Where("user_auth_id = ? AND status IN ?", userId, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()}).
+		Updates(&internal_entity.UserProjectRole{
+			Mutable: gorm_models.Mutable{
+				Status:    type_enums.RECORD_ARCHIEVE,
+				UpdatedBy: auth.GetUserInfo().Id,
+			},
+		}).Error; err != nil {
+		tx.Rollback()
+		aS.logger.Errorf("exception in DB transaction %v", err)
+		return err
+	}
+
+	return tx.Commit().Error
+}
+
+func (aS *userService) ArchiveUserFromProject(ctx context.Context, auth types.Principle, userId uint64, projectId uint64) error {
+	db := aS.postgres.DB(ctx)
+	tx := db.Model(&internal_entity.UserProjectRole{}).
+		Where("user_auth_id = ? AND project_id = ? AND status IN ?", userId, projectId, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()}).
+		Updates(&internal_entity.UserProjectRole{
+			Mutable: gorm_models.Mutable{
+				Status:    type_enums.RECORD_ARCHIEVE,
+				UpdatedBy: auth.GetUserInfo().Id,
+			},
+		})
+	if tx.Error != nil {
+		aS.logger.Errorf("exception in DB transaction %v", tx.Error)
+		return tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		return fmt.Errorf("user project role not found")
+	}
+	return nil
+}
+
 func (aS *userService) GetOrganizationRole(ctx context.Context, userId uint64) (*internal_entity.UserOrganizationRole, error) {
 	db := aS.postgres.DB(ctx)
 	var ct internal_entity.UserOrganizationRole
 	tx := db.Last(&ct, "user_auth_id = ? AND status = ?", userId, type_enums.RECORD_ACTIVE.String())
 	if tx.Error != nil {
 		aS.logger.Errorf("exception in DB transaction %v", tx.Error)
+		return nil, tx.Error
+	}
+	return &ct, nil
+}
+
+func (aS *userService) GetActiveOrInvitedOrganizationRole(ctx context.Context, userId uint64) (*internal_entity.UserOrganizationRole, error) {
+	db := aS.postgres.DB(ctx)
+	var ct internal_entity.UserOrganizationRole
+	tx := db.Last(&ct, "user_auth_id = ? AND status IN ?", userId, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()})
+	if tx.Error != nil {
+		if !errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			aS.logger.Errorf("exception in DB transaction %v", tx.Error)
+		}
 		return nil, tx.Error
 	}
 	return &ct, nil
@@ -503,6 +586,23 @@ func (aS *userService) UpdateUser(ctx context.Context, auth types.Principle, use
 	}
 }
 
+func (aS *userService) UpdateUserStatus(ctx context.Context, auth types.Principle, userId uint64, status type_enums.RecordState) error {
+	db := aS.postgres.DB(ctx)
+	tx := db.Model(&internal_entity.UserAuth{}).
+		Where("id = ?", userId).
+		Updates(&internal_entity.UserAuth{
+			Mutable: gorm_models.Mutable{
+				Status:    status,
+				UpdatedBy: auth.GetUserInfo().Id,
+			},
+		})
+	if tx.Error != nil {
+		aS.logger.Errorf("exception in DB transaction %v", tx.Error)
+		return tx.Error
+	}
+	return nil
+}
+
 func (as *userService) CreateSocial(ctx context.Context, userId uint64, id string, token string, source string, verified bool) (*internal_entity.UserSocial, error) {
 	db := as.postgres.DB(ctx)
 	ct := &internal_entity.UserSocial{
@@ -644,7 +744,7 @@ func (uS *userService) GetAllUserRolesForOrg(ctx context.Context, organizationId
 func (aS *userService) GetProjectRolesForUsers(ctx context.Context, pIds []uint64, uIds []uint64) ([]*internal_entity.UserProjectRole, error) {
 	db := aS.postgres.DB(ctx)
 	var pr []*internal_entity.UserProjectRole
-	if err := db.Where("project_id IN ? and user_auth_id IN ? and status = ?", pIds, uIds, type_enums.RECORD_ACTIVE.String()).Find(&pr).Error; err != nil {
+	if err := db.Where("project_id IN ? and user_auth_id IN ? and status IN ?", pIds, uIds, []string{type_enums.RECORD_ACTIVE.String(), type_enums.RECORD_INVITED.String()}).Find(&pr).Error; err != nil {
 		return nil, err
 	}
 	return pr, nil

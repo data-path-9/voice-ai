@@ -4992,6 +4992,9 @@
   .break-all {
     word-break: break-all;
   }
+  .\!whitespace-nowrap {
+    white-space: nowrap !important;
+  }
   .whitespace-nowrap {
     white-space: nowrap;
   }
@@ -9771,6 +9774,12 @@
   .\[\&_\.cds--list-box\]\:\!rounded-none {
     & .cds--list-box {
       border-radius: 0 !important;
+    }
+  }
+  .\[\&_\.cds--list-box\]\:\!border-none {
+    & .cds--list-box {
+      --tw-border-style: none !important;
+      border-style: none !important;
     }
   }
   .\[\&_\.cds--select-input\]\:\!border-none {

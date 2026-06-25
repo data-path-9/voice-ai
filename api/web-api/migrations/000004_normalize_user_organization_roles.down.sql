@@ -1,0 +1,2 @@
+-- This data normalization is intentionally irreversible because the original
+-- invalid role values cannot be reconstructed after they are set to member.
