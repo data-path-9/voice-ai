@@ -57,8 +57,8 @@ func (conversationService *assistantConversationService) GetAllConversationMessa
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(orderClause).Find(&conversationMessage)
@@ -145,8 +145,8 @@ func (conversationService *assistantConversationService) GetAllAssistantMessage(
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(orderClause).Find(&conversationMessage)
@@ -235,8 +235,8 @@ func (conversationService *assistantConversationService) GetAllMessage(
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(orderClause).Find(&conversationMessage)

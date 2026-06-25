@@ -132,8 +132,8 @@ func (eService *endpointService) GetAll(ctx context.Context, auth types.SimplePr
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{
@@ -166,8 +166,8 @@ func (eService *endpointService) GetAllEndpointProviderModel(ctx context.Context
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{

@@ -32,8 +32,8 @@ func TestNewPaginated(t *testing.T) {
 	var count int64
 	p := NewPaginated(1, 10, &count, db)
 
-	assert.Equal(t, 1, p.Page)
-	assert.Equal(t, 10, p.PageSize)
+	assert.Equal(t, uint32(1), p.Page)
+	assert.Equal(t, uint32(10), p.PageSize)
 	assert.Equal(t, &count, p.Count)
 	assert.Equal(t, db, p.DB)
 }
@@ -50,8 +50,8 @@ func TestPaginate(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		page        int
-		pageSize    int
+		page        uint32
+		pageSize    uint32
 		expectedLen int
 	}{
 		{
@@ -89,12 +89,6 @@ func TestPaginate(t *testing.T) {
 			page:        1,
 			pageSize:    150,
 			expectedLen: 25,
-		},
-		{
-			name:        "page 1, size -5",
-			page:        1,
-			pageSize:    -5,
-			expectedLen: 10,
 		},
 	}
 

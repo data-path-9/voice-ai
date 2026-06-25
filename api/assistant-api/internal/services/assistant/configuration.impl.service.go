@@ -112,8 +112,8 @@ func (s *assistantConfigurationService) GetAll(
 	tx := qry.Scopes(
 		gorm_models.Paginate(
 			gorm_models.NewPaginated(
-				int(page),
-				int(pageSize),
+				page,
+				pageSize,
 				&cnt,
 				qry,
 			),

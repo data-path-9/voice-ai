@@ -6,11 +6,10 @@
 package internal_twilio_telephony
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +21,7 @@ import (
 	internal_telephony_base "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/base"
 	internal_telephony_media "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/media"
 	internal_twilio "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio/internal"
+	"github.com/rapidaai/api/assistant-api/internal/observability"
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
@@ -31,6 +31,23 @@ import (
 type fakeTwilioMediaEngine struct {
 	providerFrame internal_telephony_media.ProviderAudioFrame
 	processError  error
+}
+
+type recordingObserver struct {
+	records []observability.Record
+}
+
+func (r *recordingObserver) Record(_ context.Context, _ observability.Scope, records ...observability.Record) error {
+	r.records = append(r.records, records...)
+	return nil
+}
+
+func (r *recordingObserver) AddCollectors(...observability.Collector) error {
+	return nil
+}
+
+func (r *recordingObserver) Close(context.Context) error {
+	return nil
 }
 
 func (engine *fakeTwilioMediaEngine) ProcessProviderAudioFrame(frame internal_telephony_media.ProviderAudioFrame) (internal_telephony_media.InputAudioFrame, error) {
@@ -335,14 +352,11 @@ func TestSend_EndConversation_DoesNotCancelStreamer(t *testing.T) {
 }
 
 func TestSend_Disconnection_LogsTwilioClientError(t *testing.T) {
-	logDirectory := t.TempDir()
 	logger, err := commons.NewApplicationLogger(
-		commons.EnableConsole(false),
-		commons.EnableFile(true),
-		commons.Path(logDirectory),
-		commons.Name("twilio-disconnection"),
+		commons.EnableFile(false),
 	)
 	require.NoError(t, err)
+	observer := &recordingObserver{}
 
 	conn, cleanup := testWSPair(t)
 	defer cleanup()
@@ -356,7 +370,7 @@ func TestSend_Disconnection_LogsTwilioClientError(t *testing.T) {
 				ChannelUUID:    "CA123",
 			},
 			nil,
-			nil,
+			observer,
 		),
 		connection: conn,
 	}
@@ -365,14 +379,19 @@ func TestSend_Disconnection_LogsTwilioClientError(t *testing.T) {
 		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_USER,
 	})
 	require.NoError(t, err)
-	require.NoError(t, logger.Sync())
 
-	logBytes, err := os.ReadFile(filepath.Join(logDirectory, "twilio-disconnection.log"))
-	require.NoError(t, err)
-	logContent := string(logBytes)
-	assert.Contains(t, logContent, "Failed to create Twilio client for server-side disconnect")
-	assert.Contains(t, logContent, "CA123")
-	assert.Contains(t, logContent, protos.ConversationDisconnection_DISCONNECTION_TYPE_USER.String())
+	require.Len(t, observer.records, 2)
+	logRecord, ok := observer.records[0].(observability.RecordLog)
+	require.True(t, ok)
+	assert.Equal(t, "Failed to create Twilio client for server-side disconnect", logRecord.Message)
+	assert.Equal(t, "CA123", logRecord.Attributes["conversation_uuid"])
+	assert.Equal(t, protos.ConversationDisconnection_DISCONNECTION_TYPE_USER.String(), logRecord.Attributes["disconnection_type"])
+
+	metricRecord, ok := observer.records[1].(observability.RecordMetric)
+	require.True(t, ok)
+	require.Len(t, metricRecord.Metrics, 1)
+	assert.Equal(t, observability.MetricCallStatus, metricRecord.Metrics[0].Name)
+	assert.Equal(t, "FAILED", metricRecord.Metrics[0].Value)
 }
 
 func TestSend_TransferConversation_MissingTarget(t *testing.T) {

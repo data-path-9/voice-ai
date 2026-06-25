@@ -168,8 +168,8 @@ func (s *assistantHTTPLogService) GetAllLog(
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{

@@ -540,8 +540,8 @@ func (eService assistantDeploymentService) GetAllAssistantApiDeployment(ctx cont
 		Preload("OutputAudio", "audio_type = ?", "output").
 		Preload("OutputAudio.AudioOptions").
 		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
-			int(paginate.GetPage()),
-			int(paginate.GetPageSize()),
+			paginate.GetPage(),
+			paginate.GetPageSize(),
 			&cnt,
 			qry,
 		))).
@@ -574,8 +574,8 @@ func (eService assistantDeploymentService) GetAllAssistantDebuggerDeployment(ctx
 		Preload("OutputAudio", "audio_type = ?", "output").
 		Preload("OutputAudio.AudioOptions").
 		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
-			int(paginate.GetPage()),
-			int(paginate.GetPageSize()),
+			paginate.GetPage(),
+			paginate.GetPageSize(),
 			&cnt,
 			qry,
 		))).
@@ -609,8 +609,8 @@ func (eService assistantDeploymentService) GetAllAssistantPhoneDeployment(ctx co
 		Preload("OutputAudio", "audio_type = ?", "output").
 		Preload("OutputAudio.AudioOptions").
 		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
-			int(paginate.GetPage()),
-			int(paginate.GetPageSize()),
+			paginate.GetPage(),
+			paginate.GetPageSize(),
 			&cnt,
 			qry,
 		))).
@@ -643,8 +643,8 @@ func (eService assistantDeploymentService) GetAllAssistantWebpluginDeployment(ct
 		Preload("OutputAudio", "audio_type = ?", "output").
 		Preload("OutputAudio.AudioOptions").
 		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
-			int(paginate.GetPage()),
-			int(paginate.GetPageSize()),
+			paginate.GetPage(),
+			paginate.GetPageSize(),
 			&cnt,
 			qry,
 		))).
@@ -674,8 +674,8 @@ func (eService assistantDeploymentService) GetAllAssistantWhatsappDeployment(ctx
 	tx := qry.
 		Preload("WhatsappOptions").
 		Scopes(gorm_models.Paginate(gorm_models.NewPaginated(
-			int(paginate.GetPage()),
-			int(paginate.GetPageSize()),
+			paginate.GetPage(),
+			paginate.GetPageSize(),
 			&cnt,
 			qry,
 		))).

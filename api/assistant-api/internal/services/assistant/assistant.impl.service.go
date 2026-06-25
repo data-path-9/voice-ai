@@ -143,8 +143,8 @@ func (eService *assistantService) GetAllAssistantTool(ctx context.Context, auth 
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{
@@ -564,8 +564,8 @@ func (eService *assistantService) GetAll(ctx context.Context, auth types.SimpleP
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{
@@ -606,8 +606,8 @@ func (eService *assistantService) GetAllAssistantProviderModel(
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{
@@ -647,8 +647,8 @@ func (eService *assistantService) GetAllAssistantProviderAgentkit(
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{
@@ -688,8 +688,8 @@ func (eService *assistantService) GetAllAssistantProviderWebsocket(
 		Scopes(gorm_models.
 			Paginate(gorm_models.
 				NewPaginated(
-					int(paginate.GetPage()),
-					int(paginate.GetPageSize()),
+					paginate.GetPage(),
+					paginate.GetPageSize(),
 					&cnt,
 					qry))).
 		Order(clause.OrderByColumn{
