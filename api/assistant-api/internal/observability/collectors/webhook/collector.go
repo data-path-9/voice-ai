@@ -37,6 +37,9 @@ const (
 	WebhookOptionRetryStatusCodesKey = "retry_status_codes"
 	WebhookOptionMaxRetryCountKey    = "max_retry_count"
 	WebhookOptionTimeoutSecondsKey   = "timeout_seconds"
+
+	defaultWebhookTimeoutSeconds uint32 = 60
+	minWebhookTimeoutSeconds     uint32 = 1
 )
 
 type Config struct {
@@ -59,7 +62,7 @@ type Collector struct {
 }
 
 func New(_ context.Context, config Config) observability.Collector {
-	if config.Auth == nil || config.AssistantConfigurationService == nil || config.HTTPLogService == nil {
+	if !validator.NonNil(config.Auth) || !validator.NonNil(config.AssistantConfigurationService) || !validator.NonNil(config.HTTPLogService) {
 		return observability.NoopCollector{}
 	}
 	return &Collector{
@@ -184,48 +187,41 @@ func (c *Collector) send(ctx context.Context, scope observability.Scope, webhook
 	}
 
 	webhookTimeoutSeconds, err := webhookOptions.GetUint32(WebhookOptionTimeoutSecondsKey)
-	if err != nil {
-		webhookTimeoutSeconds = 0
+	if err != nil || !validator.Between(int(webhookTimeoutSeconds), int(minWebhookTimeoutSeconds), int(defaultWebhookTimeoutSeconds)) {
+		webhookTimeoutSeconds = defaultWebhookTimeoutSeconds
 	}
 	webhookRetryStatusCodes := webhookOptions.GetStringSlice(WebhookOptionRetryStatusCodesKey)
 
 	webhookHTTPClient := rest.NewRestClientWithConfig(webhookHTTPURL, webhookHTTPHeaders, webhookTimeoutSeconds)
-	webhookAssistantID := uint64(0)
 	var webhookConversationID *uint64
 	switch typedScope := scope.(type) {
 	case observability.MessageScope:
-		webhookAssistantID = typedScope.AssistantScopeID()
 		scopeConversationID := typedScope.ConversationScopeID()
 		webhookConversationID = &scopeConversationID
 		if !validator.NotBlank(webhookContextID) {
 			webhookContextID = typedScope.ContextID()
 		}
 	case observability.ConversationScope:
-		webhookAssistantID = typedScope.AssistantScopeID()
 		scopeConversationID := typedScope.ConversationScopeID()
 		webhookConversationID = &scopeConversationID
 		if !validator.NotBlank(webhookContextID) {
 			webhookContextID = typedScope.ContextID()
 		}
 	case observability.AssistantScope:
-		webhookAssistantID = typedScope.AssistantScopeID()
 		if !validator.NotBlank(webhookContextID) {
 			webhookContextID = typedScope.ContextID()
 		}
 	}
-	if webhookAssistantID == 0 {
-		webhookAssistantID = c.assistantID
-	}
 	webhookRequestBody := map[string]interface{}{
 		"assistant": map[string]interface{}{
-			"id": webhookAssistantID,
+			"id": fmt.Sprintf("%d", c.assistantID),
 		},
 		"data":  webhookPayload,
 		"event": webhookEventName,
 	}
 	if webhookConversationID != nil && *webhookConversationID != 0 {
 		webhookRequestBody["conversation"] = map[string]interface{}{
-			"id": *webhookConversationID,
+			"id": fmt.Sprintf("%d", *webhookConversationID),
 		}
 	}
 
@@ -291,7 +287,7 @@ func (c *Collector) send(ctx context.Context, scope observability.Scope, webhook
 			webhookConfiguration.Id,
 			webhookEventName,
 			webhookContextID,
-			webhookAssistantID,
+			c.assistantID,
 			webhookConversationID,
 			webhookHTTPURL,
 			webhookHTTPMethod,
