@@ -68,7 +68,7 @@ func (orgG *webOrganizationGRPCApi) InviteUserToOrganization(ctx context.Context
 			},
 		}, nil
 	}
-	if !validator.OneOf(irRequest.GetOrganizationRole(), type_enums.ORGANIZATION_ROLE_OWNER.String(), type_enums.ORGANIZATION_ROLE_ADMIN.String(), type_enums.ORGANIZATION_ROLE_MEMBER.String()) {
+	if !validator.OneOf(irRequest.GetOrganizationRole(), type_enums.ORGANIZATION_ROLE_ADMIN.String(), type_enums.ORGANIZATION_ROLE_MEMBER.String()) {
 		return &protos.InviteUserToOrganizationResponse{
 			Code:    pkg_errors.InviteUserToOrganizationInvalidOrganizationRole.HTTPStatusCodeInt32(),
 			Success: false,

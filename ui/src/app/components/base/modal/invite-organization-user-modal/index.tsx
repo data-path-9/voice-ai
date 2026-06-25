@@ -26,7 +26,6 @@ import {
 } from '@/app/components/project-role-table';
 
 const organizationRoles = [
-  { name: 'Owner', value: 'owner' },
   { name: 'Admin', value: 'admin' },
   { name: 'Member', value: 'member' },
 ];
