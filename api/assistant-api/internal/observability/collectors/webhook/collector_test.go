@@ -75,11 +75,11 @@ func TestCollector_SendsWebhookEventPayload(t *testing.T) {
 		t.Fatalf("CollectWebhook returned error: %v", err)
 	}
 	assistantPayload, ok := got["assistant"].(map[string]interface{})
-	if !ok || assistantPayload["id"] != float64(10) {
+	if !ok || assistantPayload["id"] != "10" {
 		t.Fatalf("unexpected assistant payload: %+v", got)
 	}
 	conversationPayload, ok := got["conversation"].(map[string]interface{})
-	if !ok || conversationPayload["id"] != float64(20) {
+	if !ok || conversationPayload["id"] != "20" {
 		t.Fatalf("unexpected conversation payload: %+v", got)
 	}
 	dataPayload, ok := got["data"].(map[string]interface{})
@@ -108,6 +108,13 @@ func TestCollector_SendsWebhookEventPayload(t *testing.T) {
 	if requestLogCall.status != type_enums.RECORD_COMPLETE || requestLogCall.responseStatus != http.StatusNoContent {
 		t.Fatalf("unexpected request log status: %+v", requestLogCall)
 	}
+	var requestSnapshot map[string]interface{}
+	if err := json.Unmarshal(requestLogCall.requestPayload, &requestSnapshot); err != nil {
+		t.Fatalf("failed to decode request snapshot: %v", err)
+	}
+	if requestSnapshot["timeout_ms"] != float64(defaultWebhookTimeoutSeconds*1000) {
+		t.Fatalf("timeout_ms = %v, want %d", requestSnapshot["timeout_ms"], defaultWebhookTimeoutSeconds*1000)
+	}
 }
 
 func TestNew_DoesNotLoadWebhooks(t *testing.T) {
@@ -135,6 +142,53 @@ func TestNew_DoesNotLoadWebhooks(t *testing.T) {
 	}
 	if configurationService.getAllCalls != 0 {
 		t.Fatalf("New should not load webhooks, got %d calls", configurationService.getAllCalls)
+	}
+}
+
+func TestCollector_DefaultsTooLargeTimeoutSeconds(t *testing.T) {
+	httpLogService := &recordingHTTPLogService{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	organizationID := uint64(30)
+	projectID := uint64(40)
+	auth := &types.ServiceScope{
+		OrganizationId: &organizationID,
+		ProjectId:      &projectID,
+	}
+	configurationService := &recordingAssistantConfigurationService{
+		configurations: []*internal_assistant_entity.AssistantConfiguration{
+			testWebhook(1, []string{observability.CallRinging.String()}, map[string]interface{}{
+				WebhookOptionHTTPURLKey:        server.URL,
+				WebhookOptionTimeoutSecondsKey: uint32(defaultWebhookTimeoutSeconds + 1),
+			}),
+		},
+	}
+	collector := New(context.Background(), Config{
+		Logger:                        testLogger(t),
+		Auth:                          auth,
+		AssistantID:                   10,
+		AssistantConfigurationService: configurationService,
+		HTTPLogService:                httpLogService,
+	})
+
+	err := collector.Collect(context.Background(), observability.AssistantScope{AssistantID: 10}, observability.Context{Auth: auth}, observability.RecordWebhook{
+		Event: observability.CallRinging,
+	})
+	if err != nil {
+		t.Fatalf("CollectWebhook returned error: %v", err)
+	}
+	if len(httpLogService.calls) != 1 {
+		t.Fatalf("expected one request log call, got %d", len(httpLogService.calls))
+	}
+	var requestSnapshot map[string]interface{}
+	if err := json.Unmarshal(httpLogService.calls[0].requestPayload, &requestSnapshot); err != nil {
+		t.Fatalf("failed to decode request snapshot: %v", err)
+	}
+	if requestSnapshot["timeout_ms"] != float64(defaultWebhookTimeoutSeconds*1000) {
+		t.Fatalf("timeout_ms = %v, want %d", requestSnapshot["timeout_ms"], defaultWebhookTimeoutSeconds*1000)
 	}
 }
 
@@ -286,6 +340,7 @@ type webhookHTTPLogCall struct {
 	conversationID *uint64
 	responseStatus int64
 	status         type_enums.RecordState
+	requestPayload []byte
 }
 
 type recordingHTTPLogService struct {
@@ -329,7 +384,7 @@ func (s *recordingHTTPLogService) CreateLog(
 	_ uint32,
 	status type_enums.RecordState,
 	_ *string,
-	_ []byte,
+	requestPayload []byte,
 	_ []byte,
 ) (*internal_assistant_entity.AssistantHTTPLog, error) {
 	s.calls = append(s.calls, webhookHTTPLogCall{
@@ -341,6 +396,7 @@ func (s *recordingHTTPLogService) CreateLog(
 		conversationID: conversationID,
 		responseStatus: responseStatus,
 		status:         status,
+		requestPayload: requestPayload,
 	})
 	return &internal_assistant_entity.AssistantHTTPLog{}, nil
 }
