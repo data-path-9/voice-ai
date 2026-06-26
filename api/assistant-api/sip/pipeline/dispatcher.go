@@ -66,9 +66,7 @@ type CallSetupResult struct {
 	AuthType            string
 	ProjectID           uint64
 	OrganizationID      uint64
-	// CallContext is resolved by the dispatcher and carried in memory into runtime start.
-	// It may be nil when call-context persistence is not configured.
-	CallContext *callcontext.CallContext
+	CallContext         *callcontext.CallContext
 }
 
 type PreparedCallRuntime interface {

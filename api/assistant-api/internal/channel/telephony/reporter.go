@@ -7,6 +7,7 @@
 package channel_telephony
 
 import (
+	"cmp"
 	"context"
 	"strconv"
 	"time"
@@ -64,9 +65,9 @@ func (d *OutboundDispatcher) NewStatusReporter(contextID string) internal_type.P
 				"error", err)
 			return
 		}
-		recordProgress := update.CallStatus == callcontext.CallStatusRinging
-		recordTerminal := update.CallStatus == callcontext.CallStatusFailed || update.CallStatus == callcontext.CallStatusCancelled
-		if !recordProgress && !recordTerminal {
+		if update.CallStatus != callcontext.CallStatusRinging &&
+			update.CallStatus != callcontext.CallStatusFailed &&
+			update.CallStatus != callcontext.CallStatusCancelled {
 			return
 		}
 		if d.conversationService == nil {
@@ -85,35 +86,14 @@ func (d *OutboundDispatcher) NewStatusReporter(contextID string) internal_type.P
 				return
 			}
 		}
-		if recordProgress && currentCallContext.Status != callcontext.StatusPending {
+		if update.CallStatus == callcontext.CallStatusRinging && currentCallContext.Status != callcontext.StatusPending {
 			return
 		}
-
-		metricStatus := "FAILED"
-		eventName := observability.CallFailed
-		message := "Outbound provider call ended before media connection"
-		logLevel := observability.LevelError
-		if recordProgress {
-			metricStatus = "RINGING"
-			eventName = observability.CallRinging
-			message = "Outbound provider call is ringing"
-			logLevel = observability.LevelInfo
-		} else if update.CallStatus == callcontext.CallStatusCancelled {
-			metricStatus = "CANCELLED"
-			eventName = observability.CallCancelled
-		}
-		metricReason := update.FailureReason
-		if metricReason == "" {
-			metricReason = update.DisconnectReason
-		}
-		if metricReason == "" {
-			metricReason = update.ErrorMessage
-		}
-		if metricReason == "" {
-			metricReason = update.CallStatus
-		}
-
 		auth := currentCallContext.ToAuth()
+		scope := observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: currentCallContext.AssistantID},
+			ConversationID: currentCallContext.ConversationID,
+		}
 		observer := observability.New(
 			observability.WithLogger(d.logger),
 			observability.WithAuth(auth),
@@ -128,92 +108,150 @@ func (d *OutboundDispatcher) NewStatusReporter(contextID string) internal_type.P
 					Logger:              d.logger,
 					ConversationService: d.conversationService,
 				}),
-				collectors.NewWithEnv(ctx, d.logger, d.cfg)),
+				collectors.NewWithEnv(ctx, d.logger, d.cfg),
+				collectors.NewWithWebhookConfiguration(ctx, d.logger, auth, currentCallContext.AssistantID, d.configurationService, d.httpLogService),
+			),
 		)
-		if err := observer.AddCollectors(collectors.NewWithWebhookConfiguration(ctx, d.logger, auth, currentCallContext.AssistantID, d.configurationService, d.httpLogService)); err != nil {
-			d.logger.Warnw("observability collector registration failed",
-				"component", "call",
-				"operation", "add_assistant_collectors",
-				"assistant_id", currentCallContext.AssistantID,
-				"context_id", currentCallContext.ContextID,
-				"error", err,
+		defer observer.Close(ctx)
+		if update.CallStatus == callcontext.CallStatusRinging {
+			observer.Record(ctx,
+				scope,
+				observability.RecordLog{
+					Level:   observability.LevelInfo,
+					Message: "Outbound provider call is ringing",
+					Attributes: observability.Attributes{
+						"component":            observability.ComponentCall.String(),
+						"context_id":           currentCallContext.ContextID,
+						"provider":             currentCallContext.Provider,
+						"channel_uuid":         currentCallContext.ChannelUUID,
+						"call_status":          update.CallStatus,
+						"failure_class":        update.FailureClass,
+						"failure_reason":       update.FailureReason,
+						"disconnect_reason":    update.DisconnectReason,
+						"provider_status_code": strconv.Itoa(update.ProviderStatusCode),
+						"retryable":            strconv.FormatBool(update.Retryable),
+						"error":                update.ErrorMessage,
+					},
+				},
+				observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallRinging,
+					Attributes: observability.Attributes{
+						"component":            observability.ComponentCall.String(),
+						"context_id":           currentCallContext.ContextID,
+						"provider":             currentCallContext.Provider,
+						"channel_uuid":         currentCallContext.ChannelUUID,
+						"call_status":          update.CallStatus,
+						"failure_class":        update.FailureClass,
+						"failure_reason":       update.FailureReason,
+						"disconnect_reason":    update.DisconnectReason,
+						"provider_status_code": strconv.Itoa(update.ProviderStatusCode),
+						"retryable":            strconv.FormatBool(update.Retryable),
+					},
+				},
+				observability.RecordWebhook{
+					Event:     observability.CallRinging,
+					ContextID: currentCallContext.ContextID,
+					Payload: map[string]interface{}{
+						"provider":   currentCallContext.Provider,
+						"to":         currentCallContext.CallerNumber,
+						"from":       currentCallContext.FromNumber,
+						"call_id":    currentCallContext.ChannelUUID,
+						"context_id": currentCallContext.ContextID,
+						"direction":  currentCallContext.Direction,
+
+						"call_status":          update.CallStatus,
+						"failure_class":        update.FailureClass,
+						"failure_reason":       update.FailureReason,
+						"disconnect_reason":    update.DisconnectReason,
+						"provider_status_code": update.ProviderStatusCode,
+						"retryable":            update.Retryable,
+						"error":                update.ErrorMessage,
+					},
+				},
+				observability.RecordMetric{
+					Metrics: observability.CallStatusMetric("RINGING", cmp.Or(update.FailureReason, update.DisconnectReason, update.ErrorMessage, update.CallStatus)),
+					Attributes: observability.Attributes{
+						"component":     observability.ComponentCall.String(),
+						"context_id":    currentCallContext.ContextID,
+						"to":            currentCallContext.CallerNumber,
+						"from":          currentCallContext.FromNumber,
+						"provider":      currentCallContext.Provider,
+						"failure_class": update.FailureClass,
+					},
+				},
 			)
+			return
 		}
 
-		if err := observer.Record(ctx,
-			observability.ConversationScope{
-				AssistantScope: observability.AssistantScope{AssistantID: currentCallContext.AssistantID},
-				ConversationID: currentCallContext.ConversationID,
-			},
-			observability.RecordLog{
-				Level:   logLevel,
-				Message: message,
-				Attributes: observability.Attributes{
-					"component":            observability.ComponentCall.String(),
-					"context_id":           currentCallContext.ContextID,
-					"provider":             currentCallContext.Provider,
-					"channel_uuid":         currentCallContext.ChannelUUID,
-					"call_status":          update.CallStatus,
-					"failure_class":        update.FailureClass,
-					"failure_reason":       update.FailureReason,
-					"disconnect_reason":    update.DisconnectReason,
-					"provider_status_code": strconv.Itoa(update.ProviderStatusCode),
-					"retryable":            strconv.FormatBool(update.Retryable),
-					"error":                update.ErrorMessage,
+		if update.CallStatus == callcontext.CallStatusCancelled {
+			observer.Record(ctx,
+				scope,
+				observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Outbound provider call ended before media connection",
+					Attributes: observability.Attributes{
+						"component":            observability.ComponentCall.String(),
+						"context_id":           currentCallContext.ContextID,
+						"provider":             currentCallContext.Provider,
+						"channel_uuid":         currentCallContext.ChannelUUID,
+						"call_status":          update.CallStatus,
+						"failure_class":        update.FailureClass,
+						"failure_reason":       update.FailureReason,
+						"disconnect_reason":    update.DisconnectReason,
+						"provider_status_code": strconv.Itoa(update.ProviderStatusCode),
+						"retryable":            strconv.FormatBool(update.Retryable),
+						"error":                update.ErrorMessage,
+					},
 				},
-			},
-			observability.RecordEvent{
-				Component: observability.ComponentCall,
-				Event:     eventName,
-				Attributes: observability.Attributes{
-					"component":            observability.ComponentCall.String(),
-					"context_id":           currentCallContext.ContextID,
-					"provider":             currentCallContext.Provider,
-					"channel_uuid":         currentCallContext.ChannelUUID,
-					"call_status":          update.CallStatus,
-					"failure_class":        update.FailureClass,
-					"failure_reason":       update.FailureReason,
-					"disconnect_reason":    update.DisconnectReason,
-					"provider_status_code": strconv.Itoa(update.ProviderStatusCode),
-					"retryable":            strconv.FormatBool(update.Retryable),
+				observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallCancelled,
+					Attributes: observability.Attributes{
+						"component":            observability.ComponentCall.String(),
+						"context_id":           currentCallContext.ContextID,
+						"provider":             currentCallContext.Provider,
+						"channel_uuid":         currentCallContext.ChannelUUID,
+						"call_status":          update.CallStatus,
+						"failure_class":        update.FailureClass,
+						"failure_reason":       update.FailureReason,
+						"disconnect_reason":    update.DisconnectReason,
+						"provider_status_code": strconv.Itoa(update.ProviderStatusCode),
+						"retryable":            strconv.FormatBool(update.Retryable),
+					},
 				},
-			},
-			observability.RecordWebhook{
-				Event:     eventName,
-				ContextID: currentCallContext.ContextID,
-				Payload: map[string]interface{}{
-					"context_id":           currentCallContext.ContextID,
-					"provider":             currentCallContext.Provider,
-					"direction":            currentCallContext.Direction,
-					"caller":               currentCallContext.CallerNumber,
-					"from":                 currentCallContext.FromNumber,
-					"channel_uuid":         currentCallContext.ChannelUUID,
-					"call_status":          update.CallStatus,
-					"failure_class":        update.FailureClass,
-					"failure_reason":       update.FailureReason,
-					"disconnect_reason":    update.DisconnectReason,
-					"provider_status_code": update.ProviderStatusCode,
-					"retryable":            update.Retryable,
-					"error":                update.ErrorMessage,
+				observability.RecordWebhook{
+					Event:     observability.CallCancelled,
+					ContextID: currentCallContext.ContextID,
+					Payload: map[string]interface{}{
+						"provider":   currentCallContext.Provider,
+						"to":         currentCallContext.CallerNumber,
+						"from":       currentCallContext.FromNumber,
+						"call_id":    currentCallContext.ChannelUUID,
+						"context_id": currentCallContext.ContextID,
+						"direction":  currentCallContext.Direction,
+
+						"call_status":          update.CallStatus,
+						"failure_class":        update.FailureClass,
+						"failure_reason":       update.FailureReason,
+						"disconnect_reason":    update.DisconnectReason,
+						"provider_status_code": update.ProviderStatusCode,
+						"retryable":            update.Retryable,
+						"error":                update.ErrorMessage,
+					},
 				},
-			},
-			observability.RecordMetric{
-				Metrics: observability.CallStatusMetric(metricStatus, metricReason),
-				Attributes: observability.Attributes{
-					"component":     observability.ComponentCall.String(),
-					"context_id":    currentCallContext.ContextID,
-					"provider":      currentCallContext.Provider,
-					"failure_class": update.FailureClass,
+				observability.RecordMetric{
+					Metrics: observability.CallStatusMetric("CANCELLED", cmp.Or(update.FailureReason, update.DisconnectReason, update.ErrorMessage, update.CallStatus)),
+					Attributes: observability.Attributes{
+						"component":     observability.ComponentCall.String(),
+						"context_id":    currentCallContext.ContextID,
+						"to":            currentCallContext.CallerNumber,
+						"from":          currentCallContext.FromNumber,
+						"provider":      currentCallContext.Provider,
+						"failure_class": update.FailureClass,
+					},
 				},
-			},
-		); err != nil {
-			d.logger.Errorw("Failed to record outbound provider status observability",
-				"contextId", contextID,
-				"call_status", update.CallStatus,
-				"failure_class", update.FailureClass,
-				"error", err)
-		}
-		if recordTerminal {
+			)
 			metadata := observability.DisconnectMetadata(update.DisconnectReason, update.FailureReason, update.ErrorMessage)
 			metadata = append(metadata,
 				&protos.Metadata{Key: observability.MetadataCallStatus, Value: update.CallStatus},
@@ -227,27 +265,100 @@ func (d *OutboundDispatcher) NewStatusReporter(contextID string) internal_type.P
 			if update.ErrorMessage != "" {
 				metadata = append(metadata, &protos.Metadata{Key: observability.MetadataCallError, Value: update.ErrorMessage})
 			}
-			if err := observer.Record(ctx,
-				observability.ConversationScope{
-					AssistantScope: observability.AssistantScope{AssistantID: currentCallContext.AssistantID},
-					ConversationID: currentCallContext.ConversationID,
-				},
+			observer.Record(ctx,
+				scope,
 				observability.RecordMetadata{Metadata: metadata},
-			); err != nil {
-				d.logger.Errorw("Failed to record outbound provider status metadata",
-					"contextId", contextID,
-					"call_status", update.CallStatus,
-					"failure_class", update.FailureClass,
-					"error", err)
-			}
+			)
+			return
 		}
 
-		if err := observer.Close(ctx); err != nil {
-			d.logger.Warnw("Failed to close outbound provider status observability",
-				"contextId", contextID,
-				"call_status", update.CallStatus,
-				"failure_class", update.FailureClass,
-				"error", err)
+		if update.CallStatus == callcontext.CallStatusFailed {
+			observer.Record(ctx,
+				scope,
+				observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Outbound provider call ended before media connection",
+					Attributes: observability.Attributes{
+						"component":            observability.ComponentCall.String(),
+						"context_id":           currentCallContext.ContextID,
+						"provider":             currentCallContext.Provider,
+						"channel_uuid":         currentCallContext.ChannelUUID,
+						"call_status":          update.CallStatus,
+						"failure_class":        update.FailureClass,
+						"failure_reason":       update.FailureReason,
+						"disconnect_reason":    update.DisconnectReason,
+						"provider_status_code": strconv.Itoa(update.ProviderStatusCode),
+						"retryable":            strconv.FormatBool(update.Retryable),
+						"error":                update.ErrorMessage,
+					},
+				},
+				observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallFailed,
+					Attributes: observability.Attributes{
+						"component":            observability.ComponentCall.String(),
+						"context_id":           currentCallContext.ContextID,
+						"provider":             currentCallContext.Provider,
+						"channel_uuid":         currentCallContext.ChannelUUID,
+						"call_status":          update.CallStatus,
+						"failure_class":        update.FailureClass,
+						"failure_reason":       update.FailureReason,
+						"disconnect_reason":    update.DisconnectReason,
+						"provider_status_code": strconv.Itoa(update.ProviderStatusCode),
+						"retryable":            strconv.FormatBool(update.Retryable),
+					},
+				},
+				observability.RecordWebhook{
+					Event:     observability.CallFailed,
+					ContextID: currentCallContext.ContextID,
+					Payload: map[string]interface{}{
+						"provider":   currentCallContext.Provider,
+						"to":         currentCallContext.CallerNumber,
+						"from":       currentCallContext.FromNumber,
+						"call_id":    currentCallContext.ChannelUUID,
+						"context_id": currentCallContext.ContextID,
+						"direction":  currentCallContext.Direction,
+
+						"call_status":          update.CallStatus,
+						"failure_class":        update.FailureClass,
+						"failure_reason":       update.FailureReason,
+						"disconnect_reason":    update.DisconnectReason,
+						"provider_status_code": update.ProviderStatusCode,
+						"retryable":            update.Retryable,
+						"error":                update.ErrorMessage,
+					},
+				},
+				observability.RecordMetric{
+					Metrics: observability.CallStatusMetric("FAILED", cmp.Or(update.FailureReason, update.DisconnectReason, update.ErrorMessage, update.CallStatus)),
+					Attributes: observability.Attributes{
+						"to":            currentCallContext.CallerNumber,
+						"from":          currentCallContext.FromNumber,
+						"provider":      currentCallContext.Provider,
+						"context_id":    currentCallContext.ContextID,
+						"call_id":       currentCallContext.ChannelUUID,
+						"component":     observability.ComponentCall.String(),
+						"failure_class": update.FailureClass,
+					},
+				},
+			)
+			metadata := observability.DisconnectMetadata(update.DisconnectReason, update.FailureReason, update.ErrorMessage)
+			metadata = append(metadata,
+				&protos.Metadata{Key: observability.MetadataCallStatus, Value: update.CallStatus},
+				&protos.Metadata{Key: observability.MetadataFailureClass, Value: update.FailureClass},
+				&protos.Metadata{Key: observability.MetadataFailureReason, Value: update.FailureReason},
+				&protos.Metadata{Key: observability.MetadataRetryable, Value: strconv.FormatBool(update.Retryable)},
+			)
+			if update.ProviderStatusCode != 0 {
+				metadata = append(metadata, &protos.Metadata{Key: observability.MetadataProviderStatusCode, Value: strconv.Itoa(update.ProviderStatusCode)})
+			}
+			if update.ErrorMessage != "" {
+				metadata = append(metadata, &protos.Metadata{Key: observability.MetadataCallError, Value: update.ErrorMessage})
+			}
+			observer.Record(ctx,
+				scope,
+				observability.RecordMetadata{Metadata: metadata},
+			)
+			return
 		}
 	}
 }

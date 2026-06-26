@@ -103,13 +103,14 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 	}
 	if callbackWebhookEvent != "" {
 		callbackWebhookData := map[string]interface{}{
+			"provider":   cc.Provider,
+			"direction":  cc.Direction,
+			"to":         cc.CallerNumber,
+			"from":       cc.FromNumber,
+			"call_id":    statusInfo.ChannelUUID,
+			"context_id": cc.ContextID,
+
 			"source":       "provider_callback",
-			"context_id":   cc.ContextID,
-			"provider":     cc.Provider,
-			"direction":    cc.Direction,
-			"caller":       cc.CallerNumber,
-			"from":         cc.FromNumber,
-			"channel_uuid": statusInfo.ChannelUUID,
 			"status_event": statusInfo.Event,
 			"raw_payload":  statusInfo.RawPayload,
 			"payload":      statusInfo.Payload,
@@ -162,16 +163,21 @@ func (cApi *ConversationApi) UnviersalCallback(c *gin.Context) {
 			cApi.logger.Warnf("failed to update call context %s from callback event %s: %v", cc.ContextID, statusInfo.Event, err)
 		}
 	}
-	metrics := make([]*protos.Metric, 0, 2)
-	if statusInfo.Duration != nil {
-		metrics = append(metrics, &protos.Metric{Name: observability.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10)})
+	if validator.NonNil(statusInfo.Duration) {
+		observer.Record(c, scope,
+			observability.RecordMetric{Metrics: []*protos.Metric{
+				{Name: observability.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10)},
+			}},
+		)
 	}
 	if validator.NotBlank(statusInfo.Price) {
-		metrics = append(metrics, &protos.Metric{Name: observability.MetricTelephonyPrice, Value: statusInfo.Price})
+		observer.Record(c, scope,
+			observability.RecordMetric{Metrics: []*protos.Metric{
+				{Name: observability.MetricTelephonyPrice, Value: statusInfo.Price},
+			}},
+		)
 	}
-	if len(metrics) > 0 {
-		_ = observer.Record(c, scope, observability.RecordMetric{Metrics: metrics})
-	}
+
 	if err := observer.Close(context.Background()); err != nil {
 		cApi.logger.Warnf("failed to close callback observability recorder: %v", err)
 	}
@@ -217,28 +223,29 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 			AssistantScope: observability.AssistantScope{AssistantID: cc.AssistantID},
 			ConversationID: cc.ConversationID,
 		}
-		_ = observer.Record(c, scope, observability.RecordLog{
-			Level:   observability.LevelInfo,
-			Message: "telephony provider callback received",
-			Attributes: observability.Attributes{
-				"provider":     cc.Provider,
-				"status_event": statusInfo.Event,
-				"context_id":   contextID,
-				"direction":    cc.Direction,
-				"channel_uuid": statusInfo.ChannelUUID,
-				"raw_payload":  statusInfo.RawPayload,
+		_ = observer.Record(c, scope,
+			observability.RecordLog{
+				Level:   observability.LevelInfo,
+				Message: "telephony provider callback received",
+				Attributes: observability.Attributes{
+					"provider":     cc.Provider,
+					"status_event": statusInfo.Event,
+					"context_id":   contextID,
+					"direction":    cc.Direction,
+					"channel_uuid": statusInfo.ChannelUUID,
+					"raw_payload":  statusInfo.RawPayload,
+				},
 			},
-		})
-		_ = observer.Record(c, scope, observability.RecordEvent{
-			Event: observability.CallStatus,
-			Attributes: observability.Attributes{
-				"provider":     cc.Provider,
-				"status_event": statusInfo.Event,
-				"context_id":   contextID,
-				"direction":    cc.Direction,
-				"channel_uuid": statusInfo.ChannelUUID,
-			},
-		})
+			observability.RecordEvent{
+				Event: observability.CallStatus,
+				Attributes: observability.Attributes{
+					"provider":     cc.Provider,
+					"status_event": statusInfo.Event,
+					"context_id":   contextID,
+					"direction":    cc.Direction,
+					"channel_uuid": statusInfo.ChannelUUID,
+				},
+			})
 		callbackStatusEvent := strings.ToLower(statusInfo.Event)
 		callbackWebhookEvent := observability.EventName("")
 		switch callbackStatusEvent {
@@ -254,13 +261,13 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 		}
 		if callbackWebhookEvent != "" {
 			callbackWebhookData := map[string]interface{}{
-				"source":       "provider_callback",
-				"context_id":   cc.ContextID,
 				"provider":     cc.Provider,
-				"direction":    cc.Direction,
-				"caller":       cc.CallerNumber,
+				"to":           cc.CallerNumber,
 				"from":         cc.FromNumber,
-				"channel_uuid": statusInfo.ChannelUUID,
+				"call_id":      statusInfo.ChannelUUID,
+				"context_id":   cc.ContextID,
+				"direction":    cc.Direction,
+				"source":       "provider_callback",
 				"status_event": statusInfo.Event,
 				"raw_payload":  statusInfo.RawPayload,
 				"payload":      statusInfo.Payload,
@@ -313,16 +320,14 @@ func (cApi *ConversationApi) CallbackByContext(c *gin.Context) {
 				cApi.logger.Warnf("failed to update call context %s from callback event %s: %v", cc.ContextID, statusInfo.Event, err)
 			}
 		}
-		metrics := make([]*protos.Metric, 0, 2)
-		if statusInfo.Duration != nil {
-			metrics = append(metrics, &protos.Metric{Name: observability.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10), Description: "Call duration in nanoseconds"})
+
+		if validator.NonNil(statusInfo.Duration) {
+			observer.Record(c, scope, observability.RecordMetric{Metrics: []*protos.Metric{&protos.Metric{Name: observability.MetricTelephonyDuration, Value: strconv.FormatInt(statusInfo.Duration.Nanoseconds(), 10), Description: "Call duration in nanoseconds"}}})
 		}
 		if validator.NotBlank(statusInfo.Price) {
-			metrics = append(metrics, &protos.Metric{Name: observability.MetricTelephonyPrice, Value: statusInfo.Price, Description: "Call price"})
+			observer.Record(c, scope, observability.RecordMetric{Metrics: []*protos.Metric{&protos.Metric{Name: observability.MetricTelephonyPrice, Value: statusInfo.Price, Description: "Call price"}}})
 		}
-		if len(metrics) > 0 {
-			_ = observer.Record(c, scope, observability.RecordMetric{Metrics: metrics})
-		}
+
 		if err := observer.Close(context.Background()); err != nil {
 			cApi.logger.Warnf("failed to close callback observability recorder: %v", err)
 		}

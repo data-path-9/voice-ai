@@ -64,10 +64,6 @@ func (d *Dispatcher) createConversation(ctx context.Context, stage sip_infra.Ses
 }
 
 func (d *Dispatcher) ensureCallContext(ctx context.Context, stage sip_infra.SessionEstablishedPipeline, conversationID uint64) (*callcontext.CallContext, error) {
-	if d.callContextStore == nil {
-		return nil, nil
-	}
-
 	callID := stage.Session.GetCallID()
 	dirStr := string(stage.Direction)
 	if stage.Direction == sip_infra.CallDirectionOutbound {
@@ -150,7 +146,6 @@ func (d *Dispatcher) setupCall(ctx context.Context, stage sip_infra.SessionEstab
 }
 
 func (d *Dispatcher) createObserver(ctx context.Context, setup *CallSetupResult, auth types.SimplePrinciple) observability.Recorder {
-
 	recorder := observability.New(
 		observability.WithLogger(d.logger),
 		observability.WithAuth(auth),

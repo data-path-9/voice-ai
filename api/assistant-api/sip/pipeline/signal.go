@@ -114,11 +114,11 @@ func (d *Dispatcher) handleCallFailed(ctx context.Context, v sip_infra.CallFaile
 			Event:     observability.CallFailed,
 			ContextID: contextID,
 			Payload: map[string]interface{}{
-				"context_id": contextID,
 				"provider":   "sip",
+				"context_id": contextID,
+				"call_id":    v.ID,
 				"reason":     reason,
 				"direction":  string(v.Session.GetInfo().Direction),
-				"call_id":    v.ID,
 				"sip_code":   v.SIPCode,
 				"error":      fmt.Sprintf("%v", v.Error),
 			},

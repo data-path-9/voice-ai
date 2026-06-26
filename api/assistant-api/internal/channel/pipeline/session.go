@@ -25,8 +25,7 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 	if contextID == "" {
 		contextID = v.ID
 	}
-	auth := v.CallContext.ToAuth()
-	if err := v.Observer.AddCollectors(
+	v.Observer.AddCollectors(
 		observability_collector_requestlog.New(observability_collector_requestlog.Config{
 			Logger:         d.logger,
 			HTTPLogService: d.httpLogService,
@@ -35,54 +34,55 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 			Logger:      d.logger,
 			ToolService: d.assistantToolService,
 		}),
-		collectors.NewWithWebhookConfiguration(ctx, d.logger, auth, v.CallContext.AssistantID, d.configurationService, d.httpLogService),
-	); err != nil {
-		d.logger.Warnw("observability collector registration failed",
-			"component", "call",
-			"operation", "add_assistant_collectors",
-			"assistant_id", v.CallContext.AssistantID,
-			"context_id", contextID,
-			"error", err,
-		)
-	}
+		collectors.NewWithWebhookConfiguration(ctx, d.logger, v.CallContext.ToAuth(), v.CallContext.AssistantID, d.configurationService, d.httpLogService),
+	)
 
-	scope := observability.ConversationScope{
-		AssistantScope: observability.AssistantScope{AssistantID: v.CallContext.AssistantID},
-		ConversationID: v.CallContext.ConversationID,
-	}
-	_ = v.Observer.Record(ctx, scope, observability.RecordMetadata{
-		Metadata: observability.ClientMetadata(
-			v.CallContext.CallerNumber, v.CallContext.FromNumber, v.CallContext.Direction, v.CallContext.Provider,
-			v.CallContext.ChannelUUID, contextID, "", "", // codec/sampleRate set by streamer
-		),
-	}, observability.RecordEvent{
-		Component: observability.ComponentCall,
-		Event:     observability.CallStarted,
-		Attributes: observability.Attributes{
-			"context_id": contextID,
-			"provider":   v.CallContext.Provider,
-			"direction":  v.CallContext.Direction,
+	v.Observer.Record(ctx,
+		observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: v.CallContext.AssistantID},
+			ConversationID: v.CallContext.ConversationID,
 		},
-	}, observability.RecordWebhook{
-		Event:     observability.CallStarted,
-		ContextID: contextID,
-		Payload: map[string]interface{}{
-			"context_id":   contextID,
-			"provider":     v.CallContext.Provider,
-			"direction":    v.CallContext.Direction,
-			"caller":       v.CallContext.CallerNumber,
-			"from":         v.CallContext.FromNumber,
-			"channel_uuid": v.CallContext.ChannelUUID,
+		observability.RecordMetadata{
+			Metadata: observability.ClientMetadata(
+				v.CallContext.CallerNumber, v.CallContext.FromNumber, v.CallContext.Direction, v.CallContext.Provider,
+				v.CallContext.ChannelUUID, contextID, "", "", // codec/sampleRate set by streamer
+			),
 		},
-	}, observability.RecordLog{
-		Level:   observability.LevelDebug,
-		Message: "Pipeline session connected",
-		Attributes: observability.Attributes{
-			"context_id": contextID,
-			"provider":   v.CallContext.Provider,
-			"direction":  v.CallContext.Direction,
+		observability.RecordEvent{
+			Component: observability.ComponentCall,
+			Event:     observability.CallStarted,
+			Attributes: observability.Attributes{
+				"provider":   v.CallContext.Provider,
+				"to":         v.CallContext.CallerNumber,
+				"from":       v.CallContext.FromNumber,
+				"context_id": contextID,
+				"direction":  v.CallContext.Direction,
+			},
 		},
-	})
+		observability.RecordWebhook{
+			Event:     observability.CallStarted,
+			ContextID: contextID,
+			Payload: map[string]interface{}{
+				"provider":   v.CallContext.Provider,
+				"to":         v.CallContext.CallerNumber,
+				"from":       v.CallContext.FromNumber,
+				"call_id":    v.CallContext.ChannelUUID,
+				"context_id": contextID,
+				"direction":  v.CallContext.Direction,
+			},
+		},
+		observability.RecordLog{
+			Level:   observability.LevelDebug,
+			Message: "Pipeline session connected",
+			Attributes: observability.Attributes{
+				"provider":   v.CallContext.Provider,
+				"direction":  v.CallContext.Direction,
+				"to":         v.CallContext.CallerNumber,
+				"from":       v.CallContext.FromNumber,
+				"context_id": contextID,
+				"call_id":    v.CallContext.ChannelUUID,
+			},
+		})
 	reason := "talk_completed"
 	status := "COMPLETE"
 	func() {
@@ -90,44 +90,61 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 			if r := recover(); r != nil {
 				reason = fmt.Sprintf("panic: %v", r)
 				status = "FAILED"
-				_ = v.Observer.Record(ctx, scope, observability.RecordLog{
-					Level:   observability.LevelError,
-					Message: "Pipeline talk panicked",
-					Attributes: observability.Attributes{
-						"context_id": contextID,
-						"provider":   v.CallContext.Provider,
-						"direction":  v.CallContext.Direction,
-						"panic":      fmt.Sprintf("%v", r),
+				v.Observer.Record(ctx,
+					observability.ConversationScope{
+						AssistantScope: observability.AssistantScope{AssistantID: v.CallContext.AssistantID},
+						ConversationID: v.CallContext.ConversationID,
 					},
-				})
+					observability.RecordLog{
+						Level:   observability.LevelError,
+						Message: "Pipeline talk panicked",
+						Attributes: observability.Attributes{
+							"context_id": contextID,
+							"provider":   v.CallContext.Provider,
+							"direction":  v.CallContext.Direction,
+							"panic":      fmt.Sprintf("%v", r),
+						},
+					})
 			}
 		}()
 
-		err := v.Talker.Talk(ctx, auth)
+		err := v.Talker.Talk(ctx, v.CallContext.ToAuth())
 		if err != nil {
 			reason = fmt.Sprintf("talk_error: %v", err)
 			status = "FAILED"
-			_ = v.Observer.Record(ctx, scope, observability.RecordLog{
-				Level:   observability.LevelError,
-				Message: "Pipeline talk failed",
-				Attributes: observability.Attributes{
-					"context_id": contextID,
-					"provider":   v.CallContext.Provider,
-					"direction":  v.CallContext.Direction,
-					"error":      err.Error(),
+			_ = v.Observer.Record(ctx,
+				observability.ConversationScope{
+					AssistantScope: observability.AssistantScope{AssistantID: v.CallContext.AssistantID},
+					ConversationID: v.CallContext.ConversationID,
 				},
-			})
+				observability.RecordLog{
+					Level:   observability.LevelError,
+					Message: "Pipeline talk failed",
+					Attributes: observability.Attributes{
+						"provider":   v.CallContext.Provider,
+						"direction":  v.CallContext.Direction,
+						"error":      err.Error(),
+						"context_id": contextID,
+					},
+				})
 		}
 	}()
 
 	durationMs := time.Since(startTime).Milliseconds()
-	callEndedRecords := []observability.Record{
+	v.Observer.Record(ctx,
+		observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: v.CallContext.AssistantID},
+			ConversationID: v.CallContext.ConversationID,
+		},
 		observability.RecordEvent{
 			Component: observability.ComponentCall,
 			Event:     observability.CallEnded,
 			Attributes: observability.Attributes{
-				"context_id":  contextID,
 				"provider":    v.CallContext.Provider,
+				"to":          v.CallContext.CallerNumber,
+				"from":        v.CallContext.FromNumber,
+				"call_id":     v.CallContext.ChannelUUID,
+				"context_id":  contextID,
 				"direction":   v.CallContext.Direction,
 				"reason":      reason,
 				"status":      status,
@@ -138,15 +155,15 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 			Event:     observability.CallEnded,
 			ContextID: contextID,
 			Payload: map[string]interface{}{
-				"context_id":   contextID,
-				"provider":     v.CallContext.Provider,
-				"direction":    v.CallContext.Direction,
-				"caller":       v.CallContext.CallerNumber,
-				"from":         v.CallContext.FromNumber,
-				"channel_uuid": v.CallContext.ChannelUUID,
-				"reason":       reason,
-				"status":       status,
-				"duration_ms":  durationMs,
+				"provider":    v.CallContext.Provider,
+				"to":          v.CallContext.CallerNumber,
+				"from":        v.CallContext.FromNumber,
+				"call_id":     v.CallContext.ChannelUUID,
+				"context_id":  contextID,
+				"direction":   v.CallContext.Direction,
+				"reason":      reason,
+				"status":      status,
+				"duration_ms": durationMs,
 			},
 		},
 		observability.RecordMetric{
@@ -163,29 +180,34 @@ func (d *Dispatcher) runSession(ctx context.Context, v SessionConnectedPipeline)
 				},
 			},
 		},
-	}
-
+	)
 	if status == "FAILED" {
-		callEndedRecords = append(callEndedRecords, observability.RecordWebhook{
-			Event:     observability.CallFailed,
-			ContextID: contextID,
-			Payload: map[string]interface{}{
-				"context_id":   contextID,
-				"provider":     v.CallContext.Provider,
-				"direction":    v.CallContext.Direction,
-				"caller":       v.CallContext.CallerNumber,
-				"from":         v.CallContext.FromNumber,
-				"channel_uuid": v.CallContext.ChannelUUID,
-				"reason":       reason,
-				"status":       status,
-				"duration_ms":  durationMs,
+		v.Observer.Record(ctx,
+			observability.ConversationScope{
+				AssistantScope: observability.AssistantScope{AssistantID: v.CallContext.AssistantID},
+				ConversationID: v.CallContext.ConversationID,
 			},
-		})
-	}
-	_ = v.Observer.Record(ctx, scope, callEndedRecords...)
-
-	if status == "FAILED" {
+			observability.RecordWebhook{
+				Event:     observability.CallFailed,
+				ContextID: contextID,
+				Payload: map[string]interface{}{
+					"provider":    v.CallContext.Provider,
+					"to":          v.CallContext.CallerNumber,
+					"from":        v.CallContext.FromNumber,
+					"call_id":     v.CallContext.ChannelUUID,
+					"context_id":  contextID,
+					"direction":   v.CallContext.Direction,
+					"reason":      reason,
+					"status":      status,
+					"duration_ms": durationMs,
+				},
+			})
 		return &PipelineResult{Error: fmt.Errorf("%s", reason)}
 	}
-	return &PipelineResult{}
+	return &PipelineResult{
+		ContextID:      contextID,
+		ConversationID: v.CallContext.ConversationID,
+		Provider:       v.CallContext.Provider,
+		CallStatus:     status,
+	}
 }
