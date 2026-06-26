@@ -7,8 +7,6 @@
 package sip_infra
 
 import (
-	"time"
-
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/protos"
 )
@@ -31,21 +29,6 @@ type SessionEstablishedPipeline struct {
 }
 
 func (p SessionEstablishedPipeline) CallID() string { return p.ID }
-
-type ByeReceivedPipeline struct {
-	ID      string
-	Session *Session
-	Reason  string
-}
-
-func (p ByeReceivedPipeline) CallID() string { return p.ID }
-
-type CancelReceivedPipeline struct {
-	ID      string
-	Session *Session
-}
-
-func (p CancelReceivedPipeline) CallID() string { return p.ID }
 
 type TransferInitiatedPipeline struct {
 	ID                 string
@@ -79,14 +62,6 @@ type TransferFailedPipeline struct {
 }
 
 func (p TransferFailedPipeline) CallID() string { return p.ID }
-
-type CallEndedPipeline struct {
-	ID       string
-	Duration time.Duration
-	Reason   string
-}
-
-func (p CallEndedPipeline) CallID() string { return p.ID }
 
 type CallFailedPipeline struct {
 	ID      string

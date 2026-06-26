@@ -279,11 +279,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 					})
 				observer.Close(ctx)
 				d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-				d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-					ID:       v.ID,
-					Duration: time.Since(startTime),
-					Reason:   reason,
-				})
 			}
 		}()
 		if prepared.runtime != nil {
@@ -356,11 +351,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 							})
 						observer.Close(ctx)
 						d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-						d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-							ID:       v.ID,
-							Duration: time.Since(startTime),
-							Reason:   reason,
-						})
 						return
 					}
 				}
@@ -410,11 +400,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 					})
 				observer.Close(ctx)
 				d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-				d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-					ID:       v.ID,
-					Duration: time.Since(startTime),
-					Reason:   reason,
-				})
 				return
 			}
 			if targetVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferTarget); ok {
@@ -481,11 +466,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 						})
 					observer.Close(ctx)
 					d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-					d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-						ID:       v.ID,
-						Duration: time.Since(startTime),
-						Reason:   "transfer_" + transferStatus,
-					})
 					return
 				}
 			}
@@ -534,11 +514,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 				})
 			observer.Close(ctx)
 			d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-			d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-				ID:       v.ID,
-				Duration: time.Since(startTime),
-				Reason:   "talk_completed",
-			})
 			return
 		}
 
@@ -618,11 +593,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 						})
 					observer.Close(ctx)
 					d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-					d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-						ID:       v.ID,
-						Duration: time.Since(startTime),
-						Reason:   reason,
-					})
 					return
 				}
 			}
@@ -672,11 +642,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 				})
 			observer.Close(ctx)
 			d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-			d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-				ID:       v.ID,
-				Duration: time.Since(startTime),
-				Reason:   reason,
-			})
 			return
 		}
 		if err := runtime.Start(ctx); err != nil {
@@ -754,11 +719,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 						})
 					observer.Close(ctx)
 					d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-					d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-						ID:       v.ID,
-						Duration: time.Since(startTime),
-						Reason:   reason,
-					})
 					return
 				}
 			}
@@ -808,11 +768,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 				})
 			observer.Close(ctx)
 			d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-			d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-				ID:       v.ID,
-				Duration: time.Since(startTime),
-				Reason:   reason,
-			})
 			return
 		}
 		if v.Session.GetInfo().Direction == sip_infra.CallDirectionOutbound && !v.Session.IsEnded() {
@@ -889,11 +844,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 					})
 				observer.Close(ctx)
 				d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-				d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-					ID:       v.ID,
-					Duration: time.Since(startTime),
-					Reason:   reason,
-				})
 				return
 			}
 		}
@@ -943,11 +893,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 			})
 		observer.Close(ctx)
 		d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-		d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-			ID:       v.ID,
-			Duration: time.Since(startTime),
-			Reason:   reason,
-		})
 	}()
 }
 
