@@ -377,11 +377,6 @@ func (m *SIPEngine) sessionEstablishedStage(session *sip_infra.Session, fromURI,
 func (m *SIPEngine) onBye(session *sip_infra.Session) error {
 	disconnectMetadata := session.GetDisconnectMetadata()
 	m.persistRemoteByeCallStatus(session, disconnectMetadata)
-	m.dispatcher.OnPipeline(m.ctx, sip_infra.ByeReceivedPipeline{
-		ID:      session.GetInfo().CallID,
-		Session: session,
-		Reason:  disconnectMetadata.Reason,
-	})
 	return nil
 }
 
@@ -441,10 +436,6 @@ func callContextHasTerminalFailure(callContext *callcontext.CallContext) bool {
 }
 
 func (m *SIPEngine) onCancel(session *sip_infra.Session) error {
-	m.dispatcher.OnPipeline(m.ctx, sip_infra.CancelReceivedPipeline{
-		ID:      session.GetInfo().CallID,
-		Session: session,
-	})
 	return nil
 }
 

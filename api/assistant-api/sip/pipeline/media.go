@@ -33,10 +33,6 @@ func (e *sessionPreparationError) Error() string {
 	return e.err.Error()
 }
 
-func (e *sessionPreparationError) Unwrap() error {
-	return e.err
-}
-
 func newSessionPreparationError(reason sip_infra.LifecycleReason, err error) *sessionPreparationError {
 	return &sessionPreparationError{reason: reason, err: err}
 }
@@ -123,16 +119,13 @@ func (d *Dispatcher) prepareSession(ctx context.Context, v sip_infra.SessionEsta
 		codec = negotiated.Name
 		sampleRate = fmt.Sprintf("%d", negotiated.ClockRate)
 	}
-	// Identity keys flow through ConversationInitialization.Metadata.
-	// provider_call_id is emitted here as well because the SIP Call-ID
-	// is only known at this stage and isn't required for prompts.
-	scope := observability.ConversationScope{
-		AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
-		ConversationID: setup.ConversationID,
-	}
-	_ = observer.Record(
+
+	observer.Record(
 		ctx,
-		scope,
+		observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+			ConversationID: setup.ConversationID,
+		},
 		observability.RecordMetadata{
 			Metadata: observability.ClientMetadata("", "", string(v.Direction), "sip", v.ID, "", codec, sampleRate),
 		},
@@ -159,13 +152,13 @@ func (d *Dispatcher) prepareSession(ctx context.Context, v sip_infra.SessionEsta
 		var err error
 		preparedRuntime, err := d.prepareSIPCallRuntime(ctx, v.Session, setup, observer, v.VaultCredential, v.Config, string(v.Direction))
 		if err != nil {
-			_ = observer.Close(ctx)
+			observer.Close(ctx)
 			d.logger.Error("Pipeline: runtime preparation failed", "call_id", v.ID, "error", err)
 			return nil, newSessionPreparationError(sip_infra.LifecycleReasonPipelineSetupFailed, err)
 		}
 		if err := preparedRuntime.StartBeforeAnswer(ctx, inboundRuntimeReadyTimeout(v.Config)); err != nil {
 			preparedRuntime.Close(ctx)
-			_ = observer.Close(ctx)
+			observer.Close(ctx)
 			d.logger.Error("Pipeline: runtime pre-answer start failed", "call_id", v.ID, "error", err)
 			return nil, newSessionPreparationError(sip_infra.LifecycleReasonPipelineSetupFailed, err)
 		}
@@ -180,8 +173,6 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 	observer := prepared.observer
 	go func() {
 		startTime := time.Now()
-		reason := "talk_completed"
-		status := observability.MetricCallStatusComplete
 		contextID := v.Session.GetContextID()
 		if contextID == "" && setup.CallContext != nil {
 			contextID = setup.CallContext.ContextID
@@ -189,13 +180,13 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 		if contextID == "" {
 			contextID = v.ID
 		}
-		scope := observability.ConversationScope{
-			AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
-			ConversationID: setup.ConversationID,
-		}
-		_ = observer.Record(
+
+		observer.Record(
 			ctx,
-			scope,
+			observability.ConversationScope{
+				AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+				ConversationID: setup.ConversationID,
+			},
 			observability.RecordEvent{
 				Component: observability.ComponentCall,
 				Event:     observability.CallStarted,
@@ -209,10 +200,12 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 				Event:     observability.CallStarted,
 				ContextID: contextID,
 				Payload: map[string]interface{}{
-					"context_id": contextID,
 					"provider":   "sip",
-					"direction":  string(v.Direction),
+					"to":         setup.CallContext.CallerNumber,
+					"from":       setup.CallContext.FromNumber,
 					"call_id":    v.ID,
+					"context_id": contextID,
+					"direction":  string(v.Direction),
 				},
 			},
 			observability.RecordMetric{
@@ -223,12 +216,15 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 				}},
 			},
 		)
+
 		defer func() {
 			if r := recover(); r != nil {
-				reason = fmt.Sprintf("panic: %v", r)
-				status = observability.MetricCallStatusFailed
+				reason := fmt.Sprintf("panic: %v", r)
 				d.logger.Error("Pipeline: onCallStart panicked", "call_id", v.ID, "panic", r)
-				_ = observer.Record(ctx, scope, observability.RecordLog{
+				observer.Record(ctx, observability.ConversationScope{
+					AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+					ConversationID: setup.ConversationID,
+				}, observability.RecordLog{
 					Level:   observability.LevelError,
 					Message: "SIP pipeline call start panicked",
 					Attributes: observability.Attributes{
@@ -238,43 +234,405 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 						"panic":     fmt.Sprintf("%v", r),
 					},
 				})
+				durationMs := time.Since(startTime).Milliseconds()
+				observer.Record(ctx, observability.ConversationScope{
+					AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+					ConversationID: setup.ConversationID,
+				},
+					observability.RecordEvent{
+						Component: observability.ComponentCall,
+						Event:     observability.CallFailed,
+						Attributes: observability.Attributes{
+							"provider":    "sip",
+							"direction":   string(v.Direction),
+							"call_id":     v.ID,
+							"reason":      reason,
+							"status":      observability.MetricCallStatusFailed,
+							"duration_ms": fmt.Sprintf("%d", durationMs),
+						},
+					},
+					observability.RecordWebhook{
+						Event:     observability.CallFailed,
+						ContextID: contextID,
+						Payload: map[string]interface{}{
+							"provider":    "sip",
+							"to":          setup.CallContext.CallerNumber,
+							"from":        setup.CallContext.FromNumber,
+							"call_id":     v.ID,
+							"context_id":  contextID,
+							"direction":   string(v.Direction),
+							"reason":      reason,
+							"status":      observability.MetricCallStatusFailed,
+							"duration_ms": durationMs,
+						},
+					},
+					observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallStatus,
+							Value:       observability.MetricCallStatusFailed,
+							Description: reason,
+						}, {
+							Name:        observability.MetricCallDurationMs,
+							Value:       fmt.Sprintf("%d", durationMs),
+							Description: "SIP call duration in milliseconds",
+						}},
+					})
+				observer.Close(ctx)
+				d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
 			}
-
+		}()
+		if prepared.runtime != nil {
+			if err := prepared.runtime.Start(ctx); err != nil {
+				if targetVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferTarget); ok {
+					if target, ok := targetVal.(string); ok && target != "" {
+						transferStatus := "failed"
+						if statusVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferStatus); ok {
+							if s, ok := statusVal.(string); ok {
+								transferStatus = s
+							}
+						}
+						reason := "transfer_" + transferStatus
+						observer.Record(ctx, observability.ConversationScope{
+							AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+							ConversationID: setup.ConversationID,
+						}, observability.RecordEvent{
+							Component: observability.ComponentSIP,
+							Event:     observability.SIPTransferRequested,
+							Attributes: observability.Attributes{
+								"provider":  "sip",
+								"direction": string(v.Direction),
+								"call_id":   v.ID,
+								"target":    target,
+								"reason":    transferStatus,
+							},
+						})
+						durationMs := time.Since(startTime).Milliseconds()
+						observer.Record(ctx, observability.ConversationScope{
+							AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+							ConversationID: setup.ConversationID,
+						},
+							observability.RecordEvent{
+								Component: observability.ComponentCall,
+								Event:     observability.CallFailed,
+								Attributes: observability.Attributes{
+									"provider":    "sip",
+									"direction":   string(v.Direction),
+									"call_id":     v.ID,
+									"reason":      reason,
+									"status":      observability.MetricCallStatusFailed,
+									"duration_ms": fmt.Sprintf("%d", durationMs),
+								},
+							},
+							observability.RecordWebhook{
+								Event:     observability.CallFailed,
+								ContextID: contextID,
+								Payload: map[string]interface{}{
+									"provider":    "sip",
+									"to":          setup.CallContext.CallerNumber,
+									"from":        setup.CallContext.FromNumber,
+									"call_id":     v.ID,
+									"context_id":  contextID,
+									"direction":   string(v.Direction),
+									"reason":      reason,
+									"status":      observability.MetricCallStatusFailed,
+									"duration_ms": durationMs,
+								},
+							},
+							observability.RecordMetric{
+								Metrics: []*protos.Metric{{
+									Name:        observability.MetricCallStatus,
+									Value:       observability.MetricCallStatusFailed,
+									Description: reason,
+								}, {
+									Name:        observability.MetricCallDurationMs,
+									Value:       fmt.Sprintf("%d", durationMs),
+									Description: "SIP call duration in milliseconds",
+								}},
+							})
+						observer.Close(ctx)
+						d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
+						return
+					}
+				}
+				reason := err.Error()
+				durationMs := time.Since(startTime).Milliseconds()
+				observer.Record(ctx, observability.ConversationScope{
+					AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+					ConversationID: setup.ConversationID,
+				},
+					observability.RecordEvent{
+						Component: observability.ComponentCall,
+						Event:     observability.CallFailed,
+						Attributes: observability.Attributes{
+							"provider":    "sip",
+							"direction":   string(v.Direction),
+							"call_id":     v.ID,
+							"reason":      reason,
+							"status":      observability.MetricCallStatusFailed,
+							"duration_ms": fmt.Sprintf("%d", durationMs),
+						},
+					},
+					observability.RecordWebhook{
+						Event:     observability.CallFailed,
+						ContextID: contextID,
+						Payload: map[string]interface{}{
+							"provider":    "sip",
+							"to":          setup.CallContext.CallerNumber,
+							"from":        setup.CallContext.FromNumber,
+							"call_id":     v.ID,
+							"context_id":  contextID,
+							"direction":   string(v.Direction),
+							"reason":      reason,
+							"status":      observability.MetricCallStatusFailed,
+							"duration_ms": durationMs,
+						},
+					},
+					observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallStatus,
+							Value:       observability.MetricCallStatusFailed,
+							Description: reason,
+						}, {
+							Name:        observability.MetricCallDurationMs,
+							Value:       fmt.Sprintf("%d", durationMs),
+							Description: "SIP call duration in milliseconds",
+						}},
+					})
+				observer.Close(ctx)
+				d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
+				return
+			}
+			if targetVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferTarget); ok {
+				if target, ok := targetVal.(string); ok && target != "" {
+					transferStatus := "failed"
+					if statusVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferStatus); ok {
+						if s, ok := statusVal.(string); ok {
+							transferStatus = s
+						}
+					}
+					durationMs := time.Since(startTime).Milliseconds()
+					observer.Record(ctx, observability.ConversationScope{
+						AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+						ConversationID: setup.ConversationID,
+					},
+						observability.RecordEvent{
+							Component: observability.ComponentSIP,
+							Event:     observability.SIPTransferRequested,
+							Attributes: observability.Attributes{
+								"provider":  "sip",
+								"direction": string(v.Direction),
+								"call_id":   v.ID,
+								"target":    target,
+								"reason":    transferStatus,
+							},
+						},
+						observability.RecordEvent{
+							Component: observability.ComponentCall,
+							Event:     observability.CallEnded,
+							Attributes: observability.Attributes{
+								"provider":    "sip",
+								"direction":   string(v.Direction),
+								"call_id":     v.ID,
+								"reason":      "transfer_" + transferStatus,
+								"status":      observability.MetricCallStatusComplete,
+								"duration_ms": fmt.Sprintf("%d", durationMs),
+							},
+						},
+						observability.RecordWebhook{
+							Event:     observability.CallEnded,
+							ContextID: contextID,
+							Payload: map[string]interface{}{
+								"provider":    "sip",
+								"to":          setup.CallContext.CallerNumber,
+								"from":        setup.CallContext.FromNumber,
+								"call_id":     v.ID,
+								"context_id":  contextID,
+								"direction":   string(v.Direction),
+								"reason":      "transfer_" + transferStatus,
+								"status":      observability.MetricCallStatusComplete,
+								"duration_ms": durationMs,
+							},
+						},
+						observability.RecordMetric{
+							Metrics: []*protos.Metric{{
+								Name:        observability.MetricCallStatus,
+								Value:       observability.MetricCallStatusComplete,
+								Description: "transfer_" + transferStatus,
+							}, {
+								Name:        observability.MetricCallDurationMs,
+								Value:       fmt.Sprintf("%d", durationMs),
+								Description: "SIP call duration in milliseconds",
+							}},
+						})
+					observer.Close(ctx)
+					d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
+					return
+				}
+			}
 			durationMs := time.Since(startTime).Milliseconds()
-			event := observability.CallEnded
-			if status == observability.MetricCallStatusFailed {
-				event = observability.CallFailed
-			}
-			_ = observer.Record(ctx, scope,
+			observer.Record(ctx, observability.ConversationScope{
+				AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+				ConversationID: setup.ConversationID,
+			},
 				observability.RecordEvent{
 					Component: observability.ComponentCall,
-					Event:     event,
+					Event:     observability.CallEnded,
 					Attributes: observability.Attributes{
 						"provider":    "sip",
 						"direction":   string(v.Direction),
 						"call_id":     v.ID,
-						"reason":      reason,
-						"status":      status,
+						"reason":      "talk_completed",
+						"status":      observability.MetricCallStatusComplete,
 						"duration_ms": fmt.Sprintf("%d", durationMs),
 					},
 				},
 				observability.RecordWebhook{
-					Event:     event,
+					Event:     observability.CallEnded,
 					ContextID: contextID,
 					Payload: map[string]interface{}{
-						"context_id":  contextID,
 						"provider":    "sip",
-						"direction":   string(v.Direction),
+						"to":          setup.CallContext.CallerNumber,
+						"from":        setup.CallContext.FromNumber,
 						"call_id":     v.ID,
-						"reason":      reason,
-						"status":      status,
+						"context_id":  contextID,
+						"direction":   string(v.Direction),
+						"reason":      "talk_completed",
+						"status":      observability.MetricCallStatusComplete,
 						"duration_ms": durationMs,
 					},
 				},
 				observability.RecordMetric{
 					Metrics: []*protos.Metric{{
 						Name:        observability.MetricCallStatus,
-						Value:       status,
+						Value:       observability.MetricCallStatusComplete,
+						Description: "talk_completed",
+					}, {
+						Name:        observability.MetricCallDurationMs,
+						Value:       fmt.Sprintf("%d", durationMs),
+						Description: "SIP call duration in milliseconds",
+					}},
+				})
+			observer.Close(ctx)
+			d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
+			return
+		}
+
+		runtime, err := d.prepareSIPCallRuntime(ctx, v.Session, setup, observer, v.VaultCredential, v.Config, string(v.Direction))
+		if err != nil {
+			if v.Session.GetInfo().Direction == sip_infra.CallDirectionOutbound && !v.Session.IsEnded() {
+				state := v.Session.GetState()
+				if state != sip_infra.CallStateTransferring && state != sip_infra.CallStateBridgeConnected {
+					d.endCall(v.Session, sip_infra.LifecycleReasonPipelineTalkCompleted)
+				}
+			}
+			if targetVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferTarget); ok {
+				if target, ok := targetVal.(string); ok && target != "" {
+					transferStatus := "failed"
+					if statusVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferStatus); ok {
+						if s, ok := statusVal.(string); ok {
+							transferStatus = s
+						}
+					}
+					reason := "transfer_" + transferStatus
+					observer.Record(ctx, observability.ConversationScope{
+						AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+						ConversationID: setup.ConversationID,
+					}, observability.RecordEvent{
+						Component: observability.ComponentSIP,
+						Event:     observability.SIPTransferRequested,
+						Attributes: observability.Attributes{
+							"provider":  "sip",
+							"direction": string(v.Direction),
+							"call_id":   v.ID,
+							"target":    target,
+							"reason":    transferStatus,
+						},
+					})
+					durationMs := time.Since(startTime).Milliseconds()
+					observer.Record(ctx, observability.ConversationScope{
+						AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+						ConversationID: setup.ConversationID,
+					},
+						observability.RecordEvent{
+							Component: observability.ComponentCall,
+							Event:     observability.CallFailed,
+							Attributes: observability.Attributes{
+								"provider":    "sip",
+								"direction":   string(v.Direction),
+								"call_id":     v.ID,
+								"reason":      reason,
+								"status":      observability.MetricCallStatusFailed,
+								"duration_ms": fmt.Sprintf("%d", durationMs),
+							},
+						},
+						observability.RecordWebhook{
+							Event:     observability.CallFailed,
+							ContextID: contextID,
+							Payload: map[string]interface{}{
+								"provider":    "sip",
+								"to":          setup.CallContext.CallerNumber,
+								"from":        setup.CallContext.FromNumber,
+								"call_id":     v.ID,
+								"context_id":  contextID,
+								"direction":   string(v.Direction),
+								"reason":      reason,
+								"status":      observability.MetricCallStatusFailed,
+								"duration_ms": durationMs,
+							},
+						},
+						observability.RecordMetric{
+							Metrics: []*protos.Metric{{
+								Name:        observability.MetricCallStatus,
+								Value:       observability.MetricCallStatusFailed,
+								Description: reason,
+							}, {
+								Name:        observability.MetricCallDurationMs,
+								Value:       fmt.Sprintf("%d", durationMs),
+								Description: "SIP call duration in milliseconds",
+							}},
+						})
+					observer.Close(ctx)
+					d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
+					return
+				}
+			}
+			reason := err.Error()
+			durationMs := time.Since(startTime).Milliseconds()
+			observer.Record(ctx, observability.ConversationScope{
+				AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+				ConversationID: setup.ConversationID,
+			},
+				observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallFailed,
+					Attributes: observability.Attributes{
+						"provider":    "sip",
+						"direction":   string(v.Direction),
+						"call_id":     v.ID,
+						"reason":      reason,
+						"status":      observability.MetricCallStatusFailed,
+						"duration_ms": fmt.Sprintf("%d", durationMs),
+					},
+				},
+				observability.RecordWebhook{
+					Event:     observability.CallFailed,
+					ContextID: contextID,
+					Payload: map[string]interface{}{
+						"provider":    "sip",
+						"to":          setup.CallContext.CallerNumber,
+						"from":        setup.CallContext.FromNumber,
+						"call_id":     v.ID,
+						"context_id":  contextID,
+						"direction":   string(v.Direction),
+						"reason":      reason,
+						"status":      observability.MetricCallStatusFailed,
+						"duration_ms": durationMs,
+					},
+				},
+				observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       observability.MetricCallStatusFailed,
 						Description: reason,
 					}, {
 						Name:        observability.MetricCallDurationMs,
@@ -282,42 +640,142 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 						Description: "SIP call duration in milliseconds",
 					}},
 				})
-			_ = observer.Close(ctx)
+			observer.Close(ctx)
 			d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
-			d.OnPipeline(ctx, sip_infra.CallEndedPipeline{
-				ID:       v.ID,
-				Duration: time.Since(startTime),
-				Reason:   reason,
-			})
-		}()
-		if prepared.runtime != nil {
-			if err := prepared.runtime.Start(ctx); err != nil {
-				reason = err.Error()
-				status = observability.MetricCallStatusFailed
+			return
+		}
+		if err := runtime.Start(ctx); err != nil {
+			if v.Session.GetInfo().Direction == sip_infra.CallDirectionOutbound && !v.Session.IsEnded() {
+				state := v.Session.GetState()
+				if state != sip_infra.CallStateTransferring && state != sip_infra.CallStateBridgeConnected {
+					d.endCall(v.Session, sip_infra.LifecycleReasonPipelineTalkCompleted)
+				}
 			}
-		} else {
-			if v.Session.GetInfo().Direction == sip_infra.CallDirectionOutbound {
-				defer func() {
-					if !v.Session.IsEnded() {
-						state := v.Session.GetState()
-						if state == sip_infra.CallStateTransferring || state == sip_infra.CallStateBridgeConnected {
-							return
+			if targetVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferTarget); ok {
+				if target, ok := targetVal.(string); ok && target != "" {
+					transferStatus := "failed"
+					if statusVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferStatus); ok {
+						if s, ok := statusVal.(string); ok {
+							transferStatus = s
 						}
-						d.endCall(v.Session, sip_infra.LifecycleReasonPipelineTalkCompleted)
 					}
-				}()
+					reason := "transfer_" + transferStatus
+					observer.Record(ctx, observability.ConversationScope{
+						AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+						ConversationID: setup.ConversationID,
+					}, observability.RecordEvent{
+						Component: observability.ComponentSIP,
+						Event:     observability.SIPTransferRequested,
+						Attributes: observability.Attributes{
+							"provider":  "sip",
+							"direction": string(v.Direction),
+							"call_id":   v.ID,
+							"target":    target,
+							"reason":    transferStatus,
+						},
+					})
+					durationMs := time.Since(startTime).Milliseconds()
+					observer.Record(ctx, observability.ConversationScope{
+						AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+						ConversationID: setup.ConversationID,
+					},
+						observability.RecordEvent{
+							Component: observability.ComponentCall,
+							Event:     observability.CallFailed,
+							Attributes: observability.Attributes{
+								"provider":    "sip",
+								"direction":   string(v.Direction),
+								"call_id":     v.ID,
+								"reason":      reason,
+								"status":      observability.MetricCallStatusFailed,
+								"duration_ms": fmt.Sprintf("%d", durationMs),
+							},
+						},
+						observability.RecordWebhook{
+							Event:     observability.CallFailed,
+							ContextID: contextID,
+							Payload: map[string]interface{}{
+								"provider":    "sip",
+								"to":          setup.CallContext.CallerNumber,
+								"from":        setup.CallContext.FromNumber,
+								"call_id":     v.ID,
+								"context_id":  contextID,
+								"direction":   string(v.Direction),
+								"reason":      reason,
+								"status":      observability.MetricCallStatusFailed,
+								"duration_ms": durationMs,
+							},
+						},
+						observability.RecordMetric{
+							Metrics: []*protos.Metric{{
+								Name:        observability.MetricCallStatus,
+								Value:       observability.MetricCallStatusFailed,
+								Description: reason,
+							}, {
+								Name:        observability.MetricCallDurationMs,
+								Value:       fmt.Sprintf("%d", durationMs),
+								Description: "SIP call duration in milliseconds",
+							}},
+						})
+					observer.Close(ctx)
+					d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
+					return
+				}
 			}
-			runtime, err := d.prepareSIPCallRuntime(ctx, v.Session, setup, observer, v.VaultCredential, v.Config, string(v.Direction))
-			if err != nil {
-				reason = err.Error()
-				status = observability.MetricCallStatusFailed
-			} else if err := runtime.Start(ctx); err != nil {
-				reason = err.Error()
-				status = observability.MetricCallStatusFailed
+			reason := err.Error()
+			durationMs := time.Since(startTime).Milliseconds()
+			observer.Record(ctx, observability.ConversationScope{
+				AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+				ConversationID: setup.ConversationID,
+			},
+				observability.RecordEvent{
+					Component: observability.ComponentCall,
+					Event:     observability.CallFailed,
+					Attributes: observability.Attributes{
+						"provider":    "sip",
+						"direction":   string(v.Direction),
+						"call_id":     v.ID,
+						"reason":      reason,
+						"status":      observability.MetricCallStatusFailed,
+						"duration_ms": fmt.Sprintf("%d", durationMs),
+					},
+				},
+				observability.RecordWebhook{
+					Event:     observability.CallFailed,
+					ContextID: contextID,
+					Payload: map[string]interface{}{
+						"provider":    "sip",
+						"to":          setup.CallContext.CallerNumber,
+						"from":        setup.CallContext.FromNumber,
+						"call_id":     v.ID,
+						"context_id":  contextID,
+						"direction":   string(v.Direction),
+						"reason":      reason,
+						"status":      observability.MetricCallStatusFailed,
+						"duration_ms": durationMs,
+					},
+				},
+				observability.RecordMetric{
+					Metrics: []*protos.Metric{{
+						Name:        observability.MetricCallStatus,
+						Value:       observability.MetricCallStatusFailed,
+						Description: reason,
+					}, {
+						Name:        observability.MetricCallDurationMs,
+						Value:       fmt.Sprintf("%d", durationMs),
+						Description: "SIP call duration in milliseconds",
+					}},
+				})
+			observer.Close(ctx)
+			d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
+			return
+		}
+		if v.Session.GetInfo().Direction == sip_infra.CallDirectionOutbound && !v.Session.IsEnded() {
+			state := v.Session.GetState()
+			if state != sip_infra.CallStateTransferring && state != sip_infra.CallStateBridgeConnected {
+				d.endCall(v.Session, sip_infra.LifecycleReasonPipelineTalkCompleted)
 			}
 		}
-
-		// Check if the call ended due to a bridge transfer — emit transfer events
 		if targetVal, ok := v.Session.GetMetadata(sip_infra.MetadataBridgeTransferTarget); ok {
 			if target, ok := targetVal.(string); ok && target != "" {
 				transferStatus := "failed"
@@ -326,10 +784,11 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 						transferStatus = s
 					}
 				}
-				reason = "transfer_" + transferStatus
-				d.logger.Infow("Pipeline: bridge transfer",
-					"call_id", v.ID, "target", target, "status", transferStatus)
-				_ = observer.Record(ctx, scope, observability.RecordEvent{
+				reason := "transfer_" + transferStatus
+				observer.Record(ctx, observability.ConversationScope{
+					AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+					ConversationID: setup.ConversationID,
+				}, observability.RecordEvent{
 					Component: observability.ComponentSIP,
 					Event:     observability.SIPTransferRequested,
 					Attributes: observability.Attributes{
@@ -340,8 +799,100 @@ func (d *Dispatcher) startPreparedSession(ctx context.Context, prepared *prepare
 						"reason":    transferStatus,
 					},
 				})
+				durationMs := time.Since(startTime).Milliseconds()
+				observer.Record(ctx, observability.ConversationScope{
+					AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+					ConversationID: setup.ConversationID,
+				},
+					observability.RecordEvent{
+						Component: observability.ComponentCall,
+						Event:     observability.CallEnded,
+						Attributes: observability.Attributes{
+							"provider":    "sip",
+							"direction":   string(v.Direction),
+							"call_id":     v.ID,
+							"reason":      reason,
+							"status":      observability.MetricCallStatusComplete,
+							"duration_ms": fmt.Sprintf("%d", durationMs),
+						},
+					},
+					observability.RecordWebhook{
+						Event:     observability.CallEnded,
+						ContextID: contextID,
+						Payload: map[string]interface{}{
+							"provider":    "sip",
+							"to":          setup.CallContext.CallerNumber,
+							"from":        setup.CallContext.FromNumber,
+							"call_id":     v.ID,
+							"context_id":  contextID,
+							"direction":   string(v.Direction),
+							"reason":      reason,
+							"status":      observability.MetricCallStatusComplete,
+							"duration_ms": durationMs,
+						},
+					},
+					observability.RecordMetric{
+						Metrics: []*protos.Metric{{
+							Name:        observability.MetricCallStatus,
+							Value:       observability.MetricCallStatusComplete,
+							Description: reason,
+						}, {
+							Name:        observability.MetricCallDurationMs,
+							Value:       fmt.Sprintf("%d", durationMs),
+							Description: "SIP call duration in milliseconds",
+						}},
+					})
+				observer.Close(ctx)
+				d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
+				return
 			}
 		}
+		reason := "talk_completed"
+		durationMs := time.Since(startTime).Milliseconds()
+		observer.Record(ctx, observability.ConversationScope{
+			AssistantScope: observability.AssistantScope{AssistantID: setup.AssistantID},
+			ConversationID: setup.ConversationID,
+		},
+			observability.RecordEvent{
+				Component: observability.ComponentCall,
+				Event:     observability.CallEnded,
+				Attributes: observability.Attributes{
+					"provider":    "sip",
+					"direction":   string(v.Direction),
+					"call_id":     v.ID,
+					"reason":      reason,
+					"status":      observability.MetricCallStatusComplete,
+					"duration_ms": fmt.Sprintf("%d", durationMs),
+				},
+			},
+			observability.RecordWebhook{
+				Event:     observability.CallEnded,
+				ContextID: contextID,
+				Payload: map[string]interface{}{
+					"provider":    "sip",
+					"to":          setup.CallContext.CallerNumber,
+					"from":        setup.CallContext.FromNumber,
+					"call_id":     v.ID,
+					"context_id":  contextID,
+					"direction":   string(v.Direction),
+					"reason":      reason,
+					"status":      observability.MetricCallStatusComplete,
+					"duration_ms": durationMs,
+				},
+			},
+			observability.RecordMetric{
+				Metrics: []*protos.Metric{{
+					Name:        observability.MetricCallStatus,
+					Value:       observability.MetricCallStatusComplete,
+					Description: reason,
+				}, {
+					Name:        observability.MetricCallDurationMs,
+					Value:       fmt.Sprintf("%d", durationMs),
+					Description: "SIP call duration in milliseconds",
+				}},
+			})
+		observer.Close(ctx)
+		d.endCall(v.Session, sip_infra.LifecycleReasonPipelineCallEnd)
 	}()
 }
 
@@ -352,7 +903,7 @@ func (p *preparedSession) Close(ctx context.Context) {
 	if p.runtime != nil {
 		p.runtime.Close(ctx)
 	}
-	_ = p.observer.Close(ctx)
+	p.observer.Close(ctx)
 }
 
 func sessionPreparationReason(err error) sip_infra.LifecycleReason {

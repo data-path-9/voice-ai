@@ -66,9 +66,7 @@ type CallSetupResult struct {
 	AuthType            string
 	ProjectID           uint64
 	OrganizationID      uint64
-	// CallContext is resolved by the dispatcher and carried in memory into runtime start.
-	// It may be nil when call-context persistence is not configured.
-	CallContext *callcontext.CallContext
+	CallContext         *callcontext.CallContext
 }
 
 type PreparedCallRuntime interface {
@@ -255,12 +253,9 @@ func (d *Dispatcher) OnPipeline(ctx context.Context, stages ...sip_infra.Pipelin
 	for _, s := range stages {
 		e := callEnvelope{ctx: ctx, p: s}
 		switch s.(type) {
-		case sip_infra.ByeReceivedPipeline,
-			sip_infra.CancelReceivedPipeline,
-			sip_infra.TransferInitiatedPipeline,
+		case sip_infra.TransferInitiatedPipeline,
 			sip_infra.TransferConnectedPipeline,
 			sip_infra.TransferFailedPipeline,
-			sip_infra.CallEndedPipeline,
 			sip_infra.CallFailedPipeline:
 			d.signalCh <- e
 		case sip_infra.SessionEstablishedPipeline:
@@ -298,18 +293,12 @@ func (d *Dispatcher) dispatch(ctx context.Context, p sip_infra.Pipeline) {
 	switch v := p.(type) {
 	case sip_infra.SessionEstablishedPipeline:
 		d.handleSessionEstablished(ctx, v)
-	case sip_infra.ByeReceivedPipeline:
-		d.handleByeReceived(ctx, v)
-	case sip_infra.CancelReceivedPipeline:
-		d.handleCancelReceived(ctx, v)
 	case sip_infra.TransferInitiatedPipeline:
 		d.handleTransferInitiated(ctx, v)
 	case sip_infra.TransferConnectedPipeline:
 		d.handleTransferConnected(ctx, v)
 	case sip_infra.TransferFailedPipeline:
 		d.handleTransferFailed(ctx, v)
-	case sip_infra.CallEndedPipeline:
-		d.handleCallEnded(ctx, v)
 	case sip_infra.CallFailedPipeline:
 		d.handleCallFailed(ctx, v)
 	default:

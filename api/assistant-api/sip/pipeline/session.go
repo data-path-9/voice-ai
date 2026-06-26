@@ -64,10 +64,6 @@ func (d *Dispatcher) createConversation(ctx context.Context, stage sip_infra.Ses
 }
 
 func (d *Dispatcher) ensureCallContext(ctx context.Context, stage sip_infra.SessionEstablishedPipeline, conversationID uint64) (*callcontext.CallContext, error) {
-	if d.callContextStore == nil {
-		return nil, nil
-	}
-
 	callID := stage.Session.GetCallID()
 	dirStr := string(stage.Direction)
 	if stage.Direction == sip_infra.CallDirectionOutbound {
@@ -149,14 +145,13 @@ func (d *Dispatcher) setupCall(ctx context.Context, stage sip_infra.SessionEstab
 	return result, nil
 }
 
-func (d *Dispatcher) createObserver(ctx context.Context, setup *CallSetupResult, auth types.SimplePrinciple) observability.Recorder {
-
+func (d *Dispatcher) createObserver(ctx context.Context, scope *CallSetupResult, auth types.SimplePrinciple) observability.Recorder {
 	recorder := observability.New(
 		observability.WithLogger(d.logger),
 		observability.WithAuth(auth),
 		observability.WithGlobalScope(observability.GlobalScope{
-			ProjectID:      setup.ProjectID,
-			OrganizationID: setup.OrganizationID,
+			ProjectID:      scope.ProjectID,
+			OrganizationID: scope.OrganizationID,
 		}),
 		observability.WithContext(ctx),
 		observability.WithGracePeriod(),
@@ -177,7 +172,7 @@ func (d *Dispatcher) createObserver(ctx context.Context, setup *CallSetupResult,
 				Logger:      d.logger,
 				ToolService: d.assistantToolService,
 			}),
-			collectors.NewWithWebhookConfiguration(ctx, d.logger, auth, setup.AssistantID, d.configurationService, d.httpLogService),
+			collectors.NewWithWebhookConfiguration(ctx, d.logger, auth, scope.AssistantID, d.configurationService, d.httpLogService),
 			collectors.NewWithEnv(ctx, d.logger, d.assistantConfig),
 		),
 	)
