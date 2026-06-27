@@ -2,16 +2,172 @@ package internal_llm_agentkit
 
 import (
 	"context"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-func TestHandleResponse_AllTypes(t *testing.T) {
+func TestRead_ContextCancelled(t *testing.T) {
+	talker := newMockTalker()
+	e := newTestExecutor(talker)
+	comm, _ := newTestComm()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Read(ctx, comm, e.connection)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read did not exit after context cancellation")
+	}
+}
+
+func TestRead_RecvEOF(t *testing.T) {
+	talker := newMockTalker()
+	e := newTestExecutor(talker)
+	comm, collector := newTestComm()
+
+	talker.recvCh <- recvResult{err: io.EOF}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Read(context.Background(), comm, e.connection)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read did not exit on EOF")
+	}
+
+	errPkts := findPackets[internal_type.LLMErrorPacket](collector.all())
+	require.Len(t, errPkts, 1)
+	assert.Equal(t, internal_type.LLMSystemPanic, errPkts[0].Type)
+	assert.Contains(t, errPkts[0].Error.Error(), "server closed connection")
+}
+
+func TestRead_RecvUnavailable(t *testing.T) {
+	talker := newMockTalker()
+	e := newTestExecutor(talker)
+	comm, collector := newTestComm()
+
+	talker.recvCh <- recvResult{err: status.Error(codes.Unavailable, "gone")}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Read(context.Background(), comm, e.connection)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read did not exit on Unavailable")
+	}
+
+	errPkts := findPackets[internal_type.LLMErrorPacket](collector.all())
+	require.Len(t, errPkts, 1)
+	assert.Equal(t, internal_type.LLMSystemPanic, errPkts[0].Type)
+	assert.Contains(t, errPkts[0].Error.Error(), "server unavailable")
+}
+
+func TestRead_ProcessesMultipleMessages(t *testing.T) {
+	talker := newMockTalker()
+	e := newTestExecutor(talker)
+	comm, collector := newTestComm()
+
+	talker.recvCh <- recvResult{out: &protos.TalkOutput{
+		Data: &protos.TalkOutput_Assistant{
+			Assistant: &protos.ConversationAssistantMessage{
+				Id:      "m1",
+				Message: &protos.ConversationAssistantMessage_Text{Text: "hi"},
+			},
+		},
+	}}
+	talker.recvCh <- recvResult{out: &protos.TalkOutput{
+		Data: &protos.TalkOutput_Assistant{
+			Assistant: &protos.ConversationAssistantMessage{
+				Id:      "m1",
+				Message: &protos.ConversationAssistantMessage_Text{Text: " there"},
+			},
+		},
+	}}
+	talker.recvCh <- recvResult{err: io.EOF}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Read(context.Background(), comm, e.connection)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read did not exit")
+	}
+
+	pkts := collector.all()
+	deltas := findPackets[internal_type.LLMResponseDeltaPacket](pkts)
+	assert.Len(t, deltas, 2)
+	errPkts := findPackets[internal_type.LLMErrorPacket](pkts)
+	assert.Len(t, errPkts, 1)
+}
+
+func TestE2E_ReadProcessesAndExitsOnEOF(t *testing.T) {
+	talker := newMockTalker()
+	e := newTestExecutor(talker)
+	comm, collector := newTestComm()
+
+	talker.recvCh <- recvResult{out: &protos.TalkOutput{
+		Data: &protos.TalkOutput_Assistant{Assistant: &protos.ConversationAssistantMessage{
+			Id: "r1", Message: &protos.ConversationAssistantMessage_Text{Text: "chunk"},
+		}},
+	}}
+	talker.recvCh <- recvResult{out: &protos.TalkOutput{
+		Data: &protos.TalkOutput_Assistant{Assistant: &protos.ConversationAssistantMessage{
+			Id: "r1", Completed: true,
+			Message: &protos.ConversationAssistantMessage_Text{Text: "done"},
+		}},
+	}}
+	talker.recvCh <- recvResult{err: io.EOF}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Read(context.Background(), comm, e.connection)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Read did not exit")
+	}
+
+	pkts := collector.all()
+	deltas := findPackets[internal_type.LLMResponseDeltaPacket](pkts)
+	dones := findPackets[internal_type.LLMResponseDonePacket](pkts)
+	errPkts := findPackets[internal_type.LLMErrorPacket](pkts)
+	assert.Len(t, deltas, 1)
+	assert.Len(t, dones, 1)
+	assert.Len(t, errPkts, 1)
+}
+
+func TestWrite_AllTypes(t *testing.T) {
 	tests := []struct {
 		name     string
 		resp     *protos.TalkOutput
@@ -217,8 +373,91 @@ func TestHandleResponse_AllTypes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newTestExecutor()
 			comm, collector := newTestComm()
-			e.handleResponse(context.Background(), comm, tt.resp)
+			e.Write(context.Background(), comm, tt.resp)
 			tt.wantFunc(t, collector.all())
 		})
 	}
+}
+
+func TestWrite_CompletedTextContextID(t *testing.T) {
+	e := newTestExecutor()
+	comm, collector := newTestComm()
+
+	resp := &protos.TalkOutput{
+		Data: &protos.TalkOutput_Assistant{
+			Assistant: &protos.ConversationAssistantMessage{
+				Id:        "unique-ctx",
+				Completed: true,
+				Message:   &protos.ConversationAssistantMessage_Text{Text: "done"},
+			},
+		},
+	}
+	e.Write(context.Background(), comm, resp)
+
+	pkts := collector.all()
+	done, ok := findPacket[internal_type.LLMResponseDonePacket](pkts)
+	require.True(t, ok)
+	assert.Equal(t, "unique-ctx", done.ContextID)
+
+	ev, ok := findPacket[internal_type.ObservabilityEventRecordPacket](pkts)
+	require.True(t, ok)
+	assert.Equal(t, "unique-ctx", ev.ContextID)
+}
+
+func TestWrite_ToolResultFailed(t *testing.T) {
+	e := newTestExecutor()
+	comm, collector := newTestComm()
+
+	resp := &protos.TalkOutput{
+		Data: &protos.TalkOutput_ToolCallResult{
+			ToolCallResult: &protos.ConversationToolCallResult{
+				Id:     "tr-2",
+				ToolId: "tool-99",
+				Name:   "calculator",
+			},
+		},
+	}
+	e.Write(context.Background(), comm, resp)
+
+	logs := findPackets[internal_type.ObservabilityLogRecordPacket](collector.all())
+	require.Len(t, logs, 1)
+	assert.Equal(t, "tool_result", logs[0].Record.Attributes["operation"])
+}
+
+func TestWrite_ErrorMessageFormat(t *testing.T) {
+	e := newTestExecutor()
+	comm, collector := newTestComm()
+
+	resp := &protos.TalkOutput{
+		Data: &protos.TalkOutput_Error{
+			Error: &protos.Error{
+				ErrorCode:    403,
+				ErrorMessage: "forbidden",
+			},
+		},
+	}
+	e.Write(context.Background(), comm, resp)
+
+	errPkts := findPackets[internal_type.LLMErrorPacket](collector.all())
+	require.Len(t, errPkts, 1)
+	assert.ErrorIs(t, errPkts[0].Error, ErrAgentkitResponse)
+	assert.Contains(t, errPkts[0].Error.Error(), "agentkit error 403: forbidden")
+}
+
+func TestWrite_StaleContext_Dropped(t *testing.T) {
+	e := newTestExecutor()
+	e.activeContextID = "ctx-active"
+	comm, collector := newTestComm()
+
+	resp := &protos.TalkOutput{
+		Data: &protos.TalkOutput_Assistant{
+			Assistant: &protos.ConversationAssistantMessage{
+				Id:        "ctx-stale",
+				Completed: true,
+				Message:   &protos.ConversationAssistantMessage_Text{Text: "ignore"},
+			},
+		},
+	}
+	e.Write(context.Background(), comm, resp)
+	assert.Empty(t, collector.all())
 }

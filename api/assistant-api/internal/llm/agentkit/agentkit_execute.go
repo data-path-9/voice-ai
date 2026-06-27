@@ -21,43 +21,33 @@ import (
 func (e *agentkitExecutor) Execute(ctx context.Context, comm internal_type.Communication, pctk internal_type.Packet) error {
 	switch p := pctk.(type) {
 	case internal_type.UserInputPacket:
-		return e.Run(ctx, comm, UserTurnPipeline{Packet: p})
-	case internal_type.UserTextReceivedPacket:
-		return e.Run(ctx, comm, UserTextPipeline{Packet: p})
+		return e.handleUserTurn(ctx, comm, p.ContextID, p.Text)
 	case internal_type.InjectMessagePacket:
-		return e.Run(ctx, comm, InjectMessagePipeline{Packet: p})
-	case internal_type.LLMInterruptPacket:
-		return e.Run(ctx, comm, InterruptionPipeline{Packet: p})
-	default:
-		return fmt.Errorf("unsupported packet type: %T", pctk)
-	}
-}
-
-func (e *agentkitExecutor) Run(ctx context.Context, comm internal_type.Communication, p AgentPipeline) error {
-	switch v := p.(type) {
-	case UserTurnPipeline:
-		return e.handleUserTurn(ctx, comm, v.Packet.ContextID, v.Packet.Text)
-	case UserTextPipeline:
-		return e.handleUserTurn(ctx, comm, v.Packet.ContextID, v.Packet.Text)
-	case InjectMessagePipeline:
-		// no-op: external agent manages its own history
 		return nil
-	case InterruptionPipeline:
+	case internal_type.LLMToolCallPacket:
+		return nil
+	case internal_type.LLMToolResultPacket:
+		return nil
+	case internal_type.LLMInterruptPacket:
 		e.stateMu.Lock()
 		e.activeContextID = ""
 		e.stateMu.Unlock()
 		return nil
-	case ResponsePipeline:
-		e.handleResponse(ctx, comm, v.Response)
-		return nil
 	default:
-		return fmt.Errorf("unknown pipeline type: %T", p)
+		return fmt.Errorf("%w: %T", ErrAgentkitExecuteUnsupportedPacket, pctk)
 	}
 }
 
 func (e *agentkitExecutor) handleUserTurn(ctx context.Context, comm internal_type.Communication, contextID, text string) error {
 	if !validator.NotBlank(contextID) {
 		return nil
+	}
+	e.stateMu.RLock()
+	activeConnection := e.connection
+	e.stateMu.RUnlock()
+
+	if !validator.NonNil(activeConnection) {
+		return ErrAgentkitExecutorNotConnected
 	}
 	e.stateMu.Lock()
 	e.activeContextID = contextID
@@ -103,7 +93,8 @@ func (e *agentkitExecutor) handleUserTurn(ctx context.Context, comm internal_typ
 			},
 		},
 	)
-	if err := e.send(&protos.TalkInput{
+
+	return activeConnection.Send(&protos.TalkInput{
 		Request: &protos.TalkInput_Message{
 			Message: &protos.ConversationUserMessage{
 				Message:   &protos.ConversationUserMessage_Text{Text: text},
@@ -112,8 +103,5 @@ func (e *agentkitExecutor) handleUserTurn(ctx context.Context, comm internal_typ
 				Time:      timestamppb.Now(),
 			},
 		},
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }
