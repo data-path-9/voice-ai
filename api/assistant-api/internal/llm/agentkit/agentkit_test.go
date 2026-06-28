@@ -582,7 +582,7 @@ func TestE2E_FullConversationTurn(t *testing.T) {
 	// Verify: talker received the message, event was emitted
 	talker.mu.Lock()
 	require.Len(t, talker.sendCalls, 1)
-	assert.Equal(t, "What is Go?", talker.sendCalls[0].GetMessage().GetText())
+	assert.Equal(t, "What is Go?", talker.sendCalls[0].GetUser().GetText())
 	talker.mu.Unlock()
 
 	evs := findPackets[internal_type.ObservabilityEventRecordPacket](collector.all())

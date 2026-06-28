@@ -67,9 +67,7 @@ func WithConfiguration(configuration *protos.ConversationInitialization) Option 
 func New(opts ...Option) (*agentkitExecutor, error) {
 	options := &options{ctx: context.Background()}
 	for _, opt := range opts {
-		if opt != nil {
-			opt(options)
-		}
+		opt(options)
 	}
 	if options.ctx == nil {
 		options.ctx = context.Background()
@@ -118,7 +116,7 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 				OccurredAt: time.Now(),
 			},
 		})
-		_ = executor.Close(options.ctx)
+		executor.Close(options.ctx)
 		return nil, fmt.Errorf("%w: %w", ErrAgentkitInitializationConnect, err)
 	}
 
@@ -139,7 +137,7 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 				OccurredAt: time.Now(),
 			},
 		})
-		_ = executor.Close(options.ctx)
+		executor.Close(options.ctx)
 		return nil, fmt.Errorf("%w: %w", ErrAgentkitInitializationOpenTalkStream, err)
 	}
 
@@ -177,7 +175,7 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 				OccurredAt: time.Now(),
 			},
 		})
-		_ = executor.Close(options.ctx)
+		executor.Close(options.ctx)
 		return nil, fmt.Errorf("%w: %w", ErrAgentkitInitializationSend, err)
 	}
 

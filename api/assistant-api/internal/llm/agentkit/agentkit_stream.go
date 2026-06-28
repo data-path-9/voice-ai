@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/validator"
@@ -112,6 +114,14 @@ func (e *agentkitExecutor) Write(ctx context.Context, comm internal_type.Communi
 			},
 		)
 
+	case *protos.TalkOutput_User:
+		if !validator.NotBlank(data.User.GetText()) {
+			return
+		}
+		comm.OnPacket(ctx, internal_type.UserInputPacket{
+			Text: data.User.GetText(),
+		})
+
 	case *protos.TalkOutput_Assistant:
 		if !e.isCurrentContext(data.Assistant.GetId()) {
 			return
@@ -169,10 +179,14 @@ func (e *agentkitExecutor) Write(ctx context.Context, comm internal_type.Communi
 		if !e.isCurrentContext(data.ToolCall.GetId()) {
 			return
 		}
+		toolID := data.ToolCall.GetToolId()
+		if !validator.NotBlank(toolID) {
+			toolID = AgentkitToolIDPrefix + uuid.NewString()
+		}
 		comm.OnPacket(ctx,
 			internal_type.LLMToolCallPacket{
 				ContextID: data.ToolCall.GetId(),
-				ToolID:    data.ToolCall.GetToolId(),
+				ToolID:    toolID,
 				Name:      data.ToolCall.GetName(),
 				Action:    data.ToolCall.GetAction(),
 				Arguments: data.ToolCall.GetArgs(),
@@ -250,13 +264,74 @@ func (e *agentkitExecutor) Write(ctx context.Context, comm internal_type.Communi
 				Arguments: map[string]string{"reason": data.Error.GetErrorMessage()},
 			},
 		)
+
+	case *protos.TalkOutput_Observability:
+		switch record := data.Observability.GetRecord().(type) {
+		case *protos.ObservabilityRecord_Log:
+			occurredAt := time.Now()
+			if record.Log.GetOccurredAt() != nil {
+				occurredAt = record.Log.GetOccurredAt().AsTime()
+			}
+			comm.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
+				Record: observability.RecordLog{
+					ID:         record.Log.GetId(),
+					Message:    record.Log.GetMessage(),
+					Level:      observability.Level(record.Log.GetLevel()),
+					Attributes: observability.Attributes(record.Log.GetAttributes()),
+					OccurredAt: occurredAt,
+				},
+			})
+		case *protos.ObservabilityRecord_Event:
+			occurredAt := time.Now()
+			if record.Event.GetOccurredAt() != nil {
+				occurredAt = record.Event.GetOccurredAt().AsTime()
+			}
+			event := record.Event.GetEvent()
+			if !strings.HasPrefix(event, AgentkitObservabilityPrefix) {
+				event = AgentkitObservabilityPrefix + event
+			}
+			component := record.Event.GetComponent()
+			if !strings.HasPrefix(component, AgentkitObservabilityPrefix) {
+				component = AgentkitObservabilityPrefix + component
+			}
+			comm.OnPacket(ctx, internal_type.ObservabilityEventRecordPacket{
+				Record: observability.RecordEvent{
+					ID:         record.Event.GetId(),
+					Component:  observability.ComponentName(component),
+					Event:      observability.EventName(event),
+					Attributes: observability.Attributes(record.Event.GetAttributes()),
+					OccurredAt: occurredAt,
+				},
+			})
+		case *protos.ObservabilityRecord_Metric:
+			occurredAt := time.Now()
+			if record.Metric.GetOccurredAt() != nil {
+				occurredAt = record.Metric.GetOccurredAt().AsTime()
+			}
+			name := record.Metric.GetName()
+			if !strings.HasPrefix(name, AgentkitObservabilityPrefix) {
+				name = AgentkitObservabilityPrefix + name
+			}
+			comm.OnPacket(ctx, internal_type.ObservabilityMetricRecordPacket{
+				Record: observability.RecordMetric{
+					ID: record.Metric.GetId(),
+					Metrics: []*protos.Metric{{
+						Name:        name,
+						Value:       record.Metric.GetValue(),
+						Description: record.Metric.GetDescription(),
+					}},
+					Attributes: observability.Attributes(record.Metric.GetAttributes()),
+					OccurredAt: occurredAt,
+				},
+			})
+		}
 	}
 }
 
 func (e *agentkitExecutor) isCurrentContext(id string) bool {
 	e.stateMu.RLock()
 	defer e.stateMu.RUnlock()
-	if e.activeContextID == "" {
+	if !validator.NotBlank(e.activeContextID) {
 		return true
 	}
 	if !validator.NotBlank(id) {

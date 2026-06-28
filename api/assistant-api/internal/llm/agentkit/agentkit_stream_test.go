@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestRead_ContextCancelled(t *testing.T) {
@@ -213,6 +214,24 @@ func TestWrite_AllTypes(t *testing.T) {
 			},
 		},
 		{
+			name: "user_message",
+			resp: &protos.TalkOutput{
+				Data: &protos.TalkOutput_User{
+					User: &protos.ConversationUserMessage{
+						Id:        "user-1",
+						Completed: true,
+						Message:   &protos.ConversationUserMessage_Text{Text: "synthetic user"},
+					},
+				},
+			},
+			wantFunc: func(t *testing.T, pkts []internal_type.Packet) {
+				require.Len(t, pkts, 1)
+				userInput, ok := pkts[0].(internal_type.UserInputPacket)
+				require.True(t, ok)
+				assert.Equal(t, "synthetic user", userInput.Text)
+			},
+		},
+		{
 			name: "text_delta",
 			resp: &protos.TalkOutput{
 				Data: &protos.TalkOutput_Assistant{
@@ -292,6 +311,45 @@ func TestWrite_AllTypes(t *testing.T) {
 			},
 		},
 		{
+			name: "tool_call_generates_empty_tool_id",
+			resp: &protos.TalkOutput{
+				Data: &protos.TalkOutput_ToolCall{
+					ToolCall: &protos.ConversationToolCall{
+						Id:     "tc-1",
+						Name:   "get_weather",
+						Action: protos.ToolCallAction_TOOL_CALL_ACTION_UNSPECIFIED,
+					},
+				},
+			},
+			wantFunc: func(t *testing.T, pkts []internal_type.Packet) {
+				require.Len(t, pkts, 1)
+				tc, ok := pkts[0].(internal_type.LLMToolCallPacket)
+				require.True(t, ok)
+				assert.Equal(t, "tc-1", tc.ContextID)
+				assert.Regexp(t, "^agentkit-tool-", tc.ToolID)
+				assert.Equal(t, "get_weather", tc.Name)
+			},
+		},
+		{
+			name: "tool_call_preserves_empty_name",
+			resp: &protos.TalkOutput{
+				Data: &protos.TalkOutput_ToolCall{
+					ToolCall: &protos.ConversationToolCall{
+						Id:     "tc-1",
+						Action: protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION,
+					},
+				},
+			},
+			wantFunc: func(t *testing.T, pkts []internal_type.Packet) {
+				require.Len(t, pkts, 1)
+				tc, ok := pkts[0].(internal_type.LLMToolCallPacket)
+				require.True(t, ok)
+				assert.Regexp(t, "^agentkit-tool-", tc.ToolID)
+				assert.Empty(t, tc.Name)
+				assert.Equal(t, protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION, tc.Action)
+			},
+		},
+		{
 			name: "tool_call_result",
 			resp: &protos.TalkOutput{
 				Data: &protos.TalkOutput_ToolCallResult{
@@ -347,6 +405,90 @@ func TestWrite_AllTypes(t *testing.T) {
 				dir, ok := pkts[3].(internal_type.LLMToolCallPacket)
 				require.True(t, ok)
 				assert.Equal(t, protos.ToolCallAction_TOOL_CALL_ACTION_END_CONVERSATION, dir.Action)
+			},
+		},
+		{
+			name: "observability_log",
+			resp: &protos.TalkOutput{
+				Data: &protos.TalkOutput_Observability{
+					Observability: &protos.ObservabilityRecord{
+						Record: &protos.ObservabilityRecord_Log{Log: &protos.ObservabilityLogRecord{
+							Id:         "log-1",
+							Scope:      internal_type.ObservabilityRecordScopeConversation.String(),
+							Level:      string(observability.LevelInfo),
+							Message:    "remote.log",
+							Attributes: map[string]string{"source": "agentkit"},
+							Context:    map[string]string{"context_id": "ctx-log"},
+							OccurredAt: timestamppb.Now(),
+						}},
+					},
+				},
+			},
+			wantFunc: func(t *testing.T, pkts []internal_type.Packet) {
+				require.Len(t, pkts, 1)
+				log, ok := pkts[0].(internal_type.ObservabilityLogRecordPacket)
+				require.True(t, ok)
+				assert.Equal(t, "log-1", log.Record.ID)
+				assert.Equal(t, observability.LevelInfo, log.Record.Level)
+				assert.Equal(t, "remote.log", log.Record.Message)
+				assert.Equal(t, "agentkit", log.Record.Attributes["source"])
+			},
+		},
+		{
+			name: "observability_event",
+			resp: &protos.TalkOutput{
+				Data: &protos.TalkOutput_Observability{
+					Observability: &protos.ObservabilityRecord{
+						Record: &protos.ObservabilityRecord_Event{Event: &protos.ObservabilityEventRecord{
+							Id:         "event-1",
+							Scope:      internal_type.ObservabilityRecordScopeAssistantMessage.String(),
+							Component:  "llm",
+							Event:      "response.created",
+							Attributes: map[string]string{"phase": "stream"},
+							Context:    map[string]string{"context_id": "ctx-event"},
+							OccurredAt: timestamppb.Now(),
+						}},
+					},
+				},
+			},
+			wantFunc: func(t *testing.T, pkts []internal_type.Packet) {
+				require.Len(t, pkts, 1)
+				event, ok := pkts[0].(internal_type.ObservabilityEventRecordPacket)
+				require.True(t, ok)
+				assert.Equal(t, "event-1", event.Record.ID)
+				assert.Equal(t, observability.ComponentName("agentkit.llm"), event.Record.Component)
+				assert.Equal(t, observability.EventName("agentkit.response.created"), event.Record.Event)
+				assert.Equal(t, "stream", event.Record.Attributes["phase"])
+			},
+		},
+		{
+			name: "observability_metric",
+			resp: &protos.TalkOutput{
+				Data: &protos.TalkOutput_Observability{
+					Observability: &protos.ObservabilityRecord{
+						Record: &protos.ObservabilityRecord_Metric{Metric: &protos.ObservabilityMetricRecord{
+							Id:          "metric-1",
+							Scope:       internal_type.ObservabilityRecordScopeAssistantMessage.String(),
+							Name:        "latency_ms",
+							Value:       "42",
+							Description: "latency",
+							Attributes:  map[string]string{"unit": "ms"},
+							Context:     map[string]string{"context_id": "ctx-metric"},
+							OccurredAt:  timestamppb.Now(),
+						}},
+					},
+				},
+			},
+			wantFunc: func(t *testing.T, pkts []internal_type.Packet) {
+				require.Len(t, pkts, 1)
+				metric, ok := pkts[0].(internal_type.ObservabilityMetricRecordPacket)
+				require.True(t, ok)
+				assert.Equal(t, "metric-1", metric.Record.ID)
+				require.Len(t, metric.Record.Metrics, 1)
+				assert.Equal(t, "agentkit.latency_ms", metric.Record.Metrics[0].Name)
+				assert.Equal(t, "42", metric.Record.Metrics[0].Value)
+				assert.Equal(t, "latency", metric.Record.Metrics[0].Description)
+				assert.Equal(t, "ms", metric.Record.Attributes["unit"])
 			},
 		},
 		{

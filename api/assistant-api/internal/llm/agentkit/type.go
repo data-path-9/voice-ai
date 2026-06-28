@@ -34,6 +34,9 @@ const (
 	MaxKeepaliveTimeoutMs = 300000
 	MinMessageBytes       = 1024
 	MaxMessageBytes       = 104857600
+
+	AgentkitObservabilityPrefix = "agentkit."
+	AgentkitToolIDPrefix        = "agentkit-tool-"
 )
 
 var (
