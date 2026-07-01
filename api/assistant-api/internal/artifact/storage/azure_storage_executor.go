@@ -9,6 +9,7 @@ package internal_artifact_storage
 import (
 	"context"
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -291,9 +292,12 @@ func (e *azureStorageExecutor) Execute(ctx context.Context, input internal_type.
 				artifactFileName += ".txt"
 			}
 		}
-		destinationObjectKey := strings.Join([]string{input.ContextID, artifact.Type, artifactFileName}, "/")
-		if configuredPrefix != "" {
-			destinationObjectKey = configuredPrefix + "/" + destinationObjectKey
+		artifactExtension := filepath.Ext(artifactFileName)
+		artifactBaseName := strings.TrimSuffix(artifactFileName, artifactExtension)
+		artifactFileName = fmt.Sprintf("%s-%s%s", artifactBaseName, input.RecordingUUID, artifactExtension)
+		destinationObjectKey := path.Join(input.ContextID, artifactFileName)
+		if validator.NotBlank(configuredPrefix) {
+			destinationObjectKey = path.Join(configuredPrefix, destinationObjectKey)
 		}
 
 		storageResult := destinationStorage.Store(pushContext, destinationObjectKey, artifact.Content)

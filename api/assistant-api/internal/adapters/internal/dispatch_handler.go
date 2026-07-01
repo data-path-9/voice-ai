@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	adapter_lifecycle "github.com/rapidaai/api/assistant-api/internal/adapters/lifecycle"
 	internal_analysis "github.com/rapidaai/api/assistant-api/internal/analysis"
 	internal_artifact "github.com/rapidaai/api/assistant-api/internal/artifact"
@@ -1300,7 +1301,8 @@ func (h requestorDispatchHandler) HandleConversationRecordingCompleted(ctx conte
 	if h.r.artifactPushExecutors != nil {
 		for _, artifactPushExecutor := range h.r.artifactPushExecutors {
 			_, _ = artifactPushExecutor.Execute(ctx, internal_type.ArtifactPushInput{
-				ContextID: p.ContextID,
+				ContextID:     p.ContextID,
+				RecordingUUID: uuid.NewString(),
 				Artifacts: []internal_type.ArtifactPushArtifact{
 					{Name: "user", Type: "recording", ContentType: "audio/wav", Content: p.Audio.UserAudio},
 					{Name: "assistant", Type: "recording", ContentType: "audio/wav", Content: p.Audio.AssistantAudio},

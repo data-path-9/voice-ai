@@ -7,6 +7,13 @@
       "required": true,
       "placeholder": "Enter your S3 bucket name",
       "errorMessage": "Please provide a valid S3 bucket name."
+    },
+    {
+      "key": "prefix",
+      "label": "Path / Prefix",
+      "type": "input",
+      "required": false,
+      "placeholder": "e.g. /x/v/b"
     }
   ]
 }

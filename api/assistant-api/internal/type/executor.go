@@ -64,8 +64,9 @@ type ArtifactPushArtifact struct {
 }
 
 type ArtifactPushInput struct {
-	ContextID string
-	Artifacts []ArtifactPushArtifact
+	ContextID     string
+	RecordingUUID string
+	Artifacts     []ArtifactPushArtifact
 }
 
 type ArtifactPushResult struct {
