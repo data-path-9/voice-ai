@@ -7,6 +7,13 @@
       "required": true,
       "placeholder": "Enter your Azure container",
       "errorMessage": "Please provide a valid Azure container."
+    },
+    {
+      "key": "prefix",
+      "label": "Path / Prefix",
+      "type": "input",
+      "required": false,
+      "placeholder": "e.g. /x/v/b"
     }
   ]
 }
