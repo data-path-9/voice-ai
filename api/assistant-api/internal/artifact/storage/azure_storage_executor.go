@@ -294,8 +294,8 @@ func (e *azureStorageExecutor) Execute(ctx context.Context, input internal_type.
 		}
 		artifactExtension := filepath.Ext(artifactFileName)
 		artifactBaseName := strings.TrimSuffix(artifactFileName, artifactExtension)
-		artifactFileName = fmt.Sprintf("%s-%s%s", artifactBaseName, input.RecordingUUID, artifactExtension)
-		destinationObjectKey := path.Join(input.ContextID, artifactFileName)
+		artifactFileName = fmt.Sprintf("%s-%s%s", artifactBaseName, input.ContextID, artifactExtension)
+		destinationObjectKey := path.Join(fmt.Sprintf("%d", input.ConversationID), artifactFileName)
 		if validator.NotBlank(configuredPrefix) {
 			destinationObjectKey = path.Join(configuredPrefix, destinationObjectKey)
 		}
