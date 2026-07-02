@@ -211,13 +211,15 @@ func (e *agentkitExecutor) Close(ctx context.Context) error {
 		e.cancel(context.Canceled)
 	}
 	if validator.NonNil(activeConnection) {
-		if err := e.connection.Close(); err != nil {
+		if err := activeConnection.Close(); err != nil {
 			e.logger.Warnf("failed to close agentkit connection: %v", err)
 		}
 	}
-	e.connection = nil
+	e.stateMu.Lock()
 	e.activeContextID = ""
 	e.requestStartedAt = time.Time{}
+	e.connection = nil
+	e.stateMu.Unlock()
 	return nil
 }
 
