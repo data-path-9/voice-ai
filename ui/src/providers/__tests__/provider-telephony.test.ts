@@ -8,6 +8,7 @@ const EXPECTED_TELEPHONY_CODES = [
   'sip',
   'telnyx',
   'twilio',
+  'vobiz_websocket',
 ];
 
 describe('Telephony providers registry', () => {
