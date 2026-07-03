@@ -10,13 +10,16 @@ import (
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_agent_tool "github.com/rapidaai/api/assistant-api/internal/tool"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
+	integration_client "github.com/rapidaai/pkg/clients/integration"
 	integration_client_builders "github.com/rapidaai/pkg/clients/integration/builders"
 	"github.com/rapidaai/pkg/commons"
 	gorm_types "github.com/rapidaai/pkg/models/gorm/types"
+	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/pkg/utils"
 	"github.com/rapidaai/protos"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -66,16 +69,22 @@ func (m *testToolExecutor) Close(context.Context) error { return nil }
 
 type testComm struct {
 	internal_type.Communication
-	assistant    *internal_assistant_entity.Assistant
-	conversation *internal_conversation_entity.AssistantConversation
-	options      utils.Option
-	pkts         []internal_type.Packet
+	assistant         *internal_assistant_entity.Assistant
+	conversation      *internal_conversation_entity.AssistantConversation
+	integrationCaller integration_client.IntegrationServiceClient
+	auth              types.SimplePrinciple
+	options           utils.Option
+	pkts              []internal_type.Packet
 }
 
 func (m *testComm) OnPacket(_ context.Context, pkts ...internal_type.Packet) error {
 	m.pkts = append(m.pkts, pkts...)
 	return nil
 }
+func (m *testComm) IntegrationCaller() integration_client.IntegrationServiceClient {
+	return m.integrationCaller
+}
+func (m *testComm) Auth() types.SimplePrinciple                     { return m.auth }
 func (m *testComm) Assistant() *internal_assistant_entity.Assistant { return m.assistant }
 func (m *testComm) Conversation() *internal_conversation_entity.AssistantConversation {
 	return m.conversation
@@ -89,22 +98,28 @@ func (m *testComm) GetMode() type_enums.MessageMode { return type_enums.TextMode
 func (m *testComm) GetSource() utils.RapidaSource   { return utils.WebPlugin }
 func (m *testComm) GetOptions() utils.Option        { return m.options }
 
+type testIntegrationClient struct {
+	integration_client.IntegrationServiceClient
+
+	mu     sync.Mutex
+	stream grpc.BidiStreamingClient[protos.StreamChatRequest, protos.StreamChatResponse]
+	err    error
+	calls  int
+}
+
+func (m *testIntegrationClient) StreamChat(context.Context, types.SimplePrinciple, string) (grpc.BidiStreamingClient[protos.StreamChatRequest, protos.StreamChatResponse], error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	return m.stream, m.err
+}
+
 func newModelTestEnv(t *testing.T) (*modelAssistantExecutor, *testComm, *testStream, *testToolExecutor) {
 	t.Helper()
 	logger, err := commons.NewApplicationLogger()
 	require.NoError(t, err)
 
 	stream := &testStream{}
-	toolExec := &testToolExecutor{}
-	e := &modelAssistantExecutor{
-		logger:             logger,
-		inputBuilder:       integration_client_builders.NewChatInputBuilder(logger),
-		toolExecutor:       toolExec,
-		history:            NewConversationHistory(),
-		stream:             stream,
-		providerCredential: &protos.VaultCredential{Id: 9, Value: &structpb.Struct{}},
-	}
-
 	comm := &testComm{
 		assistant: &internal_assistant_entity.Assistant{
 			Name: "assistant",
@@ -114,7 +129,20 @@ func newModelTestEnv(t *testing.T) (*modelAssistantExecutor, *testComm, *testStr
 				AssistantModelOptions: []*internal_assistant_entity.AssistantProviderModelOption{},
 			},
 		},
-		conversation: &internal_conversation_entity.AssistantConversation{},
+		conversation:      &internal_conversation_entity.AssistantConversation{},
+		integrationCaller: &testIntegrationClient{stream: stream},
+	}
+
+	connection := NewModelConnection("openai")
+	require.NoError(t, connection.OpenStream(context.Background(), comm))
+	toolExec := &testToolExecutor{}
+	e := &modelAssistantExecutor{
+		logger:             logger,
+		inputBuilder:       integration_client_builders.NewChatInputBuilder(logger),
+		toolExecutor:       toolExec,
+		history:            NewConversationHistory(),
+		connection:         connection,
+		providerCredential: &protos.VaultCredential{Id: 9, Value: &structpb.Struct{}},
 	}
 	return e, comm, stream, toolExec
 }
