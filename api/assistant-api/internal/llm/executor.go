@@ -16,6 +16,7 @@ import (
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/pkg/commons"
 	type_enums "github.com/rapidaai/pkg/types/enums"
+	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
 
@@ -68,15 +69,15 @@ func New(opts ...Option) (internal_type.LLMExecutor, error) {
 			opt(options)
 		}
 	}
-	if options.ctx == nil {
+	if !validator.NonNil(options.ctx) {
 		options.ctx = context.Background()
 	}
-	if options.assistant == nil {
+	if !validator.NonNil(options.assistant) {
 		return nil, errors.New("llm: assistant is required")
 	}
 	switch options.assistant.AssistantProvider {
 	case type_enums.AGENTKIT:
-		if options.assistant.AssistantProviderAgentkit == nil {
+		if !validator.NonNil(options.assistant.AssistantProviderAgentkit) {
 			return nil, errors.New("llm: agentkit provider configuration is required")
 		}
 		return internal_llm_agentkit.New(
@@ -86,7 +87,7 @@ func New(opts ...Option) (internal_type.LLMExecutor, error) {
 			internal_llm_agentkit.WithConfiguration(options.configuration),
 		)
 	case type_enums.WEBSOCKET:
-		if options.assistant.AssistantProviderWebsocket == nil {
+		if !validator.NonNil(options.assistant.AssistantProviderWebsocket) {
 			return nil, errors.New("llm: websocket provider configuration is required")
 		}
 		return internal_llm_websocket.New(
@@ -96,7 +97,7 @@ func New(opts ...Option) (internal_type.LLMExecutor, error) {
 			internal_llm_websocket.WithConfiguration(options.configuration),
 		)
 	case type_enums.MODEL:
-		if options.assistant.AssistantProviderModel == nil {
+		if !validator.NonNil(options.assistant.AssistantProviderModel) {
 			return nil, errors.New("llm: model provider configuration is required")
 		}
 		return internal_llm_model.New(

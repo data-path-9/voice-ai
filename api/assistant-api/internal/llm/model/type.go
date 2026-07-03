@@ -7,8 +7,20 @@
 package internal_llm_model
 
 import (
+	"errors"
+
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	"github.com/rapidaai/protos"
+)
+
+var (
+	ErrModelConnectionOpenStream        = errors.New("model connection open stream failed")
+	ErrModelConnectionSend              = errors.New("model connection send failed")
+	ErrModelConnectionRecv              = errors.New("model connection recv failed")
+	ErrModelConnectionCloseRequest      = errors.New("model connection close request failed")
+	ErrModelConnectionCloseStream       = errors.New("model connection close stream failed")
+	ErrModelConnectionNotConnected      = errors.New("model connection not connected")
+	ErrModelConnectionStreamAlreadyOpen = errors.New("model connection stream already open")
 )
 
 // AgentPipeline is a sealed marker interface for all pipeline types.
