@@ -10,7 +10,15 @@ import { FC, useCallback, useMemo } from 'react';
 import { CredentialDropdown } from '@/app/components/dropdown/credential-dropdown';
 import { TEXT_PROVIDERS } from '@/providers';
 import { NormalizeTextProviderModelSelection } from './model-normalization';
-import { Dropdown } from '@carbon/react';
+import {
+  Dropdown,
+  Stack,
+  Toggletip,
+  ToggletipButton,
+  ToggletipContent,
+} from '@carbon/react';
+import { FormLabel } from '@/app/components/form-label';
+import { Information } from '@carbon/icons-react';
 
 export const GetDefaultTextProviderConfigIfInvalid = (
   provider: string,
@@ -115,24 +123,37 @@ export const TextProvider: React.FC<ProviderComponentProps> = props => {
 
   return (
     <>
-      <div className="flex items-stretch border border-gray-200 dark:border-gray-700">
-        <div className="w-48 shrink-0 border-r border-gray-200 dark:border-gray-700">
-          <Dropdown
-            id="text-provider"
-            titleText=""
-            hideLabel
-            label="Select provider"
-            size="md"
-            items={textProviders}
-            selectedItem={selectedProvider}
-            itemToString={(item: any) => item?.name || ''}
-            onChange={({ selectedItem }: any) => {
-              if (selectedItem) onChangeProvider(selectedItem.code);
-            }}
-          />
+      <Stack>
+        <div className="mb-2 flex items-center gap-1">
+          <FormLabel>Model</FormLabel>
+          <Toggletip align="right">
+            <ToggletipButton label="Show information">
+              <Information size={14} />
+            </ToggletipButton>
+            <ToggletipContent>
+              Select the provider and model configuration used by this agent.
+            </ToggletipContent>
+          </Toggletip>
         </div>
-        <TextProviderConfigComponent {...props} />
-      </div>
+        <div className="flex items-stretch border border-gray-200 dark:border-gray-700">
+          <div className="w-48 shrink-0 border-r border-gray-200 dark:border-gray-700">
+            <Dropdown
+              id="text-provider"
+              titleText=""
+              hideLabel
+              label="Select provider"
+              size="md"
+              items={textProviders}
+              selectedItem={selectedProvider}
+              itemToString={(item: any) => item?.name || ''}
+              onChange={({ selectedItem }: any) => {
+                if (selectedItem) onChangeProvider(selectedItem.code);
+              }}
+            />
+          </div>
+          <TextProviderConfigComponent {...props} />
+        </div>
+      </Stack>
       {provider && (
         <CredentialDropdown
           onChangeCredential={(c: VaultCredential) => {

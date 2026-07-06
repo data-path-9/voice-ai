@@ -44,8 +44,10 @@ import {
   DeploymentConfigureAssistantDeploymentPage,
   DeploymentCreateWebsocketVersionAssistantPage,
   DeploymentCreateAgentKitVersionAssistantPage,
+  DeploymentCreateAgentflowVersionAssistantPage,
   DeploymentCreateAgentKitPage,
   DeploymentCreateWebsocketPage,
+  DeploymentCreateAgentflowPage,
 } from '@/app/pages/assistant';
 import { AssistantViewLayout } from '@/app/pages/assistant/view/assistant-view.layout';
 import { StaticPageNotFoundPage } from '@/app/pages/static-pages';
@@ -142,11 +144,19 @@ export function DeploymentRoute() {
             path={'create-agentkit-version'}
             element={<DeploymentCreateAgentKitVersionAssistantPage />}
           />
+          <Route
+            path={'create-agentflow-version'}
+            element={<DeploymentCreateAgentflowVersionAssistantPage />}
+          />
 
           {/* Configure pages */}
           <Route
             path={'edit-assistant/'}
             element={<DeploymentEditAssistantPage />}
+          />
+          <Route
+            path={'edit-agentflow/'}
+            element={<DeploymentCreateAgentflowVersionAssistantPage />}
           />
           <Route
             path={'configure-analysis/'}
@@ -271,6 +281,11 @@ export function DeploymentRoute() {
           key={'/deployment/assistant/create-agentkit'}
           path={'assistant/connect-agentkit'}
           element={<DeploymentCreateAgentKitPage />}
+        />
+        <Route
+          key={'/deployment/assistant/create-agentflow'}
+          path={'assistant/create-agentflow'}
+          element={<DeploymentCreateAgentflowPage />}
         />
       </Route>
     </Routes>

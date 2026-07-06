@@ -17,6 +17,8 @@ import {
   RAPIDA_RESERVED_RUNTIME_VARIABLE_KEYS,
   RAPIDA_RESERVED_RUNTIME_VARIABLES,
 } from '@/utils/prompt-reserved-variables';
+import { Toggletip, ToggletipButton, ToggletipContent } from '@carbon/react';
+import { Information } from '@carbon/icons-react';
 
 const isRapidaReservedRuntimeVariable = (variableName: string): boolean =>
   RAPIDA_RESERVED_RUNTIME_VARIABLE_KEYS.has(variableName) ||
@@ -28,6 +30,7 @@ export type IPromptProps = {
   };
   instanceId?: string;
   showRuntimeReplacementHint?: boolean;
+  hideArgumentRuntimeHint?: boolean;
   enableReservedVariableSuggestions?: boolean;
   onChange: (prompt: {
     prompt: { role: string; content: string }[];
@@ -40,6 +43,7 @@ export const ConfigPrompt: FC<IPromptProps> = ({
   onChange,
   instanceId,
   showRuntimeReplacementHint = false,
+  hideArgumentRuntimeHint = false,
   enableReservedVariableSuggestions = false,
 }) => {
   const [showReservedVariables, setShowReservedVariables] = useState(false);
@@ -130,7 +134,17 @@ export const ConfigPrompt: FC<IPromptProps> = ({
   return (
     <>
       <FieldSet>
-        <FormLabel>Instruction</FormLabel>
+        <div className="flex items-center gap-1">
+          <FormLabel>Instruction</FormLabel>
+          <Toggletip align="right">
+            <ToggletipButton label="Show information">
+              <Information size={14} />
+            </ToggletipButton>
+            <ToggletipContent>
+              Define the messages and variables that guide the agent response.
+            </ToggletipContent>
+          </Toggletip>
+        </div>
         {showRuntimeReplacementHint && (
           <div className="border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
             <button
@@ -222,7 +236,7 @@ export const ConfigPrompt: FC<IPromptProps> = ({
               {existingPrompt.variables.length}
             </span>
           </div>
-          {showRuntimeReplacementHint && (
+          {showRuntimeReplacementHint && !hideArgumentRuntimeHint && (
             <InputHelper className="mb-2">
               Add only your template-specific variables here. Rapida reserved
               variables are preserved and replaced at runtime.

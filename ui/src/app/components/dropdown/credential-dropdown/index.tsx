@@ -1,12 +1,18 @@
 import { VaultCredential } from '@rapidaai/react';
-import { Renew, Add } from '@carbon/icons-react';
+import { Renew, Add, Information } from '@carbon/icons-react';
 import { FC, useEffect, useState } from 'react';
 import { CreateProviderCredentialDialog } from '@/app/components/base/modal/create-provider-credential-modal';
 import { useAllProviderCredentials } from '@/hooks/use-model';
 import { useProviderContext } from '@/context/provider-context';
 import { allProvider } from '@/providers';
-import { Button } from '@carbon/react';
+import {
+  Button,
+  Toggletip,
+  ToggletipButton,
+  ToggletipContent,
+} from '@carbon/react';
 import { Dropdown } from '@/app/components/carbon/dropdown';
+import { FormLabel } from '@/app/components/form-label';
 
 interface CredentialDropdownProps {
   className?: string;
@@ -29,9 +35,10 @@ export const CredentialDropdown: FC<CredentialDropdownProps> = props => {
     );
   }, [providerCredentials, props.provider]);
 
-  const selectedItem = currentProviderCredentials.find(
-    x => x.getId() === props.currentCredential,
-  ) || null;
+  const selectedItem =
+    currentProviderCredentials.find(
+      x => x.getId() === props.currentCredential,
+    ) || null;
 
   const getProviderInfo = (code: string) =>
     allProvider().find(x => x.code === code);
@@ -48,7 +55,20 @@ export const CredentialDropdown: FC<CredentialDropdownProps> = props => {
           <div className="flex-1 min-w-0">
             <Dropdown
               id="credential-dropdown"
-              titleText="Credential"
+              titleText={
+                <span className="inline-flex items-center gap-1">
+                  <FormLabel>Credential</FormLabel>
+                  <Toggletip align="right">
+                    <ToggletipButton label="Show information">
+                      <Information size={14} />
+                    </ToggletipButton>
+                    <ToggletipContent>
+                      Select the saved provider credential used for model
+                      access.
+                    </ToggletipContent>
+                  </Toggletip>
+                </span>
+              }
               hideLabel={false}
               label="Select credential"
               items={currentProviderCredentials}
