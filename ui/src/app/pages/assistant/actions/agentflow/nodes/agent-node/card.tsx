@@ -125,9 +125,6 @@ export function AgentNodeCard({
               ))}
             </StructuredListBody>
           </StructuredListWrapper>
-          <div className="flex h-10 items-center justify-end border-t border-gray-200 px-7 text-sm text-gray-900 dark:border-gray-800 dark:text-white">
-            <span className="min-w-0 truncate font-semibold">Response</span>
-          </div>
         </div>
       </Tile>
     </>

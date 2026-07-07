@@ -363,7 +363,6 @@ const AGENT_NODE_PROMPT_TOP = 64;
 const AGENT_NODE_PROMPT_HEIGHT = 132;
 const AGENT_NODE_TRANSITION_HEADER_HEIGHT = 48;
 const AGENT_NODE_TRANSITION_ROW_HEIGHT = 40;
-const AGENT_NODE_RESPONSE_ROW_HEIGHT = 40;
 const AGENT_NODE_BOTTOM_PADDING = 0;
 const AGENT_NODE_TRANSITION_LIST_TOP =
   AGENT_NODE_PROMPT_TOP +
@@ -382,7 +381,6 @@ const CONDITION_NODE_INPUT_PORT_TOP = 28;
 const CONDITION_NODE_CONDITION_HEADER_HEIGHT = 48;
 const CONDITION_NODE_ROW_HEIGHT = 40;
 const CONDITION_NODE_BOTTOM_PADDING = 16;
-const AGENT_RESPONSE_OUTPUT = 'Response';
 const DEFAULT_AGENT_PROMPT =
   'Hello this is customer support department,\nhow can I help you today?';
 const DEFAULT_AGENT_TRANSITIONS: AgentTransition[] = [
@@ -2152,19 +2150,12 @@ const getNodeValidationIssues = (node: AgentflowNode) => {
 const getAgentNodeHeight = (transitionCount: number) =>
   AGENT_NODE_TRANSITION_LIST_TOP +
   Math.max(transitionCount, 1) * AGENT_NODE_TRANSITION_ROW_HEIGHT +
-  AGENT_NODE_RESPONSE_ROW_HEIGHT +
   AGENT_NODE_BOTTOM_PADDING;
 
 const getAgentTransitionPortTop = (index: number) =>
   AGENT_NODE_TRANSITION_LIST_TOP +
   index * AGENT_NODE_TRANSITION_ROW_HEIGHT +
   AGENT_NODE_TRANSITION_ROW_HEIGHT / 2 -
-  7;
-
-const getAgentResponsePortTop = (transitionCount: number) =>
-  AGENT_NODE_TRANSITION_LIST_TOP +
-  Math.max(transitionCount, 1) * AGENT_NODE_TRANSITION_ROW_HEIGHT +
-  AGENT_NODE_RESPONSE_ROW_HEIGHT / 2 -
   7;
 
 const getChatInputNodeHeight = (argumentCount: number) =>
@@ -2239,12 +2230,9 @@ const isAnnotationNodeType = (type: AgentflowNodeType) =>
 
 const getNodeOutputs = (node: AgentflowNode) => {
   if (node.type === 'prompt') {
-    return [
-      ...getAgentTransitionRows(getNodeConfig(node)).map(
-        transition => transition.name,
-      ),
-      AGENT_RESPONSE_OUTPUT,
-    ];
+    return getAgentTransitionRows(getNodeConfig(node)).map(
+      transition => transition.name,
+    );
   }
 
   if (node.type === 'condition') {
@@ -2262,10 +2250,6 @@ const getPromptSourceHandleLabel = (
   sourceHandle?: string,
 ) => {
   if (!sourceHandle) return node.label;
-
-  if (sourceHandle === AGENT_RESPONSE_OUTPUT) {
-    return 'Response';
-  }
 
   const transition = getAgentTransitionRows(getNodeConfig(node)).find(
     item => item.id === sourceHandle || item.name === sourceHandle,
@@ -2292,10 +2276,6 @@ const getConditionFieldOptionsForNode = (
   }
 
   if (node.type === 'prompt') {
-    if (sourceHandle === AGENT_RESPONSE_OUTPUT) {
-      return [{ value: 'response', label: 'response' }];
-    }
-
     const transition = getAgentTransitionRows(config).find(
       item => item.id === sourceHandle || item.name === sourceHandle,
     );
@@ -2816,9 +2796,6 @@ const AgentflowCanvasNode = ({
                 })}
               </React.Fragment>
             ))}
-            {renderSourceHandle(AGENT_RESPONSE_OUTPUT, {
-              top: getAgentResponsePortTop(transitionRows.length) + 7,
-            })}
           </>
         }
         Icon={Icon}

@@ -20,6 +20,7 @@ const (
 	ComponentSTT            ComponentName = "stt"
 	ComponentTTS            ComponentName = "tts"
 	ComponentLLM            ComponentName = "llm"
+	ComponentAgentflow      ComponentName = "agentflow"
 	ComponentVAD            ComponentName = "vad"
 	ComponentEOS            ComponentName = "eos"
 	ComponentDenoise        ComponentName = "denoise"
@@ -103,6 +104,12 @@ const (
 	LLMCompleted EventName = "llm.completed"
 	LLMDiscarded EventName = "llm.discarded"
 	LLMError     EventName = "llm.error"
+)
+
+const (
+	AgentflowTransitionTriggered   EventName = "agentflow.transition.triggered"
+	AgentflowTransitionMatched     EventName = "agentflow.transition.matched"
+	AgentflowTransitionMissingEdge EventName = "agentflow.transition.missing_edge"
 )
 
 const (
@@ -219,6 +226,11 @@ var eventsByComponent = map[ComponentName][]EventName{
 		LLMCompleted,
 		LLMDiscarded,
 		LLMError,
+	},
+	ComponentAgentflow: {
+		AgentflowTransitionTriggered,
+		AgentflowTransitionMatched,
+		AgentflowTransitionMissingEdge,
 	},
 	ComponentVAD: {
 		VADSpeechStarted,
