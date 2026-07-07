@@ -14,6 +14,7 @@ type AssistantProvider string
 
 const (
 	AGENTKIT  AssistantProvider = "AGENTKIT"
+	AGENTFLOW AssistantProvider = "AGENTFLOW"
 	WEBSOCKET AssistantProvider = "WEBSOCKET"
 	MODEL     AssistantProvider = "MODEL"
 )
@@ -34,6 +35,8 @@ func ToAssistantProvider(s string) AssistantProvider {
 	switch s {
 	case "AGENTKIT":
 		return AGENTKIT
+	case "AGENTFLOW":
+		return AGENTFLOW
 	case "WEBSOCKET":
 		return WEBSOCKET
 	default:

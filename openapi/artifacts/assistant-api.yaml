@@ -1200,6 +1200,8 @@ components:
           $ref: "#/components/schemas/CreateAssistantProviderAgentkit"
         websocket:
           $ref: "#/components/schemas/CreateAssistantProviderWebsocket"
+        agentflow:
+          $ref: "#/components/schemas/CreateAssistantProviderAgentflow"
     CreateAssistantProviderModel:
       type: object
       required:
@@ -1262,6 +1264,17 @@ components:
           type: object
           additionalProperties:
             type: string
+    CreateAssistantProviderAgentflow:
+      type: object
+      required:
+        - schemaVersion
+        - definition
+      properties:
+        schemaVersion:
+          type: string
+        definition:
+          type: object
+          additionalProperties: true
     CreateAssistantKnowledgeRequest:
       type: object
       properties:
@@ -1724,6 +1737,8 @@ components:
           $ref: "#/components/schemas/AssistantProviderAgentkit"
         assistantProviderWebsocket:
           $ref: "#/components/schemas/AssistantProviderWebsocket"
+        assistantProviderAgentflow:
+          $ref: "#/components/schemas/AssistantProviderAgentflow"
         assistantTag:
           $ref: "#/components/schemas/AssistantTag"
         createdBy:
@@ -1833,6 +1848,22 @@ components:
           type: object
           additionalProperties:
             type: string
+        status:
+          type: string
+    AssistantProviderAgentflow:
+      type: object
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        description:
+          type: string
+        assistantId:
+          $ref: "./common.yaml#/components/schemas/Uint64String"
+        schemaVersion:
+          type: string
+        definition:
+          type: object
+          additionalProperties: true
         status:
           type: string
     AssistantTool:
