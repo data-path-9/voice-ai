@@ -3954,9 +3954,13 @@ export function AgentflowBuilder({
       setSaveState('saved');
       setSaveDialogOpen(false);
       toast.success('Agentflow saved successfully.');
-    } catch {
+    } catch (error) {
       setSaveState('error');
-      toast.error('Unable to save agentflow. Please try again later.');
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to save agentflow. Please try again later.',
+      );
     }
   };
 

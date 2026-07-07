@@ -78,6 +78,11 @@ type AssistantService interface {
 		auth types.SimplePrinciple,
 		assistantId uint64, criterias []*workflow_api.Criteria,
 		paginate *workflow_api.Paginate) (int64, []*internal_assistant_entity.AssistantProviderAgentkit, error)
+	GetAllAssistantProviderAgentflow(
+		ctx context.Context,
+		auth types.SimplePrinciple,
+		assistantId uint64, criterias []*workflow_api.Criteria,
+		paginate *workflow_api.Paginate) (int64, []*internal_assistant_entity.AssistantProviderAgentflow, error)
 
 	UpdateAssistantVersion(ctx context.Context,
 		auth types.SimplePrinciple,
@@ -135,6 +140,14 @@ type AssistantService interface {
 		maxRecvMessageBytes *uint32,
 		maxSendMessageBytes *uint32,
 	) (*internal_assistant_entity.AssistantProviderAgentkit, error)
+
+	CreateAssistantProviderAgentflow(ctx context.Context,
+		auth types.SimplePrinciple,
+		assistantId uint64,
+		description string,
+		schemaVersion string,
+		definition map[string]interface{},
+	) (*internal_assistant_entity.AssistantProviderAgentflow, error)
 
 	AttachProviderModelToAssistant(ctx context.Context,
 		auth types.SimplePrinciple,

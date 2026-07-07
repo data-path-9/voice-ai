@@ -178,6 +178,18 @@ export function Version(props: VersionProps) {
           deployType: 'WEBSOCKET',
         };
       }
+      case Cases.ASSISTANTPROVIDERAGENTFLOW: {
+        const a = apm.getAssistantprovideragentflow();
+        return {
+          id: a?.getId()!,
+          type: 'Agentflow',
+          typeColor: 'green' as const,
+          description: a?.getDescription() || 'Initial assistant version',
+          createdBy: a?.getCreateduser()?.getName() || '',
+          createdDate: a?.getCreateddate(),
+          deployType: 'AGENTFLOW',
+        };
+      }
       default:
         return null;
     }
@@ -203,6 +215,11 @@ export function Version(props: VersionProps) {
   const goToCreateVersion = () => {
     if (props.assistant.hasAssistantprovideragentkit()) {
       navigation.goToCreateAssistantAgentKitVersion(props.assistant.getId());
+      return;
+    }
+
+    if (props.assistant.hasAssistantprovideragentflow()) {
+      navigation.goToCreateAssistantAgentflowVersion(props.assistant.getId());
       return;
     }
 

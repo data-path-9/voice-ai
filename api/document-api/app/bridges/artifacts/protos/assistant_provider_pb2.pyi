@@ -1,6 +1,7 @@
 import datetime
 
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
+from google.protobuf import struct_pb2 as _struct_pb2
 import app.bridges.artifacts.protos.common_pb2 as _common_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf import descriptor as _descriptor
@@ -21,7 +22,7 @@ class UpdateAssistantVersionRequest(_message.Message):
     def __init__(self, assistantId: _Optional[int] = ..., assistantProviderId: _Optional[int] = ..., assistantProvider: _Optional[str] = ...) -> None: ...
 
 class CreateAssistantProviderRequest(_message.Message):
-    __slots__ = ("assistantId", "description", "model", "agentkit", "websocket")
+    __slots__ = ("assistantId", "description", "model", "agentkit", "websocket", "agentflow")
     class CreateAssistantProviderModel(_message.Message):
         __slots__ = ("template", "modelProviderName", "assistantModelOptions")
         TEMPLATE_FIELD_NUMBER: _ClassVar[int]
@@ -86,17 +87,26 @@ class CreateAssistantProviderRequest(_message.Message):
         headers: _containers.ScalarMap[str, str]
         connectionParameters: _containers.ScalarMap[str, str]
         def __init__(self, websocketUrl: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., connectionParameters: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    class CreateAssistantProviderAgentflow(_message.Message):
+        __slots__ = ("schemaVersion", "definition")
+        SCHEMAVERSION_FIELD_NUMBER: _ClassVar[int]
+        DEFINITION_FIELD_NUMBER: _ClassVar[int]
+        schemaVersion: str
+        definition: _struct_pb2.Struct
+        def __init__(self, schemaVersion: _Optional[str] = ..., definition: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
     ASSISTANTID_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     MODEL_FIELD_NUMBER: _ClassVar[int]
     AGENTKIT_FIELD_NUMBER: _ClassVar[int]
     WEBSOCKET_FIELD_NUMBER: _ClassVar[int]
+    AGENTFLOW_FIELD_NUMBER: _ClassVar[int]
     assistantId: int
     description: str
     model: CreateAssistantProviderRequest.CreateAssistantProviderModel
     agentkit: CreateAssistantProviderRequest.CreateAssistantProviderAgentkit
     websocket: CreateAssistantProviderRequest.CreateAssistantProviderWebsocket
-    def __init__(self, assistantId: _Optional[int] = ..., description: _Optional[str] = ..., model: _Optional[_Union[CreateAssistantProviderRequest.CreateAssistantProviderModel, _Mapping]] = ..., agentkit: _Optional[_Union[CreateAssistantProviderRequest.CreateAssistantProviderAgentkit, _Mapping]] = ..., websocket: _Optional[_Union[CreateAssistantProviderRequest.CreateAssistantProviderWebsocket, _Mapping]] = ...) -> None: ...
+    agentflow: CreateAssistantProviderRequest.CreateAssistantProviderAgentflow
+    def __init__(self, assistantId: _Optional[int] = ..., description: _Optional[str] = ..., model: _Optional[_Union[CreateAssistantProviderRequest.CreateAssistantProviderModel, _Mapping]] = ..., agentkit: _Optional[_Union[CreateAssistantProviderRequest.CreateAssistantProviderAgentkit, _Mapping]] = ..., websocket: _Optional[_Union[CreateAssistantProviderRequest.CreateAssistantProviderWebsocket, _Mapping]] = ..., agentflow: _Optional[_Union[CreateAssistantProviderRequest.CreateAssistantProviderAgentflow, _Mapping]] = ...) -> None: ...
 
 class AssistantProviderAgentkit(_message.Message):
     __slots__ = ("id", "description", "assistantId", "status", "url", "certificate", "metadata", "createdBy", "createdUser", "updatedBy", "updatedUser", "createdDate", "updatedDate", "transportSecurity", "tlsVerification", "tlsServerName", "connectTimeoutMs", "keepaliveTimeMs", "keepaliveTimeoutMs", "maxRecvMessageBytes", "maxSendMessageBytes")
@@ -225,6 +235,34 @@ class AssistantProviderModel(_message.Message):
     updatedDate: _timestamp_pb2.Timestamp
     def __init__(self, id: _Optional[int] = ..., template: _Optional[_Union[_common_pb2.TextChatCompletePrompt, _Mapping]] = ..., description: _Optional[str] = ..., assistantId: _Optional[int] = ..., modelProviderName: _Optional[str] = ..., assistantModelOptions: _Optional[_Iterable[_Union[_common_pb2.Metadata, _Mapping]]] = ..., status: _Optional[str] = ..., createdBy: _Optional[int] = ..., createdUser: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., updatedBy: _Optional[int] = ..., updatedUser: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., createdDate: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updatedDate: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
+class AssistantProviderAgentflow(_message.Message):
+    __slots__ = ("id", "description", "assistantId", "schemaVersion", "definition", "status", "createdBy", "createdUser", "updatedBy", "updatedUser", "createdDate", "updatedDate")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    ASSISTANTID_FIELD_NUMBER: _ClassVar[int]
+    SCHEMAVERSION_FIELD_NUMBER: _ClassVar[int]
+    DEFINITION_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    CREATEDBY_FIELD_NUMBER: _ClassVar[int]
+    CREATEDUSER_FIELD_NUMBER: _ClassVar[int]
+    UPDATEDBY_FIELD_NUMBER: _ClassVar[int]
+    UPDATEDUSER_FIELD_NUMBER: _ClassVar[int]
+    CREATEDDATE_FIELD_NUMBER: _ClassVar[int]
+    UPDATEDDATE_FIELD_NUMBER: _ClassVar[int]
+    id: int
+    description: str
+    assistantId: int
+    schemaVersion: str
+    definition: _struct_pb2.Struct
+    status: str
+    createdBy: int
+    createdUser: _common_pb2.User
+    updatedBy: int
+    updatedUser: _common_pb2.User
+    createdDate: _timestamp_pb2.Timestamp
+    updatedDate: _timestamp_pb2.Timestamp
+    def __init__(self, id: _Optional[int] = ..., description: _Optional[str] = ..., assistantId: _Optional[int] = ..., schemaVersion: _Optional[str] = ..., definition: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., status: _Optional[str] = ..., createdBy: _Optional[int] = ..., createdUser: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., updatedBy: _Optional[int] = ..., updatedUser: _Optional[_Union[_common_pb2.User, _Mapping]] = ..., createdDate: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updatedDate: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
 class GetAllAssistantProviderRequest(_message.Message):
     __slots__ = ("paginate", "criterias", "assistantId")
     PAGINATE_FIELD_NUMBER: _ClassVar[int]
@@ -236,32 +274,36 @@ class GetAllAssistantProviderRequest(_message.Message):
     def __init__(self, paginate: _Optional[_Union[_common_pb2.Paginate, _Mapping]] = ..., criterias: _Optional[_Iterable[_Union[_common_pb2.Criteria, _Mapping]]] = ..., assistantId: _Optional[int] = ...) -> None: ...
 
 class GetAssistantProviderResponse(_message.Message):
-    __slots__ = ("code", "success", "assistantProviderModel", "assistantProviderAgentkit", "assistantProviderWebsocket", "error")
+    __slots__ = ("code", "success", "assistantProviderModel", "assistantProviderAgentkit", "assistantProviderWebsocket", "assistantProviderAgentflow", "error")
     CODE_FIELD_NUMBER: _ClassVar[int]
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     ASSISTANTPROVIDERMODEL_FIELD_NUMBER: _ClassVar[int]
     ASSISTANTPROVIDERAGENTKIT_FIELD_NUMBER: _ClassVar[int]
     ASSISTANTPROVIDERWEBSOCKET_FIELD_NUMBER: _ClassVar[int]
+    ASSISTANTPROVIDERAGENTFLOW_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
     code: int
     success: bool
     assistantProviderModel: AssistantProviderModel
     assistantProviderAgentkit: AssistantProviderAgentkit
     assistantProviderWebsocket: AssistantProviderWebsocket
+    assistantProviderAgentflow: AssistantProviderAgentflow
     error: _common_pb2.Error
-    def __init__(self, code: _Optional[int] = ..., success: bool = ..., assistantProviderModel: _Optional[_Union[AssistantProviderModel, _Mapping]] = ..., assistantProviderAgentkit: _Optional[_Union[AssistantProviderAgentkit, _Mapping]] = ..., assistantProviderWebsocket: _Optional[_Union[AssistantProviderWebsocket, _Mapping]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ...) -> None: ...
+    def __init__(self, code: _Optional[int] = ..., success: bool = ..., assistantProviderModel: _Optional[_Union[AssistantProviderModel, _Mapping]] = ..., assistantProviderAgentkit: _Optional[_Union[AssistantProviderAgentkit, _Mapping]] = ..., assistantProviderWebsocket: _Optional[_Union[AssistantProviderWebsocket, _Mapping]] = ..., assistantProviderAgentflow: _Optional[_Union[AssistantProviderAgentflow, _Mapping]] = ..., error: _Optional[_Union[_common_pb2.Error, _Mapping]] = ...) -> None: ...
 
 class GetAllAssistantProviderResponse(_message.Message):
     __slots__ = ("code", "success", "data", "error", "paginated")
     class AssistantProvider(_message.Message):
-        __slots__ = ("assistantProviderModel", "assistantProviderAgentkit", "assistantProviderWebsocket")
+        __slots__ = ("assistantProviderModel", "assistantProviderAgentkit", "assistantProviderWebsocket", "assistantProviderAgentflow")
         ASSISTANTPROVIDERMODEL_FIELD_NUMBER: _ClassVar[int]
         ASSISTANTPROVIDERAGENTKIT_FIELD_NUMBER: _ClassVar[int]
         ASSISTANTPROVIDERWEBSOCKET_FIELD_NUMBER: _ClassVar[int]
+        ASSISTANTPROVIDERAGENTFLOW_FIELD_NUMBER: _ClassVar[int]
         assistantProviderModel: AssistantProviderModel
         assistantProviderAgentkit: AssistantProviderAgentkit
         assistantProviderWebsocket: AssistantProviderWebsocket
-        def __init__(self, assistantProviderModel: _Optional[_Union[AssistantProviderModel, _Mapping]] = ..., assistantProviderAgentkit: _Optional[_Union[AssistantProviderAgentkit, _Mapping]] = ..., assistantProviderWebsocket: _Optional[_Union[AssistantProviderWebsocket, _Mapping]] = ...) -> None: ...
+        assistantProviderAgentflow: AssistantProviderAgentflow
+        def __init__(self, assistantProviderModel: _Optional[_Union[AssistantProviderModel, _Mapping]] = ..., assistantProviderAgentkit: _Optional[_Union[AssistantProviderAgentkit, _Mapping]] = ..., assistantProviderWebsocket: _Optional[_Union[AssistantProviderWebsocket, _Mapping]] = ..., assistantProviderAgentflow: _Optional[_Union[AssistantProviderAgentflow, _Mapping]] = ...) -> None: ...
     CODE_FIELD_NUMBER: _ClassVar[int]
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     DATA_FIELD_NUMBER: _ClassVar[int]

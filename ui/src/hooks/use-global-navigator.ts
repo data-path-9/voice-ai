@@ -30,6 +30,9 @@ export const useGlobalNavigation = () => {
   const goToCreateAssistantAgentKitVersion = (assistantId: string) =>
     navigate(`/deployment/assistant/${assistantId}/create-agentkit-version`);
 
+  const goToCreateAssistantAgentflowVersion = (assistantId: string) =>
+    navigate(`/deployment/assistant/${assistantId}/create-agentflow-version`);
+
   const goToConfigureWeb = (assistantId: string) =>
     navigate(`/deployment/assistant/${assistantId}/deployment/web`);
   const goToEditWeb = (assistantId: string, deploymentId: string) =>
@@ -220,6 +223,7 @@ export const useGlobalNavigation = () => {
     goToCreateAssistantVersion,
     goToCreateAssistantWebsocketVersion,
     goToCreateAssistantAgentKitVersion,
+    goToCreateAssistantAgentflowVersion,
 
     goToDeploymentAssistant,
     goToConfigureWeb,

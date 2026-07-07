@@ -51,6 +51,10 @@ func (s *createAssistantRestAssistantServiceStub) GetAllAssistantProviderAgentki
 	return 0, nil, errors.New("not implemented")
 }
 
+func (s *createAssistantRestAssistantServiceStub) GetAllAssistantProviderAgentflow(context.Context, types.SimplePrinciple, uint64, []*protos.Criteria, *protos.Paginate) (int64, []*internal_assistant_entity.AssistantProviderAgentflow, error) {
+	return 0, nil, errors.New("not implemented")
+}
+
 func (s *createAssistantRestAssistantServiceStub) UpdateAssistantVersion(context.Context, types.SimplePrinciple, uint64, type_enums.AssistantProvider, uint64) (*internal_assistant_entity.Assistant, error) {
 	return nil, errors.New("not implemented")
 }
@@ -97,6 +101,14 @@ func (s *createAssistantRestAssistantServiceStub) CreateAssistantProviderAgentki
 	agentkitProvider := &internal_assistant_entity.AssistantProviderAgentkit{}
 	agentkitProvider.Id = 2
 	return agentkitProvider, nil
+}
+
+func (s *createAssistantRestAssistantServiceStub) CreateAssistantProviderAgentflow(_ context.Context, _ types.SimplePrinciple, _ uint64, providerDescription string, _ string, _ map[string]interface{}) (*internal_assistant_entity.AssistantProviderAgentflow, error) {
+	s.createProviderCalled = true
+	s.providerDescription = providerDescription
+	agentflowProvider := &internal_assistant_entity.AssistantProviderAgentflow{}
+	agentflowProvider.Id = 2
+	return agentflowProvider, nil
 }
 
 func (s *createAssistantRestAssistantServiceStub) AttachProviderModelToAssistant(context.Context, types.SimplePrinciple, uint64, type_enums.AssistantProvider, uint64) (*internal_assistant_entity.Assistant, error) {

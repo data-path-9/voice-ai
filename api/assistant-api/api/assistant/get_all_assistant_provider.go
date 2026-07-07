@@ -90,6 +90,34 @@ func (assistantApi *assistantGrpcApi) GetAllAssistantProvider(ctx context.Contex
 		defer wg.Done()
 		_, pModels, err := assistantApi.
 			assistantService.
+			GetAllAssistantProviderAgentflow(ctx,
+				iAuth,
+				gaep.GetAssistantId(),
+				gaep.GetCriterias(),
+				gaep.GetPaginate())
+		if err != nil {
+			return
+		}
+		out := []*protos.AssistantProviderAgentflow{}
+		err = utils.Cast(pModels, &out)
+		if err != nil {
+			assistantApi.logger.Errorf("unable to cast assistant provider agentflow %v", err)
+		}
+		for _, v := range out {
+			combinedProviders = append(combinedProviders, &protos.GetAllAssistantProviderResponse_AssistantProvider{
+				AssistantProvider: &protos.GetAllAssistantProviderResponse_AssistantProvider_AssistantProviderAgentflow{
+					AssistantProviderAgentflow: v,
+				},
+			})
+		}
+
+	})
+
+	wg.Add(1)
+	utils.Go(ctx, func() {
+		defer wg.Done()
+		_, pModels, err := assistantApi.
+			assistantService.
 			GetAllAssistantProviderWebsocket(ctx,
 				iAuth,
 				gaep.GetAssistantId(),

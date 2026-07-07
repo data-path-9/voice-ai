@@ -18,6 +18,7 @@ import (
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/connectors"
 	gorm_models "github.com/rapidaai/pkg/models/gorm"
+	gorm_types "github.com/rapidaai/pkg/models/gorm/types"
 	"github.com/rapidaai/pkg/types"
 	type_enums "github.com/rapidaai/pkg/types/enums"
 	"github.com/rapidaai/pkg/utils"
@@ -115,6 +116,34 @@ func (eService *assistantService) CreateAssistantProviderAgentkit(ctx context.Co
 		return nil, err
 	}
 	eService.logger.Benchmark("assistantService.CreateAssistantProviderAgentkit", time.Since(start))
+	return epm, nil
+}
+
+func (eService *assistantService) CreateAssistantProviderAgentflow(ctx context.Context,
+	auth types.SimplePrinciple,
+	assistantId uint64,
+	description string,
+	schemaVersion string,
+	definition map[string]interface{},
+) (*internal_assistant_entity.AssistantProviderAgentflow, error) {
+	start := time.Now()
+	db := eService.postgres.DB(ctx)
+	epm := &internal_assistant_entity.AssistantProviderAgentflow{
+		AssistantProvider: internal_assistant_entity.AssistantProvider{
+			Description: description,
+			CreatedBy:   *auth.GetUserId(),
+			AssistantId: assistantId,
+		},
+		SchemaVersion: schemaVersion,
+		Definition:    gorm_types.PromptMap(definition),
+	}
+	tx := db.Save(epm)
+	if err := tx.Error; err != nil {
+		eService.logger.Benchmark("assistantService.CreateAssistantProviderAgentflow", time.Since(start))
+		eService.logger.Errorf("unable to create assistant provider agentflow.")
+		return nil, err
+	}
+	eService.logger.Benchmark("assistantService.CreateAssistantProviderAgentflow", time.Since(start))
 	return epm, nil
 }
 
@@ -442,6 +471,22 @@ func (eService *assistantService) Get(ctx context.Context,
 				}
 				assistant.AssistantProviderAgentkit = agentkit
 			})
+
+		wg.Add(1)
+		utils.Go(ctx,
+			func() {
+				defer wg.Done()
+				var agentflow *internal_assistant_entity.AssistantProviderAgentflow
+				tx := db.
+					Where("assistant_id = ? AND id = ?",
+						assistantId,
+						assistant.AssistantProviderId).
+					First(&agentflow)
+				if tx.Error != nil {
+					return
+				}
+				assistant.AssistantProviderAgentflow = agentflow
+			})
 	}
 
 	if opts.InjectAnalysis {
@@ -678,6 +723,46 @@ func (eService *assistantService) GetAllAssistantProviderAgentkit(
 		return cnt, nil, tx.Error
 	}
 	eService.logger.Benchmark("assistantService.GetAllAssistantProviderAgentkit", time.Since(start))
+	return cnt, epms, nil
+}
+
+func (eService *assistantService) GetAllAssistantProviderAgentflow(
+	ctx context.Context,
+	auth types.SimplePrinciple,
+	assistantId uint64, criterias []*protos.Criteria,
+	paginate *protos.Paginate) (int64, []*internal_assistant_entity.AssistantProviderAgentflow, error) {
+
+	start := time.Now()
+	db := eService.postgres.DB(ctx)
+	var (
+		epms []*internal_assistant_entity.AssistantProviderAgentflow
+		cnt  int64
+	)
+	qry := db.Model(internal_assistant_entity.AssistantProviderAgentflow{})
+	qry.
+		Where("assistant_id = ? ", assistantId)
+	for _, ct := range criterias {
+		qry.Where(fmt.Sprintf("%s = ?", ct.GetKey()), ct.GetValue())
+	}
+	tx := qry.
+		Scopes(gorm_models.
+			Paginate(gorm_models.
+				NewPaginated(
+					paginate.GetPage(),
+					paginate.GetPageSize(),
+					&cnt,
+					qry))).
+		Order(clause.OrderByColumn{
+			Column: clause.Column{Name: "created_date"},
+			Desc:   true,
+		}).Find(&epms)
+
+	if tx.Error != nil {
+		eService.logger.Benchmark("assistantService.GetAllAssistantProviderAgentflow", time.Since(start))
+		eService.logger.Errorf("not able to find any assistant %v", tx.Error)
+		return cnt, nil, tx.Error
+	}
+	eService.logger.Benchmark("assistantService.GetAllAssistantProviderAgentflow", time.Since(start))
 	return cnt, epms, nil
 }
 
