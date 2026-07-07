@@ -1,0 +1,1085 @@
+[
+  {
+    "schemaVersion": "2026-07-06",
+    "entryNodeId": "chat-input-1",
+    "name": "Customer Support Routing",
+    "description": "Routes common support intents and escalates unresolved callers.",
+    "tags": ["support", "routing", "voice"],
+    "nodes": [
+      {
+        "id": "customer-support-routing-quick-note",
+        "type": "sticky-note",
+        "label": "Quick Note",
+        "position": {
+          "x": 88,
+          "y": -180
+        },
+        "config": {
+          "note": "# Quick start\n\nUse this Customer Support Routing template as a starting point.\nEdit Agent nodes, update transitions, then connect actions for your call flow.",
+          "color": "yellow"
+        }
+      },
+      {
+        "id": "chat-input-1",
+        "type": "chat-input",
+        "label": "Chat Input",
+        "position": {
+          "x": 88,
+          "y": 152
+        },
+        "config": {
+          "arguments": []
+        }
+      },
+      {
+        "id": "support-welcome",
+        "type": "prompt",
+        "label": "Welcome",
+        "position": {
+          "x": 528,
+          "y": 120
+        },
+        "config": {
+          "prompt": "You are a friendly customer support voice agent. Greet the caller, ask how you can help, and use the available transitions to route the request.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "You are a friendly customer support voice agent for {{company_name}}. Keep responses short, warm, and suitable for voice. Greet the caller, ask how you can help, and use the available transitions to route the request."
+              }
+            ],
+            "variables": [
+              {
+                "name": "company_name",
+                "type": "string",
+                "defaultvalue": "Rapida"
+              }
+            ]
+          },
+          "transitions": [
+            {
+              "id": "transition-return-package",
+              "name": "return_package",
+              "description": "Use this when the caller wants to return an item or asks about return eligibility.",
+              "parameters": [
+                {
+                  "id": "parameter-order-id",
+                  "name": "order_id",
+                  "type": "string",
+                  "description": "The caller order id if they provide it.",
+                  "required": false
+                }
+              ]
+            },
+            {
+              "id": "transition-order-status",
+              "name": "check_order_status",
+              "description": "Use this when the caller wants to check the status of an existing order.",
+              "parameters": [
+                {
+                  "id": "parameter-order-id-status",
+                  "name": "order_id",
+                  "type": "string",
+                  "description": "The order id to check.",
+                  "required": true
+                }
+              ]
+            },
+            {
+              "id": "transition-human-agent",
+              "name": "transfer_to_human",
+              "description": "Use this when the caller asks for a person, is upset, or the request cannot be resolved by automation.",
+              "parameters": []
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.4"
+            }
+          ]
+        }
+      },
+      {
+        "id": "return-instructions",
+        "type": "message",
+        "label": "Return Instructions",
+        "position": {
+          "x": 968,
+          "y": 40
+        },
+        "config": {
+          "message": "I can help with that. I will check the return window and guide you through the return steps.",
+          "post_delay_ms": 500
+        }
+      },
+      {
+        "id": "order-status-agent",
+        "type": "prompt",
+        "label": "Order Status",
+        "position": {
+          "x": 968,
+          "y": 230
+        },
+        "config": {
+          "prompt": "Collect the order id if needed, confirm it back to the caller, and explain that you are checking the order status.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "You are checking an order status in a voice support call. Collect the order id if needed, confirm it back to the caller, and keep the response concise."
+              }
+            ],
+            "variables": []
+          },
+          "transitions": [
+            {
+              "id": "transition-status-complete",
+              "name": "status_complete",
+              "description": "Use this when the order status has been shared and the caller has no more questions.",
+              "parameters": []
+            },
+            {
+              "id": "transition-status-transfer",
+              "name": "needs_human_help",
+              "description": "Use this when the order status issue requires manual review or escalation.",
+              "parameters": []
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.3"
+            }
+          ]
+        }
+      },
+      {
+        "id": "transfer-human",
+        "type": "transfer",
+        "label": "Transfer Call",
+        "position": {
+          "x": 1408,
+          "y": 120
+        },
+        "config": {
+          "transfer_to": "",
+          "transfer_message": "I will connect you with a support specialist now.",
+          "post_transfer_action": "end_call",
+          "ringtone": "default",
+          "transfer_delay": 500
+        }
+      },
+      {
+        "id": "support-end",
+        "type": "end",
+        "label": "End Conversation",
+        "position": {
+          "x": 1408,
+          "y": 330
+        },
+        "config": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-chat-input-1-support-welcome",
+        "source": "chat-input-1",
+        "sourceHandle": "next",
+        "target": "support-welcome",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-support-welcome-return-instructions",
+        "source": "support-welcome",
+        "sourceHandle": "transition-return-package",
+        "target": "return-instructions",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-support-welcome-order-status-agent",
+        "source": "support-welcome",
+        "sourceHandle": "transition-order-status",
+        "target": "order-status-agent",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-support-welcome-transfer-human",
+        "source": "support-welcome",
+        "sourceHandle": "transition-human-agent",
+        "target": "transfer-human",
+        "targetHandle": "call"
+      },
+      {
+        "id": "edge-order-status-agent-transfer-human",
+        "source": "order-status-agent",
+        "sourceHandle": "transition-status-transfer",
+        "target": "transfer-human",
+        "targetHandle": "call"
+      },
+      {
+        "id": "edge-return-instructions-support-end",
+        "source": "return-instructions",
+        "sourceHandle": "response",
+        "target": "support-end",
+        "targetHandle": "call"
+      },
+      {
+        "id": "edge-order-status-agent-support-end",
+        "source": "order-status-agent",
+        "sourceHandle": "transition-status-complete",
+        "target": "support-end",
+        "targetHandle": "call"
+      }
+    ],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 0.75
+    }
+  },
+  {
+    "schemaVersion": "2026-07-06",
+    "entryNodeId": "chat-input-1",
+    "name": "Food Ordering",
+    "description": "Collects food orders through LLM transition functions.",
+    "tags": ["food", "ordering"],
+    "nodes": [
+      {
+        "id": "food-ordering-quick-note",
+        "type": "sticky-note",
+        "label": "Quick Note",
+        "position": {
+          "x": 88,
+          "y": -180
+        },
+        "config": {
+          "note": "# Quick start\n\nUse this Food Ordering template as a starting point.\nEdit Agent nodes, update transitions, then connect actions for your call flow.",
+          "color": "yellow"
+        }
+      },
+      {
+        "id": "chat-input-1",
+        "type": "chat-input",
+        "label": "Chat Input",
+        "position": {
+          "x": 88,
+          "y": 180
+        },
+        "config": {
+          "arguments": []
+        }
+      },
+      {
+        "id": "food-initial",
+        "type": "prompt",
+        "label": "Initial Order",
+        "position": {
+          "x": 528,
+          "y": 130
+        },
+        "config": {
+          "prompt": "Greet the caller and ask whether they would like pizza or sushi. Always use one of the available transitions when the caller chooses.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "You are an order-taking voice assistant. Keep the conversation friendly and concise. Ask whether the caller wants pizza or sushi, then use the correct transition."
+              }
+            ],
+            "variables": []
+          },
+          "transitions": [
+            {
+              "id": "transition-choose-pizza",
+              "name": "choose_pizza",
+              "description": "User wants to order pizza.",
+              "parameters": []
+            },
+            {
+              "id": "transition-choose-sushi",
+              "name": "choose_sushi",
+              "description": "User wants to order sushi.",
+              "parameters": []
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.5"
+            }
+          ]
+        }
+      },
+      {
+        "id": "pizza-order",
+        "type": "prompt",
+        "label": "Pizza Order",
+        "position": {
+          "x": 968,
+          "y": 30
+        },
+        "config": {
+          "prompt": "Ask for pizza size and type. Use select_pizza_order only when both values are known.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "You are handling a pizza order. Ask for size and type. Pricing is small 10, medium 15, large 20. Use select_pizza_order only when both values are known."
+              }
+            ],
+            "variables": []
+          },
+          "transitions": [
+            {
+              "id": "transition-select-pizza",
+              "name": "select_pizza_order",
+              "description": "Record the pizza order details.",
+              "parameters": [
+                {
+                  "id": "parameter-pizza-size",
+                  "name": "size",
+                  "type": "string",
+                  "description": "Size of the pizza.",
+                  "required": true,
+                  "schema": {
+                    "enum": ["small", "medium", "large"]
+                  }
+                },
+                {
+                  "id": "parameter-pizza-type",
+                  "name": "type",
+                  "type": "string",
+                  "description": "Type of pizza.",
+                  "required": true,
+                  "schema": {
+                    "enum": ["pepperoni", "cheese", "supreme", "vegetarian"]
+                  }
+                }
+              ]
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.5"
+            }
+          ]
+        }
+      },
+      {
+        "id": "sushi-order",
+        "type": "prompt",
+        "label": "Sushi Order",
+        "position": {
+          "x": 968,
+          "y": 330
+        },
+        "config": {
+          "prompt": "Ask for sushi roll count and type. Use select_sushi_order only when both values are known.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "You are handling a sushi order. Ask for roll count and type. Sushi is 8 dollars per roll. Use select_sushi_order only when both values are known."
+              }
+            ],
+            "variables": []
+          },
+          "transitions": [
+            {
+              "id": "transition-select-sushi",
+              "name": "select_sushi_order",
+              "description": "Record the sushi order details.",
+              "parameters": [
+                {
+                  "id": "parameter-sushi-count",
+                  "name": "count",
+                  "type": "integer",
+                  "description": "Number of rolls to order.",
+                  "required": true,
+                  "schema": {
+                    "minimum": 1,
+                    "maximum": 10
+                  }
+                },
+                {
+                  "id": "parameter-sushi-type",
+                  "name": "type",
+                  "type": "string",
+                  "description": "Type of sushi roll.",
+                  "required": true,
+                  "schema": {
+                    "enum": ["california", "spicy_tuna", "rainbow", "dragon"]
+                  }
+                }
+              ]
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.5"
+            }
+          ]
+        }
+      },
+      {
+        "id": "confirm-order",
+        "type": "prompt",
+        "label": "Confirm Order",
+        "position": {
+          "x": 1408,
+          "y": 180
+        },
+        "config": {
+          "prompt": "Read back the order details. Ask if the order is correct or if the caller wants changes.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "Read back the complete order details to the caller and ask whether it is correct. Use complete_order when confirmed. Use revise_order if they want changes."
+              }
+            ],
+            "variables": []
+          },
+          "transitions": [
+            {
+              "id": "transition-complete-order",
+              "name": "complete_order",
+              "description": "User confirms the order is correct and no changes are needed.",
+              "parameters": []
+            },
+            {
+              "id": "transition-revise-order",
+              "name": "revise_order",
+              "description": "User wants to change something in the order.",
+              "parameters": []
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.4"
+            }
+          ]
+        }
+      },
+      {
+        "id": "order-end",
+        "type": "end",
+        "label": "End Conversation",
+        "position": {
+          "x": 1848,
+          "y": 180
+        },
+        "config": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-chat-input-1-food-initial",
+        "source": "chat-input-1",
+        "sourceHandle": "next",
+        "target": "food-initial",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-food-initial-pizza-order",
+        "source": "food-initial",
+        "sourceHandle": "transition-choose-pizza",
+        "target": "pizza-order",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-food-initial-sushi-order",
+        "source": "food-initial",
+        "sourceHandle": "transition-choose-sushi",
+        "target": "sushi-order",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-pizza-order-confirm-order",
+        "source": "pizza-order",
+        "sourceHandle": "transition-select-pizza",
+        "target": "confirm-order",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-sushi-order-confirm-order",
+        "source": "sushi-order",
+        "sourceHandle": "transition-select-sushi",
+        "target": "confirm-order",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-confirm-order-food-initial",
+        "source": "confirm-order",
+        "sourceHandle": "transition-revise-order",
+        "target": "food-initial",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-confirm-order-order-end",
+        "source": "confirm-order",
+        "sourceHandle": "transition-complete-order",
+        "target": "order-end",
+        "targetHandle": "call"
+      }
+    ],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 0.75
+    }
+  },
+  {
+    "schemaVersion": "2026-07-06",
+    "entryNodeId": "chat-input-1",
+    "name": "Appointment Scheduler",
+    "description": "Collects appointment booking or rescheduling details.",
+    "tags": ["healthcare", "scheduler", "voice"],
+    "nodes": [
+      {
+        "id": "appointment-scheduler-quick-note",
+        "type": "sticky-note",
+        "label": "Quick Note",
+        "position": {
+          "x": 88,
+          "y": -180
+        },
+        "config": {
+          "note": "# Quick start\n\nUse this Appointment Scheduler template as a starting point.\nEdit Agent nodes, update transitions, then connect actions for your call flow.",
+          "color": "yellow"
+        }
+      },
+      {
+        "id": "chat-input-1",
+        "type": "chat-input",
+        "label": "Chat Input",
+        "position": {
+          "x": 88,
+          "y": 180
+        },
+        "config": {
+          "arguments": []
+        }
+      },
+      {
+        "id": "scheduler-greeting",
+        "type": "prompt",
+        "label": "Greeting",
+        "position": {
+          "x": 528,
+          "y": 130
+        },
+        "config": {
+          "prompt": "Greet the caller and ask whether they want to book a new appointment or reschedule an existing one.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "You are a courteous appointment scheduling voice agent for {{clinic_name}}. Keep responses concise. Start by asking whether the caller wants to book a new appointment or reschedule an existing one."
+              }
+            ],
+            "variables": [
+              {
+                "name": "clinic_name",
+                "type": "string",
+                "defaultvalue": "the clinic"
+              }
+            ]
+          },
+          "transitions": [
+            {
+              "id": "transition-new-appointment",
+              "name": "book_new_appointment",
+              "description": "Caller wants to book a new appointment.",
+              "parameters": [
+                {
+                  "id": "parameter-service-type",
+                  "name": "service_type",
+                  "type": "string",
+                  "description": "The appointment or service type requested.",
+                  "required": false
+                }
+              ]
+            },
+            {
+              "id": "transition-reschedule",
+              "name": "reschedule_appointment",
+              "description": "Caller wants to reschedule an existing appointment.",
+              "parameters": [
+                {
+                  "id": "parameter-patient-name",
+                  "name": "patient_name",
+                  "type": "string",
+                  "description": "Patient full name.",
+                  "required": false
+                }
+              ]
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o-mini"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o-mini"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.4"
+            }
+          ]
+        }
+      },
+      {
+        "id": "collect-patient-details",
+        "type": "prompt",
+        "label": "Collect Details",
+        "position": {
+          "x": 968,
+          "y": 80
+        },
+        "config": {
+          "prompt": "Collect patient name, date of birth, requested service, and preferred date and time. Confirm the details before continuing.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "Collect patient name, date of birth, requested service, and preferred date and time. Confirm each important detail back to the caller before continuing."
+              }
+            ],
+            "variables": []
+          },
+          "transitions": [
+            {
+              "id": "transition-details-collected",
+              "name": "appointment_details_collected",
+              "description": "Use when patient details and preferred appointment time are collected.",
+              "parameters": [
+                {
+                  "id": "parameter-name",
+                  "name": "patient_name",
+                  "type": "string",
+                  "description": "Patient full name.",
+                  "required": true
+                },
+                {
+                  "id": "parameter-date-time",
+                  "name": "preferred_time",
+                  "type": "string",
+                  "description": "Preferred appointment date and time.",
+                  "required": true
+                },
+                {
+                  "id": "parameter-service",
+                  "name": "service_type",
+                  "type": "string",
+                  "description": "Requested service or appointment type.",
+                  "required": true
+                }
+              ]
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o-mini"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o-mini"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.3"
+            }
+          ]
+        }
+      },
+      {
+        "id": "confirm-schedule",
+        "type": "message",
+        "label": "Confirm Appointment",
+        "position": {
+          "x": 1408,
+          "y": 130
+        },
+        "config": {
+          "message": "Your appointment details are confirmed. You will receive a confirmation message shortly.",
+          "post_delay_ms": 500
+        }
+      },
+      {
+        "id": "scheduler-end",
+        "type": "end",
+        "label": "End Conversation",
+        "position": {
+          "x": 1848,
+          "y": 130
+        },
+        "config": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-chat-input-1-scheduler-greeting",
+        "source": "chat-input-1",
+        "sourceHandle": "next",
+        "target": "scheduler-greeting",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-scheduler-greeting-collect-patient-details",
+        "source": "scheduler-greeting",
+        "sourceHandle": "transition-new-appointment",
+        "target": "collect-patient-details",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-scheduler-greeting-collect-patient-details-reschedule",
+        "source": "scheduler-greeting",
+        "sourceHandle": "transition-reschedule",
+        "target": "collect-patient-details",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-collect-patient-details-confirm-schedule",
+        "source": "collect-patient-details",
+        "sourceHandle": "transition-details-collected",
+        "target": "confirm-schedule",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-confirm-schedule-scheduler-end",
+        "source": "confirm-schedule",
+        "sourceHandle": "response",
+        "target": "scheduler-end",
+        "targetHandle": "call"
+      }
+    ],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 0.75
+    }
+  },
+  {
+    "schemaVersion": "2026-07-06",
+    "entryNodeId": "chat-input-1",
+    "name": "Insurance Quote Intake",
+    "description": "Quote collection and adjustment flow.",
+    "tags": ["insurance", "quote", "intake"],
+    "nodes": [
+      {
+        "id": "insurance-quote-intake-quick-note",
+        "type": "sticky-note",
+        "label": "Quick Note",
+        "position": {
+          "x": 88,
+          "y": -180
+        },
+        "config": {
+          "note": "# Quick start\n\nUse this Insurance Quote Intake template as a starting point.\nEdit Agent nodes, update transitions, then connect actions for your call flow.",
+          "color": "yellow"
+        }
+      },
+      {
+        "id": "chat-input-1",
+        "type": "chat-input",
+        "label": "Chat Input",
+        "position": {
+          "x": 88,
+          "y": 180
+        },
+        "config": {
+          "arguments": []
+        }
+      },
+      {
+        "id": "collect-age",
+        "type": "prompt",
+        "label": "Collect Age",
+        "position": {
+          "x": 528,
+          "y": 130
+        },
+        "config": {
+          "prompt": "Start by asking for the customer's age.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "You are a friendly insurance agent. Your responses will be converted to audio, so avoid special characters. Start by asking for the customer's age."
+              }
+            ],
+            "variables": []
+          },
+          "transitions": [
+            {
+              "id": "transition-collect-age",
+              "name": "collect_age",
+              "description": "Record customer's age.",
+              "parameters": [
+                {
+                  "id": "parameter-age",
+                  "name": "age",
+                  "type": "integer",
+                  "description": "Customer age.",
+                  "required": true
+                }
+              ]
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.4"
+            }
+          ]
+        }
+      },
+      {
+        "id": "collect-marital-status",
+        "type": "prompt",
+        "label": "Marital Status",
+        "position": {
+          "x": 968,
+          "y": 130
+        },
+        "config": {
+          "prompt": "Ask about the customer's marital status for premium calculation.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "Ask about the customer's marital status for premium calculation. Keep the conversation natural and concise."
+              }
+            ],
+            "variables": []
+          },
+          "transitions": [
+            {
+              "id": "transition-collect-marital-status",
+              "name": "collect_marital_status",
+              "description": "Record marital status after customer provides it.",
+              "parameters": [
+                {
+                  "id": "parameter-marital-status",
+                  "name": "marital_status",
+                  "type": "string",
+                  "description": "Customer marital status.",
+                  "required": true,
+                  "schema": {
+                    "enum": ["single", "married"]
+                  }
+                }
+              ]
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.4"
+            }
+          ]
+        }
+      },
+      {
+        "id": "quote-results",
+        "type": "prompt",
+        "label": "Quote Results",
+        "position": {
+          "x": 1408,
+          "y": 130
+        },
+        "config": {
+          "prompt": "Explain the quote details and ask whether the caller would like to adjust coverage or finish.",
+          "prompt_template": {
+            "prompt": [
+              {
+                "role": "system",
+                "content": "Explain the quote details clearly. Ask whether the caller would like to adjust coverage or finish the quote process."
+              }
+            ],
+            "variables": []
+          },
+          "transitions": [
+            {
+              "id": "transition-update-coverage",
+              "name": "update_coverage",
+              "description": "Recalculate quote with new coverage options.",
+              "parameters": [
+                {
+                  "id": "parameter-coverage-amount",
+                  "name": "coverage_amount",
+                  "type": "integer",
+                  "description": "Requested coverage amount.",
+                  "required": true
+                },
+                {
+                  "id": "parameter-deductible",
+                  "name": "deductible",
+                  "type": "integer",
+                  "description": "Requested deductible.",
+                  "required": true
+                }
+              ]
+            },
+            {
+              "id": "transition-end-quote",
+              "name": "end_quote",
+              "description": "Complete the quote process when customer is satisfied.",
+              "parameters": []
+            }
+          ],
+          "model_provider": "openai",
+          "model_parameters": [
+            {
+              "key": "model.id",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.name",
+              "value": "gpt-4o"
+            },
+            {
+              "key": "model.temperature",
+              "value": "0.4"
+            }
+          ]
+        }
+      },
+      {
+        "id": "quote-end",
+        "type": "end",
+        "label": "End Conversation",
+        "position": {
+          "x": 1848,
+          "y": 130
+        },
+        "config": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-chat-input-1-collect-age",
+        "source": "chat-input-1",
+        "sourceHandle": "next",
+        "target": "collect-age",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-collect-age-collect-marital-status",
+        "source": "collect-age",
+        "sourceHandle": "transition-collect-age",
+        "target": "collect-marital-status",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-collect-marital-status-quote-results",
+        "source": "collect-marital-status",
+        "sourceHandle": "transition-collect-marital-status",
+        "target": "quote-results",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-quote-results-quote-results",
+        "source": "quote-results",
+        "sourceHandle": "transition-update-coverage",
+        "target": "quote-results",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-quote-results-quote-end",
+        "source": "quote-results",
+        "sourceHandle": "transition-end-quote",
+        "target": "quote-end",
+        "targetHandle": "call"
+      }
+    ],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 0.75
+    }
+  }
+]

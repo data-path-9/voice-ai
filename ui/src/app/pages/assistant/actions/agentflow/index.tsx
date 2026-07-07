@@ -35,6 +35,8 @@ import { ConfigPrompt } from '@/app/components/configuration/config-prompt';
 import { FormLabel } from '@/app/components/form-label';
 import { TagInput } from '@/app/components/form/tag-input';
 import { AssistantTag } from '@/app/components/form/tag-input/assistant-tags';
+import { CornerBorderOverlay } from '@/app/components/base/corner-border';
+import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
 import {
   Modal,
   ModalBody,
@@ -53,6 +55,7 @@ import {
 import {
   Button,
   Checkbox,
+  ContentSwitcher,
   OverflowMenu,
   OverflowMenuItem,
   StructuredListBody,
@@ -66,6 +69,7 @@ import {
   Select,
   SelectItem,
   Slider,
+  Switch,
   TextArea,
   TextInput,
   Tooltip,
@@ -77,7 +81,7 @@ import {
   Bot,
   CaretDown,
   Chat as ChatIcon,
-  ChevronRight,
+  Checkmark,
   Close,
   Code,
   Document,
@@ -89,6 +93,7 @@ import {
   Link,
   Locked,
   MachineLearning,
+  Notebook,
   PhoneOff,
   PhoneOutgoing,
   PromptTemplate,
@@ -109,7 +114,10 @@ import {
   ConditionNodeCard,
   GenericNodeCard,
   StaticMessageNodeCard,
+  StickyNoteNodeCard,
 } from '@/app/pages/assistant/actions/agentflow/nodes';
+import agentflowExamples from '@/prompts/agentflow/index.json';
+import { cn } from '@/utils';
 
 export type AgentPromptTemplate = {
   prompt: { role: string; content: string }[];
@@ -155,6 +163,7 @@ export type AgentflowNodeType =
   | 'chat-input'
   | 'chat-output'
   | 'message'
+  | 'sticky-note'
   | 'text-input'
   | 'text-output'
   | 'api-request'
@@ -193,6 +202,17 @@ export type AgentflowEdge = Edge;
 export type AgentflowNodeConfigValue = string | number | boolean;
 
 export type AgentflowNodeConfig = Record<string, AgentflowNodeConfigValue>;
+
+export type AgentflowDefinitionConfigValue =
+  | AgentflowNodeConfigValue
+  | null
+  | AgentflowDefinitionConfigValue[]
+  | { [key: string]: AgentflowDefinitionConfigValue };
+
+export type AgentflowDefinitionNodeConfig = Record<
+  string,
+  AgentflowDefinitionConfigValue
+>;
 
 export type AgentflowFieldType =
   | 'text'
@@ -253,6 +273,12 @@ type AgentflowReactNodeData = {
   onSave: () => void;
   onDuplicate: (node: AgentflowNode) => void;
   onDelete: (node: AgentflowNode) => void;
+  onUpdateConfig: (
+    nodeId: string,
+    name: string,
+    value: AgentflowNodeConfigValue,
+  ) => void;
+  onUpdateConfigValues: (nodeId: string, values: AgentflowNodeConfig) => void;
   onAddTransition: (
     event: React.MouseEvent<HTMLButtonElement>,
     node: AgentflowNode,
@@ -285,7 +311,7 @@ export type AgentflowDefinitionNode = {
     x: number;
     y: number;
   };
-  config: AgentflowNodeConfig;
+  config?: AgentflowDefinitionNodeConfig;
 };
 
 export type AgentflowDefinitionEdge = {
@@ -311,6 +337,9 @@ export type AgentflowDefinition = {
   };
 };
 
+const exampleAgentflowDefinitions =
+  agentflowExamples as unknown as AgentflowDefinition[];
+
 type AgentflowValidationIssue = {
   id: string;
   message: string;
@@ -319,6 +348,7 @@ type AgentflowValidationIssue = {
 };
 
 const NODE_WIDTH = 320;
+const STICKY_NOTE_WIDTH = 560;
 const FLOW_START_X = 88;
 const FLOW_NODE_GAP = 120;
 const FLOW_NODE_STEP = NODE_WIDTH + FLOW_NODE_GAP;
@@ -434,7 +464,7 @@ const paletteGroups: AgentflowPaletteGroup[] = [
     key: 'input-output',
     title: 'Input and Output',
     icon: ChatIcon,
-    nodeTypes: ['chat-input', 'chat-output'],
+    nodeTypes: ['chat-input'],
   },
   {
     key: 'agent',
@@ -452,7 +482,7 @@ const paletteGroups: AgentflowPaletteGroup[] = [
     key: 'utilities',
     title: 'Utility',
     icon: ToolKit,
-    nodeTypes: ['message'],
+    nodeTypes: ['message', 'sticky-note'],
   },
   {
     key: 'action',
@@ -461,8 +491,6 @@ const paletteGroups: AgentflowPaletteGroup[] = [
     nodeTypes: ['end', 'transfer'],
   },
 ];
-
-const defaultOpenGroups = new Set(paletteGroups.map(group => group.key));
 
 const NODE_DRAG_TYPE = 'application/rapida-agentflow-node';
 const START_NODE_ID = 'chat-input-1';
@@ -488,9 +516,9 @@ const nodeTemplates: AgentflowNodeTemplate[] = [
     group: 'input-output',
     label: 'Chat Output',
     eyebrow: 'Output',
-    description: 'Send a chat response from the workflow.',
+    description: 'Speak or emit the current assistant response to the caller.',
     inputs: ['message'],
-    outputs: [],
+    outputs: ['next'],
     options: ['Message'],
     icon: ChatIcon,
   },
@@ -504,6 +532,17 @@ const nodeTemplates: AgentflowNodeTemplate[] = [
     outputs: ['response'],
     options: ['Message'],
     icon: ChatIcon,
+  },
+  {
+    type: 'sticky-note',
+    group: 'utilities',
+    label: 'Sticky Note',
+    eyebrow: 'Note',
+    description: 'Add a non-runtime annotation to document the flow.',
+    inputs: [],
+    outputs: [],
+    options: ['Note'],
+    icon: Notebook,
   },
   {
     type: 'text-input',
@@ -782,7 +821,7 @@ const nodeEditFields: Record<AgentflowNodeType, AgentflowField[]> = {
     {
       name: 'response_key',
       label: 'Response key',
-      description: 'Runtime key that contains the assistant response.',
+      description: 'Runtime key that contains the response to speak or emit.',
       type: 'text',
       section: 'basic',
       defaultValue: 'response',
@@ -818,6 +857,27 @@ const nodeEditFields: Record<AgentflowNodeType, AgentflowField[]> = {
       max: 30000,
       step: 100,
       control: 'slider-input',
+    },
+  ],
+  'sticky-note': [
+    {
+      name: 'note',
+      label: 'Note',
+      description: 'Canvas annotation text. It does not affect runtime.',
+      type: 'textarea',
+      section: 'basic',
+      defaultValue: '# Quick start',
+      optional: true,
+    },
+    {
+      name: 'color',
+      label: 'Color',
+      description: 'Visual color used for this note on the canvas.',
+      type: 'select',
+      section: 'basic',
+      defaultValue: 'yellow',
+      options: ['yellow', 'blue', 'green', 'purple'],
+      optional: true,
     },
   ],
   'text-input': [
@@ -1013,23 +1073,6 @@ const nodeEditFields: Record<AgentflowNodeType, AgentflowField[]> = {
       type: 'textarea',
       section: 'basic',
       defaultValue: JSON.stringify(DEFAULT_AGENT_TRANSITIONS),
-    },
-    {
-      name: 'model',
-      label: 'Model',
-      description: 'Model profile used by this agent node.',
-      type: 'select',
-      section: 'advanced',
-      defaultValue: 'default assistant model',
-      options: ['default assistant model', 'fast model', 'reasoning model'],
-    },
-    {
-      name: 'temperature',
-      label: 'Temperature',
-      description: 'Sampling temperature for the model response.',
-      type: 'number',
-      section: 'advanced',
-      defaultValue: 0.2,
     },
   ],
   condition: [
@@ -1331,34 +1374,11 @@ const nodeEditFields: Record<AgentflowNodeType, AgentflowField[]> = {
   ],
 };
 
-const initialNodes: AgentflowNode[] = [
-  {
-    id: START_NODE_ID,
-    type: 'chat-input',
-    label: 'Chat Input',
-    x: FLOW_START_X,
-    y: 152,
-  },
-  {
-    id: 'prompt-1',
-    type: 'prompt',
-    label: 'Welcome Node',
-    x: FLOW_START_X + FLOW_NODE_STEP,
-    y: 141,
-  },
-  {
-    id: 'end-1',
-    type: 'end',
-    label: 'End Conversation',
-    x: FLOW_START_X + FLOW_NODE_STEP * 2,
-    y: 152,
-  },
-];
-
 const createStoredNode = (node: AgentflowNode): AgentflowStoredNode => ({
   id: node.id,
   type: 'agentflowNode',
   position: { x: node.x, y: node.y },
+  style: getStoredNodeStyle(node),
   data: { node },
   deletable: node.id !== START_NODE_ID,
 });
@@ -1380,29 +1400,6 @@ const syncStoredNodeData = (
   },
 });
 
-const initialEdges: AgentflowEdge[] = [
-  {
-    id: 'edge-chat-input-1-prompt-1',
-    source: START_NODE_ID,
-    sourceHandle: 'next',
-    target: 'prompt-1',
-    targetHandle: 'input',
-    type: 'smoothstep',
-    interactionWidth: EDGE_INTERACTION_WIDTH,
-    style: EDGE_STYLE,
-  },
-  {
-    id: 'edge-prompt-1-end-1',
-    source: 'prompt-1',
-    sourceHandle: AGENT_RESPONSE_OUTPUT,
-    target: 'end-1',
-    targetHandle: 'call',
-    type: 'smoothstep',
-    interactionWidth: EDGE_INTERACTION_WIDTH,
-    style: EDGE_STYLE,
-  },
-];
-
 const getNodeTemplate = (type: AgentflowNodeType) =>
   nodeTemplates.find(template => template.type === type) ?? nodeTemplates[1];
 
@@ -1420,6 +1417,93 @@ const getNodeConfig = (node: AgentflowNode): AgentflowNodeConfig => ({
   ...createDefaultConfig(node.type),
   ...(node.config ?? {}),
 });
+
+const normalizeDefinitionConfigValue = (
+  value: AgentflowDefinitionConfigValue,
+): AgentflowNodeConfigValue => {
+  if (value === null) {
+    return '';
+  }
+
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+
+  return value;
+};
+
+const parseDefinitionMetadataList = (
+  value: AgentflowDefinitionConfigValue | AgentflowNodeConfigValue | undefined,
+) => {
+  const rawValue =
+    typeof value === 'string'
+      ? value
+      : value === undefined
+        ? ''
+        : JSON.stringify(value);
+
+  if (!rawValue.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as { key?: string; value?: string }[];
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter(item => item.key)
+      .map(item => ({
+        key: String(item.key),
+        value: String(item.value ?? ''),
+      }));
+  } catch {
+    return [];
+  }
+};
+
+const normalizeDefinitionConfig = (
+  type: AgentflowNodeType,
+  config: AgentflowDefinitionNodeConfig | undefined,
+): AgentflowNodeConfig => {
+  const normalized = Object.entries(config ?? {}).reduce<AgentflowNodeConfig>(
+    (result, [key, value]) => {
+      result[key] = normalizeDefinitionConfigValue(value);
+      return result;
+    },
+    {},
+  );
+
+  if (type !== 'prompt') {
+    return normalized;
+  }
+
+  if ('temperature' in normalized) {
+    const parameters = parseDefinitionMetadataList(normalized.model_parameters);
+    const temperature = String(normalized.temperature);
+    const existingTemperature = parameters.find(
+      parameter => parameter.key === 'model.temperature',
+    );
+
+    if (existingTemperature) {
+      existingTemperature.value = temperature;
+    } else {
+      parameters.push({ key: 'model.temperature', value: temperature });
+    }
+
+    normalized.model_parameters = JSON.stringify(parameters);
+    delete normalized.temperature;
+  }
+
+  delete normalized.model;
+
+  return normalized;
+};
+
+const getSerializableNodeConfig = (node: AgentflowNode): AgentflowNodeConfig =>
+  normalizeDefinitionConfig(node.type, getNodeConfig(node));
 
 export const createAgentflowDefinition = (
   nodes: AgentflowNode[],
@@ -1442,7 +1526,7 @@ export const createAgentflowDefinition = (
       x: node.x,
       y: node.y,
     },
-    config: getNodeConfig(node),
+    config: getSerializableNodeConfig(node),
   })),
   edges: edges.map(edge => ({
     id: edge.id,
@@ -1466,10 +1550,29 @@ const getAgentflowNodesFromDefinition = (
         y: node.position.y,
         config: {
           ...createDefaultConfig(node.type),
-          ...node.config,
+          ...normalizeDefinitionConfig(node.type, node.config),
         },
       }))
-    : initialNodes;
+    : [
+        {
+          id: 'sticky-note-1',
+          type: 'sticky-note',
+          label: 'Quick Note',
+          x: 420,
+          y: 160,
+          config: {
+            note: [
+              '# Quick start',
+              '',
+              '1. Drag Chat Input to define flow arguments.',
+              '2. Add Agent Node and write instructions.',
+              '3. Add transitions for each route.',
+              '4. Connect actions like Transfer Call or End Conversation.',
+            ].join('\n'),
+            color: 'yellow',
+          },
+        },
+      ];
 
 const getAgentflowEdgesFromDefinition = (
   definition: AgentflowDefinition | undefined,
@@ -1485,7 +1588,7 @@ const getAgentflowEdgesFromDefinition = (
         interactionWidth: EDGE_INTERACTION_WIDTH,
         style: EDGE_STYLE,
       }))
-    : initialEdges;
+    : [];
 
 const getNodeCounterSeed = (nodes: AgentflowNode[]) =>
   Math.max(
@@ -1906,6 +2009,10 @@ const getNodeValidationIssues = (node: AgentflowNode) => {
   const config = getNodeConfig(node);
   const issues: string[] = [];
 
+  if (node.type === 'sticky-note') {
+    return issues;
+  }
+
   if (!node.label.trim()) {
     issues.push('Name is required.');
   }
@@ -2076,6 +2183,26 @@ const getStaticMessageNodeHeight = (config: AgentflowNodeConfig) =>
     ? COMPACT_NODE_HEADER_HEIGHT + 84
     : COMPACT_NODE_HEADER_HEIGHT;
 
+const getStickyNoteNodeHeight = (config: AgentflowNodeConfig) => {
+  const noteLength = String(config.note ?? '').trim().length;
+  const lineCount = Math.max(2, Math.ceil(noteLength / 64));
+
+  return Math.min(lineCount, 12) * 40 + 80;
+};
+
+const getStickyNoteNodeSize = (node: AgentflowNode) => {
+  const config = getNodeConfig(node);
+  return {
+    width: Number(config.note_width ?? STICKY_NOTE_WIDTH),
+    height: Number(config.note_height ?? getStickyNoteNodeHeight(config)),
+  };
+};
+
+const getStoredNodeStyle = (
+  node: AgentflowNode,
+): React.CSSProperties | undefined =>
+  node.type === 'sticky-note' ? getStickyNoteNodeSize(node) : undefined;
+
 const getConditionNodeHeight = (conditionCount: number) =>
   GENERIC_NODE_HEADER_HEIGHT +
   CONDITION_NODE_CONDITION_HEADER_HEIGHT +
@@ -2106,6 +2233,9 @@ const getConditionRuleSummary = (condition: ConditionRule) => {
 
 const isActionNodeType = (type: AgentflowNodeType) =>
   type === 'end' || type === 'transfer';
+
+const isAnnotationNodeType = (type: AgentflowNodeType) =>
+  type === 'sticky-note';
 
 const getNodeOutputs = (node: AgentflowNode) => {
   if (node.type === 'prompt') {
@@ -2270,6 +2400,10 @@ const getAgentflowValidationIssues = (
     const outgoing = outgoingByNodeId.get(node.id) ?? [];
     const isTerminal = getNodeOutputs(node).length === 0;
 
+    if (isAnnotationNodeType(node.type)) {
+      return;
+    }
+
     if (!isStartNode(node) && template.inputs.length > 0 && !incoming.length) {
       issues.push({
         id: `node-${node.id}-missing-input`,
@@ -2315,7 +2449,7 @@ const getAgentflowValidationIssues = (
     }
 
     nodes
-      .filter(node => !visited.has(node.id))
+      .filter(node => !visited.has(node.id) && !isAnnotationNodeType(node.type))
       .forEach(node => {
         issues.push({
           id: `node-${node.id}-unreachable`,
@@ -2345,6 +2479,10 @@ const getNodeHeight = (type: AgentflowNodeType) => {
 
   if (type === 'message') {
     return getStaticMessageNodeHeight(createDefaultConfig(type));
+  }
+
+  if (type === 'sticky-note') {
+    return getStickyNoteNodeHeight(createDefaultConfig(type));
   }
 
   if (isActionNodeType(type)) {
@@ -2404,6 +2542,10 @@ const getNodeDisplayHeight = (node: AgentflowNode) => {
 
   if (node.type === 'message') {
     return getStaticMessageNodeHeight(getNodeConfig(node));
+  }
+
+  if (node.type === 'sticky-note') {
+    return getStickyNoteNodeHeight(getNodeConfig(node));
   }
 
   if (node.type === 'prompt') {
@@ -2531,6 +2673,7 @@ const AgentflowCanvasNode = ({
   const cardClass = getNodeCardClass(selected, hasValidationError);
   const updateNodeInternals = useUpdateNodeInternals();
   const isActionGenericNode = isActionNodeType(node.type);
+  const isAnnotationNode = isAnnotationNodeType(node.type);
   const isCompactGenericNode =
     isActionGenericNode || node.type === 'chat-output';
   const getGenericConnectorTop = (index: number) => {
@@ -2611,15 +2754,17 @@ const AgentflowCanvasNode = ({
       offset={8}
       className={NODE_TOOLBAR_CLASS}
     >
-      <Button
-        kind="ghost"
-        size="sm"
-        onClick={() => onOpenDetails(node)}
-        className={`${NODE_TOOLBAR_BUTTON_CLASS} nodrag`}
-      >
-        <Edit size={14} />
-        <span>Edit</span>
-      </Button>
+      {!isAnnotationNode && (
+        <Button
+          kind="ghost"
+          size="sm"
+          onClick={() => onOpenDetails(node)}
+          className={`${NODE_TOOLBAR_BUTTON_CLASS} nodrag`}
+        >
+          <Edit size={14} />
+          <span>Edit</span>
+        </Button>
+      )}
       <OverflowMenu
         aria-label="Node options"
         iconDescription="Node options"
@@ -2628,11 +2773,13 @@ const AgentflowCanvasNode = ({
         flipped
         className={`${NODE_TOOLBAR_MENU_CLASS} nodrag`}
       >
-        <OverflowMenuItem
-          itemText="Save"
-          className={NODE_TOOLBAR_MENU_ITEM_CLASS}
-          onClick={onSave}
-        />
+        {!isAnnotationNode && (
+          <OverflowMenuItem
+            itemText="Save"
+            className={NODE_TOOLBAR_MENU_ITEM_CLASS}
+            onClick={onSave}
+          />
+        )}
         <OverflowMenuItem
           itemText="Duplicate"
           className={NODE_TOOLBAR_MENU_ITEM_CLASS}
@@ -2726,6 +2873,26 @@ const AgentflowCanvasNode = ({
         width={NODE_WIDTH}
         messagePreview={messagePreview}
         postDelayMs={postDelayMs}
+      />
+    );
+  }
+
+  if (node.type === 'sticky-note') {
+    return (
+      <StickyNoteNodeCard
+        node={node}
+        selected={selected}
+        note={String(nodeConfig.note ?? '')}
+        noteColor={String(nodeConfig.color ?? 'yellow')}
+        onChangeNote={noteValue =>
+          data.onUpdateConfig(node.id, 'note', noteValue)
+        }
+        onResizeEnd={size =>
+          data.onUpdateConfigValues(node.id, {
+            note_width: Math.round(size.width),
+            note_height: Math.round(size.height),
+          })
+        }
       />
     );
   }
@@ -2831,23 +2998,22 @@ export function AgentflowBuilder({
     () => getAgentflowEdgesFromDefinition(initialDefinition),
     [initialDefinition],
   );
+  const initialSelectedNodeId =
+    (initialCanvasNodes[1] ?? initialCanvasNodes[0])?.id ?? null;
   const [storedNodes, setStoredNodes] = useState<AgentflowStoredNode[]>(() =>
     initialCanvasNodes.map(node => ({
       ...createStoredNode(node),
-      selected: node.id === (initialCanvasNodes[1] ?? initialCanvasNodes[0]).id,
+      selected: node.id === initialSelectedNodeId,
     })),
   );
   const [edges, setEdges] = useState<AgentflowEdge[]>(initialCanvasEdges);
-  const [selectedNodeId, setSelectedNodeId] = useState(
-    (initialCanvasNodes[1] ?? initialCanvasNodes[0]).id,
-  );
+  const [selectedNodeId, setSelectedNodeId] = useState(initialSelectedNodeId);
   const [reactFlowInstance, setReactFlowInstance] =
     useState<ReactFlowInstance | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [nodeCounter, setNodeCounter] = useState(
     getNodeCounterSeed(initialCanvasNodes),
   );
-  const [openGroups, setOpenGroups] = useState<Set<string>>(defaultOpenGroups);
   const [componentListOpen, setComponentListOpen] = useState(true);
   const [componentListLocked, setComponentListLocked] = useState(true);
   const [canvasLocked, setCanvasLocked] = useState(false);
@@ -2859,6 +3025,7 @@ export function AgentflowBuilder({
     'idle' | 'saving' | 'saved' | 'invalid' | 'error'
   >('idle');
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [exampleDialogOpen, setExampleDialogOpen] = useState(false);
   const [agentflowName, setAgentflowName] = useState(
     initialDefinition?.name ?? '',
   );
@@ -2868,6 +3035,11 @@ export function AgentflowBuilder({
   const [agentflowTags, setAgentflowTags] = useState<string[]>(
     initialDefinition?.tags ?? [],
   );
+  const [selectedExampleName, setSelectedExampleName] = useState<string | null>(
+    exampleAgentflowDefinitions[0]?.name ?? null,
+  );
+  const [activeExampleCategory, setActiveExampleCategory] =
+    useState<string>('All');
   const [settingsTransitionId, setSettingsTransitionId] = useState<
     string | null
   >(null);
@@ -2884,7 +3056,7 @@ export function AgentflowBuilder({
     if (!initialDefinition) return;
 
     const nextNodes = getAgentflowNodesFromDefinition(initialDefinition);
-    const selectedId = (nextNodes[1] ?? nextNodes[0]).id;
+    const selectedId = (nextNodes[1] ?? nextNodes[0])?.id ?? null;
     setStoredNodes(
       nextNodes.map(node => ({
         ...createStoredNode(node),
@@ -2902,6 +3074,55 @@ export function AgentflowBuilder({
     setSaveDialogOpen(false);
     setSaveState('idle');
   }, [initialDefinition]);
+
+  const loadAgentflowDefinition = (definition: AgentflowDefinition) => {
+    const nextNodes = getAgentflowNodesFromDefinition(definition);
+    const selectedId = (nextNodes[1] ?? nextNodes[0])?.id ?? null;
+
+    setStoredNodes(
+      nextNodes.map(node => ({
+        ...createStoredNode(node),
+        selected: node.id === selectedId,
+      })),
+    );
+    setEdges(getAgentflowEdgesFromDefinition(definition));
+    setSelectedNodeId(selectedId);
+    setNodeCounter(getNodeCounterSeed(nextNodes));
+    setCanvasZoom(definition.viewport?.zoom ?? DEFAULT_CANVAS_ZOOM);
+    setAgentflowName(definition.name ?? '');
+    setAgentflowDescription(definition.description ?? '');
+    setAgentflowTags(definition.tags ?? []);
+    setDetailsOpen(false);
+    setSaveDialogOpen(false);
+    setExampleDialogOpen(false);
+    setSaveState('idle');
+    setZoomMenuOpen(false);
+
+    if (!reactFlowInstance) return;
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (definition.viewport) {
+          reactFlowInstance.setViewport(definition.viewport, {
+            duration: CANVAS_VIEWPORT_DURATION,
+          });
+          setCanvasZoom(clampCanvasZoom(definition.viewport.zoom));
+          return;
+        }
+
+        reactFlowInstance.fitView({
+          padding: 0.2,
+          duration: CANVAS_VIEWPORT_DURATION,
+        });
+        closeZoomMenuAndSync(reactFlowInstance);
+      });
+    });
+  };
+
+  const useSelectedExampleDefinition = () => {
+    if (!selectedExampleDefinition) return;
+    loadAgentflowDefinition(selectedExampleDefinition);
+  };
 
   const setNodes = useCallback(
     (
@@ -2923,6 +3144,7 @@ export function AgentflowBuilder({
             id: node.id,
             type: 'agentflowNode',
             position: { x: node.x, y: node.y },
+            style: getStoredNodeStyle(node),
             data: { node },
             deletable: !isStartNode(node),
           };
@@ -3052,34 +3274,55 @@ export function AgentflowBuilder({
     [],
   );
 
-  const groupedPalette = useMemo(
+  const paletteTemplates = useMemo(
     () =>
-      paletteGroups.map(group => ({
-        ...group,
-        templates: group.nodeTypes
-          .map(type => nodeTemplates.find(template => template.type === type))
-          .filter((template): template is AgentflowNodeTemplate =>
-            Boolean(template),
-          ),
-      })),
+      paletteGroups
+        .flatMap(group => group.nodeTypes)
+        .map(type => nodeTemplates.find(template => template.type === type))
+        .filter((template): template is AgentflowNodeTemplate =>
+          Boolean(template),
+        ),
     [],
+  );
+  const exampleCategories = useMemo(
+    () => [
+      'All',
+      ...Array.from(
+        new Set(
+          exampleAgentflowDefinitions.map(
+            definition => definition.tags?.[0] ?? 'General',
+          ),
+        ),
+      ),
+    ],
+    [],
+  );
+  const visibleExampleDefinitions = useMemo(
+    () =>
+      activeExampleCategory === 'All'
+        ? exampleAgentflowDefinitions
+        : exampleAgentflowDefinitions.filter(
+            definition =>
+              (definition.tags?.[0] ?? 'General') === activeExampleCategory,
+          ),
+    [activeExampleCategory],
+  );
+  const selectedExampleDefinition = useMemo(
+    () =>
+      visibleExampleDefinitions.find(
+        definition => definition.name === selectedExampleName,
+      ) ??
+      exampleAgentflowDefinitions.find(
+        definition => definition.name === selectedExampleName,
+      ) ??
+      visibleExampleDefinitions[0] ??
+      null,
+    [selectedExampleName, visibleExampleDefinitions],
   );
 
   useEffect(() => {
     setSaveState(current => (current === 'saved' ? 'idle' : current));
   }, [nodes, edges]);
-
-  const toggleGroup = (group: string) => {
-    setOpenGroups(current => {
-      const next = new Set(current);
-      if (next.has(group)) {
-        next.delete(group);
-      } else {
-        next.add(group);
-      }
-      return next;
-    });
-  };
 
   const toggleComponentListLock = () => {
     const nextLocked = !componentListLocked;
@@ -3325,7 +3568,7 @@ export function AgentflowBuilder({
 
     setNodes(current => [...current, nextNode]);
     selectStoredNode(nextNode.id);
-    setDetailsOpen(type !== 'prompt');
+    setDetailsOpen(type !== 'prompt' && !isAnnotationNodeType(type));
     setNodeCounter(current => current + 1);
   };
 
@@ -3631,15 +3874,21 @@ export function AgentflowBuilder({
 
   const deleteSelectedNode = () => {
     if (!selectedNode || isStartNode(selectedNode)) return;
-    setNodes(current => current.filter(node => node.id !== selectedNode.id));
+    const remainingNodes = nodes.filter(node => node.id !== selectedNode.id);
+    const fallbackNode =
+      remainingNodes.find(node => isStartNode(node)) ?? remainingNodes[0];
+
+    setNodes(remainingNodes);
     setEdges(current =>
       current.filter(
         edge =>
           edge.source !== selectedNode.id && edge.target !== selectedNode.id,
       ),
     );
-    selectStoredNode(START_NODE_ID);
-    setDetailsOpen(true);
+    setSelectedNodeId(fallbackNode?.id ?? null);
+    setDetailsOpen(
+      Boolean(fallbackNode && !isAnnotationNodeType(fallbackNode.type)),
+    );
   };
 
   const saveSelectedNode = () => {
@@ -3737,6 +3986,12 @@ export function AgentflowBuilder({
   };
 
   const openNodeDetails = (node: AgentflowNode) => {
+    if (isAnnotationNodeType(node.type)) {
+      selectStoredNode(node.id);
+      setDetailsOpen(false);
+      return;
+    }
+
     selectStoredNode(node.id);
     setDetailsOpen(true);
   };
@@ -3761,20 +4016,26 @@ export function AgentflowBuilder({
 
     setNodes(current => [...current, duplicate]);
     selectStoredNode(duplicate.id);
-    setDetailsOpen(node.type !== 'prompt');
+    setDetailsOpen(node.type !== 'prompt' && !isAnnotationNodeType(node.type));
     setNodeCounter(current => current + 1);
   };
 
   const deleteNode = (node: AgentflowNode) => {
     if (isStartNode(node)) return;
-    setNodes(current => current.filter(item => item.id !== node.id));
+    const remainingNodes = nodes.filter(item => item.id !== node.id);
+    const fallbackNode =
+      remainingNodes.find(item => isStartNode(item)) ?? remainingNodes[0];
+
+    setNodes(remainingNodes);
     setEdges(current =>
       current.filter(
         edge => edge.source !== node.id && edge.target !== node.id,
       ),
     );
-    selectStoredNode(START_NODE_ID);
-    setDetailsOpen(true);
+    setSelectedNodeId(fallbackNode?.id ?? null);
+    setDetailsOpen(
+      Boolean(fallbackNode && !isAnnotationNodeType(fallbackNode.type)),
+    );
   };
 
   const renderFieldControl = (field: AgentflowField) => {
@@ -3945,6 +4206,8 @@ export function AgentflowBuilder({
           onSave: saveSelectedNode,
           onDuplicate: duplicateNode,
           onDelete: deleteNode,
+          onUpdateConfig: updateNodeConfig,
+          onUpdateConfigValues: updateNodeConfigValues,
           onAddTransition: addAgentTransition,
         },
         draggable: !canvasLocked,
@@ -3958,6 +4221,8 @@ export function AgentflowBuilder({
     saveSelectedNode,
     duplicateNode,
     deleteNode,
+    updateNodeConfig,
+    updateNodeConfigValues,
     addAgentTransition,
   ]);
 
@@ -4008,115 +4273,68 @@ export function AgentflowBuilder({
                 className="m-0 !w-full border-0 bg-transparent"
               >
                 <StructuredListBody>
-                  {groupedPalette.map(group => {
-                    const GroupIcon = group.icon;
-                    const isOpen = openGroups.has(group.key);
+                  {paletteTemplates.map(template => {
+                    const Icon = template.icon;
+                    const templateDisabled =
+                      template.disabled ||
+                      (template.type === 'chat-input' &&
+                        nodes.some(node => isStartNode(node)));
                     return (
-                      <React.Fragment key={group.key}>
-                        <StructuredListRow
-                          role="button"
-                          tabIndex={0}
-                          aria-expanded={isOpen}
-                          onClick={() => toggleGroup(group.key)}
-                          onKeyDown={event => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              toggleGroup(group.key);
-                            }
-                          }}
-                          className="!flex !h-10 !w-full cursor-pointer !items-center !border-x-0 bg-white text-gray-900 transition-colors hover:bg-gray-50 dark:bg-gray-900 dark:text-white dark:hover:bg-gray-800"
-                        >
-                          <StructuredListCell className="!flex min-w-0 !flex-1 !items-center gap-3 border-0 py-0 !pl-4 pr-6">
-                            <GroupIcon
+                      <StructuredListRow
+                        key={template.type}
+                        draggable={!templateDisabled}
+                        aria-disabled={templateDisabled}
+                        onDragStart={event =>
+                          onPaletteDragStart(event, template)
+                        }
+                        className={`!flex !h-10 !w-full !items-center !border-x-0 transition-colors ${
+                          templateDisabled
+                            ? 'cursor-not-allowed bg-gray-50 text-gray-400 dark:bg-gray-900 dark:text-gray-500'
+                            : 'cursor-grab bg-white text-black hover:bg-gray-50 active:cursor-grabbing dark:bg-gray-900 dark:text-white dark:hover:bg-gray-800'
+                        }`}
+                      >
+                        <StructuredListCell className="!flex min-w-0 !flex-1 !items-center border-0 py-0 !pl-4 pr-6">
+                          <span className="flex min-w-0 items-center gap-3">
+                            <Icon
                               size={16}
-                              className="shrink-0 text-gray-800 dark:text-gray-100"
-                            />
-                            <span className="truncate text-sm font-semibold leading-none">
-                              {group.title}
-                            </span>
-                          </StructuredListCell>
-                          <StructuredListCell
-                            noWrap
-                            className="!flex !w-12 shrink-0 !items-center !justify-center border-0 px-0 py-0"
-                          >
-                            <ChevronRight
-                              size={16}
-                              className={`shrink-0 text-gray-500 transition-transform ${
-                                isOpen ? 'rotate-90' : ''
+                              className={`shrink-0 ${
+                                templateDisabled
+                                  ? 'text-gray-400 dark:text-gray-500'
+                                  : 'text-black dark:text-white'
                               }`}
                             />
-                          </StructuredListCell>
-                        </StructuredListRow>
-
-                        {isOpen &&
-                          group.templates.map(template => {
-                            const Icon = template.icon;
-                            const templateDisabled =
-                              template.disabled ||
-                              (template.type === 'chat-input' &&
-                                nodes.some(node => isStartNode(node)));
-                            return (
-                              <StructuredListRow
-                                key={template.type}
-                                draggable={!templateDisabled}
-                                aria-disabled={templateDisabled}
-                                onDragStart={event =>
-                                  onPaletteDragStart(event, template)
-                                }
-                                className={`!flex !h-10 !w-full !items-center !border-x-0 transition-colors ${
-                                  templateDisabled
-                                    ? 'cursor-not-allowed bg-gray-50 text-gray-400 dark:bg-gray-900 dark:text-gray-500'
-                                    : 'cursor-grab bg-white text-black hover:bg-gray-50 active:cursor-grabbing dark:bg-gray-900 dark:text-white dark:hover:bg-gray-800'
-                                }`}
-                              >
-                                <StructuredListCell className="!flex min-w-0 !flex-1 !items-center border-0 py-0 !pl-7 pr-6">
-                                  <span className="flex min-w-0 items-center gap-3">
-                                    <Icon
-                                      size={16}
-                                      className={`shrink-0 ${
-                                        templateDisabled
-                                          ? 'text-gray-400 dark:text-gray-500'
-                                          : 'text-black dark:text-white'
-                                      }`}
-                                    />
-                                    <span className="truncate text-sm font-normal leading-none">
-                                      {template.label}
-                                    </span>
-                                  </span>
-                                </StructuredListCell>
-                                <StructuredListCell
-                                  noWrap
-                                  className="!flex !w-12 shrink-0 !items-center !justify-center border-0 px-0 py-0"
-                                >
-                                  <Draggable
-                                    size={16}
-                                    className="text-gray-500 dark:text-gray-400"
-                                  />
-                                </StructuredListCell>
-                              </StructuredListRow>
-                            );
-                          })}
-                      </React.Fragment>
+                            <span className="truncate text-sm font-normal leading-none">
+                              {template.label}
+                            </span>
+                          </span>
+                        </StructuredListCell>
+                        <StructuredListCell
+                          noWrap
+                          className="!flex !w-12 shrink-0 !items-center !justify-center border-0 px-0 py-0"
+                        >
+                          <Draggable
+                            size={16}
+                            className="text-gray-500 dark:text-gray-400"
+                          />
+                        </StructuredListCell>
+                      </StructuredListRow>
                     );
                   })}
                 </StructuredListBody>
               </StructuredListWrapper>
             ) : (
               <div className="flex flex-col items-center py-2">
-                {groupedPalette.map(group => {
-                  const GroupIcon = group.icon;
+                {paletteTemplates.map(template => {
+                  const Icon = template.icon;
                   return (
                     <button
-                      key={group.key}
+                      key={template.type}
                       type="button"
-                      onClick={() => {
-                        setComponentListOpen(true);
-                        toggleGroup(group.key);
-                      }}
+                      onClick={() => setComponentListOpen(true)}
                       className="flex h-10 w-full items-center justify-center text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-                      aria-label={group.title}
+                      aria-label={template.label}
                     >
-                      <GroupIcon size={16} />
+                      <Icon size={16} />
                     </button>
                   );
                 })}
@@ -4314,6 +4532,16 @@ export function AgentflowBuilder({
                   className="flex h-8 w-8 items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
                   <Flow size={18} />
+                </button>
+              </Tooltip>
+              <Tooltip align="top" description="Examples">
+                <button
+                  type="button"
+                  aria-label="Examples"
+                  onClick={() => setExampleDialogOpen(true)}
+                  className="flex h-8 w-8 items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  <Document size={18} />
                 </button>
               </Tooltip>
               <div className="mx-1 h-5 border-l border-gray-200 dark:border-gray-800" />
@@ -4889,9 +5117,9 @@ export function AgentflowBuilder({
                                 <Information size={14} />
                               </ToggletipButton>
                               <ToggletipContent>
-                                Each transition becomes a Pipecat function
-                                schema. Parameters define structured data the
-                                LLM should collect before calling it.
+                                Each transition becomes a function schema.
+                                Parameters define structured data the LLM should
+                                collect before calling it.
                               </ToggletipContent>
                             </Toggletip>
                           </div>
@@ -5125,6 +5353,142 @@ export function AgentflowBuilder({
           </aside>
         )}
       </div>
+      <Modal
+        open={exampleDialogOpen}
+        onClose={() => setExampleDialogOpen(false)}
+        size="lg"
+        containerClassName="!h-[90vh] !w-[90vw] !max-h-[90vh] !max-w-[90vw]"
+      >
+        <ModalHeader
+          label="Agentflow"
+          title="Select a usecase template"
+          onClose={() => setExampleDialogOpen(false)}
+        />
+        <ModalBody hasScrollingContent>
+          <p className="mb-4 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+            Choose a pre-configured agentflow to fill the canvas. You can
+            customize every node after selecting.
+          </p>
+
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <ContentSwitcher
+              onChange={({ name }) => {
+                setActiveExampleCategory(name as string);
+                const nextDefinition =
+                  name === 'All'
+                    ? exampleAgentflowDefinitions[0]
+                    : exampleAgentflowDefinitions.find(
+                        definition =>
+                          (definition.tags?.[0] ?? 'General') === name,
+                      );
+                setSelectedExampleName(nextDefinition?.name ?? null);
+              }}
+              selectedIndex={exampleCategories.indexOf(activeExampleCategory)}
+              size="sm"
+            >
+              {exampleCategories.map(category => (
+                <Switch key={category} name={category} text={category} />
+              ))}
+            </ContentSwitcher>
+            {selectedExampleDefinition && (
+              <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
+                Selected:{' '}
+                <span className="font-medium text-gray-900 dark:text-gray-100">
+                  {selectedExampleDefinition.name}
+                </span>
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 border-l border-t border-gray-200 dark:border-gray-800">
+            {visibleExampleDefinitions.map(definition => {
+              const isSelected =
+                selectedExampleDefinition?.name === definition.name;
+              const category = definition.tags?.[0] ?? 'General';
+              return (
+                <div
+                  key={definition.name ?? definition.entryNodeId}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() =>
+                    setSelectedExampleName(definition.name ?? null)
+                  }
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedExampleName(definition.name ?? null);
+                    }
+                  }}
+                  className={cn(
+                    'relative flex min-h-36 cursor-pointer select-none flex-col border-b border-r border-gray-200 p-4 outline-none transition-colors duration-100 dark:border-gray-800',
+                    'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+                    isSelected
+                      ? 'bg-primary/5 dark:bg-primary/10'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-800',
+                  )}
+                >
+                  <CornerBorderOverlay
+                    className={isSelected ? 'opacity-100' : undefined}
+                  />
+
+                  <div
+                    className={cn(
+                      'absolute right-0 top-0 z-20 flex h-6 w-6 items-center justify-center transition-colors duration-100',
+                      isSelected ? 'bg-primary' : 'bg-transparent',
+                    )}
+                  >
+                    {isSelected && (
+                      <Checkmark size={14} className="text-white" />
+                    )}
+                  </div>
+
+                  <Tag size="sm" type="blue" className="!mb-2 !self-start">
+                    {category}
+                  </Tag>
+
+                  <h3 className="mb-1.5 pr-6 text-sm font-semibold leading-snug text-gray-900 dark:text-white">
+                    {definition.name}
+                  </h3>
+
+                  <p className="mb-4 line-clamp-2 flex-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                    {definition.description}
+                  </p>
+
+                  {definition.tags?.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {definition.tags.slice(1, 4).map(tag => (
+                        <Tag
+                          key={`${definition.name}-${tag}`}
+                          size="sm"
+                          type="cool-gray"
+                          className="!m-0"
+                        >
+                          {tag}
+                        </Tag>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <SecondaryButton
+            size="lg"
+            onClick={() => setExampleDialogOpen(false)}
+          >
+            Close
+          </SecondaryButton>
+          <PrimaryButton
+            size="lg"
+            disabled={!selectedExampleDefinition}
+            onClick={useSelectedExampleDefinition}
+          >
+            Use this template
+          </PrimaryButton>
+        </ModalFooter>
+      </Modal>
       <Modal
         open={saveDialogOpen}
         onClose={() => setSaveDialogOpen(false)}

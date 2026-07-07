@@ -14,6 +14,9 @@ export { StaticMessageNodeCard } from './static-message-node/card';
 export { StaticMessageNodeDetail } from './static-message-node/detail';
 export { validateStaticMessageNode } from './static-message-node/validator';
 
+export { StickyNoteNodeCard } from './sticky-note-node/card';
+export { validateStickyNoteNode } from './sticky-note-node/validator';
+
 export { ConditionNodeCard } from './condition-node/card';
 export { ConditionNodeDetail } from './condition-node/detail';
 export { validateConditionNode } from './condition-node/validator';
