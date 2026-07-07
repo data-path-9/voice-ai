@@ -67,6 +67,14 @@ export const Overview: FC<{ currentAssistant: Assistant }> = ({
                 )
               }
             />
+            <MenuItem
+              label="Create Agentflow"
+              onClick={() =>
+                navigation.goToCreateAssistantAgentflowVersion(
+                  currentAssistant.getId(),
+                )
+              }
+            />
           </ComboButton>
         </div>
       </div>
