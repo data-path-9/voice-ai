@@ -8,6 +8,12 @@
         "url": "https://github.com/rapidaai/voice-ai.git"
     },
     "license": "MIT",
+    "resolutions": {
+        "**/@types/d3-dispatch": "3.0.3",
+        "**/react": "18.2.0",
+        "**/react-dom": "18.2.0",
+        "**/zustand": "4.5.1"
+    },
     "engines": {
         "node": ">=14.x"
     },
@@ -81,7 +87,7 @@
         "@popperjs/core": "2.11.8",
         "@protobuf-ts/plugin": "2.9.4",
         "@protobuf-ts/runtime": "2.9.4",
-        "@rapidaai/react": "1.1.84",
+        "@rapidaai/react": "1.1.85",
         "@rapidaai/react-widget": "1.0.0",
         "@reduxjs/toolkit": "1.8.5",
         "@sentry/react": "7.101.1",
@@ -150,6 +156,7 @@
         "react-sortablejs": "6.1.4",
         "react-transition-group": "4.4.5",
         "react-use-measure": "2.1.1",
+        "reactflow": "11.11.3",
         "recharts": "3.0.2",
         "redux-injectors": "2.1.0",
         "redux-saga": "1.2.1",
@@ -177,6 +184,7 @@
         "@testing-library/jest-dom": "5.16.5",
         "@testing-library/react": "13.4.0",
         "@types/chart.js": "2.9.41",
+        "@types/d3-dispatch": "3.0.3",
         "@types/fontfaceobserver": "^2.1.0",
         "@types/google-protobuf": "3.15.12",
         "@types/jest": "^27.5.2",

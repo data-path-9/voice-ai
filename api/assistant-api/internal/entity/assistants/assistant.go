@@ -31,6 +31,7 @@ type Assistant struct {
 
 	AssistantProviderModel     *AssistantProviderModel     `json:"assistantProviderModel" gorm:"foreignKey:AssistantProviderId"`
 	AssistantProviderAgentkit  *AssistantProviderAgentkit  `json:"assistantProviderAgentkit" gorm:"foreignKey:AssistantProviderId"`
+	AssistantProviderAgentflow *AssistantProviderAgentflow `json:"assistantProviderAgentflow" gorm:"foreignKey:AssistantProviderId"`
 	AssistantProviderWebsocket *AssistantProviderWebsocket `json:"assistantProviderWebsocket" gorm:"foreignKey:AssistantProviderId"`
 
 	AssistantTag *AssistantTag `json:"assistantTag" gorm:"foreignKey:AssistantId"`

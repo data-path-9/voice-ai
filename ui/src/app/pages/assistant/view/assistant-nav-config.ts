@@ -77,6 +77,11 @@ export const assistantNavSections: AssistantNavSection[] = [
             label: 'Add AgentKit',
             path: 'create-agentkit-version',
           },
+          {
+            key: 'versions-agentflow',
+            label: 'Add Agentflow',
+            path: 'create-agentflow-version',
+          },
         ],
       },
     ],

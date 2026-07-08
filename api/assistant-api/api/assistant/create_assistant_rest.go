@@ -94,7 +94,14 @@ func (assistantApi *assistantApi) CreateAssistantRest(c *gin.Context) {
 	hasModelProvider := validator.NonNil(assistantProviderRequest.Model)
 	hasAgentKitProvider := validator.NonNil(assistantProviderRequest.Agentkit)
 	hasWebsocketProvider := validator.NonNil(assistantProviderRequest.Websocket)
-	if !hasModelProvider && !hasAgentKitProvider && !hasWebsocketProvider {
+	hasAgentflowProvider := validator.NonNil(assistantProviderRequest.Agentflow)
+	providerCount := 0
+	for _, hasProvider := range []bool{hasModelProvider, hasAgentKitProvider, hasWebsocketProvider, hasAgentflowProvider} {
+		if hasProvider {
+			providerCount++
+		}
+	}
+	if providerCount == 0 {
 		c.JSON(pkg_errors.CreateAssistantMissingProvider.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(pkg_errors.CreateAssistantMissingProvider.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
@@ -106,9 +113,7 @@ func (assistantApi *assistantApi) CreateAssistantRest(c *gin.Context) {
 		})
 		return
 	}
-	if (hasModelProvider && hasAgentKitProvider) ||
-		(hasModelProvider && hasWebsocketProvider) ||
-		(hasAgentKitProvider && hasWebsocketProvider) {
+	if providerCount > 1 {
 		c.JSON(pkg_errors.CreateAssistantInvalidProvider.HTTPStatusCode, openapi.ErrorResponse{
 			Code:    utils.Ptr(pkg_errors.CreateAssistantInvalidProvider.HTTPStatusCodeInt32()),
 			Success: utils.Ptr(false),
@@ -282,6 +287,89 @@ func (assistantApi *assistantApi) CreateAssistantRest(c *gin.Context) {
 			},
 		})
 		return
+	}
+	if hasAgentflowProvider {
+		agentflowProviderRequest := assistantProviderRequest.Agentflow
+		agentflowValidationError := ""
+		if !validator.NotBlank(agentflowProviderRequest.SchemaVersion) {
+			agentflowValidationError = "agentflow schemaVersion is required"
+		} else if len(agentflowProviderRequest.Definition) == 0 {
+			agentflowValidationError = "agentflow definition is required"
+		} else {
+			entryNodeID, ok := agentflowProviderRequest.Definition["entryNodeId"].(string)
+			if !ok || !validator.NotBlank(entryNodeID) {
+				agentflowValidationError = "agentflow definition entryNodeId is required"
+			}
+			nodes, ok := agentflowProviderRequest.Definition["nodes"].([]interface{})
+			if agentflowValidationError == "" && !ok {
+				agentflowValidationError = "agentflow definition nodes must be an array"
+			}
+			edges, ok := agentflowProviderRequest.Definition["edges"].([]interface{})
+			if agentflowValidationError == "" && !ok {
+				agentflowValidationError = "agentflow definition edges must be an array"
+			}
+			if agentflowValidationError == "" {
+				nodeIDs := make(map[string]struct{}, len(nodes))
+				for _, node := range nodes {
+					nodeMap, ok := node.(map[string]interface{})
+					if !ok {
+						agentflowValidationError = "agentflow definition node must be an object"
+						break
+					}
+					nodeID, ok := nodeMap["id"].(string)
+					if !ok || !validator.NotBlank(nodeID) {
+						agentflowValidationError = "agentflow definition node id is required"
+						break
+					}
+					nodeIDs[nodeID] = struct{}{}
+				}
+				if agentflowValidationError == "" {
+					if _, ok := nodeIDs[entryNodeID]; !ok {
+						agentflowValidationError = "agentflow entryNodeId does not match a node"
+					}
+				}
+				for _, edge := range edges {
+					if agentflowValidationError != "" {
+						break
+					}
+					edgeMap, ok := edge.(map[string]interface{})
+					if !ok {
+						agentflowValidationError = "agentflow definition edge must be an object"
+						break
+					}
+					source, ok := edgeMap["source"].(string)
+					if !ok || !validator.NotBlank(source) {
+						agentflowValidationError = "agentflow edge source is required"
+						break
+					}
+					target, ok := edgeMap["target"].(string)
+					if !ok || !validator.NotBlank(target) {
+						agentflowValidationError = "agentflow edge target is required"
+						break
+					}
+					if _, ok := nodeIDs[source]; !ok {
+						agentflowValidationError = "agentflow edge source does not match a node"
+						break
+					}
+					if _, ok := nodeIDs[target]; !ok {
+						agentflowValidationError = "agentflow edge target does not match a node"
+						break
+					}
+				}
+			}
+		}
+		if agentflowValidationError != "" {
+			c.JSON(pkg_errors.CreateAssistantInvalidRequest.HTTPStatusCode, openapi.ErrorResponse{
+				Code:    utils.Ptr(pkg_errors.CreateAssistantInvalidRequest.HTTPStatusCodeInt32()),
+				Success: utils.Ptr(false),
+				Error: &openapi.Error{
+					ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateAssistantInvalidRequest.CodeString())),
+					ErrorMessage: utils.Ptr(pkg_errors.CreateAssistantInvalidRequest.Error),
+					HumanMessage: utils.Ptr(agentflowValidationError),
+				},
+			})
+			return
+		}
 	}
 
 	description := ""
@@ -473,6 +561,39 @@ func (assistantApi *assistantApi) CreateAssistantRest(c *gin.Context) {
 					ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateAssistantAttachProviderWebsocket.CodeString())),
 					ErrorMessage: utils.Ptr(pkg_errors.CreateAssistantAttachProviderWebsocket.Error),
 					HumanMessage: utils.Ptr(pkg_errors.CreateAssistantAttachProviderWebsocket.ErrorMessage),
+				},
+			})
+			return
+		}
+	}
+
+	if hasAgentflowProvider {
+		agentflowProviderRequest := assistantProviderRequest.Agentflow
+		agentflowProvider, err := assistantApi.assistantService.CreateAssistantProviderAgentflow(
+			c, auth, assistant.Id, providerDescription, agentflowProviderRequest.SchemaVersion, agentflowProviderRequest.Definition,
+		)
+		if err != nil {
+
+			c.JSON(pkg_errors.CreateAssistantCreateProviderModel.HTTPStatusCode, openapi.ErrorResponse{
+				Code:    utils.Ptr(pkg_errors.CreateAssistantCreateProviderModel.HTTPStatusCodeInt32()),
+				Success: utils.Ptr(false),
+				Error: &openapi.Error{
+					ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateAssistantCreateProviderModel.CodeString())),
+					ErrorMessage: utils.Ptr(pkg_errors.CreateAssistantCreateProviderModel.Error),
+					HumanMessage: utils.Ptr(pkg_errors.CreateAssistantCreateProviderModel.ErrorMessage),
+				},
+			})
+			return
+		}
+		if _, err = assistantApi.assistantService.AttachProviderModelToAssistant(c, auth, assistant.Id, type_enums.AGENTFLOW, agentflowProvider.Id); err != nil {
+
+			c.JSON(pkg_errors.CreateAssistantAttachProviderModel.HTTPStatusCode, openapi.ErrorResponse{
+				Code:    utils.Ptr(pkg_errors.CreateAssistantAttachProviderModel.HTTPStatusCodeInt32()),
+				Success: utils.Ptr(false),
+				Error: &openapi.Error{
+					ErrorCode:    utils.Ptr(openapi.Uint64String(pkg_errors.CreateAssistantAttachProviderModel.CodeString())),
+					ErrorMessage: utils.Ptr(pkg_errors.CreateAssistantAttachProviderModel.Error),
+					HumanMessage: utils.Ptr(pkg_errors.CreateAssistantAttachProviderModel.ErrorMessage),
 				},
 			})
 			return

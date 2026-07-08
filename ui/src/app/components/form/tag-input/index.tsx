@@ -1,6 +1,14 @@
-import React, { FC, useState } from 'react';
-import { DismissibleTag, Tag } from '@carbon/react';
+import React, { FC, ReactNode, useState } from 'react';
+import {
+  DismissibleTag,
+  Tag,
+  Toggletip,
+  ToggletipButton,
+  ToggletipContent,
+} from '@carbon/react';
+import { Information } from '@carbon/icons-react';
 import { TextInput } from '@/app/components/carbon/form';
+import { FormLabel } from '@/app/components/form-label';
 
 interface TagInputProps {
   tags: string[];
@@ -8,6 +16,9 @@ interface TagInputProps {
   removeTag: (tag: string) => void;
   allTags: Array<string>;
   className?: string;
+  id?: string;
+  labelText?: ReactNode;
+  helperText?: ReactNode;
 }
 
 export const TagInput: FC<TagInputProps> = ({
@@ -15,6 +26,9 @@ export const TagInput: FC<TagInputProps> = ({
   addTag,
   removeTag,
   allTags,
+  id = 'tag-input',
+  labelText = 'Tags (Optional)',
+  helperText = 'Add tags to organize and locate items more efficiently.',
 }) => {
   const [inputValue, setInputValue] = useState('');
 
@@ -33,14 +47,25 @@ export const TagInput: FC<TagInputProps> = ({
 
   return (
     <div>
+      <div className="mb-2 flex items-center gap-1">
+        <FormLabel htmlFor={id}>{labelText}</FormLabel>
+        {helperText ? (
+          <Toggletip align="right">
+            <ToggletipButton label="Show information">
+              <Information size={14} />
+            </ToggletipButton>
+            <ToggletipContent>{helperText}</ToggletipContent>
+          </Toggletip>
+        ) : null}
+      </div>
       <TextInput
-        id="tag-input"
-        labelText="Tags (Optional)"
+        id={id}
+        labelText={labelText}
+        hideLabel
         placeholder="Type a tag and press Enter"
         value={inputValue}
         onChange={e => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        helperText="Add tags to organize and locate items more efficiently."
       />
       {tags.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-3">

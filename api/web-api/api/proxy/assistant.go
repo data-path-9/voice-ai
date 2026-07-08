@@ -145,6 +145,13 @@ func (assistant *webAssistantGRPCApi) GetAssistant(c context.Context, iRequest *
 			websocket.CreatedUser = user
 			_assistant.GetData().AssistantProviderWebsocket = websocket
 		}
+
+		agentflow := _assistant.GetData().GetAssistantProviderAgentflow()
+		if agentflow != nil {
+			user := assistant.GetUser(c, iAuth, agentflow.GetCreatedBy())
+			agentflow.CreatedUser = user
+			_assistant.GetData().AssistantProviderAgentflow = agentflow
+		}
 	}
 	return _assistant, nil
 }
@@ -189,6 +196,13 @@ func (assistant *webAssistantGRPCApi) GetAllAssistant(c context.Context, iReques
 			websocket.CreatedUser = user
 			ast.AssistantProviderWebsocket = websocket
 		}
+
+		agentflow := ast.GetAssistantProviderAgentflow()
+		if agentflow != nil {
+			user := assistant.GetUser(c, iAuth, agentflow.GetCreatedBy())
+			agentflow.CreatedUser = user
+			ast.AssistantProviderAgentflow = agentflow
+		}
 	}
 	return utils.PaginatedSuccess[protos.GetAllAssistantResponse, []*protos.Assistant](
 		_page.GetTotalItem(), _page.GetCurrentPage(),
@@ -232,6 +246,10 @@ func (assistantGRPCApi *webAssistantGRPCApi) GetAllAssistantProvider(ctx context
 			case *protos.GetAllAssistantProviderResponse_AssistantProvider_AssistantProviderWebsocket:
 				user := assistantGRPCApi.GetUser(ctx, iAuth, assistantProvider.AssistantProviderWebsocket.GetCreatedBy())
 				assistantProvider.AssistantProviderWebsocket.CreatedUser = user
+				ast.AssistantProvider = assistantProvider
+			case *protos.GetAllAssistantProviderResponse_AssistantProvider_AssistantProviderAgentflow:
+				user := assistantGRPCApi.GetUser(ctx, iAuth, assistantProvider.AssistantProviderAgentflow.GetCreatedBy())
+				assistantProvider.AssistantProviderAgentflow.CreatedUser = user
 				ast.AssistantProvider = assistantProvider
 			}
 		}

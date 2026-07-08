@@ -7,6 +7,20 @@ jest.mock('random-words', () => ({
   generate: () => 'stub-word',
 }));
 
+jest.mock('@carbon/react', () => {
+  const actual = jest.requireActual('@carbon/react');
+  return {
+    ...actual,
+    Toggletip: ({ children }: any) => <span>{children}</span>,
+    ToggletipButton: ({ children, label }: any) => (
+      <button type="button" aria-label={label}>
+        {children || label}
+      </button>
+    ),
+    ToggletipContent: ({ children }: any) => <span>{children}</span>,
+  };
+});
+
 jest.mock(
   '@/app/components/configuration/config-prompt/advanced-prompt-input',
   () => ({

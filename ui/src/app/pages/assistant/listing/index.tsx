@@ -185,6 +185,14 @@ const createAssistantOptions = [
     icon: Bot,
     path: '/deployment/assistant/connect-agentkit',
   },
+  {
+    title: 'Agentflow',
+    eyebrow: 'Workflow',
+    description:
+      'Design a node-based assistant workflow with prompt, condition, tool, and state steps.',
+    icon: PromptTemplate,
+    path: '/deployment/assistant/create-agentflow',
+  },
 ];
 
 function CreateAssistantDialog({
@@ -209,7 +217,7 @@ function CreateAssistantDialog({
         onClose={onClose}
       />
       <ModalBody>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {createAssistantOptions.map(option => {
             const Icon = option.icon;
             return (

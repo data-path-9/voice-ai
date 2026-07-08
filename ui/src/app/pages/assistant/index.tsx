@@ -33,6 +33,14 @@ export const DeploymentCreateWebsocketPage = lazyLoad(
   },
 );
 
+export const DeploymentCreateAgentflowPage = lazyLoad(
+  () => import('./actions/create-assistant/create-agentflow'),
+  module => module.CreateAgentflow,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
 export const DeploymentViewAssistantPage = lazyLoad(
   () => import('./view'),
   module => module.ViewAssistantPage,
@@ -252,6 +260,14 @@ export const DeploymentCreateWebsocketVersionAssistantPage = lazyLoad(
 export const DeploymentCreateAgentKitVersionAssistantPage = lazyLoad(
   () => import('./actions/create-assistant-version/create-agent-kit-version'),
   module => module.CreateAgentKitVersion,
+  {
+    fallback: <PageLoader />,
+  },
+);
+
+export const DeploymentCreateAgentflowVersionAssistantPage = lazyLoad(
+  () => import('./actions/create-assistant-version/create-agentflow-version'),
+  module => module.CreateAgentflowVersion,
   {
     fallback: <PageLoader />,
   },

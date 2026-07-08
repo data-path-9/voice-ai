@@ -178,6 +178,18 @@ export function Version(props: VersionProps) {
           deployType: 'WEBSOCKET',
         };
       }
+      case Cases.ASSISTANTPROVIDERAGENTFLOW: {
+        const a = apm.getAssistantprovideragentflow();
+        return {
+          id: a?.getId()!,
+          type: 'Agentflow',
+          typeColor: 'green' as const,
+          description: a?.getDescription() || 'Initial assistant version',
+          createdBy: a?.getCreateduser()?.getName() || '',
+          createdDate: a?.getCreateddate(),
+          deployType: 'AGENTFLOW',
+        };
+      }
       default:
         return null;
     }
@@ -200,21 +212,37 @@ export function Version(props: VersionProps) {
     );
   };
 
-  const goToCreateVersion = () => {
-    if (props.assistant.hasAssistantprovideragentkit()) {
-      navigation.goToCreateAssistantAgentKitVersion(props.assistant.getId());
-      return;
-    }
-
-    navigation.goToCreateAssistantVersion(props.assistant.getId());
-  };
-
   const allRows = assistantProviderAction.assistantProviders
     .map(apm => ({ apm, data: getProviderData(apm) }))
     .filter(({ data }) => data !== null) as {
     apm: any;
     data: NonNullable<ReturnType<typeof getProviderData>>;
   }[];
+
+  const goToCreateVersion = () => {
+    const activeProviderId =
+      assistantProviderAction.assistant?.getAssistantproviderid() ??
+      props.assistant.getAssistantproviderid();
+    const activeVersion = allRows.find(row => row.data.id === activeProviderId);
+
+    if (
+      activeVersion?.data.deployType === 'AGENTKIT' ||
+      props.assistant.hasAssistantprovideragentkit()
+    ) {
+      navigation.goToCreateAssistantAgentKitVersion(props.assistant.getId());
+      return;
+    }
+
+    if (
+      activeVersion?.data.deployType === 'AGENTFLOW' ||
+      props.assistant.hasAssistantprovideragentflow()
+    ) {
+      navigation.goToCreateAssistantAgentflowVersion(props.assistant.getId());
+      return;
+    }
+
+    navigation.goToCreateAssistantVersion(props.assistant.getId());
+  };
 
   const filteredRows = searchTerm
     ? allRows.filter(

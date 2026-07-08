@@ -47,6 +47,13 @@ type AssistantProviderWebsocket struct {
 	Parameters gorm_types.StringMap `json:"parameters" gorm:"type:string;size:400;not null;"`
 }
 
+type AssistantProviderAgentflow struct {
+	AssistantProvider
+
+	SchemaVersion string               `json:"schemaVersion" gorm:"type:string;size:50;not null"`
+	Definition    gorm_types.PromptMap `json:"definition" gorm:"type:jsonb;not null"`
+}
+
 type AssistantProviderModel struct {
 	AssistantProvider
 	//

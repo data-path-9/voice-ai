@@ -10,6 +10,7 @@ import (
 	"errors"
 
 	internal_assistant_entity "github.com/rapidaai/api/assistant-api/internal/entity/assistants"
+	internal_llm_agentflow "github.com/rapidaai/api/assistant-api/internal/llm/agentflow"
 	internal_llm_agentkit "github.com/rapidaai/api/assistant-api/internal/llm/agentkit"
 	internal_llm_model "github.com/rapidaai/api/assistant-api/internal/llm/model"
 	internal_llm_websocket "github.com/rapidaai/api/assistant-api/internal/llm/websocket"
@@ -76,6 +77,16 @@ func New(opts ...Option) (internal_type.LLMExecutor, error) {
 		return nil, errors.New("llm: assistant is required")
 	}
 	switch options.assistant.AssistantProvider {
+	case type_enums.AGENTFLOW:
+		if !validator.NonNil(options.assistant.AssistantProviderAgentflow) {
+			return nil, errors.New("llm: agentflow provider configuration is required")
+		}
+		return internal_llm_agentflow.New(
+			internal_llm_agentflow.WithContext(options.ctx),
+			internal_llm_agentflow.WithLogger(options.logger),
+			internal_llm_agentflow.WithCommunication(options.communication),
+			internal_llm_agentflow.WithConfiguration(options.configuration),
+		)
 	case type_enums.AGENTKIT:
 		if !validator.NonNil(options.assistant.AssistantProviderAgentkit) {
 			return nil, errors.New("llm: agentkit provider configuration is required")

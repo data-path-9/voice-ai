@@ -106,6 +106,13 @@ jest.mock('@carbon/react', () => ({
       {children}
     </button>
   ),
+  Toggletip: ({ children }: any) => <span>{children}</span>,
+  ToggletipButton: ({ children, label }: any) => (
+    <button type="button" aria-label={label}>
+      {children || label}
+    </button>
+  ),
+  ToggletipContent: ({ children }: any) => <span>{children}</span>,
 }));
 
 describe('CredentialDropdown', () => {

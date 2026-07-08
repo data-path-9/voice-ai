@@ -11,6 +11,7 @@ import (
 type Assistant struct {
 	AssistantKnowledges        *[]AssistantKnowledge       `json:"assistantKnowledges,omitempty"`
 	AssistantProvider          *string                     `json:"assistantProvider,omitempty"`
+	AssistantProviderAgentflow *AssistantProviderAgentflow `json:"assistantProviderAgentflow,omitempty"`
 	AssistantProviderAgentkit  *AssistantProviderAgentkit  `json:"assistantProviderAgentkit,omitempty"`
 	AssistantProviderId        *Uint64String               `json:"assistantProviderId,omitempty"`
 	AssistantProviderModel     *AssistantProviderModel     `json:"assistantProviderModel,omitempty"`
@@ -111,6 +112,16 @@ type AssistantPhoneDeployment struct {
 	PhoneOptions          *[]Metadata              `json:"phoneOptions,omitempty"`
 	PhoneProviderName     *string                  `json:"phoneProviderName,omitempty"`
 	Status                *string                  `json:"status,omitempty"`
+}
+
+// AssistantProviderAgentflow defines model for AssistantProviderAgentflow.
+type AssistantProviderAgentflow struct {
+	AssistantId   *Uint64String           `json:"assistantId,omitempty"`
+	Definition    *map[string]interface{} `json:"definition,omitempty"`
+	Description   *string                 `json:"description,omitempty"`
+	Id            *Uint64String           `json:"id,omitempty"`
+	SchemaVersion *string                 `json:"schemaVersion,omitempty"`
+	Status        *string                 `json:"status,omitempty"`
 }
 
 // AssistantProviderAgentkit defines model for AssistantProviderAgentkit.
@@ -272,6 +283,12 @@ type CreateAssistantPhoneDeploymentRequest struct {
 	PhoneProviderName     string                          `json:"phoneProviderName"`
 }
 
+// CreateAssistantProviderAgentflow defines model for CreateAssistantProviderAgentflow.
+type CreateAssistantProviderAgentflow struct {
+	Definition    map[string]interface{} `json:"definition"`
+	SchemaVersion string                 `json:"schemaVersion"`
+}
+
 // CreateAssistantProviderAgentkit defines model for CreateAssistantProviderAgentkit.
 type CreateAssistantProviderAgentkit struct {
 	AgentKitUrl         string             `json:"agentKitUrl"`
@@ -296,6 +313,7 @@ type CreateAssistantProviderModel struct {
 
 // CreateAssistantProviderRequest defines model for CreateAssistantProviderRequest.
 type CreateAssistantProviderRequest struct {
+	Agentflow   *CreateAssistantProviderAgentflow `json:"agentflow,omitempty"`
 	Agentkit    *CreateAssistantProviderAgentkit  `json:"agentkit,omitempty"`
 	AssistantId *Uint64String                     `json:"assistantId,omitempty"`
 	Description *string                           `json:"description,omitempty"`

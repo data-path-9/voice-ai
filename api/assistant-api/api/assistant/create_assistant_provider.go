@@ -255,6 +255,116 @@ func (assistantApi *assistantGrpcApi) CreateAssistantProvider(ctx context.Contex
 			&assistant_api.GetAssistantProviderResponse_AssistantProviderWebsocket{
 				AssistantProviderWebsocket: aProviderModel,
 			})
+	case *assistant_api.CreateAssistantProviderRequest_Agentflow:
+		definition := map[string]interface{}{}
+		if provider.Agentflow.GetDefinition() != nil {
+			definition = provider.Agentflow.GetDefinition().AsMap()
+		}
+		agentflowValidationError := ""
+		if !validator.NotBlank(provider.Agentflow.GetSchemaVersion()) {
+			agentflowValidationError = "agentflow schemaVersion is required"
+		} else if len(definition) == 0 {
+			agentflowValidationError = "agentflow definition is required"
+		} else {
+			entryNodeID, ok := definition["entryNodeId"].(string)
+			if !ok || !validator.NotBlank(entryNodeID) {
+				agentflowValidationError = "agentflow definition entryNodeId is required"
+			}
+			nodes, ok := definition["nodes"].([]interface{})
+			if agentflowValidationError == "" && !ok {
+				agentflowValidationError = "agentflow definition nodes must be an array"
+			}
+			edges, ok := definition["edges"].([]interface{})
+			if agentflowValidationError == "" && !ok {
+				agentflowValidationError = "agentflow definition edges must be an array"
+			}
+			if agentflowValidationError == "" {
+				nodeIDs := make(map[string]struct{}, len(nodes))
+				for _, node := range nodes {
+					nodeMap, ok := node.(map[string]interface{})
+					if !ok {
+						agentflowValidationError = "agentflow definition node must be an object"
+						break
+					}
+					nodeID, ok := nodeMap["id"].(string)
+					if !ok || !validator.NotBlank(nodeID) {
+						agentflowValidationError = "agentflow definition node id is required"
+						break
+					}
+					nodeIDs[nodeID] = struct{}{}
+				}
+				if agentflowValidationError == "" {
+					if _, ok := nodeIDs[entryNodeID]; !ok {
+						agentflowValidationError = "agentflow entryNodeId does not match a node"
+					}
+				}
+				for _, edge := range edges {
+					if agentflowValidationError != "" {
+						break
+					}
+					edgeMap, ok := edge.(map[string]interface{})
+					if !ok {
+						agentflowValidationError = "agentflow definition edge must be an object"
+						break
+					}
+					source, ok := edgeMap["source"].(string)
+					if !ok || !validator.NotBlank(source) {
+						agentflowValidationError = "agentflow edge source is required"
+						break
+					}
+					target, ok := edgeMap["target"].(string)
+					if !ok || !validator.NotBlank(target) {
+						agentflowValidationError = "agentflow edge target is required"
+						break
+					}
+					if _, ok := nodeIDs[source]; !ok {
+						agentflowValidationError = "agentflow edge source does not match a node"
+						break
+					}
+					if _, ok := nodeIDs[target]; !ok {
+						agentflowValidationError = "agentflow edge target does not match a node"
+						break
+					}
+				}
+			}
+		}
+		if agentflowValidationError != "" {
+			return &assistant_api.GetAssistantProviderResponse{
+				Code:    pkg_errors.CreateAssistantInvalidRequest.HTTPStatusCodeInt32(),
+				Success: false,
+				Error: &assistant_api.Error{
+					ErrorCode:    uint64(pkg_errors.CreateAssistantInvalidRequest.Code),
+					ErrorMessage: pkg_errors.CreateAssistantInvalidRequest.Error,
+					HumanMessage: agentflowValidationError,
+				},
+			}, errors.New(agentflowValidationError)
+		}
+		agentflowProvider, err := assistantApi.assistantService.CreateAssistantProviderAgentflow(
+			ctx,
+			iAuth,
+			assistant.Id,
+			iRequest.GetDescription(),
+			provider.Agentflow.GetSchemaVersion(),
+			definition,
+		)
+		if err != nil {
+			return utils.Error[assistant_api.GetAssistantProviderResponse](
+				err,
+				"Unable to create assistant provider agentflow, please check the argument and try again.",
+			)
+		}
+		aProviderModel := &assistant_api.AssistantProviderAgentflow{}
+		err = utils.Cast(agentflowProvider, aProviderModel)
+		if err != nil {
+			assistantApi.logger.Errorf("unable to cast the assistant provider agentflow to the response object")
+		}
+		return utils.Success[
+			assistant_api.GetAssistantProviderResponse,
+			*assistant_api.
+				GetAssistantProviderResponse_AssistantProviderAgentflow](
+			&assistant_api.GetAssistantProviderResponse_AssistantProviderAgentflow{
+				AssistantProviderAgentflow: aProviderModel,
+			})
 	}
 	return utils.Error[assistant_api.GetAssistantProviderResponse](
 		fmt.Errorf("illegal request for creating new assistant provider"),
