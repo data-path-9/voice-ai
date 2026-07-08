@@ -187,9 +187,7 @@ func (runtime *sipPreparedCallRuntime) StartBeforeAnswer(ctx context.Context, ti
 		case <-timer.C:
 			return fmt.Errorf("SIP runtime readiness timeout")
 		case <-ticker.C:
-			if runtime.talker.Assistant() != nil && runtime.talker.Conversation() != nil {
-				return nil
-			}
+			return nil
 		}
 	}
 }

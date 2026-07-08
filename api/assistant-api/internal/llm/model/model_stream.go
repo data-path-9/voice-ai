@@ -24,8 +24,12 @@ func (e *modelAssistantExecutor) sendStreamConfiguration(
 	connection *ModelConnection,
 	communication internal_type.Communication,
 ) error {
+	assistant, err := communication.Assistant()
+	if err != nil {
+		return err
+	}
 	mergedOptions := utils.MergeMaps(
-		communication.Assistant().AssistantProviderModel.GetOptions(),
+		assistant.AssistantProviderModel.GetOptions(),
 		communication.GetOptions(),
 	)
 	connectionOptions := make(map[string]string)
@@ -42,7 +46,7 @@ func (e *modelAssistantExecutor) sendStreamConfiguration(
 			Request: &protos.StreamChatRequest_Configuration{
 				Configuration: &protos.StreamChatConfiguration{
 					Credential:        &protos.Credential{Id: e.providerCredential.GetId(), Value: e.providerCredential.GetValue()},
-					ProviderName:      strings.ToLower(communication.Assistant().AssistantProviderModel.ModelProviderName),
+					ProviderName:      strings.ToLower(assistant.AssistantProviderModel.ModelProviderName),
 					ConnectionOptions: connectionOptions,
 				},
 			},
@@ -71,7 +75,12 @@ func (e *modelAssistantExecutor) handleToolFollowUp(ctx context.Context, communi
 		return
 	}
 	promptArgs := e.buildBasePromptArgs(communication)
-	if err := connection.Send(&protos.StreamChatRequest{Request: &protos.StreamChatRequest_Chat{Chat: e.chatStreamRequest(communication, contextID, promptArgs, snapshot...)}}); err != nil {
+	request, err := e.chatStreamRequest(communication, contextID, promptArgs, snapshot...)
+	if err != nil {
+		e.logger.Errorf("tool follow-up request build failed: %v", err)
+		return
+	}
+	if err := connection.Send(&protos.StreamChatRequest{Request: &protos.StreamChatRequest_Chat{Chat: request}}); err != nil {
 		e.logger.Errorf("tool follow-up send failed: %v", err)
 	}
 }
@@ -88,8 +97,12 @@ func (e *modelAssistantExecutor) sendChat(
 	if !validator.NonNil(connection) {
 		return fmt.Errorf("stream not connected")
 	}
+	request, err := e.chatStreamRequest(communication, contextID, promptArgs, messages...)
+	if err != nil {
+		return err
+	}
 	return connection.Send(&protos.StreamChatRequest{
-		Request: &protos.StreamChatRequest_Chat{Chat: e.chatStreamRequest(communication, contextID, promptArgs, messages...)},
+		Request: &protos.StreamChatRequest_Chat{Chat: request},
 	})
 }
 
@@ -107,7 +120,10 @@ func (e *modelAssistantExecutor) listen(ctx context.Context, communication inter
 				return
 			}
 			contextID := e.currentContextID()
-			providerName := communication.Assistant().AssistantProviderModel.ModelProviderName
+			providerName := "unknown"
+			if assistant, assistantErr := communication.Assistant(); assistantErr == nil {
+				providerName = assistant.AssistantProviderModel.ModelProviderName
+			}
 			communication.OnPacket(ctx,
 				internal_type.LLMErrorPacket{
 					ContextID: contextID,

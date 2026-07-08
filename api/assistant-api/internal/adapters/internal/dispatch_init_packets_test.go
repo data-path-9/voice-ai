@@ -844,7 +844,7 @@ func TestHandleError_NonRecoverable_EmitsConversationErrorWebhookRecord(t *testi
 	assert.Contains(t, webhookPacket.Record.Payload["message"], "tts provider rejected credentials")
 }
 
-func TestHandleInitializeBehavior_BehaviorUnavailable_LogsAndReturns(t *testing.T) {
+func TestHandleInitializeBehavior_RuntimeConfigUnavailable_LogsAndReturns(t *testing.T) {
 	requestorChannels := adapter_channel.NewRequestorChannels()
 	requestor := &genericRequestor{
 		source:           utils.Debugger,
@@ -864,7 +864,7 @@ func TestHandleInitializeBehavior_BehaviorUnavailable_LogsAndReturns(t *testing.
 		_, ok := envelope.Pkt.(internal_type.ObservabilityLogRecordPacket)
 		require.True(t, ok, "expected ObservabilityLogRecordPacket, got %T", envelope.Pkt)
 	default:
-		t.Fatal("expected behavior initialization failure log")
+		t.Fatal("expected session runtime initialization failure log")
 	}
 	assert.Empty(t, requestor.channels.BootstrapChannel())
 }

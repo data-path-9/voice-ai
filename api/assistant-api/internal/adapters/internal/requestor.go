@@ -214,7 +214,7 @@ func (dm *genericRequestor) GetSource() utils.RapidaSource {
 	return dm.source
 }
 
-func (gr *genericRequestor) GetAssistantConversation(ctx context.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_conversation_entity.AssistantConversation, error) {
+func (gr *genericRequestor) getAssistantConversation(ctx context.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_conversation_entity.AssistantConversation, error) {
 	return gr.conversationService.GetConversation(ctx, auth, assistantId, assistantConversationId, &internal_services.GetConversationOption{
 		InjectContext:  true,
 		InjectArgument: true,
@@ -232,20 +232,20 @@ func (talking *genericRequestor) BeginConversation(ctx context.Context, assistan
 	}
 	talking.assistantConversation = conversation
 	if arguments, err := utils.AnyMapToInterfaceMap(config.GetArgs()); err == nil {
-		talking.applyArguments(arguments)
+		talking.setArguments(arguments)
 	}
 	if options, err := utils.AnyMapToInterfaceMap(config.GetOptions()); err == nil {
-		talking.applyOptions(options)
+		talking.setOptions(options)
 	}
 	if metadata, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil {
-		talking.applyMetadata(metadata)
+		talking.setMetadata(metadata)
 	}
 	return err
 }
 
 func (talking *genericRequestor) ResumeConversation(ctx context.Context, assistant *internal_assistant_entity.Assistant, config *protos.ConversationInitialization) error {
 	talking.assistant = assistant
-	conversation, err := talking.GetAssistantConversation(ctx, talking.Auth(), assistant.Id, config.GetAssistantConversationId())
+	conversation, err := talking.getAssistantConversation(ctx, talking.Auth(), assistant.Id, config.GetAssistantConversationId())
 	if err != nil {
 		return err
 	}
@@ -265,7 +265,7 @@ func (talking *genericRequestor) ResumeConversation(ctx context.Context, assista
 		}
 	}
 	if extra, err := utils.AnyMapToInterfaceMap(config.GetMetadata()); err == nil {
-		talking.applyMetadata(extra)
+		talking.setMetadata(extra)
 	}
 	return nil
 }

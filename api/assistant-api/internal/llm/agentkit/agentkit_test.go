@@ -113,12 +113,12 @@ type mockCommunication struct {
 	conversation                *internal_conversation_entity.AssistantConversation
 }
 
-func (m *mockCommunication) Assistant() *internal_assistant_entity.Assistant {
-	return m.assistant
+func (m *mockCommunication) Assistant() (*internal_assistant_entity.Assistant, error) {
+	return m.assistant, nil
 }
 
-func (m *mockCommunication) Conversation() *internal_conversation_entity.AssistantConversation {
-	return m.conversation
+func (m *mockCommunication) Conversation() (*internal_conversation_entity.AssistantConversation, error) {
+	return m.conversation, nil
 }
 
 func (m *mockCommunication) OnPacket(ctx context.Context, pkts ...internal_type.Packet) error {

@@ -26,6 +26,7 @@ import (
 	internal_conversation_entity "github.com/rapidaai/api/assistant-api/internal/entity/conversations"
 	internal_llm "github.com/rapidaai/api/assistant-api/internal/llm"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
+	internal_services "github.com/rapidaai/api/assistant-api/internal/services"
 	internal_transformer "github.com/rapidaai/api/assistant-api/internal/transformer"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	internal_vad "github.com/rapidaai/api/assistant-api/internal/vad"
@@ -697,11 +698,10 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 	}
 	if !p.IsRecoverable() {
 		var conversationId uint64
-		if h.r.Conversation() != nil {
-			conversationId = h.r.Conversation().Id
-		}
+		conversation, conversationErr := h.r.Conversation()
 		webhookScope := internal_type.ObservabilityRecordScopeAssistant
-		if h.r.Conversation() != nil {
+		if conversationErr == nil {
+			conversationId = conversation.Id
 			webhookScope = internal_type.ObservabilityRecordScopeConversation
 		}
 		h.r.OnPacket(ctx,
@@ -742,9 +742,9 @@ func (h requestorDispatchHandler) HandleError(ctx context.Context, p internal_ty
 			})
 		return
 	}
-	if h.r.Conversation() != nil {
+	if conversation, err := h.r.Conversation(); err == nil {
 		_ = h.r.Notify(ctx, &protos.ConversationError{
-			AssistantConversationId: h.r.Conversation().Id,
+			AssistantConversationId: conversation.Id,
 			Message:                 p.ErrMessage(),
 		})
 		return
@@ -844,45 +844,103 @@ func (h requestorDispatchHandler) HandleInjectMessage(ctx context.Context, p int
 	}
 }
 func (h requestorDispatchHandler) HandleStartIdleTimeout(ctx context.Context, p internal_type.StartIdleTimeoutPacket) {
-	behavior, err := h.r.GetBehavior()
+	behavior, err := h.r.deploymentBehavior()
 	if err != nil {
 		return
 	}
-	if behavior.IdleTimeout == nil || *behavior.IdleTimeout == 0 {
+	if !validator.NonNil(behavior.IdleTimeout) || *behavior.IdleTimeout == 0 {
 		return
 	}
 
 	timeoutDuration := time.Duration(*behavior.IdleTimeout) * time.Second
-	if h.r.idleTimeoutWatchdog != nil {
+	if validator.NonNil(h.r.idleTimeoutWatchdog) {
 		h.r.idleTimeoutWatchdog.Start(p.ContextID, timeoutDuration)
 	}
 }
 func (h requestorDispatchHandler) HandleStopIdleTimeout(ctx context.Context, p internal_type.StopIdleTimeoutPacket) {
-	if h.r.idleTimeoutWatchdog != nil {
+	if validator.NonNil(h.r.idleTimeoutWatchdog) {
 		h.r.idleTimeoutWatchdog.Stop(p.ResetCount)
 	}
 }
 
 func (h requestorDispatchHandler) HandleIdleTimeoutExpired(ctx context.Context, p internal_type.IdleTimeoutExpiredPacket) {
-	if err := h.r.onIdleTimeout(ctx); err != nil {
-		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
-			ContextID: p.ContextID,
-			Scope:     internal_type.ObservabilityRecordScopeConversation,
-			Record: observability.RecordLog{
-				Level:   observability.LevelError,
-				Message: "Idle timeout handling failed; conversation may not end as configured",
-				Attributes: observability.Attributes{
-					"component":  observability.ComponentConversation.String(),
-					"operation":  "idle_timeout",
-					"packet":     "IdleTimeoutExpiredPacket",
-					"context_id": p.ContextID,
-					"count":      fmt.Sprintf("%d", p.Count),
-					"error":      err.Error(),
-					"error_type": fmt.Sprintf("%T", err),
-				},
-			},
-		})
+	behavior, err := h.r.deploymentBehavior()
+	if err != nil {
+		return
 	}
+
+	if !validator.NonNil(behavior.IdleTimeout) || *behavior.IdleTimeout == 0 {
+		return
+	}
+
+	idleTimeoutCount := uint64(0)
+	if validator.NonNil(h.r.idleTimeoutWatchdog) {
+		idleTimeoutCount = h.r.idleTimeoutWatchdog.Count()
+	}
+
+	if validator.NonNil(behavior.IdleTimeoutBackoff) && *behavior.IdleTimeoutBackoff > 0 {
+		if idleTimeoutCount >= *behavior.IdleTimeoutBackoff {
+			if _, err := h.r.Conversation(); err == nil {
+				h.r.OnPacket(h.r.sessionCtx,
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID: h.r.GetID(),
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
+						Record: observability.NewConversationEventRecord(observability.ConversationCompleted, observability.Attributes{
+							"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT.String(),
+						}),
+					},
+					internal_type.ObservabilityMetadataRecordPacket{
+						ContextID: h.r.GetID(),
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
+						Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
+							Key:   "disconnect_reason",
+							Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT.String(),
+						}}),
+					},
+				)
+			}
+
+			h.r.Notify(ctx, &protos.ConversationDisconnection{
+				Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_IDLE_TIMEOUT,
+			})
+			return
+		}
+	}
+
+	idleTimeoutCount++
+	if validator.NonNil(h.r.idleTimeoutWatchdog) {
+		idleTimeoutCount = h.r.idleTimeoutWatchdog.IncrementCount()
+	}
+	const defaultIdleTimeoutMessage = "Are you still there?"
+	timeoutContent := defaultIdleTimeoutMessage
+	if validator.NonNil(behavior.IdleTimeoutMessage) && validator.NotBlank(*behavior.IdleTimeoutMessage) {
+		timeoutContent = *behavior.IdleTimeoutMessage
+	}
+	if !validator.NotBlank(timeoutContent) {
+		return
+	}
+
+	maxCount := 0
+	if validator.NonNil(behavior.IdleTimeoutBackoff) {
+		maxCount = int(*behavior.IdleTimeoutBackoff)
+	}
+	h.r.Transition(Interrupted)
+	contextID := h.r.GetID()
+
+	_ = h.r.OnPacket(ctx,
+		internal_type.TextToSpeechInterruptPacket{ContextID: contextID},
+		internal_type.InjectMessagePacket{ContextID: contextID, Text: timeoutContent},
+		internal_type.ObservabilityEventRecordPacket{
+			ContextID: contextID,
+			Scope:     internal_type.ObservabilityRecordScopeConversation,
+			Record: observability.NewConversationEventRecord(observability.ConversationAgentStateChanged, observability.Attributes{
+				"type":      "idle_timeout",
+				"count":     fmt.Sprintf("%d", idleTimeoutCount),
+				"max_count": fmt.Sprintf("%d", maxCount),
+			}),
+		},
+		internal_type.StartIdleTimeoutPacket{ContextID: contextID},
+	)
 }
 
 func (h requestorDispatchHandler) HandleTextToSpeechText(ctx context.Context, p internal_type.TextToSpeechTextPacket) {
@@ -1041,13 +1099,11 @@ func (h requestorDispatchHandler) HandleTextToSpeechEnd(ctx context.Context, p i
 			})
 		return
 	}
-	if err := h.r.Notify(ctx, &protos.ConversationAssistantMessage{
+	h.r.Notify(ctx, &protos.ConversationAssistantMessage{
 		Time:      timestamppb.Now(),
 		Id:        p.ContextID,
 		Completed: true,
-	}); err != nil {
-		return
-	}
+	})
 	h.r.OnPacket(ctx,
 		internal_type.DispatchPolicyPacket{
 			ContextID: p.ContextID,
@@ -1298,19 +1354,24 @@ func (h requestorDispatchHandler) HandleConversationRecordingCompleted(ctx conte
 		Record:    observability.NewConversationEventRecord(observability.RecordingCompleted, nil),
 	})
 	if h.r.artifactPushExecutors != nil {
-		for _, artifactPushExecutor := range h.r.artifactPushExecutors {
-			_, _ = artifactPushExecutor.Execute(ctx, internal_type.ArtifactPushInput{
-				ContextID:      p.ContextID,
-				ConversationID: h.r.Conversation().Id,
-				Artifacts: []internal_type.ArtifactPushArtifact{
-					{Name: "user", Type: "recording", ContentType: "audio/wav", Content: p.Audio.UserAudio},
-					{Name: "assistant", Type: "recording", ContentType: "audio/wav", Content: p.Audio.AssistantAudio},
-					{Name: "conversation", Type: "recording", ContentType: "audio/wav", Content: p.Audio.MixedAudio},
-				},
-			})
+		conversation, err := h.r.Conversation()
+		if err != nil {
+			h.r.logger.Errorw("recording artifact push conversation scope failed to resolve", "error", err, "context_id", p.ContextID)
+		} else {
+			for _, artifactPushExecutor := range h.r.artifactPushExecutors {
+				_, _ = artifactPushExecutor.Execute(ctx, internal_type.ArtifactPushInput{
+					ContextID:      p.ContextID,
+					ConversationID: conversation.Id,
+					Artifacts: []internal_type.ArtifactPushArtifact{
+						{Name: "user", Type: "recording", ContentType: "audio/wav", Content: p.Audio.UserAudio},
+						{Name: "assistant", Type: "recording", ContentType: "audio/wav", Content: p.Audio.AssistantAudio},
+						{Name: "conversation", Type: "recording", ContentType: "audio/wav", Content: p.Audio.MixedAudio},
+					},
+				})
+			}
 		}
 	}
-	if err := h.r.CreateConversationRecording(ctx, p.Audio.UserAudio, p.Audio.AssistantAudio, p.Audio.MixedAudio); err != nil {
+	if err := h.r.createConversationRecording(ctx, p.Audio.UserAudio, p.Audio.AssistantAudio, p.Audio.MixedAudio); err != nil {
 		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 			ContextID: p.ContextID,
 			Scope:     internal_type.ObservabilityRecordScopeConversation,
@@ -1334,7 +1395,7 @@ func (h requestorDispatchHandler) HandleConversationRecordingCompleted(ctx conte
 }
 
 func (h requestorDispatchHandler) HandleMessageCreate(ctx context.Context, p internal_type.MessageCreatePacket) {
-	if err := h.r.onAddMessage(ctx, p); err != nil {
+	if err := h.r.createMessage(ctx, p); err != nil {
 		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 			ContextID: p.ContextID,
 			Scope:     internal_type.ObservabilityRecordScopeConversation,
@@ -1362,39 +1423,48 @@ func (h requestorDispatchHandler) HandleObservabilityRecordPacket(ctx context.Co
 		observabilityRecord := p.GetRecord()
 		switch p.GetScope() {
 		case internal_type.ObservabilityRecordScopeAssistant:
-			if h.r.Assistant() == nil {
-				h.r.logger.Errorw("observability assistant scope failed to resolve", "record", p)
+			assistant, err := h.r.Assistant()
+			if err != nil {
+				h.r.logger.Errorw("observability assistant scope failed to resolve", "error", err, "record", p)
 				return
 			}
 			if err := h.r.observabilityRecorder.Record(ctx, observability.AssistantScope{
-				AssistantID: h.r.Assistant().Id,
+				AssistantID: assistant.Id,
 			}, observabilityRecord); err != nil {
 				h.r.logger.Errorw("observability record failed to persist", "error", err, "record", p)
 			}
 		case internal_type.ObservabilityRecordScopeConversation:
-			if h.r.Assistant() == nil || h.r.Conversation() == nil {
-				h.r.logger.Errorw("observability conversation scope failed to resolve", "record", p)
+			assistant, assistantErr := h.r.Assistant()
+			conversation, conversationErr := h.r.Conversation()
+			if assistantErr != nil || conversationErr != nil {
+				h.r.logger.Errorw("observability conversation scope failed to resolve", "assistant_error", assistantErr, "conversation_error", conversationErr, "record", p)
 				return
 			}
 			if err := h.r.observabilityRecorder.Record(ctx, observability.ConversationScope{
 				AssistantScope: observability.AssistantScope{
-					AssistantID: h.r.Assistant().Id,
+					AssistantID: assistant.Id,
 				},
-				ConversationID: h.r.Conversation().Id,
+				ConversationID: conversation.Id,
 			}, observabilityRecord); err != nil {
 				h.r.logger.Errorw("observability record failed to persist", "error", err, "record", p)
 			}
 		case internal_type.ObservabilityRecordScopeUserMessage:
-			if h.r.Assistant() == nil || h.r.Conversation() == nil {
-				h.r.logger.Errorw("observability message scope failed to resolve", "record", p)
+			assistant, err := h.r.Assistant()
+			if err != nil {
+				h.r.logger.Errorw("observability message scope failed to resolve", "error", err, "record", p)
+				return
+			}
+			conversation, err := h.r.Conversation()
+			if err != nil {
+				h.r.logger.Errorw("observability message scope failed to resolve", "error", err, "record", p)
 				return
 			}
 			if err := h.r.observabilityRecorder.Record(ctx, observability.MessageScope{
 				ConversationScope: observability.ConversationScope{
 					AssistantScope: observability.AssistantScope{
-						AssistantID: h.r.Assistant().Id,
+						AssistantID: assistant.Id,
 					},
-					ConversationID: h.r.Conversation().Id,
+					ConversationID: conversation.Id,
 				},
 				MessageID: p.ContextId(),
 				Role:      observability.MessageRoleUser,
@@ -1402,16 +1472,22 @@ func (h requestorDispatchHandler) HandleObservabilityRecordPacket(ctx context.Co
 				h.r.logger.Errorw("observability record failed to persist", "error", err, "record", p)
 			}
 		case internal_type.ObservabilityRecordScopeAssistantMessage:
-			if h.r.Assistant() == nil || h.r.Conversation() == nil {
-				h.r.logger.Errorw("observability message scope failed to resolve", "record", p)
+			assistant, err := h.r.Assistant()
+			if err != nil {
+				h.r.logger.Errorw("observability message scope failed to resolve", "error", err, "record", p)
+				return
+			}
+			conversation, err := h.r.Conversation()
+			if err != nil {
+				h.r.logger.Errorw("observability message scope failed to resolve", "error", err, "record", p)
 				return
 			}
 			if err := h.r.observabilityRecorder.Record(ctx, observability.MessageScope{
 				ConversationScope: observability.ConversationScope{
 					AssistantScope: observability.AssistantScope{
-						AssistantID: h.r.Assistant().Id,
+						AssistantID: assistant.Id,
 					},
-					ConversationID: h.r.Conversation().Id,
+					ConversationID: conversation.Id,
 				},
 				MessageID: p.ContextId(),
 				Role:      observability.MessageRoleAssistant,
@@ -1586,7 +1662,30 @@ func (h requestorDispatchHandler) HandleHTTPLogCreate(ctx context.Context, p int
 }
 
 func (h requestorDispatchHandler) HandleInitializeAssistant(ctx context.Context, p internal_type.InitializeAssistantPacket) {
-	assistant, err := h.r.GetAssistant(ctx, h.r.Auth(), p.Config.Assistant.AssistantId, p.Config.Assistant.Version)
+	versionId := utils.GetVersionDefinition(p.Config.Assistant.Version)
+	assistantOpts := &internal_services.GetAssistantOption{
+		InjectAssistantProvider:      true,
+		InjectKnowledgeConfiguration: true,
+		InjectTool:                   true,
+		InjectAnalysis:               true,
+		InjectAuthentication:         true,
+		InjectStorage:                true,
+		InjectConversations:          false,
+		InjectTag:                    false,
+	}
+	switch h.r.source {
+	case utils.PhoneCall:
+		assistantOpts.InjectPhoneDeployment = true
+	case utils.Whatsapp:
+		assistantOpts.InjectWhatsappDeployment = true
+	case utils.SDK:
+		assistantOpts.InjectApiDeployment = true
+	case utils.WebPlugin:
+		assistantOpts.InjectWebpluginDeployment = true
+	case utils.Debugger:
+		assistantOpts.InjectDebuggerDeployment = true
+	}
+	assistant, err := h.r.assistantService.Get(ctx, h.r.Auth(), p.Config.Assistant.AssistantId, versionId, assistantOpts)
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -1877,9 +1976,9 @@ func (h requestorDispatchHandler) HandleExecuteAuthentication(ctx context.Contex
 }
 func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx context.Context, p internal_type.SessionAuthenticationSucceededPacket) {
 	if p.Authenticated {
-		h.r.applyArguments(p.Arguments)
-		h.r.applyMetadata(p.Metadata)
-		h.r.applyOptions(p.Options)
+		h.r.setArguments(p.Arguments)
+		h.r.setMetadata(p.Metadata)
+		h.r.setOptions(p.Options)
 	}
 
 	conversationConfigurationObj := &protos.ConversationInitialization{
@@ -1893,7 +1992,7 @@ func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx conte
 		Time:         timestamppb.Now(),
 	}
 	options := h.r.GetOptions()
-	if outputAudio, err := h.r.GetTextToSpeechTransformer(); err == nil && outputAudio != nil {
+	if outputAudio, err := h.r.textToSpeechTransformerConfig(); err == nil && outputAudio != nil {
 		if ambient, _ := outputAudio.GetOptions().GetString("speaker.ambient"); ambient != "" {
 			options["speaker.ambient"] = ambient
 		}
@@ -1904,7 +2003,7 @@ func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx conte
 	if anyArgMap, err := utils.InterfaceMapToAnyMap(h.r.GetArgs()); err == nil {
 		conversationConfigurationObj.Args = anyArgMap
 	}
-	if anyMetaMap, err := utils.InterfaceMapToAnyMap(h.r.GetMetadata()); err == nil {
+	if anyMetaMap, err := utils.InterfaceMapToAnyMap(h.r.Metadata()); err == nil {
 		conversationConfigurationObj.Metadata = anyMetaMap
 	}
 	if anyOptionMap, err := utils.InterfaceMapToAnyMap(options); err == nil {
@@ -1968,10 +2067,19 @@ func (h requestorDispatchHandler) HandleSessionAuthenticationSucceeded(ctx conte
 }
 
 func (h requestorDispatchHandler) HandleInitializeAssistantExecutorPacket(ctx context.Context, p internal_type.InitializeAssistantExecutorPacket) {
+	assistant, err := h.r.Assistant()
+	if err != nil {
+		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
+			ContextID: p.ContextID,
+			Stage:     internal_type.InitializationStageService,
+			Error:     err,
+		})
+		return
+	}
 	assistantExec, err := internal_llm.New(
 		internal_llm.WithContext(ctx),
 		internal_llm.WithLogger(h.r.logger),
-		internal_llm.WithAssistant(h.r.Assistant()),
+		internal_llm.WithAssistant(assistant),
 		internal_llm.WithCommunication(h.r),
 		internal_llm.WithConfiguration(p.Config),
 	)
@@ -1987,7 +2095,7 @@ func (h requestorDispatchHandler) HandleInitializeAssistantExecutorPacket(ctx co
 }
 
 func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Context, p internal_type.InitializeSpeechToTextPacket) {
-	cfg, err := h.r.GetSpeechToTextTransformer()
+	cfg, err := h.r.speechToTextTransformerConfig()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -2043,7 +2151,7 @@ func (h requestorDispatchHandler) HandleInitializeSpeechToText(ctx context.Conte
 }
 
 func (h requestorDispatchHandler) HandleInitializeDenoise(ctx context.Context, p internal_type.InitializeDenoisePacket) {
-	cfg, err := h.r.GetSpeechToTextTransformer()
+	cfg, err := h.r.speechToTextTransformerConfig()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -2070,7 +2178,7 @@ func (h requestorDispatchHandler) HandleInitializeDenoise(ctx context.Context, p
 	h.r.denoiserExecutor = denoise
 }
 func (h requestorDispatchHandler) HandleInitializeTextToSpeech(ctx context.Context, p internal_type.InitializeTextToSpeechPacket) {
-	outputTransformer, err := h.r.GetTextToSpeechTransformer()
+	outputTransformer, err := h.r.textToSpeechTransformerConfig()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -2126,7 +2234,7 @@ func (h requestorDispatchHandler) HandleInitializeTextToSpeech(ctx context.Conte
 func (h requestorDispatchHandler) HandleInitializeVoiceActivityDetection(ctx context.Context, p internal_type.InitializeVoiceActivityDetectionPacket) {
 	config := p.Config
 	if config.StreamMode == protos.StreamMode_STREAM_MODE_AUDIO {
-		cfg, err := h.r.GetSpeechToTextTransformer()
+		cfg, err := h.r.speechToTextTransformerConfig()
 		if err != nil {
 			h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 				ContextID: p.ContextID,
@@ -2156,7 +2264,7 @@ func (h requestorDispatchHandler) HandleInitializeVoiceActivityDetection(ctx con
 
 }
 func (h requestorDispatchHandler) HandleInitializeEndOfSpeech(ctx context.Context, p internal_type.InitializeEndOfSpeechPacket) {
-	cfg, err := h.r.GetSpeechToTextTransformer()
+	cfg, err := h.r.speechToTextTransformerConfig()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -2183,17 +2291,17 @@ func (h requestorDispatchHandler) HandleInitializeEndOfSpeech(ctx context.Contex
 	h.r.endOfSpeechExecutor = endOfSpeech
 }
 func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, p internal_type.InitializeBehaviorPacket) {
-	behavior, err := h.r.GetBehavior()
+	behavior, err := h.r.deploymentBehavior()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 			ContextID: p.ContextID,
 			Scope:     internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.RecordLog{
 				Level:   observability.LevelError,
-				Message: "Behavior initialization failed; greeting or timeout behavior may be unavailable",
+				Message: "Session runtime initialization failed; greeting or timeout may be unavailable",
 				Attributes: observability.Attributes{
 					"component":  observability.ComponentConversation.String(),
-					"operation":  "initialize_behavior",
+					"operation":  "initialize_session_runtime",
 					"packet":     "InitializeBehaviorPacket",
 					"context_id": p.ContextID,
 					"error":      err.Error(),
@@ -2203,9 +2311,79 @@ func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, 
 		})
 		return
 	}
-	h.r.initializeGreeting(ctx, behavior)
-	h.r.initializeIdleTimeout(ctx, behavior)
-	h.r.initializeMaxSessionDuration(ctx, behavior)
+	if validator.NonNil(behavior.Greeting) {
+		greetingContent := *behavior.Greeting
+		if validator.NotBlank(greetingContent) {
+			contextID := h.r.GetID()
+			if h.r.GetMode().Audio() && validator.NonNil(behavior.GreetingInterruptible) && !*behavior.GreetingInterruptible {
+				_ = h.r.OnPacket(ctx,
+					internal_type.DispatchPolicyPacket{
+						ContextID: contextID,
+						Policy: internal_type.DispatchPolicy{
+							Target: internal_type.PacketNameUserAudioReceived,
+							Action: internal_type.DispatchActionIgnore,
+						},
+					},
+					internal_type.DispatchPolicyPacket{
+						ContextID: contextID,
+						Policy: internal_type.DispatchPolicy{
+							Target: internal_type.PacketNameUserTextReceived,
+							Action: internal_type.DispatchActionIgnore,
+						},
+					},
+					internal_type.DispatchPolicyPacket{
+						ContextID: contextID,
+						Policy: internal_type.DispatchPolicy{
+							Target: internal_type.PacketNameInterruptionDetected,
+							Action: internal_type.DispatchActionIgnore,
+						},
+					},
+				)
+			}
+			_ = h.r.OnPacket(ctx,
+				internal_type.InjectMessagePacket{ContextID: contextID, Text: greetingContent},
+				internal_type.ObservabilityEventRecordPacket{
+					ContextID: contextID,
+					Scope:     internal_type.ObservabilityRecordScopeConversation,
+					Record: observability.NewConversationEventRecord(observability.ConversationAgentStateChanged, observability.Attributes{
+						"type":       "greeting",
+						"text_chars": fmt.Sprintf("%d", len(greetingContent)),
+					}),
+				},
+				internal_type.StartIdleTimeoutPacket{ContextID: contextID},
+			)
+		}
+	}
+	if validator.NonNil(behavior.IdleTimeout) && *behavior.IdleTimeout > 0 {
+		_ = h.r.OnPacket(ctx, internal_type.StartIdleTimeoutPacket{ContextID: h.r.GetID()})
+	}
+	if validator.NonNil(behavior.MaxSessionDuration) && *behavior.MaxSessionDuration > 0 {
+		timeoutDuration := time.Duration(*behavior.MaxSessionDuration) * time.Second
+		h.r.maxSessionTimer = time.AfterFunc(timeoutDuration, func() {
+			if _, err := h.r.Conversation(); err == nil {
+				h.r.OnPacket(h.r.sessionCtx,
+					internal_type.ObservabilityEventRecordPacket{
+						ContextID: h.r.GetID(),
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
+						Record: observability.NewConversationEventRecord(observability.ConversationCompleted, observability.Attributes{
+							"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
+						}),
+					},
+					internal_type.ObservabilityMetadataRecordPacket{
+						ContextID: h.r.GetID(),
+						Scope:     internal_type.ObservabilityRecordScopeConversation,
+						Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
+							Key:   "disconnect_reason",
+							Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
+						}}),
+					},
+				)
+			}
+			h.r.Notify(ctx, &protos.ConversationDisconnection{
+				Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION,
+			})
+		})
+	}
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context, p internal_type.ModeSwitchRequestedPacket) {
@@ -2269,10 +2447,6 @@ func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context,
 			})
 			return
 		}
-		// Fan out the 5 finalize packets in parallel (each is AsyncPacket) and
-		// emit ModeSwitchCompleted in the same batch — the client is told it's
-		// in text mode immediately while the 5 component closes happen in
-		// background goroutines.
 		h.r.OnPacket(ctx,
 			internal_type.ModeSwitchFinalizeSpeechToTextPacket{ContextID: p.ContextID, StreamMode: p.StreamMode},
 			internal_type.ModeSwitchFinalizeTextToSpeechPacket{ContextID: p.ContextID, StreamMode: p.StreamMode},
@@ -2298,7 +2472,7 @@ func (h requestorDispatchHandler) HandleModeSwitchRequested(ctx context.Context,
 // OnDisconnect, tearing down the session.
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeSpeechToText(ctx context.Context, p internal_type.ModeSwitchInitializeSpeechToTextPacket) {
-	cfg, err := h.r.GetSpeechToTextTransformer()
+	cfg, err := h.r.speechToTextTransformerConfig()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID,
@@ -2353,7 +2527,7 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeSpeechToText(ctx con
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeTextToSpeech(ctx context.Context, p internal_type.ModeSwitchInitializeTextToSpeechPacket) {
-	outputTransformer, err := h.r.GetTextToSpeechTransformer()
+	outputTransformer, err := h.r.textToSpeechTransformerConfig()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID, StreamMode: p.StreamMode,
@@ -2402,7 +2576,7 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeTextToSpeech(ctx con
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeVoiceActivityDetection(ctx context.Context, p internal_type.ModeSwitchInitializeVoiceActivityDetectionPacket) {
-	cfg, err := h.r.GetSpeechToTextTransformer()
+	cfg, err := h.r.speechToTextTransformerConfig()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID:  p.ContextID,
@@ -2432,7 +2606,7 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeVoiceActivityDetecti
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeDenoise(ctx context.Context, p internal_type.ModeSwitchInitializeDenoisePacket) {
-	cfg, err := h.r.GetSpeechToTextTransformer()
+	cfg, err := h.r.speechToTextTransformerConfig()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.ModeSwitchErrorPacket{
 			ContextID: p.ContextID, StreamMode: p.StreamMode,
@@ -2460,7 +2634,7 @@ func (h requestorDispatchHandler) HandleModeSwitchInitializeDenoise(ctx context.
 }
 
 func (h requestorDispatchHandler) HandleModeSwitchInitializeEndOfSpeech(ctx context.Context, p internal_type.ModeSwitchInitializeEndOfSpeechPacket) {
-	cfg, err := h.r.GetSpeechToTextTransformer()
+	cfg, err := h.r.speechToTextTransformerConfig()
 	if err != nil {
 		h.r.OnPacket(ctx, internal_type.InitializationFailedPacket{
 			ContextID: p.ContextID,
@@ -2964,7 +3138,9 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 		Value:       type_enums.CONVERSATION_COMPLETE.String(),
 		Description: "Status of current conversation",
 	}
-	if h.r.observabilityRecorder != nil && h.r.Assistant() != nil && h.r.Conversation() != nil {
+	assistant, assistantErr := h.r.Assistant()
+	conversation, conversationErr := h.r.Conversation()
+	if h.r.observabilityRecorder != nil && assistantErr == nil && conversationErr == nil {
 		messagesPayload := make([]map[string]interface{}, 0, len(h.r.GetHistories()))
 		for _, message := range h.r.GetHistories() {
 			if message == nil {
@@ -2994,9 +3170,9 @@ func (h requestorDispatchHandler) HandleFinalizeConversation(ctx context.Context
 		if err := h.r.observabilityRecorder.Record(ctx,
 			observability.ConversationScope{
 				AssistantScope: observability.AssistantScope{
-					AssistantID: h.r.Assistant().Id,
+					AssistantID: assistant.Id,
 				},
-				ConversationID: h.r.Conversation().Id,
+				ConversationID: conversation.Id,
 			},
 			observability.RecordWebhook{
 				Event:     observability.ConversationCompleted,
@@ -3133,10 +3309,14 @@ func (r *genericRequestor) IsConditionAllowed(opts utils.Option, key string) boo
 	if parseErr != nil {
 		return false
 	}
+	conversation, err := r.Conversation()
+	if err != nil {
+		return false
+	}
 	allowed, evalErr := parsed.Run(
 		internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeSource, Value: r.GetSource().Get()},
 		internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeMode, Value: r.GetMode().String()},
-		internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeDirection, Value: r.Conversation().Direction.String()},
+		internal_condition.ConditionValue{RuleType: internal_condition.RuleTypeDirection, Value: conversation.Direction.String()},
 	)
 	if evalErr != nil {
 		return false

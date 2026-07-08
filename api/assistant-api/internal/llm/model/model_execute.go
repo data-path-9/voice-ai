@@ -28,6 +28,10 @@ func (e *modelAssistantExecutor) Execute(ctx context.Context, communication inte
 	switch p := pctk.(type) {
 	case internal_type.UserInputPacket:
 		if supersededCtx := e.history.SupersedePending(); supersededCtx != "" {
+			assistant, err := communication.Assistant()
+			if err != nil {
+				return err
+			}
 			communication.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 				ContextID: supersededCtx,
 				Scope:     internal_type.ObservabilityRecordScopeAssistantMessage,
@@ -37,7 +41,7 @@ func (e *modelAssistantExecutor) Execute(ctx context.Context, communication inte
 					Attributes: observability.Attributes{
 						"component":             observability.ComponentTool.String(),
 						"operation":             "supersede_tool_block",
-						"provider":              communication.Assistant().AssistantProviderModel.ModelProviderName,
+						"provider":              assistant.AssistantProviderModel.ModelProviderName,
 						"context_id":            supersededCtx,
 						"reason":                "user_interrupted",
 						"superseded_context_id": supersededCtx,
@@ -89,9 +93,14 @@ func (e *modelAssistantExecutor) Run(ctx context.Context, communication internal
 }
 
 func (e *modelAssistantExecutor) handleUserTurn(ctx context.Context, communication internal_type.Communication, p internal_type.UserInputPacket) {
+	assistant, err := communication.Assistant()
+	if err != nil {
+		communication.OnPacket(ctx, internal_type.LLMErrorPacket{ContextID: p.ContextID, Error: err})
+		return
+	}
 	snapshot := e.history.Snapshot()
 	promptArgs := e.buildPromptArgs(communication, p)
-	providerName := communication.Assistant().AssistantProviderModel.ModelProviderName
+	providerName := assistant.AssistantProviderModel.ModelProviderName
 
 	if err := e.validateHistorySequence(snapshot); err != nil {
 		err = fmt.Errorf("history integrity: %w", err)
@@ -206,7 +215,12 @@ func (e *modelAssistantExecutor) handleUserTurn(ctx context.Context, communicati
 }
 
 func (e *modelAssistantExecutor) handleToolResult(ctx context.Context, communication internal_type.Communication, p internal_type.LLMToolResultPacket) {
-	providerName := communication.Assistant().AssistantProviderModel.ModelProviderName
+	assistant, err := communication.Assistant()
+	if err != nil {
+		communication.OnPacket(ctx, internal_type.LLMErrorPacket{ContextID: p.ContextID, Error: err})
+		return
+	}
+	providerName := assistant.AssistantProviderModel.ModelProviderName
 	resultJSON, _ := json.Marshal(p.Result)
 	accepted, resolved := e.history.AcceptToolResult(p.ContextID, p.ToolID, p.Name, string(resultJSON))
 	if !accepted {
@@ -275,7 +289,12 @@ func (e *modelAssistantExecutor) handleResponse(ctx context.Context, communicati
 		return
 	}
 	contextID := resp.GetRequestId()
-	providerName := communication.Assistant().AssistantProviderModel.ModelProviderName
+	assistant, err := communication.Assistant()
+	if err != nil {
+		communication.OnPacket(ctx, internal_type.LLMErrorPacket{ContextID: contextID, Error: err})
+		return
+	}
+	providerName := assistant.AssistantProviderModel.ModelProviderName
 
 	if resp.GetError() != nil {
 		errMsg := resp.GetError().GetErrorMessage()
@@ -319,7 +338,7 @@ func (e *modelAssistantExecutor) handleResponse(ctx context.Context, communicati
 		e.onStreamingChunk(ctx, communication, contextID, output)
 		return
 	}
-	e.onCompletion(ctx, communication, contextID, resp.GetFinishReason(), output, resp.GetMetrics())
+	e.onCompletion(ctx, communication, contextID, resp.GetFinishReason(), output, resp.GetMetrics(), providerName)
 }
 
 func (e *modelAssistantExecutor) onStreamingChunk(ctx context.Context, communication internal_type.Communication, contextID string, output *protos.Message) {
@@ -327,11 +346,10 @@ func (e *modelAssistantExecutor) onStreamingChunk(ctx context.Context, communica
 	communication.OnPacket(ctx, internal_type.LLMResponseDeltaPacket{ContextID: contextID, Text: text})
 }
 
-func (e *modelAssistantExecutor) onCompletion(ctx context.Context, communication internal_type.Communication, contextID, finishReason string, output *protos.Message, metrics []*protos.Metric) {
+func (e *modelAssistantExecutor) onCompletion(ctx context.Context, communication internal_type.Communication, contextID, finishReason string, output *protos.Message, metrics []*protos.Metric, providerName string) {
 	assistant := output.GetAssistant()
 	responseText := strings.Join(assistant.GetContents(), "")
 	toolCalls := assistant.GetToolCalls()
-	providerName := communication.Assistant().AssistantProviderModel.ModelProviderName
 
 	supersededCtx := e.history.AppendAssistant(contextID, output)
 	if supersededCtx != "" {
@@ -456,13 +474,19 @@ func (e *modelAssistantExecutor) buildBasePromptArgs(communication internal_type
 	return out
 }
 
-func (e *modelAssistantExecutor) chatStreamRequest(communication internal_type.Communication, contextID string, promptArgs map[string]interface{}, messages ...*protos.Message) *protos.StreamChatInput {
-	assistant := communication.Assistant()
+func (e *modelAssistantExecutor) chatStreamRequest(communication internal_type.Communication, contextID string, promptArgs map[string]interface{}, messages ...*protos.Message) (*protos.StreamChatInput, error) {
+	assistant, err := communication.Assistant()
+	if err != nil {
+		return nil, err
+	}
 	template := assistant.AssistantProviderModel.Template.GetTextChatCompleteTemplate()
 	defaultArgs := parsers.CanonicalizePromptArguments(e.inputBuilder.PromptArguments(template.Variables))
 	runtimeArgs := parsers.CanonicalizePromptArguments(promptArgs)
 	systemMessages := e.inputBuilder.Message(template.Prompt, utils.MergeMaps(defaultArgs, runtimeArgs))
-	src := e.buildStreamChatInput(communication, contextID, append(systemMessages, messages...)...)
+	src, err := e.buildStreamChatInput(communication, contextID, append(systemMessages, messages...)...)
+	if err != nil {
+		return nil, err
+	}
 	return &protos.StreamChatInput{
 		RequestId:       src.GetRequestId(),
 		ProviderName:    strings.ToLower(assistant.AssistantProviderModel.ModelProviderName),
@@ -470,15 +494,22 @@ func (e *modelAssistantExecutor) chatStreamRequest(communication internal_type.C
 		AdditionalData:  src.GetAdditionalData(),
 		ModelParameters: src.GetModelParameters(),
 		ToolDefinitions: src.GetToolDefinitions(),
-	}
+	}, nil
 }
 
 func (e *modelAssistantExecutor) buildStreamChatInput(
 	communication internal_type.Communication,
 	contextID string,
 	conversations ...*protos.Message,
-) *protos.StreamChatInput {
-	assistant := communication.Assistant()
+) (*protos.StreamChatInput, error) {
+	assistant, err := communication.Assistant()
+	if err != nil {
+		return nil, err
+	}
+	conversation, err := communication.Conversation()
+	if err != nil {
+		return nil, err
+	}
 	mergedOptions := utils.MergeMaps(
 		assistant.AssistantProviderModel.GetOptions(),
 		communication.GetOptions(),
@@ -505,15 +536,15 @@ func (e *modelAssistantExecutor) buildStreamChatInput(
 		ProviderName:  strings.ToLower(assistant.AssistantProviderModel.ModelProviderName),
 		Conversations: conversations,
 		AdditionalData: map[string]string{
-			"assistant_id":                fmt.Sprintf("%d", communication.Conversation().AssistantId),
-			"conversation_id":             fmt.Sprintf("%d", communication.Conversation().Id),
-			"user_identifier":             fmt.Sprintf("%s", communication.Conversation().Identifier),
+			"assistant_id":                fmt.Sprintf("%d", conversation.AssistantId),
+			"conversation_id":             fmt.Sprintf("%d", conversation.Id),
+			"user_identifier":             fmt.Sprintf("%s", conversation.Identifier),
 			"message_id":                  contextID,
 			"assistant_provider_model_id": fmt.Sprintf("%d", assistant.AssistantProviderModel.Id),
 		},
 		ModelParameters: e.inputBuilder.Options(modelOptions, nil),
 		ToolDefinitions: toolDefinitions,
-	}
+	}, nil
 }
 
 func (e *modelAssistantExecutor) validateHistorySequence(messages []*protos.Message) error {

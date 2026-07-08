@@ -78,11 +78,12 @@ func New(opts ...Option) (*executor, error) {
 	if !validator.NonNil(options.communication) {
 		return nil, errors.New("agentflow: communication is required")
 	}
-	if !validator.NonNil(options.communication.Assistant()) {
+	assistant, err := options.communication.Assistant()
+	if err != nil || !validator.NonNil(assistant) {
 		return nil, errors.New("agentflow: assistant is required")
 	}
 
-	agentflowProvider := options.communication.Assistant().AssistantProviderAgentflow
+	agentflowProvider := assistant.AssistantProviderAgentflow
 	if !validator.NonNil(agentflowProvider) {
 		return nil, errors.New("agentflow: provider configuration is required")
 	}

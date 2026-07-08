@@ -8,6 +8,7 @@ package internal_llm_agentkit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -78,10 +79,22 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 	if options.configuration == nil {
 		return nil, ErrAgentkitConfigurationRequired
 	}
-	if options.communication.Assistant() == nil {
+	assistant, err := options.communication.Assistant()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrAgentkitAssistantRequired, err)
+	}
+	if assistant == nil {
 		return nil, ErrAgentkitAssistantRequired
 	}
-	if options.communication.Assistant().AssistantProviderAgentkit == nil {
+	conversation, err := options.communication.Conversation()
+	if err != nil {
+		return nil, err
+	}
+	if conversation == nil {
+		return nil, errors.New("agentkit: conversation is required")
+	}
+	provider := assistant.AssistantProviderAgentkit
+	if provider == nil {
 		return nil, ErrAgentkitProviderConfigurationRequired
 	}
 
@@ -91,11 +104,11 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 		logger:     options.logger,
 		ctx:        executorCtx,
 		cancel:     cancel,
-		connection: NewAgentkitConnection(options.communication.Assistant().AssistantProviderAgentkit),
+		connection: NewAgentkitConnection(provider),
 	}
 
-	if options.communication.Assistant().AssistantProviderAgentkit.TLSVerification != nil &&
-		*options.communication.Assistant().AssistantProviderAgentkit.TLSVerification == TLSVerificationSkipVerify {
+	if provider.TLSVerification != nil &&
+		*provider.TLSVerification == TLSVerificationSkipVerify {
 		executor.logger.Warnf("Using insecure TLS (skipping certificate verification)")
 	}
 
@@ -109,7 +122,7 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 					"component":  observability.ComponentLLM.String(),
 					"provider":   executor.Name(),
 					"options":    observability.AttributeValue(executor.connection.GetOption()),
-					"url":        options.communication.Assistant().AssistantProviderAgentkit.Url,
+					"url":        provider.Url,
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
 				},
@@ -130,7 +143,7 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 					"component":  observability.ComponentLLM.String(),
 					"provider":   executor.Name(),
 					"options":    observability.AttributeValue(executor.connection.GetOption()),
-					"url":        options.communication.Assistant().AssistantProviderAgentkit.Url,
+					"url":        provider.Url,
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
 				},
@@ -148,10 +161,10 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 	if err := executor.connection.Send(&protos.TalkInput{
 		Request: &protos.TalkInput_Initialization{
 			Initialization: &protos.ConversationInitialization{
-				AssistantConversationId: options.communication.Conversation().Id,
+				AssistantConversationId: conversation.Id,
 				Assistant: &protos.AssistantDefinition{
-					AssistantId: options.communication.Assistant().AssistantProviderAgentkit.AssistantId,
-					Version:     utils.GetVersionString(options.communication.Assistant().AssistantProviderAgentkit.Id),
+					AssistantId: provider.AssistantId,
+					Version:     utils.GetVersionString(provider.Id),
 				},
 				Args: options.configuration.GetArgs(), Metadata: options.configuration.GetMetadata(),
 				Options: options.configuration.GetOptions(), StreamMode: options.configuration.GetStreamMode(),
@@ -168,7 +181,7 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 					"component":  observability.ComponentLLM.String(),
 					"provider":   executor.Name(),
 					"options":    observability.AttributeValue(executor.connection.GetOption()),
-					"url":        options.communication.Assistant().AssistantProviderAgentkit.Url,
+					"url":        provider.Url,
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
 				},
@@ -192,7 +205,7 @@ func New(opts ...Option) (*agentkitExecutor, error) {
 				Attributes: observability.Attributes{
 					"component": observability.ComponentLLM.String(),
 					"provider":  executor.Name(),
-					"url":       options.communication.Assistant().AssistantProviderAgentkit.Url,
+					"url":       provider.Url,
 					"options":   observability.AttributeValue(executor.connection.GetOption()),
 				},
 				OccurredAt: time.Now(),

@@ -84,13 +84,15 @@ func (m *testComm) OnPacket(_ context.Context, pkts ...internal_type.Packet) err
 func (m *testComm) IntegrationCaller() integration_client.IntegrationServiceClient {
 	return m.integrationCaller
 }
-func (m *testComm) Auth() types.SimplePrinciple                     { return m.auth }
-func (m *testComm) Assistant() *internal_assistant_entity.Assistant { return m.assistant }
-func (m *testComm) Conversation() *internal_conversation_entity.AssistantConversation {
-	return m.conversation
+func (m *testComm) Auth() types.SimplePrinciple { return m.auth }
+func (m *testComm) Assistant() (*internal_assistant_entity.Assistant, error) {
+	return m.assistant, nil
 }
-func (m *testComm) GetArgs() map[string]interface{}     { return map[string]interface{}{} }
-func (m *testComm) GetMetadata() map[string]interface{} { return map[string]interface{}{} }
+func (m *testComm) Conversation() (*internal_conversation_entity.AssistantConversation, error) {
+	return m.conversation, nil
+}
+func (m *testComm) GetArgs() map[string]interface{}  { return map[string]interface{}{} }
+func (m *testComm) Metadata() map[string]interface{} { return map[string]interface{}{} }
 func (m *testComm) GetHistories() []internal_type.MessagePacket {
 	return []internal_type.MessagePacket{}
 }

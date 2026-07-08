@@ -114,27 +114,23 @@ func (f *fakeCommunication) Auth() types.SimplePrinciple { return &types.PlainAu
 
 func (f *fakeCommunication) GetSource() utils.RapidaSource { return utils.PhoneCall }
 
-func (f *fakeCommunication) Assistant() *internal_assistant_entity.Assistant {
-	return f.assistant
-}
-
-func (f *fakeCommunication) GetBehavior() (*internal_assistant_entity.AssistantDeploymentBehavior, error) {
-	return nil, nil
+func (f *fakeCommunication) Assistant() (*internal_assistant_entity.Assistant, error) {
+	return f.assistant, nil
 }
 
 func (f *fakeCommunication) GetMode() type_enums.MessageMode { return "" }
 
-func (f *fakeCommunication) Conversation() *internal_conversation_entity.AssistantConversation {
+func (f *fakeCommunication) Conversation() (*internal_conversation_entity.AssistantConversation, error) {
 	return &internal_conversation_entity.AssistantConversation{
 		Audited:     gorm_model.Audited{Id: 10},
 		AssistantId: 20,
 		Identifier:  "caller",
-	}
+	}, nil
 }
 
 func (f *fakeCommunication) GetHistories() []internal_type.MessagePacket { return nil }
 
-func (f *fakeCommunication) GetMetadata() map[string]interface{} { return nil }
+func (f *fakeCommunication) Metadata() map[string]interface{} { return nil }
 
 func (f *fakeCommunication) GetArgs() map[string]interface{} { return nil }
 
