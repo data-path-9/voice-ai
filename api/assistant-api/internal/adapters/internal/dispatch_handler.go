@@ -943,6 +943,31 @@ func (h requestorDispatchHandler) HandleIdleTimeoutExpired(ctx context.Context, 
 	)
 }
 
+func (h requestorDispatchHandler) HandleMaxSessionExpired(ctx context.Context, p internal_type.MaxSessionExpiredPacket) {
+	if _, err := h.r.Conversation(); err == nil {
+		h.r.OnPacket(h.r.sessionCtx,
+			internal_type.ObservabilityEventRecordPacket{
+				ContextID: h.r.GetID(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationEventRecord(observability.ConversationCompleted, observability.Attributes{
+					"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
+				}),
+			},
+			internal_type.ObservabilityMetadataRecordPacket{
+				ContextID: h.r.GetID(),
+				Scope:     internal_type.ObservabilityRecordScopeConversation,
+				Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
+					Key:   "disconnect_reason",
+					Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
+				}}),
+			},
+		)
+	}
+	h.r.Notify(ctx, &protos.ConversationDisconnection{
+		Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION,
+	})
+}
+
 func (h requestorDispatchHandler) HandleTextToSpeechText(ctx context.Context, p internal_type.TextToSpeechTextPacket) {
 	if p.ContextID != h.r.GetID() {
 		h.r.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
@@ -1172,8 +1197,8 @@ func (h requestorDispatchHandler) HandleLLMToolCall(ctx context.Context, p inter
 		h.r.OnPacket(ctx, internal_type.StopIdleTimeoutPacket{
 			ContextID: h.r.GetID(), ResetCount: true,
 		})
-		if h.r.maxSessionTimer != nil {
-			h.r.maxSessionTimer.Stop()
+		if h.r.maxSessionWatchdog != nil {
+			h.r.maxSessionWatchdog.Cancel()
 		}
 	}
 
@@ -2350,7 +2375,7 @@ func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, 
 						"text_chars": fmt.Sprintf("%d", len(greetingContent)),
 					}),
 				},
-				internal_type.StartIdleTimeoutPacket{ContextID: contextID},
+				// internal_type.StartIdleTimeoutPacket{ContextID: contextID},
 			)
 		}
 	}
@@ -2359,30 +2384,9 @@ func (h requestorDispatchHandler) HandleInitializeBehavior(ctx context.Context, 
 	}
 	if validator.NonNil(behavior.MaxSessionDuration) && *behavior.MaxSessionDuration > 0 {
 		timeoutDuration := time.Duration(*behavior.MaxSessionDuration) * time.Second
-		h.r.maxSessionTimer = time.AfterFunc(timeoutDuration, func() {
-			if _, err := h.r.Conversation(); err == nil {
-				h.r.OnPacket(h.r.sessionCtx,
-					internal_type.ObservabilityEventRecordPacket{
-						ContextID: h.r.GetID(),
-						Scope:     internal_type.ObservabilityRecordScopeConversation,
-						Record: observability.NewConversationEventRecord(observability.ConversationCompleted, observability.Attributes{
-							"reason": protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
-						}),
-					},
-					internal_type.ObservabilityMetadataRecordPacket{
-						ContextID: h.r.GetID(),
-						Scope:     internal_type.ObservabilityRecordScopeConversation,
-						Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
-							Key:   "disconnect_reason",
-							Value: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION.String(),
-						}}),
-					},
-				)
-			}
-			h.r.Notify(ctx, &protos.ConversationDisconnection{
-				Type: protos.ConversationDisconnection_DISCONNECTION_TYPE_MAX_DURATION,
-			})
-		})
+		if h.r.maxSessionWatchdog != nil {
+			h.r.maxSessionWatchdog.Start(h.r.GetID(), timeoutDuration)
+		}
 	}
 }
 
@@ -2873,8 +2877,8 @@ func (h requestorDispatchHandler) HandleFinalizeBehavior(ctx context.Context, p 
 	if h.r.ttsCompletionWatchdog != nil {
 		h.r.ttsCompletionWatchdog.Cancel()
 	}
-	if h.r.maxSessionTimer != nil {
-		h.r.maxSessionTimer.Stop()
+	if h.r.maxSessionWatchdog != nil {
+		h.r.maxSessionWatchdog.Cancel()
 	}
 	h.r.OnPacket(ctx, internal_type.FinalizeEndOfSpeechPacket{ContextID: p.ContextID})
 }

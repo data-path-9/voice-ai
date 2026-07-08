@@ -106,6 +106,7 @@ const (
 	PacketNameStartIdleTimeout                           PacketName = "StartIdleTimeoutPacket"
 	PacketNameStopIdleTimeout                            PacketName = "StopIdleTimeoutPacket"
 	PacketNameIdleTimeoutExpired                         PacketName = "IdleTimeoutExpiredPacket"
+	PacketNameMaxSessionExpired                          PacketName = "MaxSessionExpiredPacket"
 	PacketNameLLMResponseDelta                           PacketName = "LLMResponseDeltaPacket"
 	PacketNameLLMResponseDone                            PacketName = "LLMResponseDonePacket"
 	PacketNameLLMError                                   PacketName = "LLMErrorPacket"
@@ -1079,6 +1080,14 @@ type IdleTimeoutExpiredPacket struct {
 
 func (f IdleTimeoutExpiredPacket) ContextId() string      { return f.ContextID }
 func (f IdleTimeoutExpiredPacket) PacketName() PacketName { return PacketNameIdleTimeoutExpired }
+
+// MaxSessionExpiredPacket signals that the max-session watchdog expired.
+type MaxSessionExpiredPacket struct {
+	ContextID string
+}
+
+func (f MaxSessionExpiredPacket) ContextId() string      { return f.ContextID }
+func (f MaxSessionExpiredPacket) PacketName() PacketName { return PacketNameMaxSessionExpired }
 
 // =============================================================================
 // LLM Pipeline — execute -> delta -> done -> error -> tools
