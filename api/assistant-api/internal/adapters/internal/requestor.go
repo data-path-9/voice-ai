@@ -124,7 +124,7 @@ type genericRequestor struct {
 	// experience
 	idleTimeoutWatchdog   *watchdog.IdleTimeoutWatchdog
 	ttsCompletionWatchdog *watchdog.TTSCompletionWatchdog
-	maxSessionTimer       *time.Timer
+	maxSessionWatchdog    *watchdog.MaxSessionWatchdog
 
 	// sessionCtx is the adapter-owned lifecycle context. Outlives the gRPC stream.
 	// cancelSession is invoked exactly once, by HandleFinalizationCompleted, after
@@ -199,6 +199,10 @@ func NewGenericRequestor(
 		watchdog.WithOnPacket(gr.OnPacket),
 		watchdog.WithPacketContext(sessionCtx),
 		watchdog.WithGracePeriod(300*time.Millisecond),
+	)
+	gr.maxSessionWatchdog = watchdog.NewMaxSessionWatchdog(
+		watchdog.WithOnPacket(gr.OnPacket),
+		watchdog.WithPacketContext(sessionCtx),
 	)
 
 	go gr.runBootstrapDispatcher(sessionCtx)

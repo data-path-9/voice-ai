@@ -39,7 +39,7 @@ func TestTTSCompletionWatchdog_StartFromTextUsesMinimumTimeoutAndGracePeriod(t *
 	)
 	<-pushedPackets
 
-	ttsCompletionWatchdog.StartFromText("ctx-greeting", "")
+	require.True(t, ttsCompletionWatchdog.StartFromText("ctx-greeting", ""))
 
 	expiredLogPacket := <-pushedPackets
 	observabilityLogPacket, ok := expiredLogPacket.(internal_type.ObservabilityLogRecordPacket)
@@ -68,7 +68,7 @@ func TestTTSCompletionWatchdog_ExpiresWhenDeadlinePasses(t *testing.T) {
 	)
 	<-pushedPackets
 
-	ttsCompletionWatchdog.Start("ctx-expire", 20*time.Millisecond)
+	require.True(t, ttsCompletionWatchdog.Start("ctx-expire", 20*time.Millisecond))
 
 	select {
 	case packet := <-pushedPackets:
@@ -105,7 +105,7 @@ func TestTTSCompletionWatchdog_CompleteCancelsExpiration(t *testing.T) {
 	)
 	<-pushedPackets
 
-	ttsCompletionWatchdog.Start("ctx-complete", 30*time.Millisecond)
+	require.True(t, ttsCompletionWatchdog.Start("ctx-complete", 30*time.Millisecond))
 	require.True(t, ttsCompletionWatchdog.Complete("ctx-complete"))
 	require.False(t, ttsCompletionWatchdog.Complete("ctx-complete"))
 
@@ -130,7 +130,7 @@ func TestTTSCompletionWatchdog_CompleteIgnoresDifferentContext(t *testing.T) {
 	)
 	<-pushedPackets
 
-	ttsCompletionWatchdog.Start("ctx-active", 20*time.Millisecond)
+	require.True(t, ttsCompletionWatchdog.Start("ctx-active", 20*time.Millisecond))
 	require.False(t, ttsCompletionWatchdog.Complete("ctx-other"))
 
 	select {
@@ -157,7 +157,7 @@ func TestTTSCompletionWatchdog_ExtendDelaysExpirationAndTracksAudioDuration(t *t
 	)
 	<-pushedPackets
 
-	ttsCompletionWatchdog.Start("ctx-audio", 40*time.Millisecond)
+	require.True(t, ttsCompletionWatchdog.Start("ctx-audio", 40*time.Millisecond))
 	time.Sleep(15 * time.Millisecond)
 
 	require.True(t, ttsCompletionWatchdog.Extend("ctx-audio", 80*time.Millisecond))
@@ -194,7 +194,7 @@ func TestTTSCompletionWatchdog_ExtendUsesObservedAudioInsteadOfTextEstimate(t *t
 	<-pushedPackets
 
 	startedAt := time.Now()
-	ttsCompletionWatchdog.Start("ctx-estimate", 220*time.Millisecond)
+	require.True(t, ttsCompletionWatchdog.Start("ctx-estimate", 220*time.Millisecond))
 	time.Sleep(20 * time.Millisecond)
 
 	require.True(t, ttsCompletionWatchdog.Extend("ctx-estimate", 120*time.Millisecond))
@@ -218,7 +218,7 @@ func TestTTSCompletionWatchdog_ExtendIgnoresInactiveAndDifferentContext(t *testi
 
 	require.False(t, ttsCompletionWatchdog.Extend("ctx-inactive", time.Second))
 
-	ttsCompletionWatchdog.Start("ctx-active", 30*time.Millisecond)
+	require.True(t, ttsCompletionWatchdog.Start("ctx-active", 30*time.Millisecond))
 	require.False(t, ttsCompletionWatchdog.Extend("ctx-other", time.Second))
 	require.True(t, ttsCompletionWatchdog.Complete("ctx-active"))
 }
@@ -237,8 +237,8 @@ func TestTTSCompletionWatchdog_StartReplacesPreviousContext(t *testing.T) {
 	)
 	<-pushedPackets
 
-	ttsCompletionWatchdog.Start("ctx-old", 25*time.Millisecond)
-	ttsCompletionWatchdog.Start("ctx-new", 120*time.Millisecond)
+	require.True(t, ttsCompletionWatchdog.Start("ctx-old", 25*time.Millisecond))
+	require.True(t, ttsCompletionWatchdog.Start("ctx-new", 120*time.Millisecond))
 	defer ttsCompletionWatchdog.Cancel()
 
 	select {

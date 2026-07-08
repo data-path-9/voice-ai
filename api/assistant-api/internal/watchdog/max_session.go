@@ -12,33 +12,32 @@ import (
 
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
-	"github.com/rapidaai/pkg/validator"
 )
 
-type IdleTimeoutEvent struct {
+type MaxSessionEvent struct {
 	ContextID string
 	Deadline  time.Time
-	Count     uint64
+	Duration  time.Duration
 }
 
-type IdleTimeoutOptions = WatchdogOptions
-type IdleTimeoutOption = Option
+type MaxSessionOptions = WatchdogOptions
+type MaxSessionOption = Option
 
-type IdleTimeoutWatchdog struct {
+type MaxSessionWatchdog struct {
 	mu      sync.Mutex
-	options IdleTimeoutOptions
+	options MaxSessionOptions
 
 	timer *time.Timer
 
-	generation       uint64
-	active           bool
-	contextID        string
-	deadline         time.Time
-	idleTimeoutCount uint64
+	generation uint64
+	active     bool
+	contextID  string
+	deadline   time.Time
+	duration   time.Duration
 }
 
-func NewIdleTimeoutWatchdog(opts ...IdleTimeoutOption) *IdleTimeoutWatchdog {
-	options := IdleTimeoutOptions{}
+func NewMaxSessionWatchdog(opts ...MaxSessionOption) *MaxSessionWatchdog {
+	options := MaxSessionOptions{}
 	for _, opt := range opts {
 		if opt == nil {
 			continue
@@ -46,14 +45,14 @@ func NewIdleTimeoutWatchdog(opts ...IdleTimeoutOption) *IdleTimeoutWatchdog {
 		opt.applyWatchdogOptions(&options)
 	}
 
-	if !validator.NonNil(options.PacketContext) {
+	if options.PacketContext == nil {
 		options.PacketContext = context.Background()
 	}
-	if !validator.NotBlank(options.RecordScope.String()) {
+	if options.RecordScope == "" {
 		options.RecordScope = internal_type.ObservabilityRecordScopeConversation
 	}
 
-	watchdog := &IdleTimeoutWatchdog{
+	watchdog := &MaxSessionWatchdog{
 		options: options,
 	}
 
@@ -64,10 +63,10 @@ func NewIdleTimeoutWatchdog(opts ...IdleTimeoutOption) *IdleTimeoutWatchdog {
 				Scope: options.RecordScope,
 				Record: observability.RecordLog{
 					Level:   observability.LevelInfo,
-					Message: "idle-timeout-watchdog: initialization completed",
+					Message: "max-session-watchdog: initialization completed",
 					Attributes: observability.Attributes{
 						"component": observability.ComponentConversation.String(),
-						"watchdog":  "idle_timeout",
+						"watchdog":  "max_session",
 					},
 					OccurredAt: time.Now(),
 				},
@@ -78,8 +77,8 @@ func NewIdleTimeoutWatchdog(opts ...IdleTimeoutOption) *IdleTimeoutWatchdog {
 	return watchdog
 }
 
-func (w *IdleTimeoutWatchdog) Start(contextID string, timeout time.Duration) bool {
-	if timeout <= 0 {
+func (w *MaxSessionWatchdog) Start(contextID string, duration time.Duration) bool {
+	if duration <= 0 {
 		return false
 	}
 
@@ -93,41 +92,18 @@ func (w *IdleTimeoutWatchdog) Start(contextID string, timeout time.Duration) boo
 	w.generation++
 	w.active = true
 	w.contextID = contextID
-	w.deadline = time.Now().Add(timeout)
+	w.duration = duration
+	w.deadline = time.Now().Add(duration)
 
 	generation := w.generation
-	w.timer = time.AfterFunc(timeout, func() {
+	w.timer = time.AfterFunc(duration, func() {
 		w.expire(generation)
 	})
 
 	return true
 }
 
-func (w *IdleTimeoutWatchdog) Extend(contextID string, duration time.Duration) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if !w.active || w.contextID != contextID || duration <= 0 {
-		return false
-	}
-
-	w.deadline = w.deadline.Add(duration)
-	if remaining := time.Until(w.deadline); remaining > 0 {
-		if w.timer != nil {
-			w.timer.Stop()
-			w.timer = nil
-		}
-		w.generation++
-		generation := w.generation
-		w.timer = time.AfterFunc(remaining, func() {
-			w.expire(generation)
-		})
-	}
-
-	return true
-}
-
-func (w *IdleTimeoutWatchdog) Stop(resetCount bool) bool {
+func (w *MaxSessionWatchdog) Cancel() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -140,49 +116,29 @@ func (w *IdleTimeoutWatchdog) Stop(resetCount bool) bool {
 	w.active = false
 	w.contextID = ""
 	w.deadline = time.Time{}
-	if resetCount {
-		w.idleTimeoutCount = 0
-	}
+	w.duration = 0
 
 	return wasActive
 }
 
-func (w *IdleTimeoutWatchdog) Cancel() bool {
-	return w.Stop(false)
-}
-
-func (w *IdleTimeoutWatchdog) Count() uint64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	return w.idleTimeoutCount
-}
-
-func (w *IdleTimeoutWatchdog) IncrementCount() uint64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.idleTimeoutCount++
-	return w.idleTimeoutCount
-}
-
-func (w *IdleTimeoutWatchdog) expire(generation uint64) {
+func (w *MaxSessionWatchdog) expire(generation uint64) {
 	w.mu.Lock()
 	if !w.active || w.generation != generation {
 		w.mu.Unlock()
 		return
 	}
 
-	event := IdleTimeoutEvent{
+	event := MaxSessionEvent{
 		ContextID: w.contextID,
 		Deadline:  w.deadline,
-		Count:     w.idleTimeoutCount,
+		Duration:  w.duration,
 	}
 	w.timer = nil
 	w.generation++
 	w.active = false
 	w.contextID = ""
 	w.deadline = time.Time{}
+	w.duration = 0
 	w.mu.Unlock()
 
 	if w.options.OnPacket != nil {
@@ -193,16 +149,16 @@ func (w *IdleTimeoutWatchdog) expire(generation uint64) {
 				Scope:     w.options.RecordScope,
 				Record: observability.RecordLog{
 					Level:   observability.LevelInfo,
-					Message: "idle-timeout-watchdog: deadline expired",
+					Message: "max-session-watchdog: deadline expired",
 					Attributes: observability.Attributes{
-						"component": observability.ComponentConversation.String(),
-						"watchdog":  "idle_timeout",
-						"count":     observability.AttributeValue(event.Count),
+						"component":   observability.ComponentConversation.String(),
+						"watchdog":    "max_session",
+						"duration_ms": observability.AttributeValue(event.Duration.Milliseconds()),
 					},
 					OccurredAt: time.Now(),
 				},
 			},
-			internal_type.IdleTimeoutExpiredPacket{ContextID: event.ContextID, Count: event.Count},
+			internal_type.MaxSessionExpiredPacket{ContextID: event.ContextID},
 		)
 	}
 }
