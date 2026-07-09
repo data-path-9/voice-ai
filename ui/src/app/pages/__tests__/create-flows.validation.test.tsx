@@ -491,6 +491,24 @@ describe('Requested create/update flow pages', () => {
     await act(async () => {});
   });
 
+  it('create assistant version shows default system prompt when latest version is not model', async () => {
+    mockParams = { assistantId: 'a-1' };
+    (GetAssistant as jest.Mock).mockResolvedValueOnce({
+      getSuccess: () => true,
+      getData: () => ({
+        getAssistantprovidermodel: () => null,
+        getAssistantprovideragentflow: () => ({}),
+      }),
+    });
+
+    render(<CreateVersionAssistantPage />);
+
+    expect(getLatestConfigPromptProps().existingPrompt.prompt).toEqual([
+      { role: 'system', content: '' },
+    ]);
+    await act(async () => {});
+  });
+
   it('create assistant version validates using changed provider', async () => {
     mockParams = { assistantId: 'a-1' };
     render(<CreateVersionAssistantPage />);

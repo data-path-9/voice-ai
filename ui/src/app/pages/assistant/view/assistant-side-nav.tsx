@@ -17,6 +17,17 @@ import {
 } from './assistant-nav-config';
 import { Assistant } from '@rapidaai/react';
 
+const getVisibleNavItems = (
+  section: AssistantNavSection,
+  assistant: Assistant | null,
+  isLoading?: boolean,
+): AssistantNavItem[] => {
+  if (isLoading) return section.items;
+  if (!assistant) return [];
+
+  return section.items.filter(item => item.visible?.(assistant) ?? true);
+};
+
 // ─── Skeleton placeholder for a single nav item ─────────────────────────────
 
 const NavItemSkeleton: FC<{ itemKey: string }> = ({ itemKey }) => (
@@ -98,12 +109,9 @@ const NavSection: FC<{
   actions,
   isLoading,
 }) => {
-  if (!isLoading) {
-    const visibleItems = section.items.filter(
-      item => !item.visible || item.visible(assistant),
-    );
-    if (visibleItems.length === 0) return null;
-  }
+  const visibleItems = getVisibleNavItems(section, assistant, isLoading);
+
+  if (visibleItems.length === 0) return null;
 
   return (
     <div>
@@ -118,11 +126,11 @@ const NavSection: FC<{
           {isLoading ? (
             <SkeletonText className="!mb-0" width="50%" />
           ) : (
-            <span className='uppercase!'>{section.label}</span>
+            <span className="uppercase!">{section.label}</span>
           )}
         </li>
       )}
-      {section.items.map(item => (
+      {visibleItems.map(item => (
         <NavItem
           key={item.key}
           item={item}
