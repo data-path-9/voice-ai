@@ -105,8 +105,8 @@
         ]
     },
     {
-        "name": "Vobiz WebSocket",
-        "code": "vobiz_websocket",
+        "name": "Vobiz",
+        "code": "vobiz",
         "description": "Place outbound calls via the Vobiz REST API and stream audio over a WebSocket (no public SIP/RTP needed — works through a public HTTPS/ngrok URL). Requires assistant.public to be a reachable HTTPS host tunneling to assistant-api.",
         "image": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDIiIGhlaWdodD0iMzAiIHZpZXdCb3g9IjAgMCA0MiAzMCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQyIDE0Ljc0NThWMEMyNC41NjQxIDAgMTIgMTMuNzI4OCAxMiAzMEgyNy4xMjgyQzI3LjEyODIgMjEuMzU1OSAzMy41Mzg1IDE0Ljc0NTggNDIgMTQuNzQ1OFoiIGZpbGw9IiNFODNDMDAiLz4KPHBhdGggZD0iTTAgMTVWMEM5LjI4NTcyIDAgMTUgNi40Mjg1NyAxNSAxNUgwWiIgZmlsbD0iI0U4NkEwMCIvPgo8L3N2Zz4K",
         "featureList": [
@@ -117,17 +117,12 @@
             {
                 "name": "auth_id",
                 "type": "string",
-                "label": "Vobiz Account Auth ID"
+                "label": "Account Auth ID"
             },
             {
                 "name": "auth_token",
                 "type": "string",
-                "label": "Vobiz API Auth Token"
-            },
-            {
-                "name": "from_number",
-                "type": "string",
-                "label": "Caller ID (from number, E.164)"
+                "label": "API Auth Token"
             }
         ]
     },
