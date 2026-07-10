@@ -20,6 +20,7 @@ import (
 	"github.com/rapidaai/pkg/commons"
 	"github.com/rapidaai/pkg/types"
 	"github.com/rapidaai/pkg/utils"
+	"github.com/rapidaai/pkg/validator"
 	"github.com/rapidaai/protos"
 )
 
@@ -35,81 +36,49 @@ func NewVobizTelephony(cfg *config.AssistantConfig, logger commons.Logger) (inte
 	return &vobizTelephony{appCfg: cfg, logger: logger}, nil
 }
 
-// vobizCreds extracts the account API credentials from the vault credential.
-func vobizCreds(vaultCredential *protos.VaultCredential) (authID, authToken, fromNumber string, err error) {
-	if vaultCredential.GetValue() == nil {
-		return "", "", "", internal_vobiz.ErrVaultCredentialValueMissing
-	}
-	m := vaultCredential.GetValue().AsMap()
-	authID, _ = m["auth_id"].(string)
-	authToken, _ = m["auth_token"].(string)
-	fromNumber, _ = m["from_number"].(string)
-	if authID == "" {
-		return "", "", "", internal_vobiz.ErrVaultAuthIDMissing
-	}
-	if authToken == "" {
-		return "", "", "", internal_vobiz.ErrVaultAuthTokenMissing
-	}
-	return authID, authToken, fromNumber, nil
-}
-
-// answerPath is the outbound answer_url path vobiz fetches to get the <Stream> XML.
-func answerPath(contextID string) string {
-	return fmt.Sprintf("v1/talk/%s/ctx/%s/answer", internal_vobiz.VobizProvider, contextID)
-}
-
-// isSafeContextID guards against XML injection: context IDs are system-generated
-// UUIDs, so only alphanumerics and hyphens are allowed in the answer-XML URLs.
-func isSafeContextID(id string) bool {
-	if id == "" {
-		return false
-	}
-	for _, r := range id {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
-			return false
-		}
-	}
-	return true
-}
-
 // AnswerXML returns the <Stream> XML that points vobiz at our WebSocket. It is
 // built from path params only (no DB lookup), invoked by the answer route.
 func (v *vobizTelephony) AnswerXML(provider, contextID string) (string, error) {
-	if !isSafeContextID(contextID) {
+	if !validator.NotBlank(contextID) {
 		return "", fmt.Errorf("invalid context id %q", contextID)
 	}
-	public := v.appCfg.Assistant.Public
-	wsURL := fmt.Sprintf("wss://%s/%s", public, internal_type.GetContextAnswerPath(provider, contextID))
-	statusURL := fmt.Sprintf("https://%s/%s", public, internal_type.GetContextEventPath(provider, contextID))
-	return fmt.Sprintf(`<Response><Stream bidirectional="true" audioTrack="inbound" contentType="audio/x-mulaw;rate=8000" keepCallAlive="true" statusCallbackUrl="%s">%s</Stream></Response>`, statusURL, wsURL), nil
+	return fmt.Sprintf(`<Response><Stream bidirectional="true" audioTrack="inbound" contentType="audio/x-mulaw;rate=8000" keepCallAlive="true" statusCallbackUrl="%s">%s</Stream></Response>`, fmt.Sprintf("https://%s/%s", v.appCfg.Assistant.Public, internal_type.GetContextEventPath(provider, contextID)), fmt.Sprintf("wss://%s/%s", v.appCfg.Assistant.Public, internal_type.GetContextAnswerPath(provider, contextID))), nil
 }
 
 func (v *vobizTelephony) OutboundCall(ctx context.Context, auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, statusReporter internal_type.ProviderCallStatusReporter, opts utils.Option) (*internal_type.CallInfo, error) {
 	info := &internal_type.CallInfo{Provider: internal_vobiz.VobizProvider}
-
 	if err := ctx.Err(); err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
-		internal_telephony_base.ReportOutboundFailure(statusReporter,
-			internal_telephony_base.OutboundFailureClassRequestCancelled, "request cancelled",
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassRequestCancelled,
+			"request cancelled",
 			internal_telephony_base.OutboundDisconnectReasonRequestCancelled, err, 0)
 		return info, err
 	}
 
-	authID, authToken, fromNumber, err := vobizCreds(vaultCredential)
-	if err != nil {
+	if !validator.NonNil(vaultCredential.GetValue()) {
 		info.Status = "FAILED"
-		info.ErrorMessage = fmt.Sprintf("authentication error: %s", err.Error())
-		internal_telephony_base.ReportOutboundFailure(statusReporter,
-			internal_telephony_base.OutboundFailureClassAuthentication, "authentication error",
-			internal_telephony_base.OutboundDisconnectReasonSetupFailed, err, 0)
-		return info, err
+		info.ErrorMessage = internal_vobiz.ErrVaultCredentialValueMissing.Error()
+		internal_telephony_base.ReportOutboundFailure(
+			statusReporter,
+			internal_telephony_base.OutboundFailureClassConfiguration,
+			"missing vault credential",
+			internal_telephony_base.OutboundDisconnectReasonRequestCancelled, internal_vobiz.ErrVaultCredentialValueMissing, 0)
+		return info, internal_vobiz.ErrVaultCredentialValueMissing
 	}
 
-	from := fromPhone
-	if from == "" {
-		from = fromNumber
+	vobizCredential := vaultCredential.GetValue().AsMap()
+	authID, ok := vobizCredential["auth_id"].(string)
+	if !ok {
+		return nil, internal_vobiz.ErrVaultAuthIDMissing
 	}
+	authToken, ok := vobizCredential["auth_token"].(string)
+	if !ok {
+		return nil, internal_vobiz.ErrVaultAuthTokenMissing
+	}
+
 	contextID, _ := opts.GetString("rapida.context_id")
 	if contextID == "" {
 		err := fmt.Errorf("missing rapida.context_id; cannot build answer/event callback URLs")
@@ -120,18 +89,15 @@ func (v *vobizTelephony) OutboundCall(ctx context.Context, auth types.SimplePrin
 			internal_telephony_base.OutboundDisconnectReasonSetupFailed, err, 0)
 		return info, err
 	}
-	public := v.appCfg.Assistant.Public
-	answerURL := fmt.Sprintf("https://%s/%s", public, answerPath(contextID))
-	eventURL := fmt.Sprintf("https://%s/%s", public, internal_type.GetContextEventPath(internal_vobiz.VobizProvider, contextID))
 
 	resp, err := newVobizClient().MakeCall(ctx, authID, authToken, internal_vobiz.MakeCallRequest{
-		From:         from,
+		From:         fromPhone,
 		To:           toPhone,
-		AnswerURL:    answerURL,
+		AnswerURL:    fmt.Sprintf("https://%s/%s", v.appCfg.Assistant.Public, internal_type.GetContextAnswerPath(internal_vobiz.VobizProvider, contextID)),
 		AnswerMethod: "POST",
-		RingURL:      eventURL,
+		RingURL:      fmt.Sprintf("https://%s/%s", v.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_vobiz.VobizProvider, contextID)),
 		RingMethod:   "POST",
-		HangupURL:    eventURL,
+		HangupURL:    fmt.Sprintf("https://%s/%s", v.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_vobiz.VobizProvider, contextID)),
 		HangupMethod: "POST",
 	})
 	if err != nil {

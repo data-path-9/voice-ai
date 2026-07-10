@@ -33,7 +33,7 @@ const (
 	Telnyx   Telephony = "telnyx"
 	Asterisk Telephony = "asterisk"
 	SIP      Telephony = "sip"
-	Vobiz    Telephony = "vobiz_websocket"
+	Vobiz    Telephony = "vobiz"
 )
 
 func (at Telephony) String() string {

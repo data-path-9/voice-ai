@@ -157,9 +157,16 @@ func (tpc *twilioTelephony) StatusCallback(c *gin.Context, auth types.SimplePrin
 	return callback.StatusInfo(), nil
 }
 
-func (tpc *twilioTelephony) OutboundCall(ctx context.Context, auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, statusReporter internal_type.ProviderCallStatusReporter, opts utils.Option) (*internal_type.CallInfo, error) {
+func (tpc *twilioTelephony) OutboundCall(ctx context.Context,
+	auth types.SimplePrinciple,
+	toPhone string,
+	fromPhone string,
+	assistant *internal_assistant_entity.Assistant,
+	assistantConversationId uint64,
+	vaultCredential *protos.VaultCredential,
+	statusReporter internal_type.ProviderCallStatusReporter,
+	opts utils.Option) (*internal_type.CallInfo, error) {
 	info := &internal_type.CallInfo{Provider: internal_twilio.TwilioProvider}
-
 	if err := ctx.Err(); err != nil {
 		info.Status = "FAILED"
 		info.ErrorMessage = fmt.Sprintf("request cancelled: %s", err.Error())
@@ -175,7 +182,6 @@ func (tpc *twilioTelephony) OutboundCall(ctx context.Context, auth types.SimpleP
 	}
 
 	contextID, _ := opts.GetString("rapida.context_id")
-
 	client, err := twilioClient(vaultCredential)
 	if err != nil {
 		info.Status = "FAILED"

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const VobizProvider = "vobiz_websocket"
+const VobizProvider = "vobiz"
 
 type EventType string
 
