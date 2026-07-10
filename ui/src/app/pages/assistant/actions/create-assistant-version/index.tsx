@@ -4,7 +4,13 @@ import { useCurrentCredential } from '@/hooks/use-credential';
 import { useParams } from 'react-router-dom';
 import { Helmet } from '@/app/components/helmet';
 import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
-import { ButtonSet } from '@carbon/react';
+import {
+  ButtonSet,
+  Toggletip,
+  ToggletipButton,
+  ToggletipContent,
+} from '@carbon/react';
+import { Information } from '@carbon/icons-react';
 import { TabForm } from '@/app/components/form/tab-form';
 import { FieldSet } from '@/app/components/form/fieldset';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
@@ -34,9 +40,7 @@ import { ValidateTextProviderDefaultOptions } from '@/app/components/providers/t
 import { useAllProviderCredentials } from '@/hooks/use-model';
 import { connectionConfig } from '@/configs';
 import { DocNoticeBlock } from '@/app/components/container/message/notice-block/doc-notice-block';
-import { InputHelper } from '@/app/components/input-helper';
 import toast from 'react-hot-toast/headless';
-import { SectionDivider } from '@/app/components/blocks/section-divider';
 
 /**
  *
@@ -101,7 +105,7 @@ const CreateNewVersion: FC<{ assistantId: string }> = ({ assistantId }) => {
     prompt: { role: string; content: string }[];
     variables: { name: string; type: string; defaultvalue: string }[];
   }>({
-    prompt: [],
+    prompt: [{ role: 'system', content: '' }],
     variables: [],
   });
 
@@ -311,7 +315,6 @@ const CreateNewVersion: FC<{ assistantId: string }> = ({ assistantId }) => {
                 <div className="px-8 pt-6 pb-8 max-w-4xl flex flex-col gap-8">
                   {/* Model configuration section */}
                   <div className="flex flex-col gap-6">
-                    <SectionDivider label="Model Configuration" />
                     <TextProvider
                       onChangeParameter={onChangeProviderParameter}
                       onChangeProvider={onChangeProvider}
@@ -322,7 +325,6 @@ const CreateNewVersion: FC<{ assistantId: string }> = ({ assistantId }) => {
 
                   {/* Prompt template section */}
                   <div className="flex flex-col gap-6">
-                    <SectionDivider label="Prompt Template" />
                     <DocNoticeBlock docUrl="https://doc.rapida.ai/assistants/prompt-templating">
                       Prompt variables and system arguments are resolved at
                       runtime. Read the prompt templating guide before creating
@@ -366,20 +368,27 @@ const CreateNewVersion: FC<{ assistantId: string }> = ({ assistantId }) => {
             body: (
               <div className="px-8 pt-8 pb-8 max-w-2xl flex flex-col gap-10">
                 <div className="flex flex-col gap-6">
-                  <SectionDivider label="Version Description" />
                   <FieldSet>
-                    <FormLabel>Version note</FormLabel>
+                    <div className="mb-2 flex items-center gap-1">
+                      <FormLabel htmlFor="model-version-note">
+                        Version note
+                      </FormLabel>
+                      <Toggletip align="right">
+                        <ToggletipButton label="Show information">
+                          <Information size={14} />
+                        </ToggletipButton>
+                        <ToggletipContent>
+                          Briefly describe what changed in this version.
+                        </ToggletipContent>
+                      </Toggletip>
+                    </div>
                     <Textarea
+                      name="model-version-note"
                       row={5}
                       value={versionMessage}
                       placeholder="Provide a clear and detailed explanation of the changes made to this assistant."
                       onChange={t => setVersionMessage(t.target.value)}
                     />
-                    <InputHelper>
-                      Summarize the changes made to the assistant, highlight key
-                      updates, and specify why these modifications are
-                      necessary.
-                    </InputHelper>
                   </FieldSet>
                 </div>
               </div>

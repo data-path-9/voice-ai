@@ -47,31 +47,27 @@ func (communication *factoryTestCommunication) GetSource() utils.RapidaSource {
 	return utils.PhoneCall
 }
 
-func (communication *factoryTestCommunication) Assistant() *internal_assistant_entity.Assistant {
-	return communication.assistant
-}
-
-func (communication *factoryTestCommunication) GetBehavior() (*internal_assistant_entity.AssistantDeploymentBehavior, error) {
-	return nil, nil
+func (communication *factoryTestCommunication) Assistant() (*internal_assistant_entity.Assistant, error) {
+	return communication.assistant, nil
 }
 
 func (communication *factoryTestCommunication) GetMode() type_enums.MessageMode {
 	return ""
 }
 
-func (communication *factoryTestCommunication) Conversation() *internal_conversation_entity.AssistantConversation {
+func (communication *factoryTestCommunication) Conversation() (*internal_conversation_entity.AssistantConversation, error) {
 	return &internal_conversation_entity.AssistantConversation{
 		Audited:     gorm_model.Audited{Id: 100},
 		AssistantId: 200,
 		Identifier:  "caller",
-	}
+	}, nil
 }
 
 func (communication *factoryTestCommunication) GetHistories() []internal_type.MessagePacket {
 	return nil
 }
 
-func (communication *factoryTestCommunication) GetMetadata() map[string]interface{} {
+func (communication *factoryTestCommunication) Metadata() map[string]interface{} {
 	return nil
 }
 

@@ -47,16 +47,13 @@ type Communication interface {
 	GetSource() utils.RapidaSource
 
 	// current assistant
-	Assistant() *internal_assistant_entity.Assistant
-
-	// deployment behavior
-	GetBehavior() (*internal_assistant_entity.AssistantDeploymentBehavior, error)
+	Assistant() (*internal_assistant_entity.Assistant, error)
 
 	//
 	GetMode() type_enums.MessageMode
 
 	// current conversation
-	Conversation() *internal_conversation_entity.AssistantConversation
+	Conversation() (*internal_conversation_entity.AssistantConversation, error)
 
 	// later will create an interface to move all the conversation
 	// idea is have custom history maintainer eg: database, inmemory
@@ -64,7 +61,7 @@ type Communication interface {
 	GetHistories() []MessagePacket
 
 	// metadata management
-	GetMetadata() map[string]interface{}
+	Metadata() map[string]interface{}
 	GetArgs() map[string]interface{}
 	GetOptions() utils.Option
 	GetKnowledge(ctx context.Context, knowledgeId uint64) (*internal_knowledge_gorm.Knowledge, error)

@@ -226,10 +226,10 @@ func (handler *AgentHandler) streamChatInput(
 
 func additionalData(communication internal_type.Communication, request prompt.Request) map[string]string {
 	data := map[string]string{"agentflow_node_id": request.Node.ID}
-	if communication.Conversation() != nil {
-		data["assistant_id"] = fmt.Sprintf("%d", communication.Conversation().AssistantId)
-		data["conversation_id"] = fmt.Sprintf("%d", communication.Conversation().Id)
-		data["user_identifier"] = communication.Conversation().Identifier
+	if conversation, err := communication.Conversation(); err == nil {
+		data["assistant_id"] = fmt.Sprintf("%d", conversation.AssistantId)
+		data["conversation_id"] = fmt.Sprintf("%d", conversation.Id)
+		data["user_identifier"] = conversation.Identifier
 	}
 	data["message_id"] = request.ContextID
 	return data

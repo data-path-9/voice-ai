@@ -7,23 +7,38 @@ package watchdog
 
 import (
 	"context"
+	"time"
 
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 )
+
+type PacketOptions struct {
+	OnPacket      func(context.Context, ...internal_type.Packet) error
+	PacketContext context.Context
+	RecordScope   internal_type.ObservabilityRecordScope
+}
+
+type WatchdogOptions struct {
+	PacketOptions
+
+	WordsPerMinute int
+	MinimumTimeout time.Duration
+	GracePeriod    time.Duration
+}
+
+type Option interface {
+	applyWatchdogOptions(*WatchdogOptions)
+}
 
 type onPacketOption struct {
 	onPacket func(context.Context, ...internal_type.Packet) error
 }
 
-func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) onPacketOption {
+func WithOnPacket(onPacket func(context.Context, ...internal_type.Packet) error) Option {
 	return onPacketOption{onPacket: onPacket}
 }
 
-func (option onPacketOption) applyTTSCompletionOptions(options *TTSCompletionOptions) {
-	options.OnPacket = option.onPacket
-}
-
-func (option onPacketOption) applyIdleTimeoutOptions(options *IdleTimeoutOptions) {
+func (option onPacketOption) applyWatchdogOptions(options *WatchdogOptions) {
 	options.OnPacket = option.onPacket
 }
 
@@ -31,15 +46,11 @@ type packetContextOption struct {
 	ctx context.Context
 }
 
-func WithPacketContext(ctx context.Context) packetContextOption {
+func WithPacketContext(ctx context.Context) Option {
 	return packetContextOption{ctx: ctx}
 }
 
-func (option packetContextOption) applyTTSCompletionOptions(options *TTSCompletionOptions) {
-	options.PacketContext = option.ctx
-}
-
-func (option packetContextOption) applyIdleTimeoutOptions(options *IdleTimeoutOptions) {
+func (option packetContextOption) applyWatchdogOptions(options *WatchdogOptions) {
 	options.PacketContext = option.ctx
 }
 
@@ -47,14 +58,10 @@ type recordScopeOption struct {
 	scope internal_type.ObservabilityRecordScope
 }
 
-func WithRecordScope(scope internal_type.ObservabilityRecordScope) recordScopeOption {
+func WithRecordScope(scope internal_type.ObservabilityRecordScope) Option {
 	return recordScopeOption{scope: scope}
 }
 
-func (option recordScopeOption) applyTTSCompletionOptions(options *TTSCompletionOptions) {
-	options.RecordScope = option.scope
-}
-
-func (option recordScopeOption) applyIdleTimeoutOptions(options *IdleTimeoutOptions) {
+func (option recordScopeOption) applyWatchdogOptions(options *WatchdogOptions) {
 	options.RecordScope = option.scope
 }

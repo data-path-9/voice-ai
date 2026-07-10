@@ -87,15 +87,17 @@ func New(opts ...Option) (*modelAssistantExecutor, error) {
 	if !validator.NonNil(options.configuration) {
 		return nil, errors.New("model: configuration is required")
 	}
-	if !validator.NonNil(options.communication.Assistant()) {
+	assistant, err := options.communication.Assistant()
+	if err != nil || !validator.NonNil(assistant) {
 		return nil, errors.New("model: assistant is required")
 	}
-	if !validator.NonNil(options.communication.Assistant().AssistantProviderModel) {
+	if !validator.NonNil(assistant.AssistantProviderModel) {
 		return nil, errors.New("model: provider configuration is required")
 	}
 
 	start := time.Now()
-	provider := options.communication.Assistant().AssistantProviderModel.ModelProviderName
+	providerConfig := assistant.AssistantProviderModel
+	provider := providerConfig.ModelProviderName
 	executorCtx, cancel := context.WithCancel(context.Background())
 	executor := &modelAssistantExecutor{
 		logger:       options.logger,
@@ -110,7 +112,7 @@ func New(opts ...Option) (*modelAssistantExecutor, error) {
 	var providerCredential *protos.VaultCredential
 	var toolExecutor internal_agent_tool.ToolExecutor
 	g.Go(func() error {
-		credentialID, err := options.communication.Assistant().AssistantProviderModel.GetOptions().GetUint64("rapida.credential_id")
+		credentialID, err := providerConfig.GetOptions().GetUint64("rapida.credential_id")
 		if err != nil {
 			return fmt.Errorf("failed to get credential ID: %w", err)
 		}
@@ -142,7 +144,7 @@ func New(opts ...Option) (*modelAssistantExecutor, error) {
 				Attributes: observability.Attributes{
 					"component":  observability.ComponentLLM.String(),
 					"provider":   provider,
-					"options":    observability.AttributeValue(options.communication.Assistant().AssistantProviderModel.GetOptions()),
+					"options":    observability.AttributeValue(providerConfig.GetOptions()),
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
 				},
@@ -164,7 +166,7 @@ func New(opts ...Option) (*modelAssistantExecutor, error) {
 				Attributes: observability.Attributes{
 					"component":  observability.ComponentLLM.String(),
 					"provider":   provider,
-					"options":    observability.AttributeValue(options.communication.Assistant().AssistantProviderModel.GetOptions()),
+					"options":    observability.AttributeValue(providerConfig.GetOptions()),
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
 				},
@@ -186,7 +188,7 @@ func New(opts ...Option) (*modelAssistantExecutor, error) {
 				Attributes: observability.Attributes{
 					"component":  observability.ComponentLLM.String(),
 					"provider":   provider,
-					"options":    observability.AttributeValue(options.communication.Assistant().AssistantProviderModel.GetOptions()),
+					"options":    observability.AttributeValue(providerConfig.GetOptions()),
 					"error":      err.Error(),
 					"error_type": fmt.Sprintf("%T", err),
 				},
@@ -210,7 +212,7 @@ func New(opts ...Option) (*modelAssistantExecutor, error) {
 				Attributes: observability.Attributes{
 					"component": observability.ComponentLLM.String(),
 					"provider":  provider,
-					"options":   observability.AttributeValue(options.communication.Assistant().AssistantProviderModel.GetOptions()),
+					"options":   observability.AttributeValue(providerConfig.GetOptions()),
 				},
 				OccurredAt: time.Now(),
 			},

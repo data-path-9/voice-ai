@@ -109,7 +109,7 @@ func (kr *genericRequestor) RetrieveToolKnowledge(ctx context.Context, knowledge
 				"result": result,
 			})
 		}
-		kr.CreateKnowledgeLog(
+		kr.createKnowledgeLog(
 			ctx,
 			knowledge.Id,
 			kc.RetrievalMethod,

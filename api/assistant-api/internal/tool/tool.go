@@ -116,10 +116,11 @@ func (executor *toolExecutor) initializeLocalTool(ctx context.Context, logger co
 }
 
 func (executor *toolExecutor) discoverTools(communication internal_type.Communication) []*internal_assistant_entity.AssistantTool {
-	if communication.Assistant() == nil {
+	assistant, err := communication.Assistant()
+	if err != nil {
 		return nil
 	}
-	return communication.Assistant().AssistantTools
+	return assistant.AssistantTools
 }
 
 func (executor *toolExecutor) filterToolsByCondition(

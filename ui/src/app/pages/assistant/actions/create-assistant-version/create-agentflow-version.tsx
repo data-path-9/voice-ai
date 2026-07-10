@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
-  AgentflowBuilder,
   AgentflowDefinition,
-} from '@/app/pages/assistant/actions/agentflow';
+  AgentflowVersionBuilder,
+} from '@/app/pages/assistant/actions/create-assistant-version/agentflow-version-builder';
 import { ErrorContainer } from '@/app/components/error-container';
 import { connectionConfig } from '@/configs';
 import { useRapidaStore } from '@/hooks';
@@ -161,7 +161,7 @@ function CreateAgentflowVersionBuilder({
   };
 
   return (
-    <AgentflowBuilder
+    <AgentflowVersionBuilder
       title="Create Agentflow Version"
       initialDefinition={initialDefinition}
       onSave={saveAgentflowVersion}

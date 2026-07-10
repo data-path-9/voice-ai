@@ -22,24 +22,14 @@ const (
 	DefaultGracePeriod    = 1500 * time.Millisecond
 )
 
-type TTSCompletionOptions struct {
-	WordsPerMinute int
-	MinimumTimeout time.Duration
-	GracePeriod    time.Duration
-	OnPacket       func(context.Context, ...internal_type.Packet) error
-	PacketContext  context.Context
-	RecordScope    internal_type.ObservabilityRecordScope
-}
-
-type TTSCompletionOption interface {
-	applyTTSCompletionOptions(*TTSCompletionOptions)
-}
+type TTSCompletionOptions = WatchdogOptions
+type TTSCompletionOption = Option
 
 type ttsCompletionOption struct {
 	applyFunc func(*TTSCompletionOptions)
 }
 
-func (option ttsCompletionOption) applyTTSCompletionOptions(options *TTSCompletionOptions) {
+func (option ttsCompletionOption) applyWatchdogOptions(options *WatchdogOptions) {
 	if option.applyFunc == nil {
 		return
 	}
@@ -96,7 +86,7 @@ func NewTTSCompletionWatchdog(opts ...TTSCompletionOption) *TTSCompletionWatchdo
 		if opt == nil {
 			continue
 		}
-		opt.applyTTSCompletionOptions(&options)
+		opt.applyWatchdogOptions(&options)
 	}
 
 	if options.WordsPerMinute <= 0 {
@@ -143,16 +133,16 @@ func NewTTSCompletionWatchdog(opts ...TTSCompletionOption) *TTSCompletionWatchdo
 	return watchdog
 }
 
-func (w *TTSCompletionWatchdog) StartFromText(contextID, text string) {
+func (w *TTSCompletionWatchdog) StartFromText(contextID, text string) bool {
 	estimatedDuration := EstimateSpeechDuration(text, w.options.WordsPerMinute)
 	if estimatedDuration < w.options.MinimumTimeout {
 		estimatedDuration = w.options.MinimumTimeout
 	}
 
-	w.Start(contextID, estimatedDuration)
+	return w.Start(contextID, estimatedDuration)
 }
 
-func (w *TTSCompletionWatchdog) Start(contextID string, timeout time.Duration) {
+func (w *TTSCompletionWatchdog) Start(contextID string, timeout time.Duration) bool {
 	if timeout < w.options.MinimumTimeout {
 		timeout = w.options.MinimumTimeout
 	}
@@ -177,6 +167,8 @@ func (w *TTSCompletionWatchdog) Start(contextID string, timeout time.Duration) {
 	w.timer = time.AfterFunc(timeout, func() {
 		w.expire(generation)
 	})
+
+	return true
 }
 
 func (w *TTSCompletionWatchdog) Extend(contextID string, duration time.Duration) bool {

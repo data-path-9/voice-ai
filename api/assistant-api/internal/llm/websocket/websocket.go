@@ -85,10 +85,11 @@ func New(opts ...Option) (*websocketExecutor, error) {
 	if options.configuration == nil {
 		return nil, errors.New("websocket: configuration is required")
 	}
-	if options.communication.Assistant() == nil {
+	assistant, err := options.communication.Assistant()
+	if err != nil || assistant == nil {
 		return nil, errors.New("websocket: assistant is required")
 	}
-	if options.communication.Assistant().AssistantProviderWebsocket == nil {
+	if assistant.AssistantProviderWebsocket == nil {
 		return nil, errors.New("websocket: provider configuration is required")
 	}
 	executor := &websocketExecutor{logger: options.logger}
@@ -106,7 +107,15 @@ func (e *websocketExecutor) Name() string {
 
 func (e *websocketExecutor) initialize(ctx context.Context, comm internal_type.Communication, cfg *protos.ConversationInitialization) error {
 	start := time.Now()
-	provider := comm.Assistant().AssistantProviderWebsocket
+	assistant, err := comm.Assistant()
+	if err != nil || assistant == nil {
+		return errors.New("websocket: assistant is required")
+	}
+	conversation, err := comm.Conversation()
+	if err != nil || conversation == nil {
+		return errors.New("websocket: conversation is required")
+	}
+	provider := assistant.AssistantProviderWebsocket
 	if provider == nil {
 		comm.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 			Scope: internal_type.ObservabilityRecordScopeConversation,
@@ -154,7 +163,7 @@ func (e *websocketExecutor) initialize(ctx context.Context, comm internal_type.C
 	})
 
 	// Send initial configuration
-	if err := e.sendConfiguration(provider.AssistantId, provider.Id, comm.Conversation().Id, cfg); err != nil {
+	if err := e.sendConfiguration(provider.AssistantId, provider.Id, conversation.Id, cfg); err != nil {
 		comm.OnPacket(ctx, internal_type.ObservabilityLogRecordPacket{
 			Scope: internal_type.ObservabilityRecordScopeConversation,
 			Record: observability.RecordLog{

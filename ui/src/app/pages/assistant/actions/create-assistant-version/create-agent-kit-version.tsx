@@ -4,8 +4,14 @@ import { useCredential } from '@/hooks/use-credential';
 import { useParams } from 'react-router-dom';
 import { Helmet } from '@/app/components/helmet';
 import { PrimaryButton, SecondaryButton } from '@/app/components/carbon/button';
-import { ButtonSet, Slider } from '@carbon/react';
-import { ChevronDown } from '@carbon/icons-react';
+import {
+  ButtonSet,
+  Slider,
+  Toggletip,
+  ToggletipButton,
+  ToggletipContent,
+} from '@carbon/react';
+import { ChevronDown, Information } from '@carbon/icons-react';
 import { TabForm } from '@/app/components/form/tab-form';
 import { FieldSet } from '@/app/components/form/fieldset';
 import { useConfirmDialog } from '@/app/pages/assistant/actions/hooks/use-confirmation';
@@ -27,10 +33,8 @@ import { DocNoticeBlock } from '@/app/components/container/message/notice-block/
 import { Input } from '@/app/components/form/input';
 import { Select } from '@/app/components/form/select';
 import { APiParameter } from '@/app/components/external-api/api-parameter';
-import { InputHelper } from '@/app/components/input-helper';
 import { CodeEditor } from '@/app/components/form/editor/code-editor';
 import toast from 'react-hot-toast/headless';
-import { SectionDivider } from '@/app/components/blocks/section-divider';
 
 const TRANSPORT_SECURITY_OPTIONS = [
   { name: 'Default', value: '' },
@@ -431,20 +435,29 @@ const CreateNewVersion: FC<{ assistantId: string }> = ({ assistantId }) => {
                 <div className="px-4 pt-6 pb-8 max-w-4xl flex flex-col gap-8">
                   {/* Connection section */}
                   <div className="flex flex-col gap-6">
-                    <SectionDivider label="Connection" />
                     <FieldSet className="relative w-full">
-                      <FormLabel>AgentKit Endpoint</FormLabel>
+                      <div className="mb-2 flex items-center gap-1">
+                        <FormLabel htmlFor="agentkit-endpoint">
+                          AgentKit Endpoint
+                        </FormLabel>
+                        <Toggletip align="right">
+                          <ToggletipButton label="Show information">
+                            <Information size={14} />
+                          </ToggletipButton>
+                          <ToggletipContent>
+                            The gRPC server address where your Rapida AgentKit
+                            is running.
+                          </ToggletipContent>
+                        </Toggletip>
+                      </div>
                       <Input
+                        name="agentkit-endpoint"
                         placeholder="agent.your-domain.com:5051"
                         value={agentKitUrl}
                         onChange={v => {
                           setAgentKitUrl(v.target.value);
                         }}
                       />
-                      <InputHelper>
-                        The gRPC server address where your Rapida AgentKit is
-                        running.
-                      </InputHelper>
                     </FieldSet>
                   </div>
 
@@ -465,7 +478,6 @@ const CreateNewVersion: FC<{ assistantId: string }> = ({ assistantId }) => {
                   {showAdvanced && (
                     <div className="pt-6 border-t border-gray-200 dark:border-gray-800 flex flex-col gap-8">
                       <div className="flex flex-col gap-6">
-                        <SectionDivider label="Connection tuning" />
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <FieldSet>
                             <div className="[&_.cds--slider-container]:!mt-0 [&_.cds--slider__range-label]:hidden">
@@ -561,7 +573,6 @@ const CreateNewVersion: FC<{ assistantId: string }> = ({ assistantId }) => {
                       </div>
 
                       <div className="flex flex-col gap-6">
-                        <SectionDivider label="Security" />
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <FieldSet>
                             <FormLabel>Transport Security</FormLabel>
@@ -612,8 +623,19 @@ const CreateNewVersion: FC<{ assistantId: string }> = ({ assistantId }) => {
                   )}
 
                   <div className="flex flex-col gap-6">
-                    <SectionDivider label="Metadata" />
                     <FieldSet>
+                      <div className="mb-2 flex items-center gap-1">
+                        <FormLabel>Metadata</FormLabel>
+                        <Toggletip align="right">
+                          <ToggletipButton label="Show information">
+                            <Information size={14} />
+                          </ToggletipButton>
+                          <ToggletipContent>
+                            Additional key-value metadata sent with the AgentKit
+                            connection.
+                          </ToggletipContent>
+                        </Toggletip>
+                      </div>
                       <APiParameter
                         actionButtonLabel="Add Metadata"
                         setParameterValue={parameters => {
@@ -654,20 +676,27 @@ const CreateNewVersion: FC<{ assistantId: string }> = ({ assistantId }) => {
             body: (
               <div className="px-8 pt-8 pb-8 max-w-2xl flex flex-col gap-10">
                 <div className="flex flex-col gap-6">
-                  <SectionDivider label="Version Description" />
                   <FieldSet>
-                    <FormLabel>Version note</FormLabel>
+                    <div className="mb-2 flex items-center gap-1">
+                      <FormLabel htmlFor="agentkit-version-note">
+                        Version note
+                      </FormLabel>
+                      <Toggletip align="right">
+                        <ToggletipButton label="Show information">
+                          <Information size={14} />
+                        </ToggletipButton>
+                        <ToggletipContent>
+                          Briefly describe what changed in this version.
+                        </ToggletipContent>
+                      </Toggletip>
+                    </div>
                     <Textarea
+                      name="agentkit-version-note"
                       row={5}
                       value={versionMessage}
                       placeholder="Provide a clear and detailed explanation of the changes made to this AgentKit connection."
                       onChange={t => setVersionMessage(t.target.value)}
                     />
-                    <InputHelper>
-                      Summarize the changes made to the connection, highlight
-                      key updates, and specify why these modifications are
-                      necessary.
-                    </InputHelper>
                   </FieldSet>
                 </div>
               </div>

@@ -14,6 +14,7 @@ import {
   ObjectStorage,
   CarbonIconType,
 } from '@carbon/icons-react';
+import { Assistant } from '@rapidaai/react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ export interface AssistantNavItem {
   path: string;
   exact?: boolean;
   action?: string;
-  visible?: (assistant: any) => boolean;
+  visible?: (assistant: Assistant) => boolean;
   /** Sub-items — renders as SideNavMenu with children */
   children?: AssistantNavChild[];
 }
@@ -40,6 +41,9 @@ export interface AssistantNavSection {
   label: string;
   items: AssistantNavItem[];
 }
+
+const hasModelProvider = (assistant: Assistant): boolean =>
+  assistant.hasAssistantprovidermodel();
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -147,6 +151,7 @@ export const assistantNavSections: AssistantNavSection[] = [
         label: 'Tools & MCP',
         icon: ToolKit,
         path: 'configure-tool',
+        visible: hasModelProvider,
         children: [
           { key: 'tools-list', label: 'View all', path: 'configure-tool' },
           {

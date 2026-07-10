@@ -34,7 +34,7 @@ func NewCommunicationSource(c internal_type.Communication) *VariableSource {
 		return s
 	}
 
-	if a := c.Assistant(); a != nil {
+	if a, err := c.Assistant(); err == nil {
 		s.assistant = &AssistantInfo{
 			ID:          a.Id,
 			VersionID:   a.AssistantProviderId,
@@ -44,7 +44,7 @@ func NewCommunicationSource(c internal_type.Communication) *VariableSource {
 		}
 	}
 
-	if conv := c.Conversation(); conv != nil {
+	if conv, err := c.Conversation(); err == nil {
 		s.conversation = &ConversationInfo{
 			ID:          conv.Id,
 			Identifier:  conv.Identifier,
@@ -62,7 +62,7 @@ func NewCommunicationSource(c internal_type.Communication) *VariableSource {
 	}
 
 	s.args = utils.CloneMap(c.GetArgs())
-	s.metadata = utils.CloneMap(c.GetMetadata())
+	s.metadata = utils.CloneMap(c.Metadata())
 	s.options = utils.CloneMap(c.GetOptions())
 	s.mode = c.GetMode().String()
 	return s

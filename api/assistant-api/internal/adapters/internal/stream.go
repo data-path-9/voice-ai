@@ -107,7 +107,7 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 				},
 			})
 		case *protos.ConversationDisconnection:
-			if t.Conversation() != nil {
+			if conversation, err := t.Conversation(); err == nil {
 				ctx := context.Background()
 				t.OnPacket(ctx,
 					internal_type.ObservabilityEventRecordPacket{
@@ -123,7 +123,7 @@ func (t *genericRequestor) Talk(_ context.Context, auth types.SimplePrinciple) e
 						},
 					},
 					internal_type.ObservabilityMetadataRecordPacket{
-						ContextID: fmt.Sprintf("%d", t.Conversation().Id),
+						ContextID: fmt.Sprintf("%d", conversation.Id),
 						Scope:     internal_type.ObservabilityRecordScopeConversation,
 						Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
 							Key:   "disconnect_reason",
@@ -160,8 +160,8 @@ func (t *genericRequestor) OnStreamUserMessage(ctx context.Context, payload *pro
 // loop exits. Persistence and telemetry collection happen in the existing
 // background-channel handlers, so this function only enqueues packets.
 func (t *genericRequestor) OnCallCompletion(startTime time.Time) {
-	conv := t.Conversation()
-	if conv == nil {
+	conv, err := t.Conversation()
+	if err != nil {
 		return
 	}
 	duration := time.Since(startTime)
@@ -237,12 +237,12 @@ func (r *genericRequestor) OnConnect(ctx context.Context, auth types.SimplePrinc
 		r.logger.Tracef(ctx, "connect ignored due to session lifecycle transition: %v", err)
 		return
 	}
-	r.SetAuth(auth)
+	r.setAuth(auth)
 	utils.WithDeadline(r.sessionCtx, connectDeadline, func() {
 		if r.sessionLifecycle.Current() != adapter_lifecycle.StateInitializing {
 			return
 		}
-		if r.Ready() {
+		if conversation, err := r.Conversation(); err == nil {
 			r.OnPacket(r.sessionCtx,
 				internal_type.ObservabilityEventRecordPacket{
 					ContextID: r.GetID(),
@@ -257,7 +257,7 @@ func (r *genericRequestor) OnConnect(ctx context.Context, auth types.SimplePrinc
 					},
 				},
 				internal_type.ObservabilityMetadataRecordPacket{
-					ContextID: fmt.Sprintf("%d", r.Conversation().Id),
+					ContextID: fmt.Sprintf("%d", conversation.Id),
 					Scope:     internal_type.ObservabilityRecordScopeConversation,
 					Record: observability.NewConversationMetadataRecord([]*protos.Metadata{{
 						Key:   "disconnect_reason",
