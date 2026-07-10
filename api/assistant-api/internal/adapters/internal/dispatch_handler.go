@@ -1450,13 +1450,13 @@ func (h requestorDispatchHandler) HandleObservabilityRecordPacket(ctx context.Co
 		case internal_type.ObservabilityRecordScopeAssistant:
 			assistant, err := h.r.Assistant()
 			if err != nil {
-				h.r.logger.Errorw("observability assistant scope failed to resolve", "error", err, "record", p)
+				h.r.logger.Errorw("observability assistant scope failed to resolve", "error", err)
 				return
 			}
 			if err := h.r.observabilityRecorder.Record(ctx, observability.AssistantScope{
 				AssistantID: assistant.Id,
 			}, observabilityRecord); err != nil {
-				h.r.logger.Errorw("observability record failed to persist", "error", err, "record", p)
+				h.r.logger.Errorw("observability record failed to persist", "error", err)
 			}
 		case internal_type.ObservabilityRecordScopeConversation:
 			assistant, assistantErr := h.r.Assistant()
@@ -1471,17 +1471,17 @@ func (h requestorDispatchHandler) HandleObservabilityRecordPacket(ctx context.Co
 				},
 				ConversationID: conversation.Id,
 			}, observabilityRecord); err != nil {
-				h.r.logger.Errorw("observability record failed to persist", "error", err, "record", p)
+				h.r.logger.Errorw("observability record failed to persist", "error", err)
 			}
 		case internal_type.ObservabilityRecordScopeUserMessage:
 			assistant, err := h.r.Assistant()
 			if err != nil {
-				h.r.logger.Errorw("observability message scope failed to resolve", "error", err, "record", p)
+				h.r.logger.Errorw("observability message scope failed to resolve", "error", err)
 				return
 			}
 			conversation, err := h.r.Conversation()
 			if err != nil {
-				h.r.logger.Errorw("observability message scope failed to resolve", "error", err, "record", p)
+				h.r.logger.Errorw("observability message scope failed to resolve", "error", err)
 				return
 			}
 			if err := h.r.observabilityRecorder.Record(ctx, observability.MessageScope{
@@ -1494,17 +1494,17 @@ func (h requestorDispatchHandler) HandleObservabilityRecordPacket(ctx context.Co
 				MessageID: p.ContextId(),
 				Role:      observability.MessageRoleUser,
 			}, observabilityRecord); err != nil {
-				h.r.logger.Errorw("observability record failed to persist", "error", err, "record", p)
+				h.r.logger.Errorw("observability record failed to persist", "error", err)
 			}
 		case internal_type.ObservabilityRecordScopeAssistantMessage:
 			assistant, err := h.r.Assistant()
 			if err != nil {
-				h.r.logger.Errorw("observability message scope failed to resolve", "error", err, "record", p)
+				h.r.logger.Errorw("observability message scope failed to resolve", "error", err)
 				return
 			}
 			conversation, err := h.r.Conversation()
 			if err != nil {
-				h.r.logger.Errorw("observability message scope failed to resolve", "error", err, "record", p)
+				h.r.logger.Errorw("observability message scope failed to resolve", "error", err)
 				return
 			}
 			if err := h.r.observabilityRecorder.Record(ctx, observability.MessageScope{
@@ -1517,7 +1517,7 @@ func (h requestorDispatchHandler) HandleObservabilityRecordPacket(ctx context.Co
 				MessageID: p.ContextId(),
 				Role:      observability.MessageRoleAssistant,
 			}, observabilityRecord); err != nil {
-				h.r.logger.Errorw("observability record failed to persist", "error", err, "record", p)
+				h.r.logger.Errorw("observability record failed to persist", "error", err)
 			}
 		default:
 			h.r.logger.Errorw("observability scope is unsupported", "record", p, "scope", p.GetScope())
