@@ -20,6 +20,7 @@ import (
 	internal_sip_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/sip"
 	internal_telnyx_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx"
 	internal_twilio_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio"
+	internal_vobiz_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vobiz"
 	internal_vonage_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage"
 	"github.com/rapidaai/api/assistant-api/internal/observability"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
@@ -135,6 +136,14 @@ func (at Telephony) NewStreamer(
 			internal_telnyx_telephony.WithCallContext(callContext),
 			internal_telnyx_telephony.WithVaultCredential(vaultCredential),
 			internal_telnyx_telephony.WithObserver(resolvedOptions.Observer),
+		)
+	case Vobiz:
+		return internal_vobiz_telephony.New(
+			internal_vobiz_telephony.WithLogger(logger),
+			internal_vobiz_telephony.WithConnection(resolvedOptions.WebSocketConn),
+			internal_vobiz_telephony.WithCallContext(callContext),
+			internal_vobiz_telephony.WithVaultCredential(vaultCredential),
+			internal_vobiz_telephony.WithObserver(resolvedOptions.Observer),
 		)
 	case SIP:
 		return New(

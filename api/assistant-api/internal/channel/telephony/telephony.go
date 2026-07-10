@@ -16,6 +16,7 @@ import (
 	internal_sip_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/sip"
 	internal_telnyx_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/telnyx"
 	internal_twilio_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/twilio"
+	internal_vobiz_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vobiz"
 	internal_vonage_telephony "github.com/rapidaai/api/assistant-api/internal/channel/telephony/internal/vonage"
 	internal_type "github.com/rapidaai/api/assistant-api/internal/type"
 	sip_infra "github.com/rapidaai/api/assistant-api/sip/infra"
@@ -32,6 +33,7 @@ const (
 	Telnyx   Telephony = "telnyx"
 	Asterisk Telephony = "asterisk"
 	SIP      Telephony = "sip"
+	Vobiz    Telephony = "vobiz_websocket"
 )
 
 func (at Telephony) String() string {
@@ -60,6 +62,8 @@ func GetTelephony(at Telephony, cfg *config.AssistantConfig, logger commons.Logg
 		return internal_asterisk_telephony.NewAsteriskTelephony(cfg, logger)
 	case Telnyx:
 		return internal_telnyx_telephony.NewTelnyxTelephony(cfg, logger)
+	case Vobiz:
+		return internal_vobiz_telephony.NewVobizTelephony(cfg, logger)
 	case SIP:
 		if opt.SIPServer == nil {
 			return nil, errors.New("SIP server not available — SIP telephony requires a running SIP server")
