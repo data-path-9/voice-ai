@@ -24,6 +24,19 @@ import (
 // CallReciever handles incoming calls for the given assistant.
 // Thin controller — business logic delegated to pipeline's handleCallReceived.
 func (cApi *ConversationApi) CallReciever(c *gin.Context) {
+	provider := c.Param("telephony")
+	if c.Query("CustomField") != "" {
+		callInfo, err := cApi.inboundDispatcher.ReceiveCall(c, provider)
+		if err != nil {
+			cApi.logger.Errorf("failed to handle provider answer hook: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to answer call"})
+			return
+		}
+		if callInfo == nil {
+			return
+		}
+	}
+
 	iAuth, isAuthenticated := types.GetAuthPrinciple(c)
 	if !isAuthenticated {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthenticated request"})
@@ -47,7 +60,7 @@ func (cApi *ConversationApi) CallReciever(c *gin.Context) {
 	// Pipeline handles: create conversation, answer provider, emit events
 	result := cApi.channelPipeline.Run(c, channel_pipeline.CallReceivedPipeline{
 		ID:          uuid.NewString(),
-		Provider:    c.Param("telephony"),
+		Provider:    provider,
 		Auth:        iAuth,
 		AssistantID: assistantId,
 		GinContext:  c,

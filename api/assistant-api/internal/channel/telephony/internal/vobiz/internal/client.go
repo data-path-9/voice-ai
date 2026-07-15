@@ -6,104 +6,103 @@
 package internal_vobiz
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
+	"net/url"
+
+	"github.com/rapidaai/pkg/clients/rest"
 )
 
-// DefaultBaseURL is the Vobiz API base URL.
-const DefaultBaseURL = "https://api.vobiz.ai"
+const (
+	// DefaultBaseURL is the Vobiz API base URL.
+	DefaultBaseURL = "https://api.vobiz.ai"
+	// DefaultTimeoutSeconds is the default timeout for Vobiz REST API calls.
+	DefaultTimeoutSeconds uint32 = 30
 
-// Client is the minimal Vobiz call surface used by the vobiz_websocket provider.
+	makeCallPathFormat = "/api/v1/Account/%s/Call/"
+)
+
+// Client is the minimal Vobiz call surface used by the vobiz provider.
 type Client interface {
 	// MakeCall originates an outbound call via the Vobiz REST API.
 	MakeCall(ctx context.Context, authID, authToken string, req MakeCallRequest) (*CallResponse, error)
 }
 
 type client struct {
-	baseURL string
-	http    *http.Client
+	http rest.APIClient
 }
 
-// NewClient returns a Vobiz client against the production API.
-func NewClient() Client {
-	return NewClientWithBaseURL(DefaultBaseURL)
+type Options struct {
+	BaseURL        string
+	TimeoutSeconds uint32
+	HTTPClient     rest.APIClient
 }
 
-// NewClientWithBaseURL returns a Vobiz client against a custom base URL (tests).
-func NewClientWithBaseURL(baseURL string) Client {
-	return &client{baseURL: baseURL, http: &http.Client{Timeout: 30 * time.Second}}
-}
+type FuncOption func(*Options)
 
-// MakeCallRequest is the body for POST /api/v1/Account/{auth_id}/Call/.
-// answer_url must return XML; for the websocket integration it returns a
-// <Stream> verb pointing at our WebSocket.
-type MakeCallRequest struct {
-	From         string `json:"from"`
-	To           string `json:"to"`
-	AnswerURL    string `json:"answer_url"`
-	AnswerMethod string `json:"answer_method,omitempty"`
-	RingURL      string `json:"ring_url,omitempty"`
-	RingMethod   string `json:"ring_method,omitempty"`
-	HangupURL    string `json:"hangup_url,omitempty"`
-	HangupMethod string `json:"hangup_method,omitempty"`
-	CallerName   string `json:"caller_name,omitempty"`
-}
-
-// CallResponse is the response of a fired outbound call. RequestUUID is the
-// call identifier (equivalent to call_uuid) used to correlate callbacks.
-type CallResponse struct {
-	APIID       string `json:"api_id"`
-	Message     string `json:"message"`
-	RequestUUID string `json:"request_uuid"`
-}
-
-// VobizAPIError is returned for non-2xx Vobiz API responses. Message is a
-// best-effort human-readable message extracted from the response body.
-type VobizAPIError struct {
-	StatusCode int
-	Body       string
-	Message    string
-}
-
-func (e *VobizAPIError) Error() string {
-	if e.Message != "" {
-		return fmt.Sprintf("vobiz api error (status %d): %s", e.StatusCode, e.Message)
+func WithBaseURL(baseURL string) FuncOption {
+	return func(options *Options) {
+		options.BaseURL = baseURL
 	}
-	return fmt.Sprintf("vobiz api error (status %d): %s", e.StatusCode, e.Body)
+}
+
+func WithTimeoutSeconds(timeoutSeconds uint32) FuncOption {
+	return func(options *Options) {
+		options.TimeoutSeconds = timeoutSeconds
+	}
+}
+
+func WithAPIClient(httpClient rest.APIClient) FuncOption {
+	return func(options *Options) {
+		options.HTTPClient = httpClient
+	}
+}
+
+// New returns a Vobiz client. By default it targets production with a 30s timeout.
+func New(opts ...FuncOption) Client {
+	options := Options{
+		BaseURL:        DefaultBaseURL,
+		TimeoutSeconds: DefaultTimeoutSeconds,
+	}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	httpClient := options.HTTPClient
+	if httpClient == nil {
+		httpClient = rest.NewRestClientWithConfig(options.BaseURL, nil, options.TimeoutSeconds)
+	}
+	return &client{http: httpClient}
 }
 
 func (c *client) MakeCall(ctx context.Context, authID, authToken string, req MakeCallRequest) (*CallResponse, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode vobiz call request: %w", err)
-	}
-
-	endpoint := fmt.Sprintf("%s/api/v1/Account/%s/Call/", c.baseURL, authID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
 	// Credentials are tenant-supplied (from the integration form), not app config.
-	httpReq.Header.Set("X-Auth-ID", authID)
-	httpReq.Header.Set("X-Auth-Token", authToken)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(httpReq)
+	resp, err := c.http.Post(ctx,
+		fmt.Sprintf(makeCallPathFormat, url.PathEscape(authID)),
+		req,
+		map[string]string{
+			"X-Auth-ID":    authID,
+			"X-Auth-Token": authToken,
+			"Content-Type": "application/json",
+		})
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read vobiz call response: %w", err)
-	}
+
+	raw := resp.Body
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, apiError(resp.StatusCode, raw)
+		msg := ""
+		var parsed map[string]interface{}
+		if json.Unmarshal(raw, &parsed) == nil {
+			for _, k := range []string{"message", "error", "error_message", "detail", "errors"} {
+				if v, ok := parsed[k]; ok && v != nil {
+					msg = fmt.Sprintf("%v", v)
+					break
+				}
+			}
+		}
+		return nil, &VobizAPIError{StatusCode: resp.StatusCode, Body: string(raw), Message: msg}
 	}
 
 	var call CallResponse
@@ -111,20 +110,4 @@ func (c *client) MakeCall(ctx context.Context, authID, authToken string, req Mak
 		return nil, fmt.Errorf("failed to parse vobiz call response: %w", err)
 	}
 	return &call, nil
-}
-
-// apiError builds a VobizAPIError, extracting a human-readable message from
-// common error body shapes.
-func apiError(statusCode int, raw []byte) error {
-	msg := ""
-	var parsed map[string]interface{}
-	if json.Unmarshal(raw, &parsed) == nil {
-		for _, k := range []string{"message", "error", "error_message", "detail", "errors"} {
-			if v, ok := parsed[k]; ok && v != nil {
-				msg = fmt.Sprintf("%v", v)
-				break
-			}
-		}
-	}
-	return &VobizAPIError{StatusCode: statusCode, Body: string(raw), Message: msg}
 }

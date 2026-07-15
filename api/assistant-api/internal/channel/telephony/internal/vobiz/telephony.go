@@ -24,8 +24,11 @@ import (
 	"github.com/rapidaai/protos"
 )
 
-// newVobizClient is overridable in tests.
-var newVobizClient = internal_vobiz.NewClient
+const (
+	vobizCallReceiverPathFmt     = "v1/talk/%s/call/%d"
+	vobizCustomFieldParam        = "CustomField"
+	vobizStatusCallbackPathParam = "StatusCallback"
+)
 
 type vobizTelephony struct {
 	appCfg *config.AssistantConfig
@@ -36,13 +39,15 @@ func NewVobizTelephony(cfg *config.AssistantConfig, logger commons.Logger) (inte
 	return &vobizTelephony{appCfg: cfg, logger: logger}, nil
 }
 
-// AnswerXML returns the <Stream> XML that points vobiz at our WebSocket. It is
-// built from path params only (no DB lookup), invoked by the answer route.
-func (v *vobizTelephony) AnswerXML(provider, contextID string) (string, error) {
-	if !validator.NotBlank(contextID) {
-		return "", fmt.Errorf("invalid context id %q", contextID)
+// AnswerXML returns the <Stream> XML that points vobiz at our WebSocket.
+func (v *vobizTelephony) AnswerXML(streamPath, statusCallbackPath string) (string, error) {
+	if !validator.NotBlank(streamPath) {
+		return "", fmt.Errorf("invalid stream path %q", streamPath)
 	}
-	return fmt.Sprintf(`<Response><Stream bidirectional="true" audioTrack="inbound" contentType="audio/x-mulaw;rate=8000" keepCallAlive="true" statusCallbackUrl="%s">%s</Stream></Response>`, fmt.Sprintf("https://%s/%s", v.appCfg.Assistant.Public, internal_type.GetContextEventPath(provider, contextID)), fmt.Sprintf("wss://%s/%s", v.appCfg.Assistant.Public, internal_type.GetContextAnswerPath(provider, contextID))), nil
+	if !validator.NotBlank(statusCallbackPath) {
+		return "", fmt.Errorf("invalid status callback path %q", statusCallbackPath)
+	}
+	return fmt.Sprintf(`<Response><Stream bidirectional="true" audioTrack="inbound" contentType="audio/x-mulaw;rate=8000" keepCallAlive="true" statusCallbackUrl="%s">%s</Stream></Response>`, fmt.Sprintf("https://%s/%s", v.appCfg.Assistant.Public, statusCallbackPath), fmt.Sprintf("wss://%s/%s", v.appCfg.Assistant.Public, streamPath)), nil
 }
 
 func (v *vobizTelephony) OutboundCall(ctx context.Context, auth types.SimplePrinciple, toPhone string, fromPhone string, assistant *internal_assistant_entity.Assistant, assistantConversationId uint64, vaultCredential *protos.VaultCredential, statusReporter internal_type.ProviderCallStatusReporter, opts utils.Option) (*internal_type.CallInfo, error) {
@@ -90,10 +95,14 @@ func (v *vobizTelephony) OutboundCall(ctx context.Context, auth types.SimplePrin
 		return info, err
 	}
 
-	resp, err := newVobizClient().MakeCall(ctx, authID, authToken, internal_vobiz.MakeCallRequest{
+	answerQuery := url.Values{}
+	answerQuery.Set(vobizCustomFieldParam, internal_type.GetContextAnswerPath(internal_vobiz.VobizProvider, contextID))
+	answerQuery.Set(vobizStatusCallbackPathParam, internal_type.GetContextEventPath(internal_vobiz.VobizProvider, contextID))
+	answerPath := fmt.Sprintf(vobizCallReceiverPathFmt, internal_vobiz.VobizProvider, assistant.Id)
+	resp, err := internal_vobiz.New().MakeCall(ctx, authID, authToken, internal_vobiz.MakeCallRequest{
 		From:         fromPhone,
 		To:           toPhone,
-		AnswerURL:    fmt.Sprintf("https://%s/%s", v.appCfg.Assistant.Public, internal_type.GetContextAnswerPath(internal_vobiz.VobizProvider, contextID)),
+		AnswerURL:    fmt.Sprintf("https://%s/%s?%s", v.appCfg.Assistant.Public, answerPath, answerQuery.Encode()),
 		AnswerMethod: "POST",
 		RingURL:      fmt.Sprintf("https://%s/%s", v.appCfg.Assistant.Public, internal_type.GetContextEventPath(internal_vobiz.VobizProvider, contextID)),
 		RingMethod:   "POST",
@@ -128,7 +137,11 @@ func (v *vobizTelephony) OutboundCall(ctx context.Context, auth types.SimplePrin
 // InboundCall answers an incoming call by returning the <Stream> XML.
 func (v *vobizTelephony) InboundCall(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, clientNumber string, assistantConversationId uint64) error {
 	contextID, _ := c.Get("contextId")
-	xml, err := v.AnswerXML(internal_vobiz.VobizProvider, fmt.Sprintf("%v", contextID))
+	ctxID := fmt.Sprintf("%v", contextID)
+	xml, err := v.AnswerXML(
+		internal_type.GetContextAnswerPath(internal_vobiz.VobizProvider, ctxID),
+		internal_type.GetContextEventPath(internal_vobiz.VobizProvider, ctxID),
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build answer"})
 		return err
@@ -143,6 +156,17 @@ func (v *vobizTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo, e
 		if len(values) > 0 {
 			queryParams[key] = values[0]
 		}
+	}
+	streamPath, ok := queryParams[vobizCustomFieldParam]
+	if ok {
+		statusCallbackPath := queryParams[vobizStatusCallbackPathParam]
+		xml, err := v.AnswerXML(streamPath, statusCallbackPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build answer"})
+			return nil, err
+		}
+		c.Data(http.StatusOK, "text/xml", []byte(xml))
+		return nil, nil
 	}
 	info := &internal_type.CallInfo{
 		Provider:   internal_vobiz.VobizProvider,
@@ -162,34 +186,8 @@ func (v *vobizTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo, e
 }
 
 func (v *vobizTelephony) StatusCallback(c *gin.Context, auth types.SimplePrinciple, assistantId uint64, assistantConversationId uint64) (*internal_type.StatusInfo, error) {
-	eventDetails, raw, err := parseCallbackPayload(c)
-	if err != nil {
-		return nil, err
-	}
-	callback, err := internal_vobiz.NewStatusCallback(eventDetails, raw)
-	if err != nil {
-		return nil, err
-	}
-	return callback.StatusInfo(), nil
-}
-
-func (v *vobizTelephony) CatchAllStatusCallback(c *gin.Context) (*internal_type.StatusInfo, error) {
-	eventDetails, raw, err := parseCallbackPayload(c)
-	if err != nil {
-		return nil, err
-	}
-	callback, err := internal_vobiz.NewStatusCallback(eventDetails, raw)
-	if err != nil {
-		return nil, err
-	}
-	return callback.StatusInfo(), nil
-}
-
-// parseCallbackPayload reads query params (preferred) or url-encoded body into
-// a utils.Option map, returning the raw payload too.
-func parseCallbackPayload(c *gin.Context) (utils.Option, string, error) {
 	eventDetails := utils.Option{}
-	raw := c.Request.URL.RawQuery
+	rawCallbackPayload := c.Request.URL.RawQuery
 	if len(c.Request.URL.Query()) > 0 {
 		for key, values := range c.Request.URL.Query() {
 			if len(values) > 0 {
@@ -198,23 +196,75 @@ func parseCallbackPayload(c *gin.Context) (utils.Option, string, error) {
 				eventDetails[key] = nil
 			}
 		}
-		return eventDetails, raw, nil
-	}
-	body, err := c.GetRawData()
-	if err != nil {
-		return nil, "", err
-	}
-	raw = string(body)
-	values, err := url.ParseQuery(string(body))
-	if err != nil {
-		return nil, "", err
-	}
-	for key, value := range values {
-		if len(value) > 0 {
-			eventDetails[key] = value[0]
-		} else {
-			eventDetails[key] = nil
+	} else {
+		body, err := c.GetRawData()
+		if err != nil {
+			v.logger.Errorf("failed to read callback body with error %+v", err)
+			return nil, err
+		}
+		rawCallbackPayload = string(body)
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			v.logger.Errorf("failed to parse callback body with error %+v", err)
+			return nil, err
+		}
+		for key, values := range values {
+			if len(values) > 0 {
+				eventDetails[key] = values[0]
+			} else {
+				eventDetails[key] = nil
+			}
 		}
 	}
-	return eventDetails, raw, nil
+
+	callback, err := internal_vobiz.NewStatusCallback(eventDetails, rawCallbackPayload)
+	if err != nil {
+		v.logger.Errorf("failed to parse status callback: %+v", err)
+		return nil, err
+	}
+	return callback.StatusInfo(), nil
+}
+
+func (v *vobizTelephony) CatchAllStatusCallback(c *gin.Context) (*internal_type.StatusInfo, error) {
+	eventDetails := utils.Option{}
+	rawCallbackPayload := c.Request.URL.RawQuery
+	if len(c.Request.URL.Query()) > 0 {
+		for key, values := range c.Request.URL.Query() {
+			if len(values) > 0 {
+				eventDetails[key] = values[0]
+			} else {
+				eventDetails[key] = nil
+			}
+		}
+	} else {
+		body, err := c.GetRawData()
+		if err != nil {
+			v.logger.Errorf("failed to read callback body with error %+v", err)
+			return nil, err
+		}
+		rawCallbackPayload = string(body)
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			v.logger.Errorf("failed to parse callback body with error %+v", err)
+			return nil, err
+		}
+		for key, values := range values {
+			if len(values) > 0 {
+				eventDetails[key] = values[0]
+			} else {
+				eventDetails[key] = nil
+			}
+		}
+	}
+
+	callback, err := internal_vobiz.NewStatusCallback(eventDetails, rawCallbackPayload)
+	if err != nil {
+		v.logger.Errorf("failed to parse status callback: %+v", err)
+		return nil, err
+	}
+	if !validator.NotBlank(callback.ChannelUUID) {
+		v.logger.Errorf("call uuid not found or invalid in catch-all payload")
+		return nil, internal_vobiz.ErrCatchAllChannelUUIDMissing
+	}
+	return callback.StatusInfo(), nil
 }

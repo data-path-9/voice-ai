@@ -7,6 +7,7 @@ package internal_vobiz
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -79,6 +80,44 @@ type VobizControlMessage struct {
 	Name     string    `json:"name,omitempty"`
 }
 
+// MakeCallRequest is the body for POST /api/v1/Account/{auth_id}/Call/.
+// answer_url must return XML; for the websocket integration it returns a
+// <Stream> verb pointing at our WebSocket.
+type MakeCallRequest struct {
+	From         string `json:"from"`
+	To           string `json:"to"`
+	AnswerURL    string `json:"answer_url"`
+	AnswerMethod string `json:"answer_method,omitempty"`
+	RingURL      string `json:"ring_url,omitempty"`
+	RingMethod   string `json:"ring_method,omitempty"`
+	HangupURL    string `json:"hangup_url,omitempty"`
+	HangupMethod string `json:"hangup_method,omitempty"`
+	CallerName   string `json:"caller_name,omitempty"`
+}
+
+// CallResponse is the response of a fired outbound call. RequestUUID is the
+// call identifier (equivalent to call_uuid) used to correlate callbacks.
+type CallResponse struct {
+	APIID       string `json:"api_id"`
+	Message     string `json:"message"`
+	RequestUUID string `json:"request_uuid"`
+}
+
+// VobizAPIError is returned for non-2xx Vobiz API responses. Message is a
+// best-effort human-readable message extracted from the response body.
+type VobizAPIError struct {
+	StatusCode int
+	Body       string
+	Message    string
+}
+
+func (e *VobizAPIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("vobiz api error (status %d): %s", e.StatusCode, e.Message)
+	}
+	return fmt.Sprintf("vobiz api error (status %d): %s", e.StatusCode, e.Body)
+}
+
 // Outbound media format negotiated via the <Stream contentType> attribute.
 const (
 	OutputContentType = "audio/x-mulaw"
@@ -101,6 +140,7 @@ var (
 	ErrVaultCredentialValueMissing    = errors.New("vault credential value is nil")
 	ErrVaultAuthIDMissing             = errors.New("illegal vault config auth_id not found")
 	ErrVaultAuthTokenMissing          = errors.New("illegal vault config auth_token not found")
+	ErrCatchAllChannelUUIDMissing     = errors.New("call uuid not found in catch-all callback")
 	ErrOutboundResponseMissingUUID    = errors.New("vobiz call response missing request_uuid")
 	ErrAudioProcessorInitFailed       = errors.New("failed to initialize vobiz audio processor")
 	ErrResamplerCreateFailed          = errors.New("failed to create resampler")
