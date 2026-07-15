@@ -1,0 +1,16 @@
+{
+  "telephony": {
+    "parameters": [
+      {
+        "key": "phone",
+        "label": "Caller ID (from number)",
+        "type": "input",
+        "required": true,
+        "default": "",
+        "placeholder": "e.g., +15551234567",
+        "helpText": "The Vobiz caller-ID used as the 'from' number on outbound calls.",
+        "errorMessage": "Please provide a valid caller-ID phone number."
+      }
+    ]
+  }
+}
