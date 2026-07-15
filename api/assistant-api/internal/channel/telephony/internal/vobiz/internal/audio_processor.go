@@ -144,7 +144,7 @@ func (audioProcessor *AudioProcessor) OutputHealthSnapshot() internal_telephony_
 }
 
 func (audioProcessor *AudioProcessor) applyAmbient(chunk []byte) []byte {
-	if audioProcessor.ambientMixer == nil || len(chunk) == 0 {
+	if audioProcessor.ambientMixer == nil {
 		return chunk
 	}
 	primaryPCM := g711.DecodeUlaw(chunk)
