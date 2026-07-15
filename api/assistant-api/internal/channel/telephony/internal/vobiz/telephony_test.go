@@ -39,6 +39,25 @@ func TestReceiveCall_OutboundAnswerRequestReturnsXMLAndSkipsInboundSetup(t *test
 	assert.Contains(t, w.Body.String(), `wss://app.rapida.ai/v1/talk/vobiz/ctx/ctx-1`)
 }
 
+func TestReceiveCall_ParsesFormBodyPayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := "BillRate=0&CallStatus=ringing&CallUUID=9c5f3046-776f-4d5f-8196-7f4c50e2c74b&CallerName=%2B919902426002&Direction=inbound&Event=StartApp&From=919902426002&To=08071387361"
+	req := httptest.NewRequest(http.MethodPost, "/v1/talk/vobiz/call/42?x-api-key=test-key", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	c.Request = req
+
+	tel := &vobizTelephony{}
+	callInfo, err := tel.ReceiveCall(c)
+
+	require.NoError(t, err)
+	require.NotNil(t, callInfo)
+	assert.Equal(t, "919902426002", callInfo.CallerNumber)
+	assert.Equal(t, "08071387361", callInfo.FromNumber)
+	assert.Equal(t, "9c5f3046-776f-4d5f-8196-7f4c50e2c74b", callInfo.ChannelUUID)
+}
+
 func TestStatusCallback_ParsesFormBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

@@ -6,8 +6,10 @@
 package internal_vobiz_telephony
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -155,6 +157,24 @@ func (v *vobizTelephony) ReceiveCall(c *gin.Context) (*internal_type.CallInfo, e
 	for key, values := range c.Request.URL.Query() {
 		if len(values) > 0 {
 			queryParams[key] = values[0]
+		}
+	}
+	if c.Request.Body != nil {
+		body, err := c.GetRawData()
+		if err != nil {
+			v.logger.Errorf("failed to read vobiz incoming call payload: %+v", err)
+		} else {
+			values, err := url.ParseQuery(string(body))
+			if err != nil {
+				v.logger.Errorf("failed to parse vobiz incoming call payload: %+v", err)
+			} else {
+				for key, values := range values {
+					if len(values) > 0 {
+						queryParams[key] = values[0]
+					}
+				}
+			}
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 		}
 	}
 	streamPath, ok := queryParams[vobizCustomFieldParam]
